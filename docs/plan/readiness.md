@@ -557,7 +557,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3869-3946`
+Section 28 of the plan is not empty — `engineering-plan.md:3910-3987`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -576,7 +576,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1377`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3944` requires a container-escape attempt as
+    `engineering-plan.md:3985` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -997,7 +997,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:593` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3853` and `engineering-plan.md:2990` and picked
+`engineering-plan.md:3894` and `engineering-plan.md:2990` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1367,11 +1367,37 @@ The readiness verdict is **Authorized**: ADR-0073, the twelve new
 whole surface. Presence-based routing, hand-off, automatic replies, and
 any silent send path remain outside it.
 
+## Milestone 21: the WhatsApp business surface, authorized and specified
+
+[whatsapp-surface.md](whatsapp-surface.md) extends the Milestone 14
+surface seam with the channel that forces the corpus's first inbound
+third-party HTTPS: the Meta Cloud API delivers by webhook only, so the
+design pays the price ADR-0071 named — a signed, loopback-bound listener
+in the surface role behind one proxy location — deliberately and once.
+The adapter itself is the additive extension inbound-surfaces.md
+anticipated: a second push provider, the same pairing, the same scope
+ceiling, the same reply pipeline, with idempotency generalized from the
+Telegram integer offset to a string `external_update_id` by the
+amendment ADR-0074 records.
+
+The design also owns the platform's twenty-four-hour window rather than
+discovering it in production: freeform replies inside, one approved
+content-free utility template outside, refusal with a closed reason code
+otherwise. What cannot proceed before Milestone 14 exists is stated
+plainly, and what proceeds now — the documents, the gates, the Meta
+ceremony with its review lead time — is the part with calendar risk.
+
+The readiness verdict is **Authorized**: ADR-0074, the twelve new
+`gate.whatsapp.*` entries, and the Milestone 21 census row specify the
+whole surface. Personal-account access stays on the roadmap as B13
+behind a risk-acceptance ADR, and nothing here amends Milestone 14's
+acceptance criteria.
+
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3948-4106` for links to other documents returned
+`engineering-plan.md:3989-4147` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1601,7 +1627,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3944` requires a test the harness's case set
+    `engineering-plan.md:3985` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

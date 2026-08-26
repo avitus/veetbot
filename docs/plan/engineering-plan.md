@@ -3541,6 +3541,46 @@ websocket device transport, the waiting-on-device suspension kind,
 presence-based routing, or hand-off; the last two remain roadmap item B7's
 residue, and the rest are recorded in the design document's exclusions.
 
+### Milestone 21: WhatsApp business surface
+
+The owner authorized this milestone on 2026-08-26 (ADR-0074) as a parallel
+workstream on the established terms. It gives the agent its own WhatsApp
+number through the official Meta Cloud API as an additive channel on the
+Milestone 14 surface seam, and pays the inbound-webhook price — the
+infrastructure ADR-0071 priced as B3 and B4 — deliberately and once. The
+detailed design is [whatsapp-surface.md](whatsapp-surface.md) and
+ADR-0074; the design declares this milestone's twelve gates. Its
+implementation begins when Milestone 14's ports exist; its documents,
+gates, and owner ceremony proceed now.
+
+Implement:
+
+- A loopback-bound webhook listener in the surface role behind one Nginx
+  location: the subscription handshake, constant-time
+  `X-Hub-Signature-256` verification before parsing, bounded bodies,
+  content-free rejects.
+- The WhatsApp adapter on the Milestone 14 ports: the `whatsapp` push
+  provider, `dm:<wa_id>` session keys, unchanged pairing and scope
+  ceiling, replies through the existing redaction and chunking, receipts
+  on the generalized `external_update_id` key.
+- The twenty-four-hour window: freeform inside, the one approved utility
+  template outside, refusal with a closed reason code otherwise.
+- Three broker-held secrets with new rule families, egress confined to
+  the fixed Meta Graph origin, and default-off composition behind
+  `AGENT_SURFACE_WHATSAPP_ENABLED`.
+- The owner ceremony: business account, number, WABA, token, and the
+  utility template through Meta review.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The owner has verified one end-to-end paired conversation and one
+  outside-window template delivery on the live number.
+
+The milestone does not include personal-account access (the linked-device
+bridge, roadmap item B13), media intake, group or thread session keys or
+inline-keyboard approvals (B3), or a second business number.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3563,6 +3603,7 @@ owner's current ranking, not a schedule.
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
+| B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 21 |
 
 ## 22. Security baseline
 

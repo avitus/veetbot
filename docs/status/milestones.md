@@ -81,6 +81,9 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 20 — SMS through the owner's iPhone** — twelve gates; a
   parallel workstream over the Section 29 device channel, implementable
   immediately on completed Milestone 12.
+- **Milestone 21 — WhatsApp business surface** — twelve gates; a parallel
+  workstream whose documents, gates, and Meta ceremony proceed now and
+  whose implementation begins when Milestone 14's surface ports exist.
 
 ## Deferred
 
@@ -96,7 +99,8 @@ recurrence (B5), the memory residue after Milestone 16 — the semantic arm,
 (the B7 residue after Milestone 20), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and
-multi-tenant billing and quotas (B12).
+multi-tenant billing and quotas (B12), and the WhatsApp linked-device
+bridge (B13).
 
 Work each milestone explicitly set aside is recorded as that milestone's
 `deferred_scope` in [`project-state.yaml`](project-state.yaml); a deferred

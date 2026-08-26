@@ -1,3 +1,4 @@
+# Canonical gate registry entries for Milestone 21 WhatsApp business surface.
 - id: gate.whatsapp.signature_required
   milestone: 21
   kind: case

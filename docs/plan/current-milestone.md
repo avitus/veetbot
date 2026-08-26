@@ -30,7 +30,12 @@ title: Current Milestone
   Milestone 20 — SMS through the owner's iPhone — is specified by
   [device-channel-and-sms.md](device-channel-and-sms.md) with twelve gates
   and is a fifth parallel workstream on the same terms, its trigger-catalog
-  and registration-source widenings named in ADR-0073.
+  and registration-source widenings named in ADR-0073. Milestone 21 — the
+  WhatsApp business surface — is specified by
+  [whatsapp-surface.md](whatsapp-surface.md) with twelve gates and is a
+  sixth parallel workstream whose implementation begins when Milestone
+  14's ports exist; its receipt-key generalization of the surface seam is
+  named in ADR-0074.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -45,7 +50,9 @@ title: Current Milestone
   conversational schedule creation, was authorized on 2026-08-24 as a fourth
   (ADR-0072), again without advancing the verified ceiling. Milestone 20,
   SMS through the owner's iPhone, was authorized on 2026-08-26 as a fifth
-  (ADR-0073), again without advancing the verified ceiling.
+  (ADR-0073), again without advancing the verified ceiling. Milestone 21,
+  the WhatsApp business surface, was authorized on 2026-08-26 as a sixth
+  (ADR-0074), on the same terms.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
