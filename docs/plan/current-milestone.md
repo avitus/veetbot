@@ -81,9 +81,18 @@ title: Current Milestone
   provider ledger used USD 42.599510 of the initially approved USD 50
   aggregate cap. The owner subsequently raised the aggregate authorization to
   USD 100, now encoded as the daily ceiling while the USD 5 repeat and USD 25
-  suite ceilings remain unchanged. The scored delegating re-run, repair of the
-  baseline floor failure, and hosted verification of the completed evidence
-  head remain.
+  suite ceilings remain unchanged. A first scored delegating arm on build
+  `877b3ec` then scored 0.75, 0.75, 0.775, 0.65, and 0.35 (mean 0.655,
+  floor 0.35) at USD 10.984242 and correctly remained blocked below the
+  baseline. Its child ledger drove a governed default-limit and synthesis-
+  discipline repair. The exact repaired build `3c8772a-delegating-repair`
+  scored 0.65, 0.65, 0.90, 0.65, and 0.75, with mean 0.72, floor 0.65,
+  population variance 0.0096, zero ceiling hits, zero policy failures, and USD
+  11.104456 cost. Its durable suite event reports `release_blocked: false`, and
+  the delegating mean exceeds the baseline's 0.69 as ADR-0063 requires.
+  Aggregate provider spend is USD 64.688208 of the USD 100 authorization. The
+  failed-trajectory baseline remains the comparison evidence; only hosted
+  verification and the final review loop remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation

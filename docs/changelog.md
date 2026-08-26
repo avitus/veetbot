@@ -112,6 +112,21 @@ title: Changelog
   USD 50 to USD 100 after explicit owner approval. The USD 5 repeat and USD 25
   suite ceilings remain unchanged, and the provider ledger continues to count
   aborted attempts when enforcing the aggregate authorization operationally.
+- Preserved the first scored delegating distribution rather than cherry-picking
+  it: exact build `877b3ec` scored 0.75, 0.75, 0.775, 0.65, and 0.35 (mean
+  0.655, floor 0.35), with zero scenario ceiling hits, zero policy failures,
+  and USD 10.984242 cost. Child traces tied the failure to exhausted default or
+  caller-guessed child limits before a usable synthesis.
+- Calibrated the governed child defaults from 8/8/16 to 12/12/48
+  steps/model/tool calls, made each derived model/tool budget visible in the
+  child instructions with an explicit final-synthesis reserve, and revised
+  `delegate.run` to 1.0.1 so long-research callers know to omit optional limits
+  unless they intend stricter caps. Exact repaired build
+  `3c8772a-delegating-repair` then scored 0.65, 0.65, 0.90, 0.65, and 0.75
+  (mean 0.72, floor 0.65, population variance 0.0096), with zero scenario
+  ceiling hits, zero policy failures, `release_blocked: false`, and USD
+  11.104456 cost. That exceeds the recorded 0.69 single-agent baseline while
+  keeping aggregate provider spend at USD 64.688208 of the USD 100 cap.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

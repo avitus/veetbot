@@ -128,7 +128,6 @@ milestones:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
     open_items:
-      - Capability-scenario scoring for the delegating re-run and repair of the scored single-agent floor failure
       - Hosted CI on the milestone's final head
       - CodeRabbit review loop on the dev to main pull request (build step 7)
     evidence:
@@ -261,6 +260,40 @@ milestones:
           7.400490. The prior unscored five-repeat delegation calibration cost
           USD 14.8738995, so the scored delegating re-run remains outstanding
           rather than knowingly exceeding the approved aggregate cap.
+      - check: first scored delegating re-run under the raised aggregate cap
+        outcome: blocked_by_comparison
+        detail: >-
+          Exact staged build 877b3ec completed five delegation-enabled repeats
+          at scores 0.75, 0.75, 0.775, 0.65, and 0.35, for mean 0.655, floor
+          0.35, and population variance 0.0251. It persisted zero scenario
+          ceiling hits, zero policy failures, and USD 10.984242 cost, taking
+          aggregate provider spend to USD 53.583752 of the owner-approved USD
+          100 cap. The arm remained release-blocked and did not score above the
+          0.69 baseline. Its child ledger showed repeated exhaustion at the
+          shipped eight-step/eight-model/16-tool defaults or caller-guessed
+          lower caps, including the 0.35 repeat whose children returned no
+          usable research summary. The failed distribution remains recorded;
+          it was not reclassified or discarded.
+      - check: scored delegating exit evidence after child-budget calibration
+        outcome: passed_live
+        detail: >-
+          The failed arm drove a red-green calibration on exact code head
+          3c8772a: governed child defaults moved from 8 model/16 tool calls to
+          12 model/48 tool calls, child instructions expose the derived budget
+          and reserve a final synthesis model call, and delegate.run@1.0.1
+          tells callers to omit guessed per-brief limits unless stricter caps
+          are intended. The focused red test failed on all three old contracts;
+          its green run passed, as did 103 delegation/configuration tests and
+          the complete local check. Exact staged build
+          3c8772a-delegating-repair then scored 0.65, 0.65, 0.90, 0.65, and
+          0.75, for mean 0.72, floor 0.65, and population variance 0.0096.
+          All five rows and the durable suite event report zero scenario
+          ceiling hits, zero policy failures, and release_blocked false. The
+          arm cost USD 11.104456 and aggregate provider spend is USD 64.688208
+          of the USD 100 authorization. This satisfies ADR-0063 because the
+          delegating mean is above the scored single-agent baseline's 0.69;
+          the lower baseline is retained as the required failed-trajectory
+          comparison rather than retrospectively repaired.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
@@ -484,5 +517,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-26T01:11:08Z
+last_updated: 2026-08-26T21:56:29Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round
