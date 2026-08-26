@@ -1,5 +1,5 @@
 schema_version: 1
-daily_cost_usd: "50.00"
+daily_cost_usd: "100.00"
 suites:
   research:
     subject_model_policy: balanced

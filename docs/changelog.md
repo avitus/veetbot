@@ -108,6 +108,10 @@ title: Changelog
   The provider ledger reached USD 42.599510 of the approved USD 50 aggregate
   cap, leaving the scored delegating re-run outstanding rather than knowingly
   exceeding the approved limit.
+- Raised only the research capability evaluator's aggregate daily ceiling from
+  USD 50 to USD 100 after explicit owner approval. The USD 5 repeat and USD 25
+  suite ceilings remain unchanged, and the provider ledger continues to count
+  aborted attempts when enforcing the aggregate authorization operationally.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

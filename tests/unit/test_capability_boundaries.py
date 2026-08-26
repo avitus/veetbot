@@ -299,7 +299,7 @@ def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> No
     settings, scenarios = load_scenarios(repository_root, "research")
 
     assert len(scenarios) == 1
-    assert settings.daily_cost_usd == Decimal("50.00")
+    assert settings.daily_cost_usd == Decimal("100.00")
     assert settings.suites["research"].cost_usd == Decimal("25.00")
     scenario = scenarios[0].scenario
     assert scenario.milestone == 13

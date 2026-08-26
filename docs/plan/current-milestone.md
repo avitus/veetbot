@@ -78,9 +78,12 @@ title: Current Milestone
   mean 0.69, floor 0.55, population variance 0.0064, zero ceiling hits, zero
   policy failures, and USD 7.855529 cost. It correctly remains
   release-blocked because one repeat is below the rubric's 0.60 floor. The
-  provider ledger has used USD 42.599510 of the approved USD 50 aggregate
-  cap; the scored delegating re-run, repair of the baseline floor failure, and
-  hosted verification of the completed evidence head remain.
+  provider ledger used USD 42.599510 of the initially approved USD 50
+  aggregate cap. The owner subsequently raised the aggregate authorization to
+  USD 100, now encoded as the daily ceiling while the USD 5 repeat and USD 25
+  suite ceilings remain unchanged. The scored delegating re-run, repair of the
+  baseline floor failure, and hosted verification of the completed evidence
+  head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation
