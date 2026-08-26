@@ -443,3 +443,17 @@ def test_device_channel_has_complete_milestone_20_gate_area() -> None:
         for entry in device_entries
     )
     assert all(GATE_ID.fullmatch(entry.id) for entry in device_entries)
+
+
+def test_whatsapp_surface_has_complete_milestone_21_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    whatsapp_entries = [entry for entry in entries if entry.milestone == 21]
+
+    assert len(whatsapp_entries) == 12
+    assert all(entry.id.startswith("gate.whatsapp.") for entry in whatsapp_entries)
+    assert all(
+        entry.spec == "docs/plan/whatsapp-surface.md#hard-gates"
+        for entry in whatsapp_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in whatsapp_entries)
