@@ -378,7 +378,7 @@ def check_milestones_page() -> None:
                     "match project-state.yaml open_items"
                 )
     for number in sorted(entries):
-        if str(number) not in declared:
+        if number not in normalized_keys:
             err(
                 f"milestones.md lists milestone {number}, which project-state.yaml does not declare"
             )
