@@ -424,3 +424,17 @@ def test_conversational_scheduling_has_complete_milestone_19_gate_area() -> None
     assert all(entry.id.startswith("gate.schedule.model_create_") for entry in schedule_entries)
     assert all(entry.spec == "docs/plan/scheduling.md#hard-gates" for entry in schedule_entries)
     assert all(GATE_ID.fullmatch(entry.id) for entry in schedule_entries)
+
+
+def test_device_channel_has_complete_milestone_20_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    device_entries = [entry for entry in entries if entry.milestone == 20]
+
+    assert len(device_entries) == 12
+    assert all(entry.id.startswith("gate.device.") for entry in device_entries)
+    assert all(
+        entry.spec == "docs/plan/device-channel-and-sms.md#hard-gates"
+        for entry in device_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in device_entries)
