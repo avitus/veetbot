@@ -112,14 +112,17 @@ async def test_approval_sweep_failure_does_not_abort_the_maintenance_pass(
     tmp_path: Path,
 ) -> None:
     clock = FixedClock(_START)
-    swept = 0
+    approval_sweeps = 0
+    export_sweeps = 0
 
     async def failing_sweep() -> int:
+        nonlocal approval_sweeps
+        approval_sweeps += 1
         raise RuntimeError("approval sweep exploded")
 
     async def counting_sweep() -> int:
-        nonlocal swept
-        swept += 1
+        nonlocal export_sweeps
+        export_sweeps += 1
         return 0
 
     async with build(settings=_settings(tmp_path), script=_script(), clock=clock) as app:
@@ -131,4 +134,5 @@ async def test_approval_sweep_failure_does_not_abort_the_maintenance_pass(
         )
         await worker.run_once()
 
-    assert swept == 1
+    assert approval_sweeps == 1
+    assert export_sweeps == 1
