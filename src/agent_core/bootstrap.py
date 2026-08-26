@@ -2183,6 +2183,7 @@ async def _compose(
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
                     clock=clock,
+                    sweep_approvals=approval_service.expire_due,
                     sweep_exports=trajectory_service.sweep_once,
                     sweep_artifacts=artifact_writers.sweep_expired,
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
