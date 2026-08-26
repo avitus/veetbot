@@ -56,10 +56,12 @@ deletes the local bearer and clears the local connection if revocation fails.
 A `404` from the feature-gated device surface marks notifications unavailable
 without preventing the rest of the client from using an older server.
 
-The tracked entitlement declares `aps-environment`; enabling the push capability
-for the application identifier and regenerating provisioning profiles remain
-owner actions in the Apple Developer portal. Debug and release simulator builds
-remain unsigned-build compatible, and the debug UI-test fixture suppresses the
+The tracked target selects platform-specific push entitlements: iOS declares
+`aps-environment`, and macOS declares
+`com.apple.developer.aps-environment`. Enabling the push capability for the
+application identifier and regenerating provisioning profiles remain owner
+actions in the Apple Developer portal. Debug and release simulator builds remain
+unsigned-build compatible, and the debug UI-test fixture suppresses the
 permission request.
 
 Approval status uses the API's uppercase five-value wire vocabulary. A pending

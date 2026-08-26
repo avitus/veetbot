@@ -27,6 +27,8 @@ approval or question. The client does not persist a notification inbox. Before a
 physical-device push can work, the application identifier must have the push
 capability enabled and its provisioning profiles regenerated in the Apple
 Developer portal; the tracked project cannot perform those owner actions.
+The shared Xcode target selects platform-specific entitlement files: iOS uses
+`aps-environment`, while macOS uses `com.apple.developer.aps-environment`.
 The generated application property list declares
 `ITSAppUsesNonExemptEncryption=NO`: the client uses platform-provided HTTPS and
 Keychain protection and implements no non-exempt encryption. Reassess that
