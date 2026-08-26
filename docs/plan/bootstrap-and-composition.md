@@ -936,6 +936,15 @@ and is empty at Milestone 1, because there is no memory yet — its absence
 changes no bytes, which is the property that lets it be added later without
 breaking a cached prefix.
 
+The default agent's instructions also establish a least-powerful-tool routing
+rule. Routine arithmetic, date/time questions, and public facts prefer the
+available read-only capabilities (`math.calculate`, `system.current_time`, and
+`web.search`) and do not fall back to `sandbox.run_command`. If no read-only
+capability can answer, the agent explains the limitation or asks before
+proposing arbitrary code execution. This is model guidance, not authorization:
+the deterministic policy and approval pipeline remains authoritative for every
+tool call the model does propose.
+
 ### The invariant, and its test
 
 Region A is built once per session, serialized to bytes with a fixed

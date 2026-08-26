@@ -87,6 +87,7 @@ let package = Package(
                 "ConversationNavigationUITestFixture.swift",
                 "VeetbotApp.swift",
                 "Veetbot.entitlements",
+                "Veetbot.macOS.entitlements",
             ],
             swiftSettings: fullXcodeFlags
         ),

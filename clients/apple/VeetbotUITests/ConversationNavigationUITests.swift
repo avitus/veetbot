@@ -11,6 +11,12 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
     }
 
+    override func tearDown() {
+        app?.terminate()
+        super.tearDown()
+    }
+
+    #if os(iOS)
     func testHistoricalAndNewConversationRowsOpenChat() {
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
@@ -120,7 +126,77 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(clientBuild.exists)
         XCTAssertTrue(app.staticTexts["Version 0.1.1 (2)"].exists)
     }
+    #endif
 
+    #if os(macOS)
+    func testMainWindowSizePersistsAcrossApplicationRestart() {
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        let initialFrame = window.frame
+        let widthDelta: CGFloat = initialFrame.width >= 1_000 ? -160 : 160
+        let heightDelta: CGFloat = initialFrame.height >= 700 ? -100 : 100
+        let requestedSize = CGSize(
+            width: initialFrame.width + widthDelta,
+            height: initialFrame.height + heightDelta
+        )
+
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] =
+            "\(requestedSize.width),\(requestedSize.height)"
+        app.launch()
+
+        let resizedWindow = app.windows.firstMatch
+        let resizeAccepted = resizedWindow.waitForExistence(timeout: 10)
+            && waitForFrame(of: resizedWindow, timeout: 5) {
+                abs($0.width - requestedSize.width) <= 3
+                    && abs($0.height - requestedSize.height) <= 3
+            }
+        let resizedFrame = resizedWindow.frame
+
+        app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME")
+        app.terminate()
+        app.launch()
+
+        let relaunchedWindow = app.windows.firstMatch
+        let relaunched = relaunchedWindow.waitForExistence(timeout: 10)
+        let restoredFrame = relaunchedWindow.frame
+
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] =
+            "\(initialFrame.width),\(initialFrame.height)"
+        app.launch()
+        let cleanupWindow = app.windows.firstMatch
+        _ = cleanupWindow.waitForExistence(timeout: 10)
+        _ = waitForFrame(of: cleanupWindow, timeout: 5) {
+            abs($0.width - initialFrame.width) <= 3
+                && abs($0.height - initialFrame.height) <= 3
+        }
+        app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME")
+
+        XCTAssertTrue(
+            resizeAccepted,
+            "the real SwiftUI window did not accept the test resize"
+        )
+        XCTAssertTrue(relaunched, "the application did not expose its window after relaunch")
+        XCTAssertEqual(restoredFrame.width, resizedFrame.width, accuracy: 3)
+        XCTAssertEqual(restoredFrame.height, resizedFrame.height, accuracy: 3)
+    }
+
+    private func waitForFrame(
+        of window: XCUIElement,
+        timeout: TimeInterval,
+        matching predicate: (CGRect) -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if predicate(window.frame) { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return predicate(window.frame)
+    }
+    #endif
+
+    #if os(iOS)
     private func revealSidebarIfNeeded(for row: XCUIElement) {
         guard !row.isHittable else { return }
         let backButton = app.navigationBars.buttons.element(boundBy: 0)
@@ -135,4 +211,5 @@ final class ConversationNavigationUITests: XCTestCase {
             scrollView.swipeUp()
         }
     }
+    #endif
 }

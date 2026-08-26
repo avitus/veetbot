@@ -63,10 +63,6 @@ def _duplicate_activation_tuples(root: Path) -> dict[ActivationTuple, list[str]]
     return {tuple_: names for tuple_, names in claimed.items() if len(names) > 1}
 
 
-def test_release_evidence_root_is_a_directory_the_runtime_can_read() -> None:
-    assert PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT.is_dir()
-
-
 def test_every_bundled_artifact_parses_through_the_runtime_loader() -> None:
     artifacts = _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT)
 

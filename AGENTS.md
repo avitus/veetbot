@@ -90,12 +90,12 @@ validates the floor, and no trailer means lane A.
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
-- Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
-  12 through 15 — notifications and device identity, subagents and delegation,
-  inbound surfaces and pairing, operational hardening — are authorized in that
-  order (ADR-0061), with Milestone 16 memory evaluation (ADR-0069), 17 the
-  memory read API and browser (ADR-0070), and 18 email integration (ADR-0071)
-  in parallel; model routing and the plan's remaining roadmap items are not.
+- Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 —
+  subagents and delegation, inbound surfaces and pairing, operational
+  hardening — proceed in that order (ADR-0061); 18 and 19 are parallel
+  workstreams (ADRs 0071–0072). Model routing and the plan's remaining roadmap
+  items are not authorized. The grouped summary with each in-progress
+  milestone's open items is `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.
@@ -139,22 +139,21 @@ failure. New adapters must begin with their shared contract suite, and new
 public surfaces require boundary-level happy-path, validation, authorization,
 failure, and retry coverage.
 
-## Pull request review gate
+## Pull request review and deployment gate
 
-GitHub mergeability does not make a PR ready under this contract. Use only the
-CodeRabbit GitHub PR integration, never the local CLI (rate-limited, not authoritative). Loop:
+GitHub mergeability is insufficient. Use only the CodeRabbit GitHub PR integration; never use the rate-limited, non-authoritative local CLI. Loop:
 
 1. Wait for CodeRabbit to finish reviewing the current head commit.
-2. Address every CodeRabbit comment of any severity or placement — inline,
-   summary, outside-diff, nitpick, suggestion, or trivial. Fix each valid
-   finding; answer inapplicable ones with concrete evidence and resolve the
-   conversation.
+2. Address every CodeRabbit comment — inline, summary, outside-diff, nitpick, suggestion, trivial, or any severity.
+   Fix valid findings; answer inapplicable ones with concrete evidence and resolve the conversation.
 3. Push, wait for the review of the new head commit, and repeat until
    CodeRabbit reports no findings and every conversation is resolved.
 4. Confirm all required CI checks pass on that same final head commit.
+5. After merging to `main`, follow the merge commit's CircleCI pipeline through production delivery. Verify the application and documentation jobs pass
+   and their public release-identity checks report the merged revision, as defined in `docs/deployment.md`. If delivery fails, keep the work active through
+   diagnosis and recovery; a merge is not complete until its production deployment succeeds.
 
-Never call a PR ready, mergeable, approved, or complete while CodeRabbit is
-queued, running, has unresolved comments, or has not reviewed the latest push.
+Never call a PR ready, mergeable, approved, or complete while CodeRabbit is queued, running, has unresolved comments, or has not reviewed the latest push.
 
 ## Documentation update rules
 

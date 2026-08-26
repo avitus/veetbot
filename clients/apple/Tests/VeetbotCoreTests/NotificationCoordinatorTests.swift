@@ -195,13 +195,37 @@ import Testing
     }
 
     @Test
-    func testEntitlementIsTrackedAndUITestFixtureSuppressesPermissionPrompt() throws {
+    func testPlatformSpecificEntitlementsAreTrackedAndUITestFixtureSuppressesPermissionPrompt()
+        throws
+    {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let entitlement = try String(
-            contentsOf: packageRoot.appendingPathComponent("Veetbot/Veetbot.entitlements"),
+        let iosEntitlements = try #require(
+            PropertyListSerialization.propertyList(
+                from: Data(
+                    contentsOf: packageRoot.appendingPathComponent(
+                        "Veetbot/Veetbot.entitlements"
+                    )
+                ),
+                format: nil
+            ) as? [String: Any]
+        )
+        let macOSEntitlements = try #require(
+            PropertyListSerialization.propertyList(
+                from: Data(
+                    contentsOf: packageRoot.appendingPathComponent(
+                        "Veetbot/Veetbot.macOS.entitlements"
+                    )
+                ),
+                format: nil
+            ) as? [String: Any]
+        )
+        let project = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Veetbot.xcodeproj/project.pbxproj"
+            ),
             encoding: .utf8
         )
         let delegate = try String(
@@ -211,8 +235,24 @@ import Testing
             encoding: .utf8
         )
 
-        #expect(entitlement.contains("<key>aps-environment</key>"))
-        #expect(entitlement.contains("$(APS_ENVIRONMENT)"))
+        #expect(iosEntitlements["aps-environment"] as? String == "$(APS_ENVIRONMENT)")
+        #expect(iosEntitlements["com.apple.developer.aps-environment"] == nil)
+        #expect(
+            macOSEntitlements["com.apple.developer.aps-environment"] as? String
+                == "$(APS_ENVIRONMENT)"
+        )
+        #expect(macOSEntitlements["aps-environment"] == nil)
+        #expect(
+            project.components(
+                separatedBy: "CODE_SIGN_ENTITLEMENTS = Veetbot/Veetbot.entitlements;"
+            ).count - 1 == 2
+        )
+        #expect(
+            project.components(
+                separatedBy:
+                    #""CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Veetbot/Veetbot.macOS.entitlements;"#
+            ).count - 1 == 2
+        )
         #expect(delegate.contains("--ui-testing-conversation-navigation"))
         #expect(delegate.contains("requestAuthorization"))
     }

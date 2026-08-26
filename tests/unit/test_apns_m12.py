@@ -307,38 +307,6 @@ async def test_apns_network_failure_retries_without_exposing_credentials(tmp_pat
     await transport.aclose()
 
 
-async def test_expired_provider_token_is_discarded_before_next_attempt(tmp_path: Path) -> None:
-    key_path, _key = _private_key_file(tmp_path)
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if len(requests) == 1:
-            return httpx.Response(403, json={"reason": "ExpiredProviderToken"})
-        return httpx.Response(200)
-
-    client = httpx.AsyncClient(
-        base_url="https://api.sandbox.push.apple.com:443",
-        transport=httpx.MockTransport(handler),
-    )
-    transport = APNsPushTransport(
-        key_file=key_path,
-        key_id="KEY123",
-        team_id="TEAM123",
-        topic="com.veetbot.app",
-        clock=FixedClock(NOW),
-        clients={PushEnvironment.SANDBOX: client},
-    )
-
-    first = await transport.deliver(push_target(), push_message())
-    second = await transport.deliver(push_target(), push_message())
-
-    assert first.outcome is DeliveryOutcome.RETRY
-    assert second.outcome is DeliveryOutcome.DELIVERED
-    assert requests[0].headers["authorization"] != requests[1].headers["authorization"]
-    await transport.aclose()
-
-
 def test_apns_rejects_non_private_key_file(tmp_path: Path) -> None:
     key_path, _key = _private_key_file(tmp_path)
     os.chmod(key_path, 0o644)

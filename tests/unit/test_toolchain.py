@@ -1496,3 +1496,219 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     assert used <= rule_binaries, (
         f"sudo commands without a contract rule: {sorted(used - rule_binaries)}"
     )
+
+
+def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
+    """The macOS UI-test arm must not require a certificate or profile.
+
+    CircleCI mac runners hold no Mac Development certificate for the team,
+    and the app's entitlements (aps-environment, keychain access groups)
+    require a provisioning profile no runner can mint. The macOS destination
+    therefore builds with manual ad-hoc signing and no entitlements; the iOS
+    simulator destinations never needed signing at all.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+    parts = recipe.split("-destination 'platform=macOS'")
+    assert len(parts) == 2, "the macOS UI-test destination is missing"
+    invocation_tail = parts[1].split("|| exit", 1)[0]
+    for override in (
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_IDENTITY=-",
+        "CODE_SIGNING_REQUIRED=NO",
+        "CODE_SIGN_ENTITLEMENTS=",
+        "PROVISIONING_PROFILE_SPECIFIER=",
+        "DEVELOPMENT_TEAM=",
+    ):
+        assert override in invocation_tail, f"macOS UI-test arm is missing {override}"
+
+
+def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
+    status = tmp_path / "docs" / "status"
+    status.mkdir(parents=True, exist_ok=True)
+    milestones = {
+        "0": {"title": "Repository and engineering foundation", "status": "complete"},
+        "1": {
+            "title": "In-memory vertical slice",
+            "status": "in_progress",
+            "open_items": ["Hosted CI on the final head", "Owner smoke of the flow"],
+        },
+        "2": {"title": "PostgreSQL persistence and durable worker", "status": "authorized"},
+    }
+    (status / "project-state.yaml").write_text(
+        yaml.safe_dump({"project": {"current_milestone": 0}, "milestones": milestones}),
+        encoding="utf-8",
+    )
+    if page is not None:
+        (status / "milestones.md").write_text(page, encoding="utf-8")
+
+
+_CONSISTENT_MILESTONES_PAGE = """\
+# Milestones
+
+## Complete
+
+- **Milestone 0 — Repository and engineering foundation** — delivered.
+
+## In progress
+
+### Milestone 1 — In-memory vertical slice
+
+- [ ] Hosted CI on the final head
+- [ ] Owner smoke of the flow
+
+## Authorized
+
+- **Milestone 2 — PostgreSQL persistence and durable worker**
+
+## Deferred
+
+Roadmap prose only; no milestone entries live here.
+"""
+
+
+def _milestones_page_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, page: str | None
+) -> list[str]:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, page)
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_milestones_page()
+    return list(check_docs.errors)
+
+
+def test_milestones_page_reconciles_against_project_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert _milestones_page_errors(monkeypatch, tmp_path, _CONSISTENT_MILESTONES_PAGE) == []
+
+
+def test_milestones_page_reports_nonnumeric_state_key_and_continues(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["current"] = {
+        "title": "Invalid milestone key",
+        "status": "authorized",
+    }
+    state["milestones"]["2"]["title"] = "Drifted title"
+    state_path.write_text(yaml.safe_dump(state), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert "project-state.yaml has a non-numeric milestone key 'current'" in check_docs.errors
+    assert any("milestone 2" in error and "title" in error for error in check_docs.errors)
+
+
+def test_milestones_page_rejects_duplicate_normalized_state_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["01"] = dict(state["milestones"]["1"])
+    state["milestones"]["01"]["title"] = "Duplicate milestone record"
+    state_path.write_text(yaml.safe_dump(state, sort_keys=False), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert check_docs.errors == ["project-state.yaml declares milestone 1 more than once"]
+
+
+def test_milestones_page_accepts_normalized_state_key_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["01"] = state["milestones"].pop("1")
+    state_path.write_text(yaml.safe_dump(state, sort_keys=False), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert check_docs.errors == []
+
+
+def test_milestones_page_flags_absence_coverage_and_grouping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    errors = _milestones_page_errors(monkeypatch, tmp_path, None)
+    assert any("docs/status/milestones.md" in e and "missing" in e for e in errors)
+
+    dropped = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**\n", ""
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, dropped)
+    assert any("milestone 2" in e and "missing" in e for e in errors)
+
+    misgrouped = _CONSISTENT_MILESTONES_PAGE.replace(
+        "## Authorized\n\n- **Milestone 2 — PostgreSQL persistence and durable worker**",
+        "## Authorized\n",
+    ).replace(
+        "- **Milestone 0 — Repository and engineering foundation** — delivered.",
+        "- **Milestone 0 — Repository and engineering foundation** — delivered.\n"
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, misgrouped)
+    assert any("milestone 2" in e and "'Complete'" in e and "'authorized'" in e for e in errors)
+
+    retitled = _CONSISTENT_MILESTONES_PAGE.replace(
+        "Milestone 0 — Repository and engineering foundation",
+        "Milestone 0 — Repository foundation",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, retitled)
+    assert any("milestone 0" in e and "title" in e for e in errors)
+
+    duplicated = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**\n"
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, duplicated)
+    assert any("milestone 2" in e and "once" in e for e in errors)
+
+
+def test_milestones_page_flags_checklist_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    drifted = _CONSISTENT_MILESTONES_PAGE.replace("- [ ] Owner smoke of the flow\n", "")
+    errors = _milestones_page_errors(monkeypatch, tmp_path, drifted)
+    assert any("milestone 1" in e and "open_items" in e for e in errors)
+
+    checked = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- [ ] Hosted CI on the final head", "- [x] Hosted CI on the final head"
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, checked)
+    assert any("milestone 1" in e and "checked" in e for e in errors)
+
+
+def test_milestones_page_requires_open_items_for_in_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    del state["milestones"]["1"]["open_items"]
+    state_path.write_text(yaml.safe_dump(state), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_milestones_page()
+    assert any("milestone 1" in e and "open_items" in e for e in check_docs.errors)
