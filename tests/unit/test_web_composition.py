@@ -17,6 +17,7 @@ from agent_core.domain.messages import (
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
+    SystemMessage,
     TextPart,
     ToolResultItem,
 )
@@ -295,6 +296,48 @@ async def test_web_selectors_curate_the_fallback_agent_tool_list() -> None:
     assert "web.fetch" not in agent.enabled_tools
     assert "demo.external_write" not in agent.enabled_tools
     assert "knowledge.ingest" in agent.enabled_tools
+
+
+async def test_default_agent_routes_routine_public_facts_away_from_sandbox() -> None:
+    provider = FakeWebProvider()
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="Sunset is at 7:42 PM.", stop_reason=StopReason.END_TURN)]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit("What time is sunset today?")
+        await composition.runs.wait_terminal(run_id)
+        model_provider = composition.executor._model_provider
+        assert isinstance(model_provider, FakeModelProvider)
+        request = model_provider.requests[0]
+
+    configured_instructions = [
+        part.text
+        for item in request.conversation
+        if isinstance(item, SystemMessage) and item.trust is TrustLevel.TRUSTED_CONFIGURATION
+        for part in item.content
+        if isinstance(part, TextPart)
+    ]
+    assert any(
+        "Prefer the least-powerful declared tool" in text for text in configured_instructions
+    )
+    assert any(
+        "routine arithmetic, date/time, and public facts" in text
+        for text in configured_instructions
+    )
+    assert any(
+        "Do not use sandbox.run_command for those requests" in text
+        for text in configured_instructions
+    )
+    assert {"math.calculate", "system.current_time", "web.search"} <= {
+        tool.name for tool in request.tools
+    }
 
 
 async def test_web_research_plan_omits_unusable_skill_loader() -> None:
