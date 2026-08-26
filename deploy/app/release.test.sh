@@ -78,6 +78,20 @@ write_stub readlink '
 '
 write_stub docker '
   printf "docker %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  if [[ "${1:-}" == run && " $* " == *" --entrypoint /bin/rm "* ]]; then
+    target="${!#}"
+    [[ "$target" == /releases/* ]]
+    /bin/rm -rf -- "$VEETBOT_ROOT/releases/${target##*/}"
+  fi
+'
+write_stub rm '
+  target="${!#}"
+  if [[ -n "${VEETBOT_TEST_UNPRUNABLE_RELEASE:-}" \
+    && "$target" == "$VEETBOT_ROOT/releases/$VEETBOT_TEST_UNPRUNABLE_RELEASE" ]]; then
+    printf "rm: cannot remove %s: Permission denied\n" "$target" >&2
+    exit 1
+  fi
+  /bin/rm "$@"
 '
 write_stub sudo '
   printf "sudo %s\n" "$*" >>"$VEETBOT_TEST_LOG"
@@ -184,6 +198,7 @@ run_release() {
   VEETBOT_TEST_AUTH_HEADERS="$TEST_ROOT/session-index-headers" \
   VEETBOT_TEST_RELEASE="$release_id" \
   VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$release_id}" \
+  VEETBOT_TEST_UNPRUNABLE_RELEASE="${VEETBOT_TEST_UNPRUNABLE_RELEASE:-}" \
   VEETBOT_API_BASE_URL="${VEETBOT_TEST_API_BASE_URL:-http://127.0.0.1:8000/}" \
     "$RELEASE_SCRIPT" "$release_id"
 }
@@ -209,7 +224,8 @@ done
 release_id="20260810-152233-abcdef0"
 make_stage "$release_id"
 ln -s "$DEPLOY_ROOT/releases/$release_id" "$PROCESS_ROOT/4242/cwd"
-run_release "$release_id"
+legacy_unprunable_id="20260809-120001-0000001"
+VEETBOT_TEST_UNPRUNABLE_RELEASE="$legacy_unprunable_id" run_release "$release_id"
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
@@ -232,6 +248,9 @@ auth_scheme='Bearer'
 grep -Fxq "Authorization: $auth_scheme synthetic-test-token" \
   "$TEST_ROOT/session-index-headers"
 [[ ! -d "$DEPLOY_ROOT/releases/20260809-120001-0000001" ]]
+grep -Fq \
+  "docker run --rm --pull=never --network none --read-only --user 0:0 --volume $DEPLOY_ROOT/releases:/releases --entrypoint /bin/rm agent-core-sandbox:$release_id -rf -- /releases/$legacy_unprunable_id" \
+  "$LOG_FILE"
 
 if run_release "$release_id" >"$TEST_ROOT/active.out" 2>&1; then
   printf 'active release mutation unexpectedly succeeded\n' >&2
