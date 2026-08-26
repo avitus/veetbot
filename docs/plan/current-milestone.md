@@ -76,11 +76,12 @@ title: Current Milestone
   remain outstanding. Milestone 18, the third parallel workstream, is
   authorized and specified with thirteen registered gates; it has not
   started. Milestone 19, the fourth parallel workstream, is in progress with
-  five registered gates; its one-time model tool and focused
-  gate suite are implemented locally, with full repository verification and
-  hosted review still outstanding. Each in-progress milestone's remaining
-  work is itemized on the [milestones page](../status/milestones.md), which
-  `make docs-check` reconciles against the project state.
+  five registered gates; its one-time model tool, clarification-to-approval
+  regression, complete non-live suite, and PostgreSQL lane pass locally, with
+  only hosted CI and the final CodeRabbit review outstanding. Each in-progress
+  milestone's remaining work is itemized on the
+  [milestones page](../status/milestones.md), which `make docs-check`
+  reconciles against the project state.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;

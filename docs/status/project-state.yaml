@@ -392,7 +392,6 @@ milestones:
       - a separate reminder record or notification payload with user content
       - notification transports beyond the existing Milestone 12 delivery path
     open_items:
-      - Full repository verification (make check and the PostgreSQL lanes) on the final head
       - Hosted CI and the CodeRabbit review loop on the dev to main pull request
     evidence:
       - check: five Milestone 19 gate.schedule.* gates
@@ -407,6 +406,44 @@ milestones:
           Milestone 13 through 15 gates and the registry validator correctly
           refuses. They become executable through the harness when
           project.current_milestone advances past them.
+      - check: Milestone 19 gate-area red phase
+        outcome: observed_expected_failure
+        detail: >-
+          The gate-area test was reconstructed on the exact pre-implementation
+          parent e79d517 with the test version introduced by 20d9c82. Running
+          pytest tests/gates/test_gate_registry.py::
+          test_conversational_scheduling_has_complete_milestone_19_gate_area
+          failed at its intended assertion because the registry contained zero
+          Milestone 19 entries rather than five; this was a behavioral gate
+          failure rather than an environment, import, or fixture error.
+      - check: clarification, approval, and schedule creation journey
+        outcome: passed_locally
+        detail: >-
+          pytest tests/gates/test_schedule_tool_m19.py
+          tests/integration/test_schedule_conversation_m19.py passes all eight
+          tests against isolated PostgreSQL 16. The integration journey asks
+          for missing time context, records exactly one answer tool result,
+          resumes once, waits for ordinary approval, and persists one future
+          one-time schedule.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 580 files and Ruff linting pass, strict mypy
+          reports no issue in 536 source files, the static partition passes
+          1297 tests, the contract partition passes 368, all deployment-script
+          tests pass, and strict documentation validation reconciles all 353
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          make test-integration passes all 155 selected tests against isolated
+          PostgreSQL 16, with 1677 deselected. This includes the scheduling and
+          notification persistence paths and the clarification journey.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          pytest -m "not live" passes all 1830 selected tests with the two
+          live-model tests deselected.
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -469,5 +506,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-25T22:30:00Z
+last_updated: 2026-08-26T01:08:30Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

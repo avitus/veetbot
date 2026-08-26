@@ -66,10 +66,10 @@ package and simulator lanes; the manual HTTP smoke is recorded. Remaining:
 ### Milestone 19 — Conversational schedule creation
 
 A parallel workstream, deliberately narrow: one-time schedule creation through
-the model-callable `schedule.create` tool. The tool and its five-gate suite
-pass locally. Remaining:
+the model-callable `schedule.create` tool. Its five gates, complete non-live
+suite, PostgreSQL lane, and clarification-to-approval journey pass locally.
+Remaining:
 
-- [ ] Full repository verification (make check and the PostgreSQL lanes) on the final head
 - [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
 
 ## Authorized
