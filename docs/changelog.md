@@ -4,6 +4,45 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-25 — Milestone 17 completion recorded
+
+- Reconciled the milestone record with the already merged delivery evidence.
+  Dev-to-main pull request 58 carried the memory read API and native Apple
+  browser to `main` with the ten gates, Python and PostgreSQL partitions,
+  native package and simulator verification, every hosted CI lane,
+  GitGuardian, and the final CodeRabbit review green on its final head; every
+  review conversation is resolved. Pull request 64 subsequently added a real
+  PostgreSQL keyset walk with an interleaved write and fixture-driven iPhone
+  and iPad list-to-detail coverage, again with all hosted lanes green and no
+  unresolved review conversation.
+- Marked Milestone 17 complete without advancing the verified sequential gate
+  ceiling beyond Milestone 12, and moved its evidence from the in-progress
+  project state into verification history. The milestone's exclusions are
+  unchanged: recall-trace viewing still waits on tenant and principal
+  predicates for `PostgresTraceStore.for_turn`; HTTP writes, consolidation and
+  formation audit routes, and knowledge-document browsing remain deferred.
+
+## 2026-08-25 — Reconciled milestones page and status refresh
+
+- Added `docs/status/milestones.md`, a grouped summary of every milestone —
+  complete, in progress, authorized, and the deferred roadmap — with an
+  open-item checklist for each in-progress milestone, and a top-level
+  "Milestones" navigation entry. The page is a projection of
+  `docs/status/project-state.yaml`: a new `check_milestones_page`
+  reconciliation in `scripts/check_docs.py` fails `make docs-check` on a
+  wrong group, a stale title, a missing or duplicated entry, or a checklist
+  that disagrees with the state file's new per-milestone `open_items` lists.
+- Recorded Milestones 17 and 19 as in progress in the project state.
+  Milestone 17 already carried locally passing evidence for its ten gates;
+  Milestone 19's five registered gates pass locally through
+  `tests/gates/test_schedule_tool_m19.py`, recorded as new evidence.
+- Refreshed stale status prose to match: the documentation home and
+  project-state overview now point at the reconciled milestones page instead
+  of restating milestone progress, `docs/architecture.md` gained the
+  Milestone 12 notification and device modules plus the landed Milestone 13,
+  16/17, and 19 additions, and `AGENTS.md` and `CLAUDE.md` correct their
+  milestone and specification counts.
+
 ## 2026-08-24 — Deployment sudo contract covers notifications
 
 - Repaired the production sudoers contract so notification-enabled releases

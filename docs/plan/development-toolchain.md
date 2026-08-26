@@ -307,10 +307,12 @@ builds the gVisor image and is deliberately outside `make check`.
 Job 6 is an additional native-client gate outside `make check`; it runs
 `make test-apple` under full Xcode because Command Line Tools can compile a
 Swift Testing bundle without executing it, then runs `make test-apple-ui` on
-available iPhone and iPad simulators. The UI target uses a debug-only in-process
-fixture to exercise historical-transcript selection, switching, and
-new-conversation navigation without a live server or credential. Release
-packaging depends on both additional gates.
+macOS and on available iPhone and iPad simulators. The macOS case resizes the
+real SwiftUI window, terminates the application, and asserts that its size is
+restored after relaunch. The simulator cases use a debug-only in-process
+fixture to exercise historical-transcript
+selection, switching, and new-conversation navigation without a live server or
+credential. Release packaging depends on both additional gates.
 
 Job 1 also runs the reading-lane floor first:
 `python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git

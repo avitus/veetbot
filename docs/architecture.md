@@ -114,6 +114,29 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   materialization into ordinary runs, admission, and the least-privilege
   schedule worker role (Milestone 11).
 
-Milestones 12 through 15 — notifications and device identity, subagents and
-delegation, inbound surfaces and pairing, operational hardening — are
-authorized and add nothing to this page until their implementations land.
+## Implemented in Milestone 12 and the later workstreams
+
+- `agent_core.application` owns the principal-scoped device registry
+  (`device_management`), the content-free notification outbox written in the
+  same transaction as its triggering event (`notification_producer`), and the
+  provider-partitioned claim-and-retry dispatcher (`notification_dispatcher`,
+  `notification_worker`); `agent_core.adapters.apns` is the APNs HTTP/2
+  transport, and the device and notification routes joined `agent_core.api`
+  behind exact scopes (Milestone 12).
+- `agent_core.application.delegations` owns the delegation ledger and the
+  one-transaction child-run materializer behind the suspending
+  `agent_core.tools.delegate_run` control tool; the runtime added child-run
+  suspension, join, and the downward-only cancel cascade (Milestone 13, in
+  progress).
+- `agent_core.memory` grew Milestone 16's deterministic benchmark arm,
+  established-fact admission, decay sweep, and usage feedback, and the
+  read-only `/v1/memories` list and detail routes entered `agent_core.api`
+  behind the exact `memory.read` scope and a default-off flag (Milestone 17,
+  in progress).
+- `agent_core.tools.schedule_create` is the model-callable, approval-gated
+  one-time creation bridge over the existing
+  `agent_core.application.schedule_service` (Milestone 19, in progress).
+
+Milestones 14, 15, and 18 — inbound surfaces and pairing, operational
+hardening, first-class email integration — are authorized and add nothing to
+this page until their implementations land.

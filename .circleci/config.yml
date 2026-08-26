@@ -106,7 +106,7 @@ jobs:
           name: Native Apple client tests
           command: make test-apple
       - run:
-          name: iPhone conversation navigation UI test
+          name: Apple client UI tests
           command: make test-apple-ui
 
   live:

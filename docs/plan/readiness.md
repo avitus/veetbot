@@ -1215,7 +1215,7 @@ tests. The owner's own copies of
 the three public datasets and provider credentials for opt-in future live-arm
 reruns remain external activation inputs, not repository design gaps.
 
-## Milestone 17: the memory read API and browser, authorized and specified
+## Milestone 17: the memory read API and browser, complete
 
 [memory-read-api-and-browser.md](memory-read-api-and-browser.md) closes the
 last gap in the memory story that the corpus had named and never filled: the
@@ -1259,10 +1259,13 @@ round on their own, separate exposure question — model selection, watermarks,
 and attempt audits. Writes over HTTP are excluded outright and stay on the
 governed `agent memory` command line.
 
-The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. The provenance trio's
-exposure question is resolved rather than outstanding; nothing about it
-remains outside the corpus.
+The readiness verdict is therefore **Complete**: there is no unnamed design
+choice left outside the corpus, all ten gates and the Python, PostgreSQL, and
+native Apple lanes passed, and the hosted CI and final review conditions were
+satisfied by dev-to-main pull request 58 on 2026-08-24. Pull request 64 then
+added end-to-end PostgreSQL pagination and native navigation coverage with the
+same hosted lanes green. The provenance trio's exposure question is resolved
+rather than outstanding.
 
 ## Milestone 18: first-class email integration, authorized and specified
 

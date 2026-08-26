@@ -568,6 +568,10 @@ private struct MainWindowFrameAutosaveView: NSViewRepresentable {
 }
 
 private final class MainWindowFrameAutosaveNSView: NSView {
+    #if DEBUG
+    private var scheduledUITestFrame = false
+    #endif
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         applyConfigurationIfPossible()
@@ -576,7 +580,46 @@ private final class MainWindowFrameAutosaveNSView: NSView {
     func applyConfigurationIfPossible() {
         guard let window else { return }
         MainWindowConfiguration.apply(to: window)
+        #if DEBUG
+        scheduleUITestFrameIfRequested(on: window)
+        #endif
     }
+
+    #if DEBUG
+    private func scheduleUITestFrameIfRequested(on window: NSWindow) {
+        guard !scheduledUITestFrame else { return }
+        guard ProcessInfo.processInfo.arguments.contains(
+            "--ui-testing-conversation-navigation"
+        ) else { return }
+        guard
+            let value = ProcessInfo.processInfo.environment[
+                "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"
+            ]
+        else { return }
+        let components = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard
+            components.count == 2,
+            let width = Double(components[0]),
+            let height = Double(components[1]),
+            width.isFinite,
+            height.isFinite,
+            width > 0,
+            height > 0
+        else { return }
+
+        scheduledUITestFrame = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak window] in
+            guard let window else { return }
+            window.setFrame(
+                NSRect(
+                    origin: window.frame.origin,
+                    size: NSSize(width: width, height: height)
+                ),
+                display: true
+            )
+        }
+    }
+    #endif
 }
 #endif
 

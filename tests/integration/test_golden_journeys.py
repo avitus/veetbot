@@ -6,14 +6,25 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from typing import Any
+from dataclasses import replace as dataclasses_replace
+from datetime import UTC, datetime
+from datetime import time as civil_time
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import httpx
 from openai import AsyncOpenAI
 
+from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
+from agent_core.adapters.push import FakePushTransport
+from agent_core.application.notification_dispatcher import NotificationDispatcher
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.agents import AgentSpec
+from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.devices import PushProvider
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import BeliefType
 from agent_core.domain.messages import (
@@ -22,8 +33,9 @@ from agent_core.domain.messages import (
     ScriptedTurn,
     StopReason,
 )
-from agent_core.domain.runs import RunStatus
-from agent_core.runtime.worker import DurableWorker
+from agent_core.domain.runs import RunLimits, RunStatus
+from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
+from agent_core.scheduling.worker import ScheduleWorker
 from tests.contract.model_fixtures import openai_text_events
 from tests.integration.m2_support import database_settings, memory_settings
 
@@ -507,3 +519,441 @@ async def test_openai_reasoning_and_tool_replay_use_the_serialized_sdk_request_p
     assert function_result["call_id"] == "golden-openai-tool-call"
     assert "391" in function_result["output"]
     assert replay.index(reasoning) < replay.index(function_call) < replay.index(function_result)
+
+
+async def test_approval_parks_resolves_and_resumes_through_the_public_api() -> None:
+    """The full approval loop at the HTTP boundary.
+
+    A scripted external write parks the run; the approval is listed, read,
+    and approved over the API; a separate worker composition resumes the
+    re-dispatched run to completion; the replayed stream shows the request,
+    the resolution, the effect, and the terminal event in order.
+    """
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={"destination": "demo", "content": "api-approved"},
+                        call_id="golden-approval",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="External write recorded.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with (
+        build(settings=database_settings(), storage="postgres") as api_composition,
+        build(
+            settings=database_settings(),
+            storage="postgres",
+            script=script,
+        ) as worker_composition,
+        _client(api_composition) as client,
+    ):
+        created = await client.post(
+            "/v1/sessions",
+            json={"agent_id": "general", "metadata": {}},
+        )
+        assert created.status_code == 201, created.text
+        session_id = UUID(created.json()["id"])
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            headers={"Idempotency-Key": "golden-approval"},
+            json={"content": [{"type": "text", "text": "record an external write"}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        run_id = UUID(submitted.json()["run_id"])
+
+        await _run_worker(worker_composition, "golden-approval-parker")
+        parked = await client.get(f"/v1/runs/{run_id}")
+        assert parked.status_code == 200, parked.text
+        assert parked.json()["status"] == RunStatus.WAITING_FOR_APPROVAL.value
+
+        listing = await client.get(f"/v1/approvals?run_id={run_id}")
+        assert listing.status_code == 200, listing.text
+        items = listing.json()["items"]
+        assert len(items) == 1
+        approval = items[0]
+        assert approval["run_id"] == str(run_id)
+        assert approval["status"] == "PENDING"
+        assert approval["tool_name"] == "demo.external_write"
+        assert approval["arguments"]["content"] == "api-approved"
+        assert approval["risk"]
+        assert approval["policy_reason"]
+
+        resolved = await client.post(
+            f"/v1/approvals/{approval['id']}/resolve",
+            json={"decision": "approve_once"},
+        )
+        assert resolved.status_code == 200, resolved.text
+        assert resolved.json()["decision"] == "approve_once"
+        assert resolved.json()["resolved_at"] is not None
+
+        await _run_worker(worker_composition, "golden-approval-resumer")
+        completed = await client.get(f"/v1/runs/{run_id}")
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["status"] == RunStatus.COMPLETED.value
+        assert completed.json()["tool_call_count"] == 1
+
+        stream = await client.get(f"/v1/runs/{run_id}/events", timeout=10.0)
+
+    assert stream.status_code == 200, stream.text
+    frames = _sse_frames(stream.text)
+    terminal = next(frame for frame in frames if frame["event"] == "run.completed")
+    assert terminal["data"]["final_message"]["content"] == [
+        {"kind": "text", "text": "External write recorded."}
+    ]
+    ordered = [frame["event"] for frame in frames]
+    for earlier, later in [
+        ("approval.requested", "approval.resolved"),
+        ("approval.resolved", "tool.call.completed"),
+        ("tool.call.completed", "assistant.message.completed"),
+        ("assistant.message.completed", "run.completed"),
+    ]:
+        assert ordered.index(earlier) < ordered.index(later), ordered
+
+
+async def test_created_schedule_fires_and_its_run_executes_to_completion() -> None:
+    """A schedule created over the API produces a run that actually executes.
+
+    The materializer and the durable worker are elsewhere proven separately;
+    this journey chains them: POST /v1/schedules, advance the clock to the
+    fire instant, one schedule-worker pass materializes the occurrence, one
+    durable-worker pass executes the run, and the occurrence history links
+    the completed run over HTTP.
+    """
+
+    now = datetime(2026, 8, 25, 16, tzinfo=UTC)
+    agent_id = UUID("00000000-0000-0000-0000-000000000619")
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="Scheduled briefing done.", stop_reason=StopReason.END_TURN)]
+    )
+    settings = dataclasses_replace(
+        database_settings(),
+        schedule_api_enabled=True,
+        schedule_worker_enabled=True,
+    )
+    async with (
+        build(
+            settings=settings,
+            storage="postgres",
+            script=script,
+            fixed_clock_at=now,
+        ) as composition,
+        _client(composition) as client,
+    ):
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(
+                AgentSpec(
+                    id=agent_id,
+                    version="1.0.0",
+                    name="Golden schedule agent",
+                    instructions="Follow the scheduled instruction.",
+                    model_policy="fake-balanced",
+                    enabled_tools=[],
+                    policy_profile="default",
+                    limits=RunLimits(),
+                )
+            )
+        created = await client.post(
+            "/v1/schedules",
+            headers={"Idempotency-Key": "golden-schedule"},
+            json={
+                "title": "Golden daily briefing",
+                "instruction": "Summarize project changes.",
+                "agent_id": str(agent_id),
+                "agent_version": "1.0.0",
+                "policy_profile": "default",
+                "requested_scopes": ["workspace.read"],
+                "limits": {
+                    "max_steps": 4,
+                    "max_model_calls": 4,
+                    "max_tool_calls": 4,
+                    "max_cost": str(Decimal("1")),
+                },
+                "run_timeout_seconds": 3600,
+                "cadence": {
+                    "kind": "DAILY",
+                    "local_time": civil_time(9).isoformat(),
+                    "timezone": "America/Los_Angeles",
+                },
+                "misfire_grace_seconds": 60,
+                "max_consecutive_failures": 3,
+            },
+        )
+        assert created.status_code == 201, created.text
+        schedule_id = UUID(created.json()["schedule"]["id"])
+
+        record = await composition.schedules.get(composition.principal, schedule_id)
+        assert record.schedule.next_fire_at is not None
+        clock = composition.clock
+        assert isinstance(clock, FixedClock)
+        clock.advance(record.schedule.next_fire_at - clock.now())
+
+        schedule_worker = composition.schedule_worker_factory()
+        assert isinstance(schedule_worker, ScheduleWorker)
+        assert await schedule_worker.run_once() == 1
+        await _run_worker(composition, "golden-schedule-runner")
+
+        occurrences = await client.get(f"/v1/schedules/{schedule_id}/occurrences")
+        assert occurrences.status_code == 200, occurrences.text
+        rows = occurrences.json()["items"]
+        assert len(rows) == 1
+        run_id = rows[0]["run_id"]
+        assert run_id is not None
+
+        run = await client.get(f"/v1/runs/{run_id}")
+        assert run.status_code == 200, run.text
+        assert run.json()["status"] == RunStatus.COMPLETED.value
+
+        stream = await client.get(f"/v1/runs/{run_id}/events", timeout=10.0)
+
+    assert stream.status_code == 200, stream.text
+    frames = _sse_frames(stream.text)
+    terminal = next(frame for frame in frames if frame["event"] == "run.completed")
+    assert terminal["data"]["final_message"]["content"] == [
+        {"kind": "text", "text": "Scheduled briefing done."}
+    ]
+
+
+async def test_parked_approval_notifies_a_registered_device_through_the_outbox() -> None:
+    """The notification pipeline joined end to end.
+
+    A device registers over the API, a scripted external write parks the run,
+    the producer's outbox row is dispatched to the fake push transport with a
+    content-free payload, and the offline inbox reports the delivery.
+    """
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={"destination": "demo", "content": "sensitive-effect-body"},
+                        call_id="golden-notify",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            )
+        ]
+    )
+    settings = dataclasses_replace(
+        database_settings(),
+        notification_api_enabled=True,
+        notification_dispatch_enabled=True,
+    )
+    async with (
+        build(settings=settings, storage="postgres", script=script) as composition,
+        _client(composition) as client,
+    ):
+        registered = await client.post(
+            "/v1/devices",
+            headers={"Idempotency-Key": "golden-device"},
+            json={
+                "client_device_id": "golden-phone",
+                "name": "Golden iPhone",
+                "kind": "mobile",
+                "platform": "ios",
+                "app_bundle_id": "com.veetbot.app",
+                "push_provider": "apns",
+                "push_token": "0123456789abcdef",
+                "push_environment": "sandbox",
+                "muted_kinds": [],
+            },
+        )
+        assert registered.status_code == 201, registered.text
+
+        created = await client.post(
+            "/v1/sessions",
+            json={"agent_id": "general", "metadata": {}},
+        )
+        assert created.status_code == 201, created.text
+        session_id = UUID(created.json()["id"])
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            headers={"Idempotency-Key": "golden-notify"},
+            json={"content": [{"type": "text", "text": "record an external write"}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        run_id = UUID(submitted.json()["run_id"])
+        await _run_worker(composition, "golden-notify-parker")
+        parked = await client.get(f"/v1/runs/{run_id}")
+        assert parked.json()["status"] == RunStatus.WAITING_FOR_APPROVAL.value
+
+        transport = FakePushTransport()
+        dispatcher = NotificationDispatcher(
+            uow_factory=composition.uow_factory,
+            transport=transport,
+            providers=frozenset({PushProvider.APNS}),
+            clock=composition.clock,
+            ids=composition.ids,
+            claimant="golden-dispatcher",
+            batch_size=10,
+            lease_seconds=30,
+            retry_delays=(30, 120, 600, 3600),
+        )
+        assert await dispatcher.run_once() == 1
+        assert await dispatcher.run_once() == 0
+
+        inbox = await client.get("/v1/notifications")
+
+    assert len(transport.calls) == 1
+    target, message = transport.calls[0]
+    assert target.token.get_secret_value() == "0123456789abcdef"
+    payload = message.payload.model_dump(mode="json")
+    assert payload["kind"] == "approval_requested"
+    flattened = json.dumps(payload)
+    assert "sensitive-effect-body" not in flattened
+    assert "record an external write" not in flattened
+
+    assert inbox.status_code == 200, inbox.text
+    items = inbox.json()["items"]
+    assert len(items) == 1
+    assert items[0]["notification"]["kind"] == "approval_requested"
+    assert items[0]["notification"]["run_id"] == str(run_id)
+    outcomes = [delivery["outcome"] for delivery in items[0]["deliveries"]]
+    assert outcomes == ["delivered"]
+
+
+async def test_implicitly_formed_memory_is_browsable_through_the_read_api() -> None:
+    """Formation, consolidation, and the Milestone 17 read surface in one chain.
+
+    A run's user message implicitly yields a belief through idle
+    consolidation — no memory.remember call anywhere — and the belief a real
+    agent run formed is then listed and opened over GET /v1/memories with its
+    provenance pointing back at the forming session and run.
+    """
+
+    now = datetime(2026, 8, 25, 16, tzinfo=UTC)
+    clock = FixedClock(now)
+    settings = dataclasses_replace(database_settings(), memory_api_enabled=True)
+    script = FakeModelScript(turns=[ScriptedTurn(text="Thanks for telling me.")])
+    async with (
+        build(settings=settings, storage="postgres", script=script, clock=clock) as composition,
+        _client(composition) as client,
+    ):
+        run_id = await composition.runs.submit("I have an Apple Watch and a BMW X3.")
+        await _run_worker(composition, "golden-memory-former")
+        run = await composition.runs.get(run_id)
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(run.session_id, 0, composition.principal)
+        assert "memory.remember" not in _tool_names(events, "tool.call.completed")
+        formation_event = next(
+            event for event in events if event.event_type == "memory.formation.requested"
+        )
+        not_before = datetime.fromisoformat(str(formation_event.payload["not_before"]))
+        clock.advance(not_before - clock.now())
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+
+        listing = await client.get("/v1/memories", params={"ceiling": "restricted"})
+        assert listing.status_code == 200, listing.text
+        items = listing.json()["items"]
+        assert items, "idle consolidation formed no browsable belief"
+        formed = [item for item in items if str(run.session_id) == item["source_session_id"]]
+        assert formed, items
+        watch = next(
+            (item for item in formed if "Apple Watch" in item["statement"]),
+            None,
+        )
+        assert watch is not None, [item["statement"] for item in formed]
+
+        detail = await client.get(f"/v1/memories/{watch['id']}", params={"ceiling": "restricted"})
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["statement"] == watch["statement"]
+        assert detail.json()["source_session_id"] == str(run.session_id)
+        assert detail.json()["formation_run_id"]
+        assert detail.json()["source_event_ids"]
+
+
+async def test_run_produced_artifact_downloads_through_the_public_api(tmp_path: Path) -> None:
+    """A run writes a workspace file, exports it, and the bytes come back
+    over GET /v1/artifacts/{id}/content as an attachment.
+
+    Every earlier HTTP artifact test injected the artifact row by hand; this
+    journey earns it through the scripted tool pipeline instead.
+    """
+
+    content = "the golden artifact body\n"
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="workspace.write_text",
+                        arguments={"path": "output/report.txt", "content": content},
+                        call_id="golden-artifact-write",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="artifact.export",
+                        arguments={
+                            "path": "output/report.txt",
+                            "filename": "report.txt",
+                            "media_type": "text/plain",
+                        },
+                        call_id="golden-artifact-export",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Report exported.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    settings = dataclasses_replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    async with (
+        build(settings=settings, storage="postgres", script=script) as composition,
+        _client(composition) as client,
+    ):
+        created = await client.post(
+            "/v1/sessions",
+            json={"agent_id": "general", "metadata": {}},
+        )
+        assert created.status_code == 201, created.text
+        session_id = UUID(created.json()["id"])
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            headers={"Idempotency-Key": "golden-artifact"},
+            json={"content": [{"type": "text", "text": "export the report"}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        run_id = UUID(submitted.json()["run_id"])
+
+        await _run_worker(composition, "golden-artifact-worker")
+        for attempt in range(3):
+            run = await client.get(f"/v1/runs/{run_id}")
+            if run.json()["status"] != RunStatus.WAITING_FOR_APPROVAL.value:
+                break
+            approval = (await composition.approvals.list_pending(run_id=run_id))[0]
+            await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+            await _run_worker(composition, f"golden-artifact-worker-{attempt}")
+        run = await client.get(f"/v1/runs/{run_id}")
+        assert run.json()["status"] == RunStatus.COMPLETED.value
+
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+        export = next(
+            invocation for invocation in invocations if invocation.tool_name == "artifact.export"
+        )
+        assert export.structured_result is not None
+        artifact_id = str(export.structured_result["artifact_id"])
+
+        metadata = await client.get(f"/v1/artifacts/{artifact_id}")
+        assert metadata.status_code == 200, metadata.text
+        assert metadata.json()["name"] == "report.txt"
+        assert metadata.json()["media_type"] == "text/plain"
+        assert metadata.json()["run_id"] == str(run_id)
+
+        download = await client.get(f"/v1/artifacts/{artifact_id}/content")
+
+    assert download.status_code == 200, download.text
+    assert download.text == content
+    assert download.headers["content-disposition"].startswith("attachment")
