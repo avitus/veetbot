@@ -39,8 +39,8 @@ class ModelStreamError(ValueError):
 
 _TOKEN_CHARS = r"[a-z0-9._~+/=-]"
 _BARE_BEARER_VALUE = (
-    rf"(?:[a-z]{{24,}}|(?={_TOKEN_CHARS}{{8,}})"
-    rf"(?={_TOKEN_CHARS}*[0-9._~+/=-]){_TOKEN_CHARS}{{8,}})"
+    rf"(?:[a-z0-9_-]{{16,}}\.[a-z0-9_-]{{6,}}\.[a-z0-9_-]{{6,}}|"
+    rf"{_TOKEN_CHARS}{{32,}})"
 )
 SECRET_VALUE = re.compile(
     rf"(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?{_TOKEN_CHARS}{{8,}}|"

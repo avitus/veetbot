@@ -79,8 +79,10 @@ title: Changelog
   credential-content rejection.
 - Refined bare bearer-value detection so ordinary documentation such as
   `Bearer authentication` remains model content, while raw authorization
-  headers, provider-key prefixes, mixed-shape bearer values, and long opaque
-  bearer values remain rejected by the normalized-stream boundary.
+  headers, provider-key prefixes, JWT-shaped bearer values, and long opaque
+  bearer values remain rejected by the normalized-stream boundary. A second
+  live false positive extended that accepted terminology to short mixed-shape
+  phrases such as `Bearer token-based authorization`.
 - Taught the live capability driver to distinguish a genuine pending approval
   from Milestone 13's approval-free child-run suspension. A delegated research
   subject now drives both interactive and asynchronous queue classes through
