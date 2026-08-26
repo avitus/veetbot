@@ -256,6 +256,7 @@ async def test_event_after_terminal_is_a_model_protocol_failure(
     assert failed.status is RunStatus.FAILED
     assert failed.failure is not None
     assert failed.failure.reason is FailureReason.MODEL_PERMANENT_ERROR
+    assert failed.failure.details == {"protocol_detail": "an event followed the terminal event"}
 
 
 @pytest.mark.asyncio

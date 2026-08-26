@@ -430,13 +430,14 @@ async def _invoke_model(
                                 step,
                             )
                         terminal = event
-        except ModelStreamError:
+        except ModelStreamError as exc:
             return _failure(
                 context,
                 FailureReason.MODEL_PERMANENT_ERROR,
                 "ModelProtocolError",
                 "the normalized model stream violated its contract",
                 step,
+                {"protocol_detail": str(exc)},
             )
         if terminal is None:
             return _failure(

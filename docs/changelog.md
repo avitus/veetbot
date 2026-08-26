@@ -72,6 +72,11 @@ title: Changelog
   now encoded as USD 5 per repeat, USD 25 per suite, and USD 50 per day; the
   two live scores and hosted verification of the completed evidence head
   remain outstanding.
+- Preserved the validator's fixed, content-free invariant name in
+  `RunFailure.details` when a normalized model stream fails locally. The live
+  research baseline exposed that the prior generic failure discarded the one
+  diagnostic needed to distinguish a provider-stream defect from a governed
+  credential-content rejection.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 
