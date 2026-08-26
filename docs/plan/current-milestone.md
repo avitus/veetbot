@@ -57,8 +57,10 @@ title: Current Milestone
   request 64 passed all five CircleCI lanes, both Xcode Cloud archives,
   GitGuardian, and a finding-free final-head CodeRabbit review before merging
   to `main`, covering the implementation on that head. The capability-bound
-  continuation passes locally; the owner's redacted failed trajectory, its two
-  live scores, and hosted verification of the completed evidence head remain.
+  continuation passes locally. A consent-stamped failed long-research run has
+  now been captured, but its first export exposed an internal event-sequence
+  field that the trajectory contract excludes; fixture admission, the two live
+  scores, and hosted verification of the completed evidence head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation

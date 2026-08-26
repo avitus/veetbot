@@ -399,7 +399,7 @@ consumer's transformation, not a producer's obligation.
   "outcome":        "COMPLETED" | "FAILED" | "CANCELLED",
   "failure":        {"kind": "...", "at_step": 7} | null,
   "recorded_on":    "2026-07-28",
-  "builder_version": "trajectory@3",
+  "builder_version": "trajectory@4",
   "redaction": {
     "ruleset_version": "...",
     "replacements":    {"provider_key": 1, "dsn_password": 2}

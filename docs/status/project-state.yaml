@@ -196,11 +196,14 @@ milestones:
       - check: capability scenario from a real failed trajectory
         outcome: not_started
         detail: >-
-          The owner has not yet supplied the redacted failed long-research
-          trajectory the gate for multi-agent work names; without it the
-          milestone is buildable but not activatable. Its single-agent
-          baseline and delegating re-run scoring remain outstanding, followed
-          by hosted CI and final review on the completed evidence head.
+          A consent-stamped production run now supplies the required real
+          long-research failure: it exhausted its tool-call budget before
+          producing an answer. Its governed export remains quarantined rather
+          than checked in because the first artifact retained internal event
+          sequence fields that the trajectory contract excludes. Deployment
+          of the local exporter regression fix, a fresh governed export and
+          fixture review, single-agent baseline and delegating re-run scoring,
+          hosted CI, and final review on the completed evidence head remain.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
