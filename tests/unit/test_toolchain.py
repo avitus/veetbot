@@ -1608,6 +1608,24 @@ def test_milestones_page_reports_nonnumeric_state_key_and_continues(
     assert any("milestone 2" in error and "title" in error for error in check_docs.errors)
 
 
+def test_milestones_page_rejects_duplicate_normalized_state_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["01"] = dict(state["milestones"]["1"])
+    state_path.write_text(yaml.safe_dump(state), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert "project-state.yaml declares milestone 1 more than once" in check_docs.errors
+
+
 def test_milestones_page_flags_absence_coverage_and_grouping(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
