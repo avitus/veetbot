@@ -323,9 +323,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 24 subject specifications declare 347 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 356
-declarations, 353 registry entries once the 3 aliases are subtracted.
+The 25 subject specifications declare 359 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 368
+declarations, 365 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1269,6 +1269,38 @@ Gate 24 is structural because it inspects the registered tool contract and its
 feature-gated composition. The remaining four are boundary cases over the
 tool pipeline and the schedule application service.
 
+### SMS through the owner's iPhone, twelve gates
+
+Twelve gates extend the existing `device` area at Milestone 20. They cover
+the first slice of the Section 29 device channel: capability-derived
+registration, the invocation lifecycle and its idempotency, the owner-tap
+send boundary, ingest idempotency and untrusted triage routing, and the
+confinement set — presence revalidation, the outbound secret scan, log
+hygiene, and default-off.
+
+```text
+#   id                                    kind         M
+--  ------------------------------------  -----------  --
+7   gate.device.capability_registration   structural   20
+8   gate.device.invocation_idempotent     case         20
+9   gate.device.foreign_device_denied     case         20
+10  gate.device.no_send_without_result    property     20
+11  gate.device.offline_outcome           case         20
+12  gate.device.untrusted_output          structural   20
+13  gate.device.presence_revalidated      case         20
+14  gate.device.outbound_secret_scan      case         20
+15  gate.device.ingest_idempotent         case         20
+16  gate.device.untrusted_triage_routing  case         20
+17  gate.device.no_body_in_logs           case         20
+18  gate.device.default_off               case         20
+```
+
+Gates 7 and 12 are structural because they inspect the registered tool
+contract and the forced output trust. Gate 10 is a property over the
+invocation state machine: no path reaches `sent` server-side. The
+remaining nine are boundary cases over the invocation routes, the ingest
+route, and the triage seeding.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1360,6 +1392,10 @@ milestone  new gates  cumulative  the earliest of them
 19                 5         353  the model-callable schedule contract,
                                   approval, exact-scope authorization,
                                   time validation, idempotent replay
+20                12         365  capability registration, the
+                                  invocation lifecycle, the owner-tap
+                                  send boundary, ingest idempotency,
+                                  untrusted triage routing
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1380,15 +1416,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and fifty-three gates are green before
+2.  **Forty-one of three hundred and sixty-five gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and fifty-three, which is every
-registry entry, at Milestone 19. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and sixty-five, which is every
+registry entry, at Milestone 20. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1397,7 +1433,8 @@ Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
 those specs already shared, Milestone 18's thirteen are `gate.email.*` in
 an area of their own, and Milestone 19's five return to the existing
-`gate.schedule.*` area. Every authorized milestone now has a specification
+`gate.schedule.*` area, and Milestone 20's twelve return to the existing
+`gate.device.*` area. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

@@ -25,8 +25,9 @@ MAP_ROW = re.compile(
 # authorized on 2026-08-20 (ADR-0061), Milestone 16 on 2026-08-22 (ADR-0069),
 # Milestone 17 on 2026-08-23 (ADR-0070), and Milestones 18 and 19 on 2026-08-24
 # (ADR-0071 and ADR-0072). The census reports a zero row for each authorized milestone
-# whose specification has not yet declared gates.
-MAX_MILESTONE = 19
+# whose specification has not yet declared gates. Milestone 20 was authorized on
+# 2026-08-26 (ADR-0073).
+MAX_MILESTONE = 20
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -55,6 +56,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "memory-evaluation-and-lifecycle.md": (20, 0),
     "memory-read-api-and-browser.md": (10, 0),
     "email-integration.md": (13, 0),
+    "device-channel-and-sms.md": (12, 0),
     "milestone-map.md": (7, 0),
 }
 
