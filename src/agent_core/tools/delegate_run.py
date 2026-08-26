@@ -33,6 +33,10 @@ _BRIEF_SCHEMA: dict[str, Any] = {
         },
         "limits": {
             "type": ["object", "null"],
+            "description": (
+                "Omit per-brief limits for long research so the runtime applies its "
+                "governed defaults. Supply them only when a brief needs stricter caps."
+            ),
             "properties": {
                 "max_steps": {"type": ["integer", "null"], "minimum": 1},
                 "max_model_calls": {"type": ["integer", "null"], "minimum": 1},
@@ -51,7 +55,7 @@ _BRIEF_SCHEMA: dict[str, Any] = {
 class DelegateRunTool:
     spec = ToolSpec(
         name=DELEGATE_RUN_TOOL_NAME,
-        version="1.0.0",
+        version="1.0.1",
         description=(
             "Delegate independent, bounded child runs — one per brief — and "
             "suspend this run until every child finishes."

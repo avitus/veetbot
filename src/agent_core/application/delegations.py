@@ -85,6 +85,11 @@ def _reject(reason: DelegationRejectionReason, message: str) -> DelegationValida
 def _child_agent(parent: AgentSpec, brief: DelegationBrief, limits: RunLimits) -> AgentSpec:
     instructions = (
         f"{CHILD_INSTRUCTIONS_FRAME}\n\n"
+        f"You have at most {limits.max_model_calls} model calls and "
+        f"{limits.max_tool_calls} tool calls. Plan bounded tool batches, reserve "
+        "one model call for the final synthesis, and finish with the best-supported "
+        "answer available. If a tool is unavailable or fails, do not repeat the "
+        "same unavailable path; use another allowed tool or report the evidence gap.\n\n"
         f"Objective: {brief.objective}\n\n"
         f"Success condition: {brief.success_condition}"
     )

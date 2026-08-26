@@ -871,6 +871,23 @@ def test_all_147_versioned_knobs_are_present_and_non_null() -> None:
             assert value is not None, f"{relative}:{path} is null"
 
 
+def test_delegated_research_defaults_leave_room_for_tool_use_and_synthesis() -> None:
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert loaded["delegation"] == {
+        "max_children_per_call": 3,
+        "max_live_children_per_parent": 8,
+        "max_depth": 1,
+        "max_live_delegated_runs_per_tenant": 16,
+        "child_max_steps": 12,
+        "child_max_model_calls": 12,
+        "child_max_tool_calls": 48,
+        "child_max_cost": 2,
+        "child_wall_seconds": 900,
+        "summary_max_bytes": 16384,
+    }
+
+
 def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
     leaves: set[str] = set()
     for key, value in document.items():

@@ -42,6 +42,7 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunKind, RunLimits, RunStatus, RunUsage
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolSpec
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
+from agent_core.tools.delegate_run import DelegateRunTool
 from tests.contract import support
 from tests.contract.support import memory_uow_factory, principal
 
@@ -488,6 +489,39 @@ async def test_every_child_gets_a_dedicated_session() -> None:
         pinned_tools=PINNED,
     )
     assert replay == delegation
+
+
+async def test_child_instructions_preserve_a_final_synthesis_turn() -> None:
+    """Give bounded research children explicit budget discipline."""
+
+    materializer, factory, parent, invocation = await _materializer_stack()
+    [child] = (
+        await materializer.materialize(
+            request=_request(_materializer_brief()),
+            run=parent,
+            agent=support.agent(),
+            principal=principal(),
+            invocation=invocation,
+            pinned_tools=PINNED,
+        )
+    ).children
+
+    assert child.child_run_id is not None
+    async with factory() as uow:
+        child_run = await uow.runs.get(child.child_run_id, principal())
+        child_agent = await uow.agents.get_version(child_run.agent_id, child_run.agent_version)
+    assert "at most 4 model calls and 8 tool calls" in child_agent.instructions
+    assert "reserve one model call for the final synthesis" in child_agent.instructions
+    assert "do not repeat the same unavailable path" in child_agent.instructions
+
+
+def test_delegate_run_advertises_governed_defaults_for_long_research() -> None:
+    spec = DelegateRunTool.spec
+
+    assert spec.version == "1.0.1"
+    limits_schema = spec.input_schema["properties"]["briefs"]["items"]["properties"]["limits"]
+    assert "Omit per-brief limits" in limits_schema["description"]
+    assert "governed defaults" in limits_schema["description"]
 
 
 def _delegation_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
