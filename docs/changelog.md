@@ -94,6 +94,11 @@ title: Changelog
   call. Live additive-usage evidence also raised only the research scenario's
   call ceilings from 40 model/60 tool calls to 80 model/200 tool calls; its USD
   5 repeat, USD 25 suite, and USD 50 daily cost ceilings remain unchanged.
+- Normalized one exact outer `json` code fence from a capability judge before
+  applying the unchanged strict schema. Surrounding prose, nested fences,
+  missing or duplicate criteria, extra fields, and out-of-range values remain
+  invalid, and evaluation failures now report a content-free judge/schema
+  diagnostic rather than echoing Pydantic's candidate-output excerpt.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

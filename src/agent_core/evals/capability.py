@@ -307,7 +307,14 @@ def judge_request(loaded: LoadedScenario, subject_output: str) -> str:
 def score_judge_output(
     rubric: CapabilityRubric, raw_output: str
 ) -> tuple[Decimal, list[JudgeObservation]]:
-    judged = JudgeOutput.model_validate_json(raw_output)
+    payload = raw_output.strip()
+    fence_prefix = "```json\n"
+    fence_suffix = "\n```"
+    if payload.startswith(fence_prefix) and payload.endswith(fence_suffix):
+        payload = payload[len(fence_prefix) : -len(fence_suffix)]
+        if "```" in payload:
+            raise ValueError("judge output contained a nested code fence")
+    judged = JudgeOutput.model_validate_json(payload)
     expected = {criterion.id: criterion for criterion in rubric.criteria}
     observed = {observation.criterion: observation for observation in judged.criteria}
     if len(observed) != len(judged.criteria) or set(observed) != set(expected):
@@ -593,14 +600,17 @@ async def run_suite(
                             )
                         try:
                             score, observations = score_judge_output(loaded.rubric, judged.output)
-                        except ValueError as exc:
+                        except ValueError:
                             await _abort_suite(
                                 uow_factory,
                                 suite=suite,
                                 build_ref=build_ref,
                                 saved=saved,
                                 clock=clock,
-                                message=str(exc),
+                                message=(
+                                    f"judge {loaded.judge.id} output did not match the "
+                                    "rubric schema"
+                                ),
                             )
             if ceiling == "cost_usd":
                 ceiling = cost_ceiling_scope

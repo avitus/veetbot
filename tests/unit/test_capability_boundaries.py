@@ -22,6 +22,7 @@ from agent_core.evals.capability import (
     load_scenarios,
     resolve_build_ref,
     run_suite,
+    score_judge_output,
 )
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.unit.test_capability_eval import NOW, EvalUnitOfWorkFactory, _fixture
@@ -307,6 +308,21 @@ def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> No
     assert scenario.ceiling.cost_usd == Decimal("5.00")
     assert scenario.source.outcome == "FAILED"
     assert "independent parallel work" in scenario.source.diagnosis
+
+
+def test_judge_scoring_accepts_one_exact_json_fence_and_no_surrounding_prose(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    _, [loaded] = load_scenarios(tmp_path, "research")
+    raw = _judge_output()
+
+    score, observations = score_judge_output(loaded.rubric, f"```json\n{raw}\n```")
+
+    assert score == Decimal("0.9375")
+    assert [item.criterion for item in observations] == ["correctness", "clarity"]
+    with pytest.raises(ValueError):
+        score_judge_output(loaded.rubric, f"Judge output:\n```json\n{raw}\n```")
 
 
 async def test_tied_cost_ceiling_uses_scenario_scope(tmp_path: Path) -> None:
