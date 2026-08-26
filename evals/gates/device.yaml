@@ -35,3 +35,75 @@
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Device and notification persistence is principal isolated.** Row-level security and repository predicates prevent cross-tenant and cross-principal reads and mutations of devices, outbox rows, and deliveries."
   check: tests/integration/test_notification_persistence_m12.py::test_notification_rows_are_principal_isolated_and_rls_forced
+- id: gate.device.capability_registration
+  milestone: 20
+  kind: structural
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Capability-derived registration.** A device tool is registered with ToolSource.DEVICE exactly while a registered, unrevoked device declares its capability; revocation or deletion removes it."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.invocation_idempotent
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Invocation idempotency.** Replaying an invocation id creates one device_invocations row and at most one push."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.foreign_device_denied
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Foreign device denied.** A device other than the invocation's target — or a revoked target — can neither fetch nor answer it."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.no_send_without_result
+  milestone: 20
+  kind: property
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**No send without a device result.** No server code path moves an invocation to sent; only a device-posted result does."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.offline_outcome
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Offline outcome.** An invocation unanswered at invocation_timeout resolves expired and surfaces tool.device_offline."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.untrusted_output
+  milestone: 20
+  kind: structural
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Untrusted device output.** Every device tool result carries EXTERNAL_UNTRUSTED, forced at registration."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.presence_revalidated
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Presence revalidated.** Every device-channel action revalidates presence and granted scopes; a revoked device fails on its next action."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.outbound_secret_scan
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Outbound secret scan.** A device.sms.send body matching a hardline secret pattern is refused before any invocation row is written."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.ingest_idempotent
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Ingest idempotency.** A replayed (sender, body, received_at) digest stores one receipt and seeds one run."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.untrusted_triage_routing
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Untrusted triage routing.** An ingested message enters the standing triage session as device-originated untrusted content and cannot resolve a consequential action to a plain allow."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.no_body_in_logs
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**No body in logs.** Message bodies appear in no process log line and no event besides the designated content event."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.default_off
+  milestone: 20
+  kind: case
+  spec: docs/plan/device-channel-and-sms.md#hard-gates
+  statement: "**Default off.** With either flag unset, no device-channel route mounts, no capability-derived tool registers, and no invocation push is sent."
+  check: tests/gates/pending.py::pending_gate

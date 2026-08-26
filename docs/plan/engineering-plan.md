@@ -3500,6 +3500,87 @@ resume, and cancel; arbitrary cron and monthly recurrence; delegated scopes;
 direct reminder payloads; and any content-bearing push remain outside this
 milestone.
 
+### Milestone 20: SMS through the owner's iPhone
+
+The owner authorized this milestone on 2026-08-26 (ADR-0073) as a parallel
+workstream on the established terms: its gates become green independently
+and the verified gate ceiling still advances only in numerical order. It
+builds the first concrete slice of Section 29's device channel — roadmap
+item B7's device channel and device-scoped tools — with SMS through the
+owner's iPhone as the concrete use case. The detailed design is
+[device-channel-and-sms.md](device-channel-and-sms.md) and ADR-0073; the
+design declares this milestone's twelve gates.
+
+Implement:
+
+- The `DeviceChannel` port with one push-wake adapter: a pending
+  invocation row, a content-free APNs wake (an explicit sixth entry in
+  Milestone 12's trigger catalog), authenticated fetch and result post,
+  a bounded wait resolving `tool.device_offline`.
+- `device.sms.send` as the first device-scoped tool, registered from the
+  device's declared capabilities with `ToolSource.DEVICE`, classified
+  `ALLOW` because the iOS compose-sheet tap is the non-bypassable
+  confirmation, with the hardline secret scan over the outbound body.
+- The device-authenticated SMS ingest route: digest idempotency, per-device
+  rate cap, device-originated untrusted content routed into a standing
+  per-device triage session that alerts, remembers, acts, and drafts
+  replies through existing machinery only.
+- The iOS client work — capability registration behind a default-off
+  setting, the compose-sheet flow, the App Intent — and the documented
+  Shortcuts owner ceremony with an end-to-end verification step.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The owner has verified one end-to-end send (agent-composed, owner-tapped)
+  and one end-to-end ingest (Shortcuts-forwarded, triage-routed) on a
+  physical iPhone.
+
+The milestone does not include automatic replies, a silent send path, a
+websocket device transport, the waiting-on-device suspension kind,
+presence-based routing, or hand-off; the last two remain roadmap item B7's
+residue, and the rest are recorded in the design document's exclusions.
+
+### Milestone 21: WhatsApp business surface
+
+The owner authorized this milestone on 2026-08-26 (ADR-0074) as a parallel
+workstream on the established terms. It gives the agent its own WhatsApp
+number through the official Meta Cloud API as an additive channel on the
+Milestone 14 surface seam, and pays the inbound-webhook price — the
+infrastructure ADR-0071 priced as B3 and B4 — deliberately and once. The
+detailed design is [whatsapp-surface.md](whatsapp-surface.md) and
+ADR-0074; the design declares this milestone's twelve gates. Its
+implementation begins when Milestone 14's ports exist; its documents,
+gates, and owner ceremony proceed now.
+
+Implement:
+
+- A loopback-bound webhook listener in the surface role behind one Nginx
+  location: the subscription handshake, constant-time
+  `X-Hub-Signature-256` verification before parsing, bounded bodies,
+  content-free rejects.
+- The WhatsApp adapter on the Milestone 14 ports: the `whatsapp` push
+  provider, `dm:<wa_id>` session keys, unchanged pairing and scope
+  ceiling, replies through the existing redaction and chunking, receipts
+  on the generalized `external_update_id` key.
+- The twenty-four-hour window: freeform inside, the one approved utility
+  template outside, refusal with a closed reason code otherwise.
+- Three broker-held secrets with new rule families, egress confined to
+  the fixed Meta Graph origin, and default-off composition behind
+  `AGENT_SURFACE_WHATSAPP_ENABLED`.
+- The owner ceremony: business account, number, WABA, token, and the
+  utility template through Meta review.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The owner has verified one end-to-end paired conversation and one
+  outside-window template delivery on the live number.
+
+The milestone does not include personal-account access (the linked-device
+bridge, roadmap item B13), media intake, group or thread session keys or
+inline-keyboard approvals (B3), or a second business number.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3516,12 +3597,13 @@ owner's current ranking, not a schedule.
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling extensions: monthly rules, arbitrary cron, continuous-session recurrence, dependency graphs | A separate ADR; not alternate implementations of Milestone 11 |
 | B6 | Memory residue after Milestone 16: the semantic arm and `pgvector`, an external memory provider, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 benchmark evidence per item, per Milestone 9's entry gate |
-| B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
+| B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 20 on 2026-08-26 (ADR-0073); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
+| B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 21 |
 
 ## 22. Security baseline
 
