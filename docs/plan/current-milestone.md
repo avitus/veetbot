@@ -27,6 +27,10 @@ title: Current Milestone
   named in ADR-0071. Milestone 19 — conversational schedule creation — is
   specified by [scheduling.md](scheduling.md) with five gates and is a fourth
   parallel workstream, limited to one-time creation through the model.
+  Milestone 20 — SMS through the owner's iPhone — is specified by
+  [device-channel-and-sms.md](device-channel-and-sms.md) with twelve gates
+  and is a fifth parallel workstream on the same terms, its trigger-catalog
+  and registration-source widenings named in ADR-0073.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -39,7 +43,9 @@ title: Current Milestone
   Milestone 18, first-class email integration, was authorized on 2026-08-24
   as a third (ADR-0071), on the same terms again. Milestone 19,
   conversational schedule creation, was authorized on 2026-08-24 as a fourth
-  (ADR-0072), again without advancing the verified ceiling.
+  (ADR-0072), again without advancing the verified ceiling. Milestone 20,
+  SMS through the owner's iPhone, was authorized on 2026-08-26 as a fifth
+  (ADR-0073), again without advancing the verified ceiling.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.

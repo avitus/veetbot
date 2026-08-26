@@ -1342,6 +1342,31 @@ The readiness verdict is **Authorized**: ADR-0072, the five new
 surface. Recurring creation and every other schedule lifecycle operation
 remain HTTP-only rather than becoming implicit parts of the model tool.
 
+## Milestone 20: SMS through the owner's iPhone, authorized and specified
+
+[device-channel-and-sms.md](device-channel-and-sms.md) designs the first
+concrete slice of Section 29's device channel with the use case roadmap
+item B7 was waiting for. The seams it lands on were already cut:
+`ToolSource.DEVICE`, the reserved `device.` name domain, forced untrusted
+device output, the device field on the policy input, and the
+`tool.device_offline` outcome. The design adds the `DeviceChannel` port
+with a push-wake adapter, capability-derived registration as the third
+tool source, the owner-tap send boundary for `device.sms.send`, and the
+device-authenticated ingest route feeding a standing triage session
+through existing run machinery.
+
+Three widenings ride with it explicitly rather than silently: Milestone
+12's trigger catalog grows a sixth content-free entry, tool-system's
+registration closes at three sources instead of two, and the platform
+constraint that iOS cannot send or read SMS programmatically is carried
+as design substance — the compose-sheet tap is the approval, and ingest
+is best-effort Shortcuts glue the document says so about.
+
+The readiness verdict is **Authorized**: ADR-0073, the twelve new
+`gate.device.*` entries, and the Milestone 20 census row specify the
+whole surface. Presence-based routing, hand-off, automatic replies, and
+any silent send path remain outside it.
+
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the

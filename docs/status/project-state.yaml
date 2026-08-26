@@ -10,8 +10,8 @@ project:
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
   # Milestones 16 through 19 are independently authorized parallel
-  # workstreams under ADRs 0069, 0070, 0071, and 0072; their gates do not
-  # advance the verified ceiling past the sequential work through 15.
+  # workstreams under ADRs 0069, 0070, 0071, 0072, and 0073; their gates do
+  # not advance the verified ceiling past the sequential work through 15.
   authorized_milestones:
     - 0
     - 1
@@ -33,6 +33,7 @@ project:
     - 17
     - 18
     - 19
+    - 20
 
 milestones:
   "0":
@@ -343,6 +344,37 @@ milestones:
         detail: >-
           pytest -m "not live" passes all 1830 selected tests with the two
           live-model tests deselected.
+
+  "20":
+    title: SMS through the owner's iPhone
+    status: authorized
+    authorized_on: 2026-08-26
+    design: docs/plan/device-channel-and-sms.md
+    adr: docs/adr/0073-milestone-20-sms-device-channel.md
+    gates_registered: 12
+    authorized_scope:
+      - the DeviceChannel port with the push-wake adapter and bounded waits
+      - device.sms.send registered from declared device capabilities
+      - the owner-tap compose-sheet send boundary and the outbound secret scan
+      - the device-authenticated SMS ingest route and digest idempotency
+      - the standing per-device triage session over existing machinery
+      - the iOS client capability, App Intent, and Shortcuts owner ceremony
+      - default-off composition behind AGENT_DEVICE_CHANNEL_ENABLED and AGENT_DEVICE_SMS_ENABLED
+    deferred_scope:
+      - automatic replies and any silent send path
+      - a websocket device transport and the waiting-on-device suspension kind
+      - presence-based routing and hand-off (B7 residue)
+      - Android capture and any second device-scoped tool
+    evidence:
+      - check: Milestone 20 gate-area red phase
+        outcome: observed_expected_failure
+        detail: >-
+          Running pytest tests/gates/test_gate_registry.py::
+          test_device_channel_has_complete_milestone_20_gate_area before the
+          registrations failed at its intended assertion because the registry
+          contained zero Milestone 20 entries rather than twelve; this was a
+          behavioral gate failure rather than an environment, import, or
+          fixture error.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
