@@ -249,7 +249,7 @@ grep -Fxq "Authorization: $auth_scheme synthetic-test-token" \
   "$TEST_ROOT/session-index-headers"
 [[ ! -d "$DEPLOY_ROOT/releases/20260809-120001-0000001" ]]
 grep -Fq \
-  "docker run --rm --network none --read-only --user 0:0 --volume $DEPLOY_ROOT/releases:/releases --entrypoint /bin/rm agent-core-sandbox:$release_id -rf -- /releases/$legacy_unprunable_id" \
+  "docker run --rm --pull=never --network none --read-only --user 0:0 --volume $DEPLOY_ROOT/releases:/releases --entrypoint /bin/rm agent-core-sandbox:$release_id -rf -- /releases/$legacy_unprunable_id" \
   "$LOG_FILE"
 
 if run_release "$release_id" >"$TEST_ROOT/active.out" 2>&1; then

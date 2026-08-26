@@ -340,7 +340,7 @@ while IFS= read -r candidate; do
     if ! rm -rf -- "$candidate_path"; then
       printf 'Direct pruning of %s failed; retrying with the trusted deployment container.\n' \
         "$candidate" >&2
-      docker run --rm --network none --read-only --user 0:0 \
+      docker run --rm --pull=never --network none --read-only --user 0:0 \
         --volume "$RELEASES_DIR:/releases" \
         --entrypoint /bin/rm "$RELEASE_IMAGE" \
         -rf -- "/releases/$candidate"
