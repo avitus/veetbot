@@ -60,8 +60,13 @@ title: Current Milestone
   continuation passes locally. A consent-stamped failed long-research run has
   now been captured, re-exported under the corrected `trajectory@5` projection,
   privacy-reviewed, and admitted as the research capability scenario. Its
-  single-agent baseline, delegating re-run score, and hosted verification of
-  the completed evidence head remain.
+  first live baseline attempt produced four `cost_usd` ceiling hits before
+  judging at costs from USD 0.861420 through USD 0.9954325; its fifth repeat
+  ended in a zero-usage model-stream contract failure. No repeat reached the
+  judge, proving that the checked-in USD 0.75 per-repeat ceiling cannot produce
+  a score on the configured balanced model. A budget decision, a scored
+  single-agent baseline, the delegating re-run score, and hosted verification
+  of the completed evidence head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation

@@ -64,9 +64,12 @@ title: Changelog
   both Xcode Cloud archives, GitGuardian, and CodeRabbit passed; CodeRabbit had
   no final-head finding and every review thread was resolved before the pull
   request merged to `main`. That evidence covers the implementation on that
-  head, not this later local continuation. The owner-supplied redacted failed
-  trajectory, its single-agent and delegating live scores, and hosted
-  verification of the completed evidence head remain outstanding.
+  head, not this later local continuation. A real failed research trajectory
+  is now exported under the corrected `trajectory@5` privacy projection,
+  reviewed, and admitted. Its first baseline attempt established that the
+  USD 0.75 per-repeat cost ceiling is too low to reach the judge on the
+  configured balanced model; a budget decision, the two live scores, and
+  hosted verification of the completed evidence head remain outstanding.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

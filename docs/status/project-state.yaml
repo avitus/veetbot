@@ -128,7 +128,7 @@ milestones:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
     open_items:
-      - Owner-supplied redacted failed long-research trajectory for the capability scenario
+      - Capability-scenario budget decision after the recorded per-repeat ceiling hits
       - Capability-scenario scoring, the single-agent baseline and the delegating re-run
       - Hosted CI on the milestone's final head
       - CodeRabbit review loop on the dev to main pull request (build step 7)
@@ -210,6 +210,22 @@ milestones:
           research scenario were added. Single-agent baseline and delegating
           re-run scoring, hosted CI, and final review on the completed evidence
           head remain.
+      - check: first single-agent live baseline attempt
+        outcome: blocked_by_cost_ceiling
+        detail: >-
+          Exact integrated build e238ce7 ran against a dedicated PostgreSQL
+          evaluation database with delegation explicitly disabled. Repeats 0
+          through 3 each exhausted the shared subject-and-judge cost ceiling
+          before any judge call, at USD 0.917954, USD 0.9954325, USD 0.861420,
+          and USD 0.913695 respectively. Repeat 4 then ended with zero usage
+          when the normalized model stream violated its contract, and the
+          suite emitted a release-blocking evaluation_error. The persisted
+          attempt cost is USD 3.6885015, with zero criterion rows and zero
+          scores. The checked-in USD 0.75 scenario, USD 5.00 suite, and USD
+          10.00 daily ceilings remain unchanged; raising them would expand
+          authorized provider spend and requires an explicit budget decision
+          before the five-repeat baseline and delegating arm can be run
+          validly.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
