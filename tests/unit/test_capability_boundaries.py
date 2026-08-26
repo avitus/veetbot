@@ -448,3 +448,86 @@ async def test_live_execution_bounds_non_advancing_worker(
         )
 
     assert worker.calls == 2
+
+
+async def test_live_execution_drives_child_run_suspension_to_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID(int=701)
+
+    def run(status: RunStatus) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=run_id,
+            status=status,
+            final_message="delegated research complete" if status is RunStatus.COMPLETED else None,
+            provider_pin=SimpleNamespace(provider="openai", model="gpt-5.6-sol"),
+            usage=SimpleNamespace(
+                model_calls=3,
+                tool_calls=2,
+                cost=Decimal("0.25"),
+            ),
+            failure=None,
+        )
+
+    class FakeRuns:
+        def __init__(self) -> None:
+            self.states = iter(
+                (
+                    run(RunStatus.RUNNING),
+                    run(RunStatus.WAITING_FOR_APPROVAL),
+                    run(RunStatus.QUEUED),
+                    run(RunStatus.COMPLETED),
+                )
+            )
+
+        async def submit(self, _prompt: str) -> UUID:
+            return run_id
+
+        async def get(self, _run_id: UUID) -> SimpleNamespace:
+            return next(self.states)
+
+        async def events(self, _run_id: UUID) -> list[object]:
+            return []
+
+    class FakeApprovals:
+        async def list_pending(self, *, run_id: UUID) -> list[object]:
+            assert run_id == UUID(int=701)
+            return []
+
+    class FakeWorker:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_once(self) -> bool:
+            self.calls += 1
+            return True
+
+    worker = FakeWorker()
+
+    @asynccontextmanager
+    async def fake_build(**_kwargs: object) -> Any:
+        yield SimpleNamespace(
+            approvals=FakeApprovals(),
+            runs=FakeRuns(),
+            worker_factory=lambda _worker_id: worker,
+        )
+
+    monkeypatch.setattr(bootstrap_module, "build", fake_build)
+
+    execution = await _live_execution(
+        "balanced",
+        ("delegate.run",),
+        CapabilityBudget(
+            model_calls=4,
+            tool_calls=4,
+            cost_usd=Decimal("1.00"),
+            wall_seconds=30,
+        ),
+        "prompt",
+        clock=FixedClock(NOW),
+        ids=_ids(4100),
+    )
+
+    assert execution.status is RunStatus.COMPLETED
+    assert execution.output == "delegated research complete"
+    assert worker.calls == 3

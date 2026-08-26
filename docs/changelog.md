@@ -77,6 +77,10 @@ title: Changelog
   research baseline exposed that the prior generic failure discarded the one
   diagnostic needed to distinguish a provider-stream defect from a governed
   credential-content rejection.
+- Taught the live capability driver to distinguish a genuine pending approval
+  from Milestone 13's approval-free child-run suspension. A delegated research
+  subject now keeps driving queued children and the resumed parent instead of
+  misclassifying `WAITING_FOR_APPROVAL` as the subject's final state.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

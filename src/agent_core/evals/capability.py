@@ -752,10 +752,12 @@ async def _live_execution(
         poll_deadline = loop.time() + budget.wall_seconds
         maximum_polls = limits.max_steps
         polls = 0
-        while run.status not in TERMINAL_RUN_STATUSES | {
-            RunStatus.WAITING_FOR_APPROVAL,
-            RunStatus.WAITING_FOR_USER,
-        }:
+        while run.status not in TERMINAL_RUN_STATUSES | {RunStatus.WAITING_FOR_USER}:
+            if (
+                run.status is RunStatus.WAITING_FOR_APPROVAL
+                and await composition.approvals.list_pending(run_id=run_id)
+            ):
+                break
             remaining = poll_deadline - loop.time()
             if remaining <= 0 or polls >= maximum_polls:
                 raise RuntimeError(
