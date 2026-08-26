@@ -428,6 +428,7 @@ async def test_live_execution_bounds_non_advancing_worker(
         yield SimpleNamespace(
             runs=FakeRuns(),
             worker_factory=lambda _worker_id: worker,
+            async_worker_factory=lambda _worker_id: worker,
         )
 
     monkeypatch.setattr(bootstrap_module, "build", fake_build)
@@ -495,21 +496,24 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
             return []
 
     class FakeWorker:
-        def __init__(self) -> None:
+        def __init__(self, results: tuple[bool, ...]) -> None:
+            self.results = iter(results)
             self.calls = 0
 
         async def run_once(self) -> bool:
             self.calls += 1
-            return True
+            return next(self.results)
 
-    worker = FakeWorker()
+    interactive_worker = FakeWorker((True, False, True))
+    async_worker = FakeWorker((True,))
 
     @asynccontextmanager
     async def fake_build(**_kwargs: object) -> Any:
         yield SimpleNamespace(
             approvals=FakeApprovals(),
             runs=FakeRuns(),
-            worker_factory=lambda _worker_id: worker,
+            worker_factory=lambda _worker_id: interactive_worker,
+            async_worker_factory=lambda _worker_id: async_worker,
         )
 
     monkeypatch.setattr(bootstrap_module, "build", fake_build)
@@ -530,4 +534,5 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
 
     assert execution.status is RunStatus.COMPLETED
     assert execution.output == "delegated research complete"
-    assert worker.calls == 3
+    assert interactive_worker.calls == 3
+    assert async_worker.calls == 1

@@ -79,8 +79,9 @@ title: Changelog
   credential-content rejection.
 - Taught the live capability driver to distinguish a genuine pending approval
   from Milestone 13's approval-free child-run suspension. A delegated research
-  subject now keeps driving queued children and the resumed parent instead of
-  misclassifying `WAITING_FOR_APPROVAL` as the subject's final state.
+  subject now drives both interactive and asynchronous queue classes through
+  queued children and the resumed parent instead of misclassifying
+  `WAITING_FOR_APPROVAL` as the subject's final state.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

@@ -746,7 +746,10 @@ async def _live_execution(
         limits=limits,
     ) as composition:
         run_id = await composition.runs.submit(prompt)
-        worker = composition.worker_factory(f"eval-capability:{ids.new_id()}")
+        workers = (
+            composition.worker_factory(f"eval-capability-interactive:{ids.new_id()}"),
+            composition.async_worker_factory(f"eval-capability-async:{ids.new_id()}"),
+        )
         run = await composition.runs.get(run_id)
         loop = asyncio.get_running_loop()
         poll_deadline = loop.time() + budget.wall_seconds
@@ -764,13 +767,17 @@ async def _live_execution(
                     "capability run did not reach a terminal state within "
                     f"{budget.wall_seconds} seconds"
                 )
-            try:
-                claimed = await asyncio.wait_for(worker.run_once(), timeout=remaining)
-            except TimeoutError as exc:
-                raise RuntimeError(
-                    "capability run did not reach a terminal state within "
-                    f"{budget.wall_seconds} seconds"
-                ) from exc
+            claimed = False
+            for worker in workers:
+                try:
+                    claimed = await asyncio.wait_for(worker.run_once(), timeout=remaining)
+                except TimeoutError as exc:
+                    raise RuntimeError(
+                        "capability run did not reach a terminal state within "
+                        f"{budget.wall_seconds} seconds"
+                    ) from exc
+                if claimed:
+                    break
             if not claimed:
                 raise RuntimeError("capability worker could not claim its submitted run")
             polls += 1
