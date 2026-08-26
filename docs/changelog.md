@@ -86,6 +86,12 @@ title: Changelog
   subject now drives both interactive and asynchronous queue classes through
   queued children and the resumed parent instead of misclassifying
   `WAITING_FOR_APPROVAL` as the subject's final state.
+- Made tool-free capability judges runnable without changing their zero-tool
+  evaluation budget: the runtime-facing limit receives a one-call floor while
+  no tools are registered and the harness still rejects any observed tool
+  call. Live additive-usage evidence also raised only the research scenario's
+  call ceilings from 40 model/60 tool calls to 80 model/200 tool calls; its USD
+  5 repeat, USD 25 suite, and USD 50 daily cost ceilings remain unchanged.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

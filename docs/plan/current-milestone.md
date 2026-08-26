@@ -66,8 +66,16 @@ title: Current Milestone
   judge, proving that the checked-in USD 0.75 per-repeat ceiling cannot produce
   a score on the configured balanced model. The owner subsequently approved a
   USD 50 evaluation budget, now encoded as USD 5 per repeat, USD 25 per suite,
-  and USD 50 per day. A scored single-agent baseline, the delegating re-run
-  score, and hosted verification of the completed evidence head remain.
+  and USD 50 per day. The next five-repeat baseline persisted five ceiling
+  hits at USD 7.8022225 total; the completed delegation arm also persisted five
+  tool-call ceiling hits, zero policy failures, and USD 14.8738995 total. Those
+  runs exposed and drove regressions for content-free model diagnostics,
+  child-suspension polling across both queue classes, bearer-terminology false
+  positives, and the zero-tool judge deadlock. Because delegated child usage
+  is correctly additive, the scenario now permits 80 model and 200 tool calls
+  while retaining every approved cost ceiling. A scored single-agent
+  baseline, the delegating re-run score, and hosted verification of the
+  completed evidence head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation

@@ -302,6 +302,8 @@ def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> No
     assert settings.suites["research"].cost_usd == Decimal("25.00")
     scenario = scenarios[0].scenario
     assert scenario.milestone == 13
+    assert scenario.ceiling.model_calls == 80
+    assert scenario.ceiling.tool_calls == 200
     assert scenario.ceiling.cost_usd == Decimal("5.00")
     assert scenario.source.outcome == "FAILED"
     assert "independent parallel work" in scenario.source.diagnosis
@@ -536,3 +538,62 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
     assert execution.output == "delegated research complete"
     assert interactive_worker.calls == 3
     assert async_worker.calls == 1
+
+
+async def test_live_execution_translates_a_tool_free_budget_to_a_runnable_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID(int=702)
+    observed_tool_limits: list[int] = []
+    completed_run = SimpleNamespace(
+        id=run_id,
+        status=RunStatus.COMPLETED,
+        final_message='{"criteria": []}',
+        provider_pin=SimpleNamespace(provider="anthropic", model="claude-opus-5"),
+        usage=SimpleNamespace(
+            model_calls=1,
+            tool_calls=0,
+            cost=Decimal("0.10"),
+        ),
+        failure=None,
+    )
+
+    class FakeRuns:
+        async def submit(self, _prompt: str) -> UUID:
+            return run_id
+
+        async def get(self, _run_id: UUID) -> SimpleNamespace:
+            return completed_run
+
+        async def events(self, _run_id: UUID) -> list[object]:
+            return []
+
+    @asynccontextmanager
+    async def fake_build(**kwargs: object) -> Any:
+        limits = cast(Any, kwargs["limits"])
+        observed_tool_limits.append(limits.max_tool_calls)
+        yield SimpleNamespace(
+            runs=FakeRuns(),
+            worker_factory=lambda _worker_id: SimpleNamespace(),
+            async_worker_factory=lambda _worker_id: SimpleNamespace(),
+        )
+
+    monkeypatch.setattr(bootstrap_module, "build", fake_build)
+
+    execution = await _live_execution(
+        "flagship",
+        (),
+        CapabilityBudget(
+            model_calls=2,
+            tool_calls=0,
+            cost_usd=Decimal("0.50"),
+            wall_seconds=30,
+        ),
+        "judge prompt",
+        clock=FixedClock(NOW),
+        ids=_ids(4200),
+    )
+
+    assert execution.status is RunStatus.COMPLETED
+    assert execution.tool_calls == 0
+    assert observed_tool_limits == [1]

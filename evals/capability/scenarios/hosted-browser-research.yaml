@@ -26,8 +26,8 @@ rubric: rubrics/research_quality.yaml
 judge: judge.v1
 repeats: 5
 ceiling:
-  model_calls: 40
-  tool_calls: 60
+  model_calls: 80
+  tool_calls: 200
   cost_usd: "5.00"
   wall_seconds: 600
 source:

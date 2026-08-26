@@ -733,7 +733,7 @@ async def _live_execution(
     limits = RunLimits(
         max_steps=max(2, budget.model_calls + budget.tool_calls),
         max_model_calls=budget.model_calls,
-        max_tool_calls=budget.tool_calls,
+        max_tool_calls=max(1, budget.tool_calls),
         max_cost=budget.cost_usd,
         deadline_at=started_at + timedelta(seconds=budget.wall_seconds),
     )

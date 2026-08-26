@@ -225,6 +225,27 @@ milestones:
           per suite invocation, and USD 50.00 per day, leaving the scored
           five-repeat baseline and delegating arm to run under the approved
           bound.
+      - check: governed baseline and delegation calibration under the approved budget
+        outcome: blocked_by_call_ceiling
+        detail: >-
+          Exact staged build 95b3236 completed the five-repeat single-agent
+          baseline with five release-blocking ceiling hits, zero policy
+          failures, no criterion rows, and USD 7.8022225 persisted cost. Exact
+          staged build d0b0eed then completed the five-repeat delegation arm
+          with five tool-call ceiling hits, zero policy failures, no criterion
+          rows, and per-repeat costs USD 5.0662285, USD 2.6579855, USD
+          2.9546355, USD 2.4501290, and USD 1.7449210. The live failures exposed
+          three harness defects now covered by regressions: model-stream
+          invariant detail was discarded, approval-free child suspension was
+          treated as terminal and only the interactive queue was driven, and a
+          zero-tool judge was stopped by the runtime before its first model
+          call. A bearer-terminology false positive was also narrowed without
+          admitting raw authorization headers or credential-shaped values.
+          Because child usage is correctly additive, the scenario now allows
+          80 model and 200 tool calls while retaining every approved cost
+          ceiling. Final scored baseline and delegating distributions remain
+          outstanding; these calibration runs are recorded rather than
+          reclassified retrospectively.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
