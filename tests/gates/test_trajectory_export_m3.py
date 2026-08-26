@@ -40,10 +40,13 @@ def settings(root: Path, *, enabled: bool) -> Settings:
 
 
 def sensitive_prompt() -> tuple[str, list[str]]:
+    """Return one export prompt containing every governed sensitive shape."""
+
     values = [
         "sk-" + "x" * 16,
         "-----BEGIN " + "PRIVATE KEY-----",
         "Authorization:" + " Bearer " + "opaque-value-123",
+        "Bearer " + "a1b2c3d4",
         "postgresql" + "://user:password@database.example/app",
         "api_key" + "='opaque-value-123'",
         "customer-73921",
@@ -60,6 +63,8 @@ def test_tenant_redaction_patterns_fail_during_construction_when_unsafe(
 
 
 async def test_export_replaces_all_rules_and_fails_closed(tmp_path: Path) -> None:
+    """Replace each mandatory secret family and refuse an unverifiable export."""
+
     prompt, source_values = sensitive_prompt()
     redactor = TrajectoryRedactor([("tenant_pattern", r"customer-\d+")])
     async with build(

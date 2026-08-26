@@ -380,7 +380,7 @@ from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
-from agent_core.tools.delegate_run import DelegateRunTool
+from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
@@ -1270,6 +1270,8 @@ async def _compose(
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
 ) -> tuple[Composition, list[ModelProvider]]:
+    """Assemble the complete runtime graph for one selected storage backend."""
+
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
     sandbox_limits = ResourceLimits(
@@ -1413,6 +1415,7 @@ async def _compose(
         registry.register(BrowserObserveTool(browser_provider))
         registry.register(BrowserActTool(browser_provider))
     if settings.delegation_enabled:
+        registry.register(LegacyDelegateRunTool())
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
         registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
@@ -2508,6 +2511,9 @@ async def build(
         max_tool_calls=int(delegation_config["child_max_tool_calls"]),
         max_cost=Decimal(str(delegation_config["child_max_cost"])),
         wall_seconds=int(delegation_config["child_wall_seconds"]),
+        synthesis_reserve_steps=int(delegation_config["synthesis_reserve_steps"]),
+        synthesis_reserve_model_calls=int(delegation_config["synthesis_reserve_model_calls"]),
+        synthesis_reserve_cost=Decimal(str(delegation_config["synthesis_reserve_cost"])),
     )
     delegation_caps = DelegationCaps(
         max_children_per_call=int(delegation_config["max_children_per_call"]),

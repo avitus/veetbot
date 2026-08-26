@@ -134,7 +134,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 147 operator-reviewable knobs. Metadata such as
+# The design corpus declares 150 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -266,6 +266,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "delegation.child_max_tool_calls",
             "delegation.child_max_cost",
             "delegation.child_wall_seconds",
+            "delegation.synthesis_reserve_steps",
+            "delegation.synthesis_reserve_model_calls",
+            "delegation.synthesis_reserve_cost",
             "delegation.summary_max_bytes",
         ),
         "memory/profiles.yaml": (
@@ -340,6 +343,9 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:delegation.child_max_tool_calls": 1,
         "runtime/limits.yaml:delegation.child_max_cost": 0.01,
         "runtime/limits.yaml:delegation.child_wall_seconds": 1,
+        "runtime/limits.yaml:delegation.synthesis_reserve_steps": 1,
+        "runtime/limits.yaml:delegation.synthesis_reserve_model_calls": 1,
+        "runtime/limits.yaml:delegation.synthesis_reserve_cost": 0.01,
         "runtime/limits.yaml:delegation.summary_max_bytes": 1,
         "memory/profiles.yaml:formation.scheduled_interval_seconds": 1,
         "memory/profiles.yaml:formation.decay.max_per_sweep": 1,

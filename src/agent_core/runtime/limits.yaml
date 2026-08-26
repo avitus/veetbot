@@ -54,4 +54,7 @@ delegation:
   child_max_tool_calls: 48
   child_max_cost: 2
   child_wall_seconds: 900
+  synthesis_reserve_steps: 1
+  synthesis_reserve_model_calls: 1
+  synthesis_reserve_cost: 0.25
   summary_max_bytes: 16384

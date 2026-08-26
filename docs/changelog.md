@@ -127,6 +127,13 @@ title: Changelog
   ceiling hits, zero policy failures, `release_blocked: false`, and USD
   11.104456 cost. That exceeds the recorded 0.69 single-agent baseline while
   keeping aggregate provider spend at USD 64.688208 of the USD 100 cap.
+- Closed the final-review gaps without discarding that live evidence: the
+  runtime now enforces explicit step, model-call, and cost headroom for a
+  delegated child's tool-free final synthesis; `delegate.run@1.0.0` remains
+  registered for exact persisted-session recovery alongside 1.0.1; and the
+  normalized stream and trajectory exporter share one bearer-value rule that
+  covers short opaque credential-shaped values without rejecting ordinary
+  authorization prose.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

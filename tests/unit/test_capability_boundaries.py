@@ -269,6 +269,8 @@ def test_trajectory_provenance_mismatch_is_rejected(tmp_path: Path) -> None:
 
 
 def test_milestone_thirteen_capability_scenario_is_accepted(tmp_path: Path) -> None:
+    """Admit the authorized Milestone 13 capability ceiling."""
+
     _fixture(tmp_path)
     path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
     path.write_text(
@@ -282,6 +284,8 @@ def test_milestone_thirteen_capability_scenario_is_accepted(tmp_path: Path) -> N
 
 
 def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> None:
+    """Keep the capability schema closed above Milestone 13."""
+
     _fixture(tmp_path)
     path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
     path.write_text(
@@ -294,6 +298,8 @@ def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> N
 
 
 def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> None:
+    """Validate the checked-in failed research trajectory and governed ceilings."""
+
     repository_root = Path(__file__).resolve().parents[2]
 
     settings, scenarios = load_scenarios(repository_root, "research")
@@ -313,6 +319,8 @@ def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> No
 def test_judge_scoring_accepts_one_exact_json_fence_and_no_surrounding_prose(
     tmp_path: Path,
 ) -> None:
+    """Accept one exact JSON fence while rejecting explanatory prose."""
+
     _fixture(tmp_path)
     _, [loaded] = load_scenarios(tmp_path, "research")
     raw = _judge_output()
@@ -422,6 +430,8 @@ async def test_replaying_build_uses_canonical_process_event_keys(tmp_path: Path)
 async def test_live_execution_bounds_non_advancing_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Bound a worker loop that reports progress without advancing the run."""
+
     run_id = UUID(int=700)
 
     class FakeRuns:
@@ -436,6 +446,8 @@ async def test_live_execution_bounds_non_advancing_worker(
             self.calls = 0
 
         async def run_once(self) -> bool:
+            """Report progress without changing the projected run state."""
+
             self.calls += 1
             return True
 
@@ -443,6 +455,8 @@ async def test_live_execution_bounds_non_advancing_worker(
 
     @asynccontextmanager
     async def fake_build(**_kwargs: object) -> Any:
+        """Provide the non-advancing worker composition test double."""
+
         yield SimpleNamespace(
             runs=FakeRuns(),
             worker_factory=lambda _worker_id: worker,
@@ -472,9 +486,13 @@ async def test_live_execution_bounds_non_advancing_worker(
 async def test_live_execution_drives_child_run_suspension_to_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Drive interactive and async workers until a delegated parent completes."""
+
     run_id = UUID(int=701)
 
     def run(status: RunStatus) -> SimpleNamespace:
+        """Build one projected parent-run state for the worker sequence."""
+
         return SimpleNamespace(
             id=run_id,
             status=status,
@@ -490,6 +508,8 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
 
     class FakeRuns:
         def __init__(self) -> None:
+            """Seed the parent states observed across worker iterations."""
+
             self.states = iter(
                 (
                     run(RunStatus.RUNNING),
@@ -500,25 +520,37 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
             )
 
         async def submit(self, _prompt: str) -> UUID:
+            """Return the stable subject run identifier."""
+
             return run_id
 
         async def get(self, _run_id: UUID) -> SimpleNamespace:
+            """Advance to the next projected parent state."""
+
             return next(self.states)
 
         async def events(self, _run_id: UUID) -> list[object]:
+            """Return no policy events for this worker-focused fixture."""
+
             return []
 
     class FakeApprovals:
         async def list_pending(self, *, run_id: UUID) -> list[object]:
+            """Prove child-run suspension is not an approval wait."""
+
             assert run_id == UUID(int=701)
             return []
 
     class FakeWorker:
         def __init__(self, results: tuple[bool, ...]) -> None:
+            """Seed deterministic worker-progress outcomes."""
+
             self.results = iter(results)
             self.calls = 0
 
         async def run_once(self) -> bool:
+            """Return the next deterministic progress outcome."""
+
             self.calls += 1
             return next(self.results)
 
@@ -527,6 +559,8 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
 
     @asynccontextmanager
     async def fake_build(**_kwargs: object) -> Any:
+        """Provide both priority-class workers to live execution."""
+
         yield SimpleNamespace(
             approvals=FakeApprovals(),
             runs=FakeRuns(),
@@ -559,6 +593,8 @@ async def test_live_execution_drives_child_run_suspension_to_completion(
 async def test_live_execution_translates_a_tool_free_budget_to_a_runnable_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Translate a zero-tool judge ceiling into the runtime's positive minimum."""
+
     run_id = UUID(int=702)
     observed_tool_limits: list[int] = []
     completed_run = SimpleNamespace(
@@ -576,16 +612,24 @@ async def test_live_execution_translates_a_tool_free_budget_to_a_runnable_limit(
 
     class FakeRuns:
         async def submit(self, _prompt: str) -> UUID:
+            """Return the stable judge run identifier."""
+
             return run_id
 
         async def get(self, _run_id: UUID) -> SimpleNamespace:
+            """Return the completed judge run projection."""
+
             return completed_run
 
         async def events(self, _run_id: UUID) -> list[object]:
+            """Return no policy events for the tool-free judge."""
+
             return []
 
     @asynccontextmanager
     async def fake_build(**kwargs: object) -> Any:
+        """Capture the translated runtime limit from the composition call."""
+
         limits = cast(Any, kwargs["limits"])
         observed_tool_limits.append(limits.max_tool_calls)
         yield SimpleNamespace(

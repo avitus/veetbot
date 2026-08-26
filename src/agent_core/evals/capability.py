@@ -307,6 +307,8 @@ def judge_request(loaded: LoadedScenario, subject_output: str) -> str:
 def score_judge_output(
     rubric: CapabilityRubric, raw_output: str
 ) -> tuple[Decimal, list[JudgeObservation]]:
+    """Validate one judge document and calculate its weighted rubric score."""
+
     payload = raw_output.strip()
     fence_prefix = "```json\n"
     fence_suffix = "\n```"
@@ -463,6 +465,8 @@ async def run_suite(
     clock: Clock,
     ids: IdFactory,
 ) -> CapabilitySuiteResult:
+    """Execute, judge, persist, and aggregate every repeat in one capability suite."""
+
     settings, scenarios = load_scenarios(repository_root, suite)
     suite_settings = settings.suites[suite]
     day_start = clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -732,6 +736,8 @@ async def _live_execution(
     clock: Clock,
     ids: IdFactory,
 ) -> CapabilityExecution:
+    """Drive one live subject run through both worker priority classes to terminal."""
+
     bootstrap: Any = __import__("agent_core.bootstrap", fromlist=["build"])
     principal = Principal(
         tenant_id="tenant_eval",

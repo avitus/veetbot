@@ -34,6 +34,7 @@ from agent_core.domain.messages import (
     TextPart,
     ToolCallItem,
     ToolResultItem,
+    UserMessage,
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
@@ -45,6 +46,7 @@ from agent_core.domain.runs import (
     Run,
     RunCheckpoint,
     RunFailure,
+    RunKind,
     RunOutcome,
     Step,
 )
@@ -297,6 +299,46 @@ def _has_final_text(message: AssistantMessage | None) -> bool:
     )
 
 
+def _synthesis_reserve_dimension(run: Run) -> str | None:
+    """Name the first delegated research budget whose synthesis reserve began."""
+
+    if run.kind is not RunKind.DELEGATED:
+        return None
+    limits = run.limits
+    if limits.max_steps - run.step_count <= limits.synthesis_reserve_steps:
+        return "steps"
+    if limits.max_model_calls - run.model_call_count <= limits.synthesis_reserve_model_calls:
+        return "model_calls"
+    if limits.max_cost is not None and (
+        limits.max_cost - run.usage.cost <= limits.synthesis_reserve_cost
+    ):
+        return "cost"
+    return None
+
+
+def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelRequest:
+    """Add a volatile platform control that forbids more delegated research."""
+
+    control = UserMessage(
+        content=[
+            TextPart(
+                text=(
+                    "Runtime control: the delegated final-synthesis reserve is active "
+                    f"because the research {dimension} budget is exhausted. Do not call "
+                    "tools. Synthesize the best-supported final answer from evidence "
+                    "already in the conversation and state any remaining gap."
+                )
+            )
+        ],
+        trust=TrustLevel.PLATFORM,
+        principal_id=None,
+    )
+    return request.model_copy(
+        update={"conversation": [*request.conversation, control]},
+        deep=True,
+    )
+
+
 def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
     for part in result.content:
         if not isinstance(part, TextPart):
@@ -373,6 +415,8 @@ async def _record_denials(
 async def _invoke_model(
     context: RunContext, step: Step, request: ModelRequest
 ) -> ModelTurn | RunOutcome:
+    """Consume one bounded model attempt sequence and persist authoritative usage."""
+
     while step.attempt_count < context.max_internal_attempts:
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
         step.attempt_count += 1
@@ -561,6 +605,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
 
     while True:
         context.token.raise_if_cancelled()
+        synthesis_reserve = _synthesis_reserve_dimension(context.run)
         context.budgets.check(context.run, BudgetScope.STEP)
         context.run.step_count += 1
         context.run.updated_at = context.clock.now()
@@ -572,6 +617,8 @@ async def run_loop(context: RunContext) -> RunOutcome:
             started_at=context.clock.now(),
         )
         request = await build_with_pressure(context, step)
+        if synthesis_reserve is not None:
+            request = _synthesis_only_request(request, synthesis_reserve)
         _apply_context_origin_trust(context.checkpoint, request)
         invoked = await _invoke_model(context, step, request)
         if isinstance(invoked, RunOutcome):
@@ -613,6 +660,16 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 {"message": message.model_dump(mode="json")},
             )
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
+
+        if synthesis_reserve is not None:
+            return _failure(
+                context,
+                FailureReason.BUDGET_EXCEEDED,
+                "SynthesisReserveViolation",
+                "a delegated child requested another tool inside its final synthesis reserve",
+                step,
+                {"synthesis_reserve": synthesis_reserve},
+            )
 
         call_counts = context.checkpoint.working_state.setdefault("identical_calls", {})
         if not isinstance(call_counts, dict):
