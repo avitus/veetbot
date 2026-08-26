@@ -1355,11 +1355,11 @@ tool source, the owner-tap send boundary for `device.sms.send`, and the
 device-authenticated ingest route feeding a standing triage session
 through existing run machinery.
 
-Three widenings ride with it explicitly rather than silently: Milestone
-12's trigger catalog grows a sixth content-free entry, tool-system's
-registration closes at three sources instead of two, and the platform
+Two widenings ride with it explicitly rather than silently — Milestone
+12's trigger catalog grows a sixth content-free entry, and tool-system's
+registration closes at three sources instead of two — and the platform
 constraint that iOS cannot send or read SMS programmatically is carried
-as design substance — the compose-sheet tap is the approval, and ingest
+as design substance: the compose-sheet tap is the approval, and ingest
 is best-effort Shortcuts glue the document says so about.
 
 The readiness verdict is **Authorized**: ADR-0073, the twelve new
@@ -1367,7 +1367,7 @@ The readiness verdict is **Authorized**: ADR-0073, the twelve new
 whole surface. Presence-based routing, hand-off, automatic replies, and
 any silent send path remain outside it.
 
-## Milestone 21: the WhatsApp business surface, authorized and specified
+## Milestone 21: WhatsApp business surface, authorized and specified
 
 [whatsapp-surface.md](whatsapp-surface.md) extends the Milestone 14
 surface seam with the channel that forces the corpus's first inbound

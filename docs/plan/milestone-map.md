@@ -1281,22 +1281,22 @@ hygiene, and default-off.
 ```text
 #   id                                    kind         M
 --  ------------------------------------  -----------  --
-7   gate.device.capability_registration   structural   20
-8   gate.device.invocation_idempotent     case         20
-9   gate.device.foreign_device_denied     case         20
-10  gate.device.no_send_without_result    property     20
-11  gate.device.offline_outcome           case         20
-12  gate.device.untrusted_output          structural   20
-13  gate.device.presence_revalidated      case         20
-14  gate.device.outbound_secret_scan      case         20
-15  gate.device.ingest_idempotent         case         20
-16  gate.device.untrusted_triage_routing  case         20
-17  gate.device.no_body_in_logs           case         20
-18  gate.device.default_off               case         20
+1   gate.device.capability_registration   structural   20
+2   gate.device.invocation_idempotent     case         20
+3   gate.device.foreign_device_denied     case         20
+4   gate.device.no_send_without_result    property     20
+5   gate.device.offline_outcome           case         20
+6   gate.device.untrusted_output          structural   20
+7   gate.device.presence_revalidated      case         20
+8   gate.device.outbound_secret_scan      case         20
+9   gate.device.ingest_idempotent         case         20
+10  gate.device.untrusted_triage_routing  case         20
+11  gate.device.no_body_in_logs           case         20
+12  gate.device.default_off               case         20
 ```
 
-Gates 7 and 12 are structural because they inspect the registered tool
-contract and the forced output trust. Gate 10 is a property over the
+Gates 1 and 6 are structural because they inspect the registered tool
+contract and the forced output trust. Gate 4 is a property over the
 invocation state machine: no path reaches `sent` server-side. The
 remaining nine are boundary cases over the invocation routes, the ingest
 route, and the triage seeding.

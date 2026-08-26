@@ -25,9 +25,11 @@ device-channel-and-sms.md is the specification, with twelve gates.
 1. **Parallel workstream.** Milestone 20 is authorized as a parallel
    workstream on the ADR-0069 terms: its gates become green independently,
    and the verified gate ceiling still advances only in numerical order,
-   so nothing here moves the ceiling past 15. The milestone shares no file
-   with the delegation, surface, or operations tranches except the two
-   widenings named in decision 6.
+   so nothing here moves the ceiling past 15. The milestone touches three
+   shared files, named here rather than discovered in review: the devices
+   domain model (the `capabilities` field lands where Milestone 14's
+   surface rows also live), and the two document widenings named in
+   decision 6.
 2. **The device channel is push-wake with poll-back.** One adapter: a
    pending invocation row, a content-free APNs wake, authenticated fetch
    and result post, a bounded wait resolving `tool.device_offline`. No

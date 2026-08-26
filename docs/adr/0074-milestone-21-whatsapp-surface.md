@@ -95,3 +95,7 @@ gates in a new `whatsapp` area.
 - **A `gate.surface.*` home for the new gates:** rejected; keeping
   Milestone 14's area closed at its own twenty-one keeps both
   milestones' evidence legible.
+- **One combined milestone for SMS and WhatsApp:** rejected; the two
+  seams share no dependency, and the WhatsApp half cannot start before
+  Milestone 14 exists, which would leave a combined milestone half-open
+  indefinitely.

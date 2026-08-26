@@ -66,8 +66,9 @@ action rather than at its next submission.
 
 The first device-scoped tool. Registration uses the third source the seam
 audit anticipated: the client's device registration declares
-`capabilities: ["device.sms.send"]` on the existing `Device.capabilities`
-field, and the registry exposes the tool with `ToolSource.DEVICE` while
+`capabilities: ["device.sms.send"]` on the `Device.capabilities` field
+Section 29.6 defines and Milestone 12 deferred; this milestone lands it.
+The registry exposes the tool with `ToolSource.DEVICE` while
 the declaring device is registered and unrevoked. The
 [tool-system.md](tool-system.md) sentence closing registration at two
 sources gains the amendment ADR-0073 records.
@@ -103,7 +104,10 @@ the existing export redaction covers the content events.
 Routing: one standing triage session per `(device_id, channel)`, created
 lazily; each ingested message continues the triage run, or seeds a new one
 when the session is idle, with a system-framed instruction naming the
-content as untrusted third-party data. The four owner-selected behaviors
+content as untrusted third-party data. The standing session is found
+through a unique `(device_id, channel)` mapping row that pins the live
+triage session id; the row is created lazily with the session and
+replaced when the session rotates. The four owner-selected behaviors
 ride existing machinery: alerting asks the owner through
 `run.waiting_for_user`, which already pushes; remembering is Milestone
 10's automatic formation over the run; acting uses existing tools under

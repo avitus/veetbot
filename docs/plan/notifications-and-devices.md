@@ -842,7 +842,7 @@ content, tokens, or the key.
    Registered as `gate.notify.trigger_catalog`, case. **M12.**
 
    Milestone 20 widens the catalog to six with the pending device invocation;
-   the widened count is observed by that milestone's gates (ADR-0073).
+   the sixth trigger's behavior is gated by that milestone (ADR-0073).
 9. **Repeated triggers deduplicate.** Generated repeats — a retry after an
    unknown commit, a repeated hook invocation, two processes recording one
    transition — produce exactly one outbox row per deduplication key.
@@ -915,5 +915,6 @@ content, tokens, or the key.
    wants it, the kind is added to the closed set and defaults to muted.
 4. `capabilities` and `granted_scopes` from Section 29.6 wait for the device
    channel. Landing them now as empty columns would be speculative.
+   Milestone 20 lands the `capabilities` half (ADR-0073).
 5. Actionable lock-screen approval is a new authorization layer, not a
    notification feature, and needs its own ADR.
