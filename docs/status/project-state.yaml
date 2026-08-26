@@ -194,17 +194,22 @@ milestones:
           local capability-bound continuation or the still-unwritten live
           scenario.
       - check: capability scenario from a real failed trajectory
-        outcome: not_started
+        outcome: admitted_locally
         detail: >-
-          A consent-stamped production run now supplies the required real
-          long-research failure: it exhausted its tool-call budget before
-          producing an answer. Its governed export remains quarantined rather
-          than checked in because the first artifact retained internal event
-          sequence and principal-attribution fields that the trajectory
-          contract excludes. Deployment of the local exporter regression fix,
-          a fresh governed export and fixture review, single-agent baseline and
-          delegating re-run scoring, hosted CI, and final review on the
-          completed evidence head remain.
+          Production run 85487ddf-5deb-45c3-a89b-a22b752f5406 supplies the
+          required real long-research failure: the single agent spent all 32
+          permitted tool calls across six providers and their second-source
+          cross-checks, then failed with budget_exceeded before producing an
+          answer. With active export consent, corrected trajectory@5 export
+          65b5b347-2891-4e58-a3f1-d9c583088f85 produced the checked-in
+          trajectory. Review confirmed the export's digest, matching failed
+          provenance, rule-based redactions, absence of event sequences and
+          principal identity, and successful redaction rescan. The repository
+          admission regression first failed because no trajectory-backed
+          scenario existed, then passed after the fixture and diagnosed
+          research scenario were added. Single-agent baseline and delegating
+          re-run scoring, hosted CI, and final review on the completed evidence
+          head remain.
   "14":
     title: Inbound surfaces and pairing
     status: authorized

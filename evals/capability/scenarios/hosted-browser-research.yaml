@@ -1,0 +1,41 @@
+id: cap-hosted-browser-research-0001
+suite: research
+milestone: 13
+task: >-
+  As of August 25, 2026, evaluate six hosted authenticated-browser automation
+  platforms suitable for Veetbot: Browserbase, Browser Use Cloud,
+  Hyperbrowser, Steel, Playwright's hosted ecosystem, and one additional
+  credible provider you discover. For each platform, verify from current
+  primary sources: persistent authenticated-profile support; credential and
+  cookie isolation; CAPTCHA and MFA handling boundaries; session recording
+  and data retention; regional hosting and data residency; API and Playwright
+  compatibility; concurrency limits; current pricing for 1,000 browser-hours
+  per month; and SOC 2 or equivalent security claims. Cross-check every
+  security, pricing, and retention claim against a second source. Identify
+  contradictions, stale documentation, and facts that could not be verified.
+  Produce a normalized comparison table, rank the providers for Veetbot's
+  governed browser architecture, and make a recommendation with citations. Do
+  not infer missing facts.
+attachments: []
+tools:
+  - context.update_working_state
+  - web.search
+  - web.fetch
+  - delegate.run
+rubric: rubrics/research_quality.yaml
+judge: judge.v1
+repeats: 5
+ceiling:
+  model_calls: 40
+  tool_calls: 60
+  cost_usd: "0.75"
+  wall_seconds: 600
+source:
+  trajectory: fixtures/trajectories/cap-hosted-browser-research-0001.json
+  export_id: 65b5b347-2891-4e58-a3f1-d9c583088f85
+  run_id: 85487ddf-5deb-45c3-a89b-a22b752f5406
+  outcome: FAILED
+  diagnosis: >-
+    independent parallel work: the single agent spent all 32 allowed tool
+    calls across six providers and their second-source cross-checks, then
+    failed with budget_exceeded before producing any answer

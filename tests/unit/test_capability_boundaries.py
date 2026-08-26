@@ -292,6 +292,18 @@ def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> N
         load_scenarios(tmp_path, "research")
 
 
+def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+
+    _settings, scenarios = load_scenarios(repository_root, "research")
+
+    assert len(scenarios) == 1
+    scenario = scenarios[0].scenario
+    assert scenario.milestone == 13
+    assert scenario.source.outcome == "FAILED"
+    assert "independent parallel work" in scenario.source.diagnosis
+
+
 async def test_tied_cost_ceiling_uses_scenario_scope(tmp_path: Path) -> None:
     _fixture(tmp_path)
     config = tmp_path / "evals" / "capability" / "config.yaml"
