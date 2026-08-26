@@ -260,7 +260,7 @@ contradiction. ADR-0002's `ToolResultItem.trust` defaults to `INTERNAL_TOOL`,
 while the context engine treats tool results as the canonical carrier of
 `EXTERNAL_UNTRUSTED` content. Both are right about different tools and neither
 states the rule for choosing, so the rule goes on the declaration where the
-information actually is. The registry then *forces* the value for two sources:
+information actually is. The registry then *forces* the value for three sources:
 
 | `source` | `output_trust` | Enforced |
 | --- | --- | --- |
