@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email)"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|whatsapp)"
     r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
@@ -26,8 +26,8 @@ MAP_ROW = re.compile(
 # Milestone 17 on 2026-08-23 (ADR-0070), and Milestones 18 and 19 on 2026-08-24
 # (ADR-0071 and ADR-0072). The census reports a zero row for each authorized milestone
 # whose specification has not yet declared gates. Milestone 20 was authorized on
-# 2026-08-26 (ADR-0073).
-MAX_MILESTONE = 20
+# 2026-08-26 (ADR-0073). Milestone 21 was authorized on 2026-08-26 (ADR-0074).
+MAX_MILESTONE = 21
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -57,6 +57,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "memory-read-api-and-browser.md": (10, 0),
     "email-integration.md": (13, 0),
     "device-channel-and-sms.md": (12, 0),
+    "whatsapp-surface.md": (12, 0),
     "milestone-map.md": (7, 0),
 }
 
