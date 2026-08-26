@@ -26,18 +26,18 @@ safely.
 
 Veetbot is in active implementation under the canonical
 [engineering plan](docs/plan/engineering-plan.md). Milestones 0 through 12 are
-complete, as is the independently delivered Milestone 16 memory-evaluation and
-lifecycle workstream. The verified sequential ceiling remains Milestone 12,
-backed by 247 cumulative gates.
+complete, as are the independently delivered Milestone 16 memory-evaluation
+and lifecycle workstream and Milestone 17 memory read API and native browser.
+The verified sequential ceiling remains Milestone 12, backed by 247 cumulative
+gates.
 
 Milestone 13's core subagent and delegation path is implemented with all
 twenty-one gates passing locally; its activation evidence, hosted CI, and final
-review remain. Milestone 17's read-only memory API and native Apple memory
-browser also pass locally and await hosted review. Milestone 19's focused
-one-time conversational scheduling tool is implemented locally, with full
-repository verification and hosted review still outstanding. Milestones 14
-(inbound surfaces and pairing), 15 (operational hardening), and 18 (email
-integration) are authorized and fully specified but have not started.
+review remain. Milestone 19's focused one-time conversational scheduling tool
+is implemented locally, with full repository verification and hosted review
+still outstanding. Milestones 14 (inbound surfaces and pairing), 15
+(operational hardening), and 18 (email integration) are authorized and fully
+specified but have not started.
 Model-routing changes and the rest of the longer-term roadmap remain deferred.
 
 ## Features
@@ -66,6 +66,9 @@ Model-routing changes and the rest of the longer-term roadmap remain deferred.
 - **Long-term memory and knowledge** — governed formation with provenance and
   corrections, hybrid recall with an auditable trace, configurable lifecycle
   policies, reproducible evaluation, and cited knowledge-document retrieval.
+- **Memory API and native browser** — a default-off, read-only,
+  principal-isolated HTTP surface with explicit sensitivity ceilings, plus a
+  SwiftUI browser for the complete governed belief view.
 - **Provider-neutral web access** — independently selectable Tavily and
   Firecrawl adapters behind stable `web.search` and `web.fetch` tools, with a
   recommended Tavily-search/Firecrawl-fetch deployment.
@@ -91,9 +94,6 @@ Model-routing changes and the rest of the longer-term roadmap remain deferred.
   and join behavior, and downward cancellation. All registered gates pass
   locally; activation evidence, hosted CI, and final review remain.
 
-- **Memory API and browser (Milestone 17)** — the read-only, principal-isolated
-  HTTP surface and native Apple browser pass their local Python, PostgreSQL,
-  Swift package, and simulator lanes. Hosted CI and final review are pending.
 - **Conversational scheduling (Milestone 19)** — a focused one-time schedule
   creation tool and its gate suite are implemented locally; full repository
   verification and hosted review are pending.
@@ -321,8 +321,8 @@ third-party dependencies. It restores complete durable transcripts, replays the
 active run over SSE, keeps a reconciled local session history, and stores its
 bearer token only in Keychain. It also registers devices for APNs, reconciles
 the offline notification inbox, and restores notification deep links. The
-current development head includes the Milestone 17 read-only memory browser,
-which is awaiting hosted CI and final review. See its
+Milestone 17 read-only memory browser is complete, with local and hosted Apple
+verification and a clean final review. See its
 [README](clients/apple/README.md) for signing, settings, and test instructions.
 
 ## Configuration

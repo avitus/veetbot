@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-25 — Milestone 17 completion recorded
+
+- Reconciled the milestone record with the already merged delivery evidence.
+  Dev-to-main pull request 58 carried the memory read API and native Apple
+  browser to `main` with the ten gates, Python and PostgreSQL partitions,
+  native package and simulator verification, every hosted CI lane,
+  GitGuardian, and the final CodeRabbit review green on its final head; every
+  review conversation is resolved. Pull request 64 subsequently added a real
+  PostgreSQL keyset walk with an interleaved write and fixture-driven iPhone
+  and iPad list-to-detail coverage, again with all hosted lanes green and no
+  unresolved review conversation.
+- Marked Milestone 17 complete without advancing the verified sequential gate
+  ceiling beyond Milestone 12, and moved its evidence from the in-progress
+  project state into verification history. The milestone's exclusions are
+  unchanged: recall-trace viewing still waits on tenant and principal
+  predicates for `PostgresTraceStore.for_turn`; HTTP writes, consolidation and
+  formation audit routes, and knowledge-document browsing remain deferred.
+
 ## 2026-08-25 — Reconciled milestones page and status refresh
 
 - Added `docs/status/milestones.md`, a grouped summary of every milestone —

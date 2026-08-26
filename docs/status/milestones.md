@@ -36,6 +36,9 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
   production APNs delivery owner-verified on a physical iPhone.
 - **Milestone 16 — Memory evaluation and lifecycle** — the first parallel
   workstream to complete; hosted review finished clean on 2026-08-23.
+- **Milestone 17 — Memory read API and browser** — the second completed
+  parallel workstream; hosted review finished clean on 2026-08-24, followed by
+  supplemental end-to-end PostgreSQL and native navigation coverage.
 
 Evidence for completed milestones lives in
 [`verification-history.yaml`](verification-history.yaml).
@@ -53,15 +56,6 @@ gates pass locally. Remaining:
 - [ ] Capability-scenario scoring, the single-agent baseline and the delegating re-run
 - [ ] Hosted CI on the milestone's final head
 - [ ] CodeRabbit review loop on the dev to main pull request (build step 7)
-
-### Milestone 17 — Memory read API and browser
-
-A parallel workstream. The read-only memory routes, store methods, and all ten
-registered gates pass locally; the native Apple memory browser passes the
-package and simulator lanes; the manual HTTP smoke is recorded. Remaining:
-
-- [ ] Hosted CI on the milestone's final head
-- [ ] CodeRabbit review loop on the dev to main pull request (build step 8)
 
 ### Milestone 19 — Conversational schedule creation
 

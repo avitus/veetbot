@@ -19,8 +19,8 @@ title: Current Milestone
   before it. Milestone 17 — the memory read API and the native memory
   browser — is specified by
   [memory-read-api-and-browser.md](memory-read-api-and-browser.md) with ten
-  gates and is a second parallel workstream rather than a successor: it shares
-  no file with Milestones 13 through 15 and may proceed alongside them.
+  gates and completed as a second parallel workstream on 2026-08-24 without
+  advancing the verified sequential ceiling.
   Milestone 18 — first-class email integration — is specified by
   [email-integration.md](email-integration.md) with thirteen gates and is a
   third parallel workstream on the same terms, its two shared-file touches
@@ -34,8 +34,8 @@ title: Current Milestone
   independently advancing parallel workstream whose gate ceiling cannot move
   ahead of Milestone 15 (ADR-0069); it completed on 2026-08-23. Milestone 17,
   the memory read API and the native memory browser, was authorized on
-  2026-08-23 as a second such workstream (ADR-0070), on the same terms: its
-  gates may go green independently and move the verified ceiling no further.
+  2026-08-23 as a second such workstream (ADR-0070) and completed on
+  2026-08-24 on the same terms, moving the verified ceiling no further.
   Milestone 18, first-class email integration, was authorized on 2026-08-24
   as a third (ADR-0071), on the same terms again. Milestone 19,
   conversational schedule creation, was authorized on 2026-08-24 as a fourth
@@ -67,13 +67,12 @@ title: Current Milestone
   `evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json`
   with four retried runs and a lift of forty-five — which is milestone evidence
   rather than one of the two completion conditions below. Milestone 17, the
-  second parallel workstream, is in progress with ten registered
-  gates; its server-side routes, store methods, and gate suite are implemented
-  and passing locally, and its Apple client — the models, client methods,
-  browser view model and views, and sidebar entry point, with native Swift
-  Testing coverage — passes the local Apple package and simulator lanes;
-  hosted CI and the CodeRabbit review loop on the `dev` to `main` pull request
-  remain outstanding. Milestone 18, the third parallel workstream, is
+  second parallel workstream, completed on 2026-08-24: all ten gates, the
+  Python and PostgreSQL lanes, the native Apple package and simulator lanes,
+  hosted CI, GitGuardian, and the final CodeRabbit review passed on the
+  dev-to-main pull request (merge `3faa978`), with supplemental end-to-end
+  browser coverage later passing the same hosted gates in merge `07c8bdf`.
+  Milestone 18, the third parallel workstream, is
   authorized and specified with thirteen registered gates; it has not
   started. Milestone 19, the fourth parallel workstream, is in progress with
   five registered gates; its one-time model tool, clarification-to-approval
@@ -256,6 +255,13 @@ the native Apple package and simulator lanes pass, because the browser is half
 of what the milestone delivers and no Python gate observes Swift. Being a
 parallel workstream changes nothing about the ceiling, which still advances
 only after every earlier milestone has completed.
+
+Milestone 17 completed on those terms on 2026-08-24: every declared gate and
+the cumulative registry passed, the PostgreSQL and native Apple lanes passed,
+and hosted CI, GitGuardian, and the final CodeRabbit review finished clean on
+dev-to-main pull request 58. Pull request 64 subsequently added end-to-end
+PostgreSQL pagination and iPhone/iPad navigation coverage with the same hosted
+lanes green and no unresolved review conversation.
 
 Milestone 18 completes on the same terms, with its own additional condition:
 the owner's real-mailbox smoke — bootstrap consent, a scheduled triage run,
