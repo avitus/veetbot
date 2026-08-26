@@ -40,10 +40,19 @@ import AppKit
 
         #expect(
             normalizedSource.contains(
-                "#if os(macOS) .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) #endif"
+                "#if os(macOS) .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
             )
         )
         #expect(source.contains(".background(MemoryBrowserWindowResizeView())"))
+    }
+
+    @Test
+    func testTheMacModalUsesTheResizableSwiftUIPresentationSizing() throws {
+        let source = try memoryBrowserViewSource()
+
+        #expect(source.contains(".memoryBrowserPresentationSizing()"))
+        #expect(source.contains("if #available(macOS 15.0, *)"))
+        #expect(source.contains("presentationSizing(.fitted)"))
     }
 
     #if os(macOS)

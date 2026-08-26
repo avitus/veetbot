@@ -54,6 +54,7 @@ public struct MemoryBrowserView: View {
             maxHeight: .infinity
         )
         .background(MemoryBrowserWindowResizeView())
+        .memoryBrowserPresentationSizing()
         #endif
     }
 
@@ -255,6 +256,17 @@ public struct MemoryBrowserView: View {
 }
 
 #if os(macOS)
+private extension View {
+    @ViewBuilder
+    func memoryBrowserPresentationSizing() -> some View {
+        if #available(macOS 15.0, *) {
+            presentationSizing(.fitted)
+        } else {
+            self
+        }
+    }
+}
+
 enum MemoryBrowserWindowConfiguration {
     static let minimumSize = NSSize(width: 560, height: 520)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
