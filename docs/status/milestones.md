@@ -52,7 +52,7 @@ The next sequential milestone. The delegation domain, the ledger persistence,
 join, and the cancel cascade are implemented, and all twenty-one registered
 gates pass locally. Remaining:
 
-- [ ] Capability-scenario scoring, the single-agent baseline and the delegating re-run
+- [ ] Capability-scenario scoring for the delegating re-run and repair of the scored single-agent floor failure
 - [ ] Hosted CI on the milestone's final head
 - [ ] CodeRabbit review loop on the dev to main pull request (build step 7)
 

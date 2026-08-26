@@ -74,8 +74,13 @@ title: Current Milestone
   positives, and the zero-tool judge deadlock. Because delegated child usage
   is correctly additive, the scenario now permits 80 model and 200 tool calls
   while retaining every approved cost ceiling. A scored single-agent
-  baseline, the delegating re-run score, and hosted verification of the
-  completed evidence head remain.
+  baseline then completed at scores 0.75, 0.55, 0.75, 0.65, and 0.75, with
+  mean 0.69, floor 0.55, population variance 0.0064, zero ceiling hits, zero
+  policy failures, and USD 7.855529 cost. It correctly remains
+  release-blocked because one repeat is below the rubric's 0.60 floor. The
+  provider ledger has used USD 42.599510 of the approved USD 50 aggregate
+  cap; the scored delegating re-run, repair of the baseline floor failure, and
+  hosted verification of the completed evidence head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation

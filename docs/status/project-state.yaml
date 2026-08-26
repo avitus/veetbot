@@ -128,7 +128,7 @@ milestones:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
     open_items:
-      - Capability-scenario scoring, the single-agent baseline and the delegating re-run
+      - Capability-scenario scoring for the delegating re-run and repair of the scored single-agent floor failure
       - Hosted CI on the milestone's final head
       - CodeRabbit review loop on the dev to main pull request (build step 7)
     evidence:
@@ -224,7 +224,7 @@ milestones:
           budget. The governed ceilings are now USD 5.00 per repeat, USD 25.00
           per suite invocation, and USD 50.00 per day, leaving the scored
           five-repeat baseline and delegating arm to run under the approved
-          bound.
+          bound at that checkpoint.
       - check: governed baseline and delegation calibration under the approved budget
         outcome: blocked_by_call_ceiling
         detail: >-
@@ -243,9 +243,24 @@ milestones:
           admitting raw authorization headers or credential-shaped values.
           Because child usage is correctly additive, the scenario now allows
           80 model and 200 tool calls while retaining every approved cost
-          ceiling. Final scored baseline and delegating distributions remain
-          outstanding; these calibration runs are recorded rather than
-          reclassified retrospectively.
+          ceiling. At that checkpoint, the final scored baseline and
+          delegating distributions remained outstanding; these calibration
+          runs are recorded rather than reclassified retrospectively.
+      - check: scored single-agent baseline under the approved budget
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          Exact staged build 11e5b90 completed the delegation-disabled
+          five-repeat research baseline against the dedicated PostgreSQL
+          evaluation database. Repeats 0 through 4 scored 0.75, 0.55, 0.75,
+          0.65, and 0.75, for mean 0.69, floor 0.55, and population variance
+          0.0064. All five rows have zero ceiling hits and zero policy
+          failures, with USD 7.855529 total persisted and provider-ledger
+          cost. The suite correctly remained release-blocked because repeat 1
+          fell below the rubric's 0.60 floor. The aggregate provider ledger
+          reached USD 42.599510 of the owner-approved USD 50 cap, leaving USD
+          7.400490. The prior unscored five-repeat delegation calibration cost
+          USD 14.8738995, so the scored delegating re-run remains outstanding
+          rather than knowingly exceeding the approved aggregate cap.
   "14":
     title: Inbound surfaces and pairing
     status: authorized

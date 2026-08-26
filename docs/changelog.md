@@ -70,8 +70,9 @@ title: Changelog
   USD 0.75 per-repeat cost ceiling is too low to reach the judge on the
   configured balanced model. The owner approved a USD 50 evaluation budget,
   now encoded as USD 5 per repeat, USD 25 per suite, and USD 50 per day; the
-  two live scores and hosted verification of the completed evidence head
-  remain outstanding.
+  two live scores and hosted verification of the completed evidence head were
+  outstanding at that checkpoint. The scored baseline is recorded below; the
+  delegating score and hosted verification remain outstanding.
 - Preserved the validator's fixed, content-free invariant name in
   `RunFailure.details` when a normalized model stream fails locally. The live
   research baseline exposed that the prior generic failure discarded the one
@@ -99,6 +100,14 @@ title: Changelog
   missing or duplicate criteria, extra fields, and out-of-range values remain
   invalid, and evaluation failures now report a content-free judge/schema
   diagnostic rather than echoing Pydantic's candidate-output excerpt.
+- Completed the scored, delegation-disabled five-repeat research baseline on
+  exact staged build `11e5b90`: scores were 0.75, 0.55, 0.75, 0.65, and 0.75,
+  with mean 0.69, floor 0.55, population variance 0.0064, zero ceiling hits,
+  zero policy failures, and USD 7.855529 cost. The suite correctly remains
+  release-blocked because the second repeat is below the rubric's 0.60 floor.
+  The provider ledger reached USD 42.599510 of the approved USD 50 aggregate
+  cap, leaving the scored delegating re-run outstanding rather than knowingly
+  exceeding the approved limit.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 
