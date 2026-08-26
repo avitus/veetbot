@@ -4,7 +4,7 @@
 - Date: 2026-08-26
 - Related: engineering plan Section 29 and roadmap item B7; ADR-0034,
   ADR-0049, ADR-0061, ADR-0069
-- Detailed design: docs/plan/device-channel-and-sms.md
+- Detailed design: `docs/plan/device-channel-and-sms.md`
 
 ## Context
 

@@ -77,6 +77,7 @@ validates the floor, and no trailer means lane A.
 | The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | The device channel and SMS through the owner's iPhone | `device-channel-and-sms.md` |
+| The WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
@@ -92,8 +93,8 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through
-  15 proceed in that order (ADR-0061); 17 through 20 are parallel
-  workstreams (ADRs 0070–0073). Model routing and the remaining roadmap
+  15 proceed in that order (ADR-0061); 17 through 21 are parallel
+  workstreams (ADRs 0070–0074). Model routing and the remaining roadmap
   items are not authorized. The grouped summary with open items is
   `docs/status/milestones.md`.
 - Avoid unrelated refactors.

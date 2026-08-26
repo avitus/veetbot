@@ -93,6 +93,7 @@ nav:
       - Memory Read API & Browser: plan/memory-read-api-and-browser.md
       - Email Integration: plan/email-integration.md
       - Device Channel & SMS: plan/device-channel-and-sms.md
+      - WhatsApp Surface: plan/whatsapp-surface.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
@@ -182,4 +183,5 @@ nav:
       - ADR-0071 Milestone 18 first-class email integration: adr/0071-milestone-18-email-integration.md
       - ADR-0072 Milestone 19 conversational schedule creation: adr/0072-milestone-19-conversational-schedule-creation.md
       - ADR-0073 Milestone 20 SMS through the owner's iPhone: adr/0073-milestone-20-sms-device-channel.md
+      - ADR-0074 Milestone 21 WhatsApp business surface: adr/0074-milestone-21-whatsapp-surface.md
   - Changelog: changelog.md

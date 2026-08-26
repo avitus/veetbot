@@ -82,3 +82,4 @@ implementation without one.
 - [ADR-0071 — Milestone 18 first-class email integration (Proposed)](0071-milestone-18-email-integration.md)
 - [ADR-0072 — Milestone 19 conversational schedule creation (Proposed)](0072-milestone-19-conversational-schedule-creation.md)
 - [ADR-0073 — Milestone 20 SMS through the owner's iPhone (Proposed)](0073-milestone-20-sms-device-channel.md)
+- [ADR-0074 — Milestone 21 WhatsApp business surface (Proposed)](0074-milestone-21-whatsapp-surface.md)
