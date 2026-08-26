@@ -69,6 +69,16 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    promoted directory; and
 9. retains the five newest valid releases.
 
+Release pruning normally runs as the deployment identity. Older releases may
+contain service-owned Python bytecode from deployments that predate the strict
+read-only systemd filesystem policy. If direct removal of such a release fails,
+the script retries with the just-built sandbox image as uid 0 in a one-shot,
+network-disabled container. The container has a read-only root filesystem, only
+the releases directory is mounted writable, and its fixed entrypoint removes
+only the validated release name selected by the retention loop. This fallback
+uses the deployment identity's existing Docker trust boundary; application
+identities still receive no Docker access.
+
 A successful server release returns control to CircleCI, which polls the public
 TLS readiness endpoint until it reports the same release ID. Exhausting that
 bounded public-probe budget fails the CircleCI job after promotion; it is not a

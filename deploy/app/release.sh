@@ -337,7 +337,16 @@ while IFS= read -r candidate; do
   [[ -d "$candidate_path" ]] || continue
   kept=$((kept + 1))
   if (( kept > KEEP_RELEASES )) && [[ "$candidate_path" != "$STAGE" ]]; then
-    rm -rf -- "$candidate_path"
+    if ! rm -rf -- "$candidate_path"; then
+      printf 'Direct pruning of %s failed; retrying with the trusted deployment container.\n' \
+        "$candidate" >&2
+      docker run --rm --network none --read-only --user 0:0 \
+        --volume "$RELEASES_DIR:/releases" \
+        --entrypoint /bin/rm "$RELEASE_IMAGE" \
+        -rf -- "/releases/$candidate"
+      [[ ! -e "$candidate_path" && ! -L "$candidate_path" ]] || fail \
+        "the trusted deployment container could not prune $candidate_path"
+    fi
     docker image rm "agent-core-sandbox:$candidate" >/dev/null 2>&1 || true
   fi
 done < <(
