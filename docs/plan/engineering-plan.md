@@ -3500,6 +3500,47 @@ resume, and cancel; arbitrary cron and monthly recurrence; delegated scopes;
 direct reminder payloads; and any content-bearing push remain outside this
 milestone.
 
+### Milestone 20: SMS through the owner's iPhone
+
+The owner authorized this milestone on 2026-08-26 (ADR-0073) as a parallel
+workstream on the established terms: its gates become green independently
+and the verified gate ceiling still advances only in numerical order. It
+builds the first concrete slice of Section 29's device channel — roadmap
+item B7's device channel and device-scoped tools — with SMS through the
+owner's iPhone as the concrete use case. The detailed design is
+[device-channel-and-sms.md](device-channel-and-sms.md) and ADR-0073; the
+design declares this milestone's twelve gates.
+
+Implement:
+
+- The `DeviceChannel` port with one push-wake adapter: a pending
+  invocation row, a content-free APNs wake (an explicit sixth entry in
+  Milestone 12's trigger catalog), authenticated fetch and result post,
+  a bounded wait resolving `tool.device_offline`.
+- `device.sms.send` as the first device-scoped tool, registered from the
+  device's declared capabilities with `ToolSource.DEVICE`, classified
+  `ALLOW` because the iOS compose-sheet tap is the non-bypassable
+  confirmation, with the hardline secret scan over the outbound body.
+- The device-authenticated SMS ingest route: digest idempotency, per-device
+  rate cap, device-originated untrusted content routed into a standing
+  per-device triage session that alerts, remembers, acts, and drafts
+  replies through existing machinery only.
+- The iOS client work — capability registration behind a default-off
+  setting, the compose-sheet flow, the App Intent — and the documented
+  Shortcuts owner ceremony with an end-to-end verification step.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The owner has verified one end-to-end send (agent-composed, owner-tapped)
+  and one end-to-end ingest (Shortcuts-forwarded, triage-routed) on a
+  physical iPhone.
+
+The milestone does not include automatic replies, a silent send path, a
+websocket device transport, the waiting-on-device suspension kind,
+presence-based routing, or hand-off; the last two remain roadmap item B7's
+residue, and the rest are recorded in the design document's exclusions.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3516,7 +3557,7 @@ owner's current ranking, not a schedule.
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling extensions: monthly rules, arbitrary cron, continuous-session recurrence, dependency graphs | A separate ADR; not alternate implementations of Milestone 11 |
 | B6 | Memory residue after Milestone 16: the semantic arm and `pgvector`, an external memory provider, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 benchmark evidence per item, per Milestone 9's entry gate |
-| B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
+| B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 20 on 2026-08-26 (ADR-0073); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |

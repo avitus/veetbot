@@ -1311,8 +1311,9 @@ Section 30.1 draws the line and it is worth restating in the tool system's own
 terms, because the tool system is what enforces it: **the agent may create and
 edit skills; it may not register arbitrary new tools at runtime.** A skill is
 text that changes how a task is done. A tool is code that does something. The
-registry accepts new entries from exactly two sources — the build, and MCP
-discovery at session open — and `skill_manage` is not one of them.
+registry accepts new entries from exactly three sources — the build, MCP,
+and the declared capabilities of a registered device (Milestone 20,
+ADR-0073) — and `skill_manage` is not one of them.
 
 That is why `register_dynamic` takes a `ToolSource` and rejects
 `ToolSource.BUILTIN`, and why `RegistrationReport` records every rejection
