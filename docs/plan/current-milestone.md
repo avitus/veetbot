@@ -64,9 +64,10 @@ title: Current Milestone
   judging at costs from USD 0.861420 through USD 0.9954325; its fifth repeat
   ended in a zero-usage model-stream contract failure. No repeat reached the
   judge, proving that the checked-in USD 0.75 per-repeat ceiling cannot produce
-  a score on the configured balanced model. A budget decision, a scored
-  single-agent baseline, the delegating re-run score, and hosted verification
-  of the completed evidence head remain.
+  a score on the configured balanced model. The owner subsequently approved a
+  USD 50 evaluation budget, now encoded as USD 5 per repeat, USD 25 per suite,
+  and USD 50 per day. A scored single-agent baseline, the delegating re-run
+  score, and hosted verification of the completed evidence head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation

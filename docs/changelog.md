@@ -68,8 +68,10 @@ title: Changelog
   is now exported under the corrected `trajectory@5` privacy projection,
   reviewed, and admitted. Its first baseline attempt established that the
   USD 0.75 per-repeat cost ceiling is too low to reach the judge on the
-  configured balanced model; a budget decision, the two live scores, and
-  hosted verification of the completed evidence head remain outstanding.
+  configured balanced model. The owner approved a USD 50 evaluation budget,
+  now encoded as USD 5 per repeat, USD 25 per suite, and USD 50 per day; the
+  two live scores and hosted verification of the completed evidence head
+  remain outstanding.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

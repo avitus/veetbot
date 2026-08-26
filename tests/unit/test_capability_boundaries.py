@@ -295,11 +295,14 @@ def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> N
 def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> None:
     repository_root = Path(__file__).resolve().parents[2]
 
-    _settings, scenarios = load_scenarios(repository_root, "research")
+    settings, scenarios = load_scenarios(repository_root, "research")
 
     assert len(scenarios) == 1
+    assert settings.daily_cost_usd == Decimal("50.00")
+    assert settings.suites["research"].cost_usd == Decimal("25.00")
     scenario = scenarios[0].scenario
     assert scenario.milestone == 13
+    assert scenario.ceiling.cost_usd == Decimal("5.00")
     assert scenario.source.outcome == "FAILED"
     assert "independent parallel work" in scenario.source.diagnosis
 

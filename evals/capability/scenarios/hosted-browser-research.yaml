@@ -28,7 +28,7 @@ repeats: 5
 ceiling:
   model_calls: 40
   tool_calls: 60
-  cost_usd: "0.75"
+  cost_usd: "5.00"
   wall_seconds: 600
 source:
   trajectory: fixtures/trajectories/cap-hosted-browser-research-0001.json

@@ -128,7 +128,6 @@ milestones:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
     open_items:
-      - Capability-scenario budget decision after the recorded per-repeat ceiling hits
       - Capability-scenario scoring, the single-agent baseline and the delegating re-run
       - Hosted CI on the milestone's final head
       - CodeRabbit review loop on the dev to main pull request (build step 7)
@@ -221,11 +220,11 @@ milestones:
           when the normalized model stream violated its contract, and the
           suite emitted a release-blocking evaluation_error. The persisted
           attempt cost is USD 3.6885015, with zero criterion rows and zero
-          scores. The checked-in USD 0.75 scenario, USD 5.00 suite, and USD
-          10.00 daily ceilings remain unchanged; raising them would expand
-          authorized provider spend and requires an explicit budget decision
-          before the five-repeat baseline and delegating arm can be run
-          validly.
+          scores. The owner then explicitly approved a USD 50 evaluation
+          budget. The governed ceilings are now USD 5.00 per repeat, USD 25.00
+          per suite invocation, and USD 50.00 per day, leaving the scored
+          five-repeat baseline and delegating arm to run under the approved
+          bound.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
