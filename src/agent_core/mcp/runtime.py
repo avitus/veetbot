@@ -53,6 +53,18 @@ _SKILL_HYPHENS = re.compile(r"-+")
 type _RegistrationKey = tuple[str, str, str]
 logger = logging.getLogger(__name__)
 
+_GMAIL_FAILURE_CODES = frozenset(
+    {
+        "gmail.credential_rejected",
+        "gmail.rate_limited",
+        "gmail.provider_unavailable",
+        "gmail.provider_rejected",
+        "gmail.provider_output_invalid",
+        "gmail.outcome_unknown",
+        "gmail.arguments_invalid",
+    }
+)
+
 
 @dataclass(slots=True)
 class _Connection:
@@ -436,14 +448,59 @@ class MCPRuntime:
                     "reason_code": connection.unavailable_reason,
                 },
             )
-            return self._unavailable(connection.unavailable_reason)
-        return self._result(result)
+            if self._non_idempotent_effect(spec):
+                return self._outcome_unknown("MCP transport failed after dispatch")
+            return self._unavailable(connection.unavailable_reason, retryable=True)
+        gmail_code = self._gmail_failure_code(result)
+        if gmail_code == "gmail.credential_rejected":
+            effect_status = (
+                result.structured.get("effect_status") if result.structured is not None else None
+            )
+            return await self._recover_unauthorized(
+                connection,
+                spec,
+                operation,
+                safe_to_retry=effect_status == "not_applied",
+            )
+        return self._result(result, spec)
+
+    @staticmethod
+    def _non_idempotent_effect(spec: ToolSpec) -> bool:
+        return (
+            spec.idempotency is IdempotencyClass.NON_IDEMPOTENT
+            and spec.side_effect is not SideEffectClass.NONE
+        )
+
+    @staticmethod
+    def _outcome_unknown(detail: str) -> ToolResult:
+        return ToolResult(
+            ok=False,
+            content=[],
+            failure=ToolFailure(
+                kind=ToolFailureKind.OUTCOME_UNKNOWN,
+                reason_code="tool.outcome_unknown",
+                detail=detail,
+                retryable=False,
+            ),
+        )
+
+    @staticmethod
+    def _gmail_failure_code(result: MCPCallResult) -> str | None:
+        if (
+            result.is_error
+            and len(result.content) == 1
+            and result.content[0] in _GMAIL_FAILURE_CODES
+        ):
+            return result.content[0]
+        return None
 
     async def _recover_unauthorized(
         self,
         connection: _Connection,
         spec: ToolSpec,
         operation: Callable[[], Awaitable[MCPCallResult]],
+        *,
+        safe_to_retry: bool = False,
     ) -> ToolResult:
         if connection.reauthentication_attempted:
             connection.unavailable_reason = "tool.server_unauthorized"
@@ -491,6 +548,7 @@ class MCPRuntime:
         if (
             spec.idempotency not in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
             and spec.side_effect is not SideEffectClass.NONE
+            and not safe_to_retry
         ):
             return ToolResult(
                 ok=False,
@@ -503,9 +561,15 @@ class MCPRuntime:
                 ),
             )
         try:
-            return self._result(await operation())
+            result = await operation()
+            if self._gmail_failure_code(result) == "gmail.credential_rejected":
+                connection.unavailable_reason = "tool.server_unauthorized"
+                return self._unavailable(connection.unavailable_reason)
+            return self._result(result, spec)
         except MCPUnauthorizedError:
             connection.unavailable_reason = "tool.server_unauthorized"
+            if self._non_idempotent_effect(spec):
+                return self._outcome_unknown("MCP authorization failed after retry dispatch")
             return self._unavailable(connection.unavailable_reason)
         except MCPTransportError:
             connection.unavailable_reason = "tool.server_unreachable"
@@ -517,11 +581,64 @@ class MCPRuntime:
                     "reason_code": connection.unavailable_reason,
                 },
             )
-            return self._unavailable(connection.unavailable_reason)
+            if self._non_idempotent_effect(spec):
+                return self._outcome_unknown("MCP transport failed after retry dispatch")
+            return self._unavailable(connection.unavailable_reason, retryable=True)
 
     @staticmethod
-    def _result(result: MCPCallResult) -> ToolResult:
+    def _result(result: MCPCallResult, spec: ToolSpec) -> ToolResult:
         if result.is_error:
+            effect_status = (
+                result.structured.get("effect_status") if result.structured is not None else None
+            )
+            if MCPRuntime._non_idempotent_effect(spec) and effect_status != "not_applied":
+                return MCPRuntime._outcome_unknown("MCP non-idempotent call failed after dispatch")
+            gmail_code = MCPRuntime._gmail_failure_code(result)
+            if gmail_code == "gmail.outcome_unknown":
+                return MCPRuntime._outcome_unknown("MCP server could not determine the outcome")
+            if gmail_code == "gmail.arguments_invalid":
+                return ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.INVALID_ARGUMENTS,
+                        reason_code="tool.arguments_invalid",
+                        detail="MCP server rejected the arguments before dispatch",
+                        retryable=False,
+                    ),
+                )
+            if gmail_code == "gmail.provider_output_invalid":
+                return ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.OUTPUT_INVALID,
+                        reason_code="tool.output_invalid",
+                        detail="MCP server rejected invalid provider output",
+                        retryable=False,
+                    ),
+                )
+            if gmail_code in {
+                "gmail.rate_limited",
+                "gmail.provider_unavailable",
+                "gmail.provider_rejected",
+            }:
+                return ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.UPSTREAM_ERROR,
+                        reason_code="tool.server_error",
+                        detail="MCP server reported a normalized provider failure",
+                        retryable=(
+                            (
+                                spec.idempotency is IdempotencyClass.READ_ONLY
+                                or effect_status == "not_applied"
+                            )
+                            and gmail_code in {"gmail.rate_limited", "gmail.provider_unavailable"}
+                        ),
+                    ),
+                )
             external = "\n".join(result.content)
             return ToolResult(
                 ok=False,
@@ -542,7 +659,7 @@ class MCPRuntime:
         )
 
     @staticmethod
-    def _unavailable(reason_code: str) -> ToolResult:
+    def _unavailable(reason_code: str, *, retryable: bool = False) -> ToolResult:
         return ToolResult(
             ok=False,
             content=[],
@@ -550,7 +667,7 @@ class MCPRuntime:
                 kind=ToolFailureKind.TRANSPORT,
                 reason_code=reason_code,
                 detail="MCP server unavailable",
-                retryable=False,
+                retryable=retryable,
             ),
         )
 

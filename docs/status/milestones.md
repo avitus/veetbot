@@ -64,6 +64,15 @@ Remaining:
 
 - [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
 
+### Milestone 18 — First-class email integration
+
+A parallel workstream providing three least-privilege Gmail MCP servers for
+read and triage, drafts and label mutation, and approval-gated sending. Its
+thirteen gates and full local repository check pass. Remaining:
+
+- [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -73,10 +82,6 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 18 — First-class email integration** — thirteen gates; a
-  parallel workstream whose completion additionally requires the owner's
-  real-mailbox smoke.
-
 ## Deferred
 
 Nothing on the engineering plan's

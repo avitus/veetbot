@@ -73,8 +73,9 @@ def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) 
             and action.target.network_enabled
             and action.name in _BROWSER_PROVIDER_TOOLS
         )
+        operator_classified_mcp_read = action.target.kind == "mcp"
         return (
-            fixed_provider_target
+            (fixed_provider_target or operator_classified_mcp_read)
             and action.side_effect is SideEffectClass.NETWORK_READ
             and action.idempotency is IdempotencyClass.READ_ONLY
         )
@@ -118,6 +119,15 @@ def evaluate_deterministic(
     rule = matching[0]
     allowed = _condition_holds(rule.condition, action)
     decision = rule.decision if allowed else (rule.otherwise or ruleset.default_effect)
+    if (
+        action.target.kind == "mcp"
+        and action.target.server_id in {"gmail_write", "gmail_send"}
+        and _RANK[decision] < PolicyDecisionRank.REQUIRE_APPROVAL
+    ):
+        # ADR-0071 forbids policy profiles from turning mailbox mutations or
+        # sends into standing allows. A future standing-grant design must own
+        # any relaxation rather than hiding it in a profile.
+        decision = PolicyDecisionType.REQUIRE_APPROVAL
     if (
         decision
         in {

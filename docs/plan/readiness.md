@@ -62,7 +62,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1982` states that device tools are *"a reserved
+    `tool-system.md:1994` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -474,8 +474,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1044-1045` and the resolve at
-`policy-and-approvals.md:1054`, and one reference in
+at `policy-and-approvals.md:1050-1051` and the resolve at
+`policy-and-approvals.md:1060`, and one reference in
 `runtime-loop.md:1182` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -1372,7 +1372,7 @@ and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
 `tool-system.md:1459` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1982` states that device tools are *"a reserved seam,
+`tool-system.md:1994` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.

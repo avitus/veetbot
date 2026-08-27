@@ -316,7 +316,7 @@ from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
 from agent_core.knowledge.service import KnowledgeService
-from agent_core.mcp.configuration import validate_mcp_config
+from agent_core.mcp.configuration import email_server_configs, validate_mcp_config
 from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
@@ -2445,6 +2445,30 @@ async def build(
             roles=set(effective_settings.auth_roles),
             scopes=set(effective_settings.auth_scopes),
         )
+    supplied_email_rows = tuple(
+        config
+        for config in mcp_servers
+        if config.server_id in {"gmail_read", "gmail_write", "gmail_send"}
+    )
+    if supplied_email_rows:
+        raise ConfigurationError(
+            "first-party Gmail MCP rows are composed only through AGENT_EMAIL_ENABLED"
+        )
+    composed_email_rows = email_server_configs(
+        effective_principal.tenant_id,
+        enabled=effective_settings.email_enabled,
+    )
+    effective_mcp_servers = (*mcp_servers, *composed_email_rows)
+    if composed_email_rows:
+        effective_principal = effective_principal.model_copy(
+            update={
+                "scopes": {
+                    *effective_principal.scopes,
+                    *(scope for row in composed_email_rows for scope in row.required_scopes),
+                }
+            },
+            deep=True,
+        )
     validate_runtime_identity(
         effective_settings,
         tenant_id=effective_principal.tenant_id,
@@ -2822,7 +2846,7 @@ async def build(
             mcp_clients=mcp_client_factory,
             mcp_scripts=mcp_scripts,
             credential_resolver=effective_credential_resolver,
-            mcp_server_configs=mcp_servers,
+            mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,

@@ -549,6 +549,26 @@ class ToolPipeline:
             )
         progress.append(5)
 
+        async with self._uow_factory() as uow:
+            prior_invocations = await uow.invocations.list_for_run(run.id, principal)
+        if any(
+            invocation.status is ToolInvocationStatus.UNCERTAIN
+            and invocation.tool_name == tool.spec.name
+            and invocation.normalized_arguments_hash == arguments_hash
+            for invocation in prior_invocations
+        ):
+            return await self._refusal(
+                run,
+                call,
+                "tool.outcome_unknown",
+                ToolOutcomeStatus.DENIED,
+                lease,
+                message=(
+                    "Not performed. An identical prior call has an unknown outcome and "
+                    "must not be repeated."
+                ),
+            )
+
         key = _idempotency_key(run, step, call, tool, arguments_hash)
         result_item = await self._execute_once(
             run=run,

@@ -1772,6 +1772,15 @@ idempotent call is retried once, and the outcome is `unavailable` with
 whose watermark is set becomes `UNCERTAIN` instead, because a 401 arriving
 after the effect was sent is not evidence that the effect failed.
 
+**A non-idempotent MCP call fails after dispatch.** Any error or transport
+failure after the effect watermark becomes `UNCERTAIN` with
+`tool.outcome_unknown` and is never retried, regardless of server name or
+provider-specific failure vocabulary. A server may preserve an ordinary
+failure only by returning the content-free structured marker
+`effect_status: not_applied`, which is its assertion that argument validation,
+credential refresh, or a definitive provider rejection proved no effect was
+applied. Missing or ambiguous status is conservative and therefore uncertain.
+
 **A stdio server inherits the worker's environment.** That is the default
 behaviour of every process-spawning API in the standard library, and it
 hands an operator-configured child process the database URL and every
@@ -1955,6 +1964,9 @@ evidence that the surface is the same one.
     `skill_manage` is a capability tool for the reason given above. The set
     stays closed at build time, and every member is now derivable from the
     document that declares it.
+26. Every non-idempotent MCP failure lacking the server's content-free
+    `effect_status: not_applied` proof becomes `UNCERTAIN` once dispatched;
+    this rule is keyed on idempotency and side effect, never a server name.
 
 ## Open questions for review
 
