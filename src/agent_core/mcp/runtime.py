@@ -504,6 +504,8 @@ class MCPRuntime:
     ) -> ToolResult:
         if connection.reauthentication_attempted:
             connection.unavailable_reason = "tool.server_unauthorized"
+            if self._non_idempotent_effect(spec) and not safe_to_retry:
+                return self._outcome_unknown("MCP authorization failed after dispatch")
             return self._unavailable(connection.unavailable_reason)
         connection.reauthentication_attempted = True
         try:
