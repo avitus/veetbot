@@ -654,9 +654,13 @@ roles in production. Interactive and async workers claim disjoint configured
 priority classes, preserving at least one slot for each workload. Multiple
 schedule workers are safe. The schedule worker has database access and no API
 bearer token, model-provider, tool, sandbox, or object-store credential because
-it executes none of those capabilities. Create, update, and resume issue a
-fixed-channel PostgreSQL notification after commit; the scheduler always keeps
-its bounded table-scan fallback.
+it executes none of those capabilities. Release validation connects through
+that role and verifies the exact table privileges needed to check the schema
+head, seed the session-history projection and checkpoint, materialize the run,
+and enqueue schedule notifications; it also rejects superuser and `BYPASSRLS`
+authority. Create, update, and resume issue a fixed-channel PostgreSQL
+notification after commit; the scheduler always keeps its bounded table-scan
+fallback.
 
 ## Tracked metrics
 

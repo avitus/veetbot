@@ -529,6 +529,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert release.count(": $BROWSER_CONTROL_CREDENTIAL_FILE") == 3
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
+    assert "scripts/check_schedule_database_permissions.py" in release
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
     assert "veetbot-notify" in release

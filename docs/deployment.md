@@ -223,6 +223,62 @@ on `schedules` applying inside each child-policy lookup. Reserve `BYPASSRLS`
 roles for explicit administration and never use one for API, worker, or
 scheduler tenant access.
 
+Provision the `veetbot_schedule` login independently with a generated password,
+then grant only the tables its materialization transaction and schema-head check
+use. The release runs `scripts/check_schedule_database_permissions.py` through
+the protected schedule environment before promotion and refuses a role that is
+administrative, bypasses row-level security, or is missing any privilege below.
+
+```sql
+ALTER ROLE veetbot_schedule
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+GRANT CONNECT ON DATABASE agent TO veetbot_schedule;
+GRANT USAGE ON SCHEMA public TO veetbot_schedule;
+GRANT SELECT ON
+  agents,
+  alembic_version,
+  checkpoints,
+  derived_event_keys,
+  events,
+  notification_outbox,
+  process_events,
+  projection_watermarks,
+  runs,
+  schedule_occurrences,
+  schedule_revisions,
+  schedules,
+  session_history_items,
+  sessions
+TO veetbot_schedule;
+GRANT INSERT ON
+  checkpoints,
+  derived_event_keys,
+  events,
+  notification_outbox,
+  process_events,
+  projection_watermarks,
+  runs,
+  schedule_occurrences,
+  session_history_items,
+  sessions
+TO veetbot_schedule;
+GRANT UPDATE ON
+  projection_watermarks,
+  runs,
+  schedules,
+  sessions
+TO veetbot_schedule;
+GRANT DELETE ON
+  checkpoints,
+  projection_watermarks,
+  session_history_items
+TO veetbot_schedule;
+```
+
+The projection grants are part of checkpoint seeding, not optional reporting:
+without them a due schedule can retry until its misfire window expires without
+ever committing the session and run.
+
 ```bash
 sudo chown root:veetbot /etc/veetbot/veetbot-schedule.env
 sudo chmod 0640 /etc/veetbot/veetbot-schedule.env

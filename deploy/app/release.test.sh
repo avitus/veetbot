@@ -151,6 +151,7 @@ make_stage() {
     "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/deploy/veetbot-notify.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
+    "$stage/scripts/check_schedule_database_permissions.py" \
     "$stage/scripts/check_production_deployment.py"
   for unit in \
     veetbot-api \
@@ -175,7 +176,7 @@ make_stage() {
     >"$stage/deploy/systemd/veetbot-notify.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
-  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\n' \
+  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "${1:-}" == scripts/check_schedule_database_permissions.py ]]; then exit 1; fi\n' \
     >"$stage/.venv/bin/python"
   chmod +x "$stage/.venv/bin/alembic" "$stage/.venv/bin/python"
 }
@@ -199,6 +200,7 @@ run_release() {
   VEETBOT_TEST_RELEASE="$release_id" \
   VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$release_id}" \
   VEETBOT_TEST_UNPRUNABLE_RELEASE="${VEETBOT_TEST_UNPRUNABLE_RELEASE:-}" \
+  VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION="${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" \
   VEETBOT_API_BASE_URL="${VEETBOT_TEST_API_BASE_URL:-http://127.0.0.1:8000/}" \
     "$RELEASE_SCRIPT" "$release_id"
 }
@@ -359,6 +361,20 @@ printf '%s\n' \
 printf '%s\n' \
   'AGENT_SCHEDULE_API_ENABLED=1' \
   'AGENT_SCHEDULE_WORKER_ENABLED=1' >>"$schedule_env"
+schedule_permission_id="20260810-152256-0000000"
+make_stage "$schedule_permission_id"
+if VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION=1 \
+  VEETBOT_TEST_ENV_FILE="$schedule_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_worker_env" \
+  run_release "$schedule_permission_id" \
+  >"$TEST_ROOT/schedule-permission.out" 2>&1; then
+  printf 'release with an under-privileged schedule role unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ ! -e "$DEPLOY_ROOT/releases/$schedule_permission_id" ]]
+grep -Fq \
+  'schedule database role does not satisfy the materialization contract' \
+  "$TEST_ROOT/schedule-permission.out"
 schedule_id="20260810-152256-0000001"
 make_stage "$schedule_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
@@ -371,6 +387,7 @@ grep -Fxq "EnvironmentFile=$schedule_worker_env" \
 grep -Fq \
   'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
+grep -Fq 'python scripts/check_schedule_database_permissions.py' "$LOG_FILE"
 
 schedule_notification_mismatch_env="$TEST_ROOT/schedule-notification-mismatch.env"
 schedule_notification_mismatch_worker_env="$TEST_ROOT/schedule-notification-mismatch-worker.env"
