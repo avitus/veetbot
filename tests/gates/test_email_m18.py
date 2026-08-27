@@ -1162,15 +1162,15 @@ async def _assert_predispatch_credential_rejection_reauthenticates_once() -> Non
             responses=(
                 ScriptedMCPResponse(
                     name="create_draft",
-                    result=MCPCallResult(content=("draft-created",)),
-                ),
-                ScriptedMCPResponse(
-                    name="create_draft",
                     result=MCPCallResult(
                         content=("gmail.credential_rejected",),
                         structured={"effect_status": "not_applied"},
                         is_error=True,
                     ),
+                ),
+                ScriptedMCPResponse(
+                    name="create_draft",
+                    result=MCPCallResult(content=("draft-created",)),
                 ),
                 ScriptedMCPResponse(
                     name="create_draft",
