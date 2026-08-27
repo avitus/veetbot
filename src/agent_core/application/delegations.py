@@ -83,8 +83,18 @@ def _reject(reason: DelegationRejectionReason, message: str) -> DelegationValida
 
 
 def _child_agent(parent: AgentSpec, brief: DelegationBrief, limits: RunLimits) -> AgentSpec:
+    """Create the immutable child agent with its governed synthesis reserve."""
+
     instructions = (
         f"{CHILD_INSTRUCTIONS_FRAME}\n\n"
+        f"You have at most {limits.max_steps} steps, {limits.max_model_calls} model "
+        f"calls, {limits.max_tool_calls} tool calls, and USD {limits.max_cost}. "
+        f"Plan bounded tool batches and reserve {limits.synthesis_reserve_steps} step, "
+        f"{limits.synthesis_reserve_model_calls} model call, and USD "
+        f"{limits.synthesis_reserve_cost} for the final synthesis. Finish with the "
+        "best-supported "
+        "answer available. If a tool is unavailable or fails, do not repeat the "
+        "same unavailable path; use another allowed tool or report the evidence gap.\n\n"
         f"Objective: {brief.objective}\n\n"
         f"Success condition: {brief.success_condition}"
     )
@@ -114,7 +124,11 @@ def _child_agent(parent: AgentSpec, brief: DelegationBrief, limits: RunLimits) -
         enabled_skills=list(parent.enabled_skills),
         policy_profile=parent.policy_profile,
         limits=limits.model_copy(update={"deadline_at": None}),
-        metadata={"run_kind": RunKind.DELEGATED.value, "source_agent": str(parent.id)},
+        metadata={
+            "run_kind": RunKind.DELEGATED.value,
+            "source_agent": str(parent.id),
+            "synthesis_reserve": "enforced",
+        },
     )
 
 

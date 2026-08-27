@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from agent_core.domain.policies import (
@@ -33,6 +34,10 @@ _BRIEF_SCHEMA: dict[str, Any] = {
         },
         "limits": {
             "type": ["object", "null"],
+            "description": (
+                "Omit per-brief limits for long research so the runtime applies its "
+                "governed defaults. Supply them only when a brief needs stricter caps."
+            ),
             "properties": {
                 "max_steps": {"type": ["integer", "null"], "minimum": 1},
                 "max_model_calls": {"type": ["integer", "null"], "minimum": 1},
@@ -51,7 +56,7 @@ _BRIEF_SCHEMA: dict[str, Any] = {
 class DelegateRunTool:
     spec = ToolSpec(
         name=DELEGATE_RUN_TOOL_NAME,
-        version="1.0.0",
+        version="1.0.1",
         description=(
             "Delegate independent, bounded child runs — one per brief — and "
             "suspend this run until every child finishes."
@@ -85,3 +90,21 @@ class DelegateRunTool:
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         del arguments, context
         raise RuntimeError("delegate.run is executed by the runtime control path")
+
+
+def _legacy_input_schema() -> dict[str, Any]:
+    """Reconstruct the exact 1.0.0 schema that persisted sessions pinned."""
+
+    schema = deepcopy(DelegateRunTool.spec.input_schema)
+    limits = schema["properties"]["briefs"]["items"]["properties"]["limits"]
+    limits.pop("description", None)
+    return schema
+
+
+class LegacyDelegateRunTool(DelegateRunTool):
+    """Compatibility registration for invocations pinned before version 1.0.1."""
+
+    spec = DelegateRunTool.spec.model_copy(
+        update={"version": "1.0.0", "input_schema": _legacy_input_schema()},
+        deep=True,
+    )

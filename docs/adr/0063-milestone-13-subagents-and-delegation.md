@@ -61,6 +61,9 @@ deployment.
    remaining value; the child deadline is bounded by the parent's; the sum of
    children's maximum cost is reserved against the parent at materialization;
    the parent's usage is debited by each child's terminal usage at the join.
+   Each child total includes a configured final-synthesis reserve; when
+   research reaches it, the runtime forbids further tool use rather than
+   spending the headroom needed to return a bounded result.
 7. **Scopes and tools are subsets; results are untrusted.** Child scopes are the
    parent's intersected with what the allowed tools require; the child's tools
    are a subset of the parent's pinned set and never include `delegate.run`

@@ -128,8 +128,6 @@ milestones:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
     open_items:
-      - Owner-supplied redacted failed long-research trajectory for the capability scenario
-      - Capability-scenario scoring, the single-agent baseline and the delegating re-run
       - Hosted CI on the milestone's final head
       - CodeRabbit review loop on the dev to main pull request (build step 7)
     evidence:
@@ -160,7 +158,9 @@ milestones:
           downward-only cancel cascade, the delegation limits block with
           the tenant admission lock and the default-off flag, and case 32
           with the tools arm overlay are implemented and verified by the
-          static, contract, and PostgreSQL integration lanes.
+          static, contract, and PostgreSQL integration lanes. The capability
+          scenario schema now admits the Milestone 13 scenario while keeping
+          Milestone 14 outside its closed bound.
       - check: red-green discipline for the Milestone 13 suites
         outcome: recorded
         detail: >-
@@ -175,15 +175,125 @@ milestones:
           repositories and constraint-free row, the end-to-end suspension
           suite failing with the parent completing without any delegation
           machinery, and tests/unit/test_config.py failing on the ten
-          missing delegation knobs.
-      - check: capability scenario from a real failed trajectory
-        outcome: not_started
+          missing delegation knobs. The capability-bound continuation ran
+          pytest tests/unit/test_capability_boundaries.py -k
+          'milestone_thirteen or milestone_fourteen', which failed because
+          the pre-change schema rejected 13 and reported 10, not 13, as its
+          upper bound.
+      - check: hosted CI and final review for pull request 64
+        outcome: passed_on_final_head
         detail: >-
-          The owner has not yet supplied the redacted failed long-research
-          trajectory the gate for multi-agent work names; without it the
-          milestone is buildable but not activatable. Its single-agent
-          baseline and delegating re-run scoring remain outstanding, as do
-          hosted CI and the CodeRabbit review loop of build step 7.
+          On final head 071e6422503df592f8fe172484a7b1b304014540 all five
+          CircleCI lanes, the Xcode Cloud iOS and macOS archives, GitGuardian,
+          and CodeRabbit passed. CodeRabbit reviewed that exact head with no
+          new finding, every review thread was resolved, and GitHub merged the
+          dev-to-main pull request as 07c8bdfec085a2e6aef75311ea1d5cb046391ab5.
+          This evidence covers the implementation on that head, not the later
+          local capability-bound continuation or the still-unwritten live
+          scenario.
+      - check: capability scenario from a real failed trajectory
+        outcome: admitted_locally
+        detail: >-
+          Production run 85487ddf-5deb-45c3-a89b-a22b752f5406 supplies the
+          required real long-research failure: the single agent spent all 32
+          permitted tool calls across six providers and their second-source
+          cross-checks, then failed with budget_exceeded before producing an
+          answer. With active export consent, corrected trajectory@5 export
+          65b5b347-2891-4e58-a3f1-d9c583088f85 produced the checked-in
+          trajectory. Review confirmed the export's digest, matching failed
+          provenance, rule-based redactions, absence of event sequences and
+          principal identity, and successful redaction rescan. The repository
+          admission regression first failed because no trajectory-backed
+          scenario existed, then passed after the fixture and diagnosed
+          research scenario were added. Single-agent baseline and delegating
+          re-run scoring, hosted CI, and final review on the completed evidence
+          head remain.
+      - check: first single-agent live baseline attempt
+        outcome: blocked_by_cost_ceiling
+        detail: >-
+          Exact integrated build e238ce7 ran against a dedicated PostgreSQL
+          evaluation database with delegation explicitly disabled. Repeats 0
+          through 3 each exhausted the shared subject-and-judge cost ceiling
+          before any judge call, at USD 0.917954, USD 0.9954325, USD 0.861420,
+          and USD 0.913695 respectively. Repeat 4 then ended with zero usage
+          when the normalized model stream violated its contract, and the
+          suite emitted a release-blocking evaluation_error. The persisted
+          attempt cost is USD 3.6885015, with zero criterion rows and zero
+          scores. The owner then explicitly approved a USD 50 evaluation
+          budget. The governed ceilings are now USD 5.00 per repeat, USD 25.00
+          per suite invocation, and USD 50.00 per day, leaving the scored
+          five-repeat baseline and delegating arm to run under the approved
+          bound at that checkpoint.
+      - check: governed baseline and delegation calibration under the approved budget
+        outcome: blocked_by_call_ceiling
+        detail: >-
+          Exact staged build 95b3236 completed the five-repeat single-agent
+          baseline with five release-blocking ceiling hits, zero policy
+          failures, no criterion rows, and USD 7.8022225 persisted cost. Exact
+          staged build d0b0eed then completed the five-repeat delegation arm
+          with five tool-call ceiling hits, zero policy failures, no criterion
+          rows, and per-repeat costs USD 5.0662285, USD 2.6579855, USD
+          2.9546355, USD 2.4501290, and USD 1.7449210. The live failures exposed
+          three harness defects now covered by regressions: model-stream
+          invariant detail was discarded, approval-free child suspension was
+          treated as terminal and only the interactive queue was driven, and a
+          zero-tool judge was stopped by the runtime before its first model
+          call. A bearer-terminology false positive was also narrowed without
+          admitting raw authorization headers or credential-shaped values.
+          Because child usage is correctly additive, the scenario now allows
+          80 model and 200 tool calls while retaining every approved cost
+          ceiling. At that checkpoint, the final scored baseline and
+          delegating distributions remained outstanding; these calibration
+          runs are recorded rather than reclassified retrospectively.
+      - check: scored single-agent baseline under the approved budget
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          Exact staged build 11e5b90 completed the delegation-disabled
+          five-repeat research baseline against the dedicated PostgreSQL
+          evaluation database. Repeats 0 through 4 scored 0.75, 0.55, 0.75,
+          0.65, and 0.75, for mean 0.69, floor 0.55, and population variance
+          0.0064. All five rows have zero ceiling hits and zero policy
+          failures, with USD 7.855529 total persisted and provider-ledger
+          cost. The suite correctly remained release-blocked because repeat 1
+          fell below the rubric's 0.60 floor. The aggregate provider ledger
+          reached USD 42.599510 of the owner-approved USD 50 cap, leaving USD
+          7.400490. The prior unscored five-repeat delegation calibration cost
+          USD 14.8738995, so the scored delegating re-run remains outstanding
+          rather than knowingly exceeding the approved aggregate cap.
+      - check: first scored delegating re-run under the raised aggregate cap
+        outcome: blocked_by_comparison
+        detail: >-
+          Exact staged build 877b3ec completed five delegation-enabled repeats
+          at scores 0.75, 0.75, 0.775, 0.65, and 0.35, for mean 0.655, floor
+          0.35, and population variance 0.0251. It persisted zero scenario
+          ceiling hits, zero policy failures, and USD 10.984242 cost, taking
+          aggregate provider spend to USD 53.583752 of the owner-approved USD
+          100 cap. The arm remained release-blocked and did not score above the
+          0.69 baseline. Its child ledger showed repeated exhaustion at the
+          shipped eight-step/eight-model/16-tool defaults or caller-guessed
+          lower caps, including the 0.35 repeat whose children returned no
+          usable research summary. The failed distribution remains recorded;
+          it was not reclassified or discarded.
+      - check: scored delegating exit evidence after child-budget calibration
+        outcome: passed_live
+        detail: >-
+          The failed arm drove a red-green calibration on exact code head
+          3c8772a: governed child defaults moved from 8 model/16 tool calls to
+          12 model/48 tool calls, child instructions expose the derived budget
+          and reserve a final synthesis model call, and delegate.run@1.0.1
+          tells callers to omit guessed per-brief limits unless stricter caps
+          are intended. The focused red test failed on all three old contracts;
+          its green run passed, as did 103 delegation/configuration tests and
+          the complete local check. Exact staged build
+          3c8772a-delegating-repair then scored 0.65, 0.65, 0.90, 0.65, and
+          0.75, for mean 0.72, floor 0.65, and population variance 0.0096.
+          All five rows and the durable suite event report zero scenario
+          ceiling hits, zero policy failures, and release_blocked false. The
+          arm cost USD 11.104456 and aggregate provider spend is USD 64.688208
+          of the USD 100 authorization. This satisfies ADR-0063 because the
+          delegating mean is above the scored single-agent baseline's 0.69;
+          the lower baseline is retained as the required failed-trajectory
+          comparison rather than retrospectively repaired.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
@@ -407,5 +517,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-26T01:11:08Z
+last_updated: 2026-08-26T21:56:29Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

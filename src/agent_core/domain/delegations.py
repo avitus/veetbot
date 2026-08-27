@@ -170,6 +170,9 @@ class DelegationDefaults(BaseModel):
     max_tool_calls: int = Field(gt=0)
     max_cost: Decimal = Field(gt=0)
     wall_seconds: int = Field(gt=0)
+    synthesis_reserve_steps: int = Field(default=1, gt=0)
+    synthesis_reserve_model_calls: int = Field(default=1, gt=0)
+    synthesis_reserve_cost: Decimal = Field(default=Decimal("0.25"), gt=0)
 
 
 class DelegationCaps(BaseModel):
@@ -233,6 +236,17 @@ def derive_child_limits(
             if available <= 0:
                 raise _insufficient("cost")
             child_cost = min(requested_cost, available)
+        child_steps = min(requested.max_steps or defaults.max_steps, remaining_steps)
+        child_model_calls = min(
+            requested.max_model_calls or defaults.max_model_calls,
+            remaining_model_calls,
+        )
+        if child_steps <= defaults.synthesis_reserve_steps:
+            raise _insufficient("steps after reserving final synthesis")
+        if child_model_calls <= defaults.synthesis_reserve_model_calls:
+            raise _insufficient("model calls after reserving final synthesis")
+        if child_cost <= defaults.synthesis_reserve_cost:
+            raise _insufficient("cost after reserving final synthesis")
         reserved += child_cost
         wall_seconds = requested.wall_seconds or defaults.wall_seconds
         deadline = now + timedelta(seconds=wall_seconds)
@@ -240,11 +254,8 @@ def derive_child_limits(
             deadline = min(parent.deadline_at, deadline)
         derived.append(
             RunLimits(
-                max_steps=min(requested.max_steps or defaults.max_steps, remaining_steps),
-                max_model_calls=min(
-                    requested.max_model_calls or defaults.max_model_calls,
-                    remaining_model_calls,
-                ),
+                max_steps=child_steps,
+                max_model_calls=child_model_calls,
                 max_tool_calls=min(
                     requested.max_tool_calls or defaults.max_tool_calls,
                     remaining_tool_calls,
@@ -253,6 +264,9 @@ def derive_child_limits(
                 max_output_tokens=parent.limits.max_output_tokens,
                 max_cost=child_cost,
                 deadline_at=deadline,
+                synthesis_reserve_steps=defaults.synthesis_reserve_steps,
+                synthesis_reserve_model_calls=defaults.synthesis_reserve_model_calls,
+                synthesis_reserve_cost=defaults.synthesis_reserve_cost,
             )
         )
     return derived

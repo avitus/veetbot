@@ -9,8 +9,9 @@ title: Current Milestone
   next sequential authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates, and is in progress: build steps 1 through 5 and the deterministic
-  half of 6 are implemented with every registered gate resolving to a live,
-  locally passing check. Milestone 14 — inbound surfaces and
+  half of 6 are implemented, and the capability scenario schema admits
+  Milestone 13 while retaining a closed upper bound, with every registered
+  gate resolving to a live, locally passing check. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
   twenty-one gates and follows Milestone 13. Milestone 15 — operational
   hardening — is specified by
@@ -52,9 +53,47 @@ title: Current Milestone
   erasure, delegate.run and its one-transaction materializer, the child-run
   suspension, join, and cancel cascade, the delegation limits block with
   tenant admission and the default-off flag, and case 32 with the tools arm
-  overlay are implemented, with all twenty-one gates passing locally; the
-  capability scenario awaits the owner's redacted failed trajectory, and
-  hosted CI and the CodeRabbit review loop remain outstanding. Milestones 14
+  overlay are implemented, with all twenty-one gates passing locally. Pull
+  request 64 passed all five CircleCI lanes, both Xcode Cloud archives,
+  GitGuardian, and a finding-free final-head CodeRabbit review before merging
+  to `main`, covering the implementation on that head. The capability-bound
+  continuation passes locally. A consent-stamped failed long-research run has
+  now been captured, re-exported under the corrected `trajectory@5` projection,
+  privacy-reviewed, and admitted as the research capability scenario. Its
+  first live baseline attempt produced four `cost_usd` ceiling hits before
+  judging at costs from USD 0.861420 through USD 0.9954325; its fifth repeat
+  ended in a zero-usage model-stream contract failure. No repeat reached the
+  judge, proving that the checked-in USD 0.75 per-repeat ceiling cannot produce
+  a score on the configured balanced model. The owner subsequently approved a
+  USD 50 evaluation budget, now encoded as USD 5 per repeat, USD 25 per suite,
+  and USD 50 per day. The next five-repeat baseline persisted five ceiling
+  hits at USD 7.8022225 total; the completed delegation arm also persisted five
+  tool-call ceiling hits, zero policy failures, and USD 14.8738995 total. Those
+  runs exposed and drove regressions for content-free model diagnostics,
+  child-suspension polling across both queue classes, bearer-terminology false
+  positives, and the zero-tool judge deadlock. Because delegated child usage
+  is correctly additive, the scenario now permits 80 model and 200 tool calls
+  while retaining every approved cost ceiling. A scored single-agent
+  baseline then completed at scores 0.75, 0.55, 0.75, 0.65, and 0.75, with
+  mean 0.69, floor 0.55, population variance 0.0064, zero ceiling hits, zero
+  policy failures, and USD 7.855529 cost. It correctly remains
+  release-blocked because one repeat is below the rubric's 0.60 floor. The
+  provider ledger used USD 42.599510 of the initially approved USD 50
+  aggregate cap. The owner subsequently raised the aggregate authorization to
+  USD 100, now encoded as the daily ceiling while the USD 5 repeat and USD 25
+  suite ceilings remain unchanged. A first scored delegating arm on build
+  `877b3ec` then scored 0.75, 0.75, 0.775, 0.65, and 0.35 (mean 0.655,
+  floor 0.35) at USD 10.984242 and correctly remained blocked below the
+  baseline. Its child ledger drove a governed default-limit and synthesis-
+  discipline repair. The exact repaired build `3c8772a-delegating-repair`
+  scored 0.65, 0.65, 0.90, 0.65, and 0.75, with mean 0.72, floor 0.65,
+  population variance 0.0096, zero ceiling hits, zero policy failures, and USD
+  11.104456 cost. Its durable suite event reports `release_blocked: false`, and
+  the delegating mean exceeds the baseline's 0.69 as ADR-0063 requires.
+  Aggregate provider spend is USD 64.688208 of the USD 100 authorization. The
+  failed-trajectory baseline remains the comparison evidence; only hosted
+  verification and the final review loop remain.
+  Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the

@@ -287,6 +287,10 @@ child.max_model_calls  = min(requested or default, parent.remaining_model_calls)
 child.max_tool_calls   = min(requested or default, parent.remaining_tool_calls)
 child.max_cost         = min(requested or default, parent.remaining_cost - reserved)
 child.deadline_at      = min(parent.deadline_at, now + (requested or default wall_seconds))
+
+research.max_steps       = child.max_steps - synthesis_reserve_steps
+research.max_model_calls = child.max_model_calls - synthesis_reserve_model_calls
+research.max_cost        = child.max_cost - synthesis_reserve_cost
 ```
 
 The rule is applied per brief, in order, against what remains after the
@@ -301,6 +305,15 @@ existing usage-recording path, and the parent may fail on budget while
 suspended if the children's actual spend exceeds what remains — the behaviour
 [runtime-loop.md](runtime-loop.md) already describes for the child-run join
 wake.
+
+The derived child total includes a closed final-synthesis reserve: one step,
+one model call, and USD 0.25 by default. A child limit that cannot contain both
+research work and those reserves is rejected before materialization. Once any
+research boundary is reached, the runtime adds a platform-trusted,
+synthesis-only control to the volatile request and refuses another tool call;
+the child must return the best-supported answer from evidence already in its
+conversation or fail closed. The reserve does not widen the child's total or
+the amount charged to the parent.
 
 Caps are closed and configured: briefs per `delegate.run` call (default
 three), live children per parent run (default eight, counted across calls),
@@ -524,7 +537,9 @@ Delegation adds no role and no unit. The `delegation:` block in the versioned
 limits file declares `max_children_per_call`, `max_live_children_per_parent`,
 `max_depth`, `max_live_delegated_runs_per_tenant`, the default child
 `max_steps`, `max_model_calls`, `max_tool_calls`, `max_cost`, and
-`wall_seconds`, and the summary byte ceiling. Children use async priority 10
+`wall_seconds`, the final `synthesis_reserve_steps`,
+`synthesis_reserve_model_calls`, and `synthesis_reserve_cost`, and the summary
+byte ceiling. Children use async priority 10
 and the existing reserved-capacity rule keeps them from starving interactive
 work.
 

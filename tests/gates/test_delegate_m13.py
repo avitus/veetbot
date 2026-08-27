@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -27,8 +29,11 @@ from agent_core.domain.delegations import (
     derive_child_limits,
 )
 from agent_core.domain.errors import DelegationValidationError
+from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     FakeModelScript,
+    ModelTransientError,
+    ModelUsage,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
@@ -40,8 +45,10 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunKind, RunLimits, RunStatus, RunUsage
+from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolSpec
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
+from agent_core.tools.delegate_run import DelegateRunTool
 from tests.contract import support
 from tests.contract.support import memory_uow_factory, principal
 
@@ -146,6 +153,8 @@ def _check_generated_child_limits(
     deadline_seconds: int | None,
     requested: list[DelegationLimits | None],
 ) -> None:
+    """Exercise derived child totals and synthesis reserves across generated budgets."""
+
     parent = _parent(
         max_steps=max_steps,
         step_count=step_count,
@@ -169,12 +178,17 @@ def _check_generated_child_limits(
         or (remaining_cost is not None and remaining_cost <= 0)
         or (parent.deadline_at is not None and parent.deadline_at <= NOW)
     )
+    reserve_exhausted = (
+        remaining_steps <= DEFAULTS.synthesis_reserve_steps
+        or remaining_model_calls <= DEFAULTS.synthesis_reserve_model_calls
+        or (remaining_cost is not None and remaining_cost <= DEFAULTS.synthesis_reserve_cost)
+    )
 
     try:
         derived = derive_child_limits(parent, briefs, DEFAULTS, now=NOW)
     except DelegationValidationError as error:
         assert error.reason == "delegation.budget_insufficient"
-        assert exhausted or (remaining_cost is not None and len(briefs) > 1)
+        assert exhausted or reserve_exhausted or (remaining_cost is not None and len(briefs) > 1)
         return
 
     assert not exhausted
@@ -488,6 +502,187 @@ async def test_every_child_gets_a_dedicated_session() -> None:
         pinned_tools=PINNED,
     )
     assert replay == delegation
+
+
+async def test_child_instructions_preserve_a_final_synthesis_turn() -> None:
+    """Give bounded research children explicit budget discipline."""
+
+    materializer, factory, parent, invocation = await _materializer_stack()
+    [child] = (
+        await materializer.materialize(
+            request=_request(_materializer_brief()),
+            run=parent,
+            agent=support.agent(),
+            principal=principal(),
+            invocation=invocation,
+            pinned_tools=PINNED,
+        )
+    ).children
+
+    assert child.child_run_id is not None
+    async with factory() as uow:
+        child_run = await uow.runs.get(child.child_run_id, principal())
+        child_agent = await uow.agents.get_version(child_run.agent_id, child_run.agent_version)
+    assert child_run.limits.synthesis_reserve_steps == 1
+    assert child_run.limits.synthesis_reserve_model_calls == 1
+    assert child_run.limits.synthesis_reserve_cost == Decimal("0.25")
+    assert "at most 4 steps, 4 model calls, 8 tool calls" in child_agent.instructions
+    assert "reserve 1 step, 1 model call, and USD 0.25" in child_agent.instructions
+    assert "do not repeat the same unavailable path" in child_agent.instructions
+
+
+def test_delegate_run_advertises_governed_defaults_for_long_research() -> None:
+    """Tell callers when the governed long-research defaults should be retained."""
+
+    spec = DelegateRunTool.spec
+
+    assert spec.version == "1.0.1"
+    limits_schema = spec.input_schema["properties"]["briefs"]["items"]["properties"]["limits"]
+    assert "Omit per-brief limits" in limits_schema["description"]
+    assert "governed defaults" in limits_schema["description"]
+
+
+@pytest.mark.parametrize("dimension", ["steps", "model_calls", "cost"])
+async def test_delegated_research_cannot_consume_synthesis_headroom(
+    tmp_path: Path,
+    dimension: str,
+) -> None:
+    """Stop tool research before retries spend any reserved synthesis budget."""
+
+    child_agent_id = UUID("00000000-0000-0000-0000-000000000171")
+    child_session_id = UUID("00000000-0000-0000-0000-000000000172")
+    child_run_id = UUID("00000000-0000-0000-0000-000000000173")
+    limits = RunLimits(
+        max_steps=2 if dimension == "steps" else 4,
+        max_model_calls=2 if dimension == "model_calls" else 4,
+        max_tool_calls=4,
+        max_cost=Decimal("0.40") if dimension == "cost" else Decimal("2.00"),
+        synthesis_reserve_steps=1,
+        synthesis_reserve_model_calls=1,
+        synthesis_reserve_cost=Decimal("0.25"),
+    )
+    child_agent = support.agent().model_copy(
+        update={
+            "id": child_agent_id,
+            "version": "1.0.0+reserve-test",
+            "model_policy": "fake-balanced",
+            "enabled_tools": ["math.calculate"],
+            "limits": limits,
+            "metadata": {"run_kind": RunKind.DELEGATED.value},
+        },
+        deep=True,
+    )
+    session = Session(
+        id=child_session_id,
+        tenant_id=support.TENANT,
+        principal_id=support.PRINCIPAL_ID,
+        agent_id=child_agent.id,
+        agent_version=child_agent.version,
+        status=SessionStatus.ACTIVE,
+        metadata={"run_kind": RunKind.DELEGATED.value},
+        created_at=support.NOW,
+        updated_at=support.NOW,
+    )
+    child_run = Run(
+        id=child_run_id,
+        session_id=session.id,
+        kind=RunKind.DELEGATED,
+        tenant_id=support.TENANT,
+        agent_id=child_agent.id,
+        agent_version=child_agent.version,
+        status=RunStatus.QUEUED,
+        limits=limits,
+        scheduled_for=support.NOW,
+        created_at=support.NOW,
+        updated_at=support.NOW,
+    )
+    tool_turn = ScriptedTurn(
+        tool_calls=[
+            ScriptedToolCall(
+                name="math.calculate",
+                arguments={"expression": "2 + 2"},
+            )
+        ],
+        stop_reason=StopReason.TOOL_USE,
+        usage=ModelUsage(cost=Decimal("0.05")),
+    )
+    if dimension == "steps":
+        turns = [tool_turn, tool_turn]
+        expected_invocations = 1
+    else:
+        transient = ModelTransientError(
+            provider="fake",
+            model="scripted",
+            attempt_id=UUID("00000000-0000-0000-0000-000000000174"),
+            message="retry within the delegated synthesis boundary",
+            stream_had_output=False,
+        )
+        turns = [
+            ScriptedTurn(
+                fail_with=transient,
+                usage=ModelUsage(cost=Decimal("0.20") if dimension == "cost" else Decimal("0.05")),
+            ),
+            tool_turn,
+        ]
+        expected_invocations = 0
+
+    async with build(
+        settings=_delegation_settings(tmp_path),
+        principal=principal(),
+        script=FakeModelScript(turns=turns),
+        fixed_clock_at=support.NOW,
+        sequential_ids=True,
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(child_agent)
+            await uow.sessions.create(session)
+            await uow.runs.create(child_run)
+            seed = await uow.events.append(
+                NewEvent(
+                    session_id=session.id,
+                    run_id=child_run.id,
+                    event_type="user.message.created",
+                    actor_type="runtime",
+                    actor_id=support.PRINCIPAL_ID,
+                    payload={"content": "Research, then synthesize within the reserve."},
+                )
+            )
+            await uow.runs.set_seed_event_sequence(child_run.id, seed.sequence)
+        await app.executor.execute(child_run.id)
+        failed = await app.runs.get(child_run.id)
+        async with app.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(child_run.id, principal())
+
+    assert failed.status is RunStatus.FAILED
+    assert failed.failure is not None
+    assert failed.failure.details == {"synthesis_reserve": dimension}
+    assert len(invocations) == expected_invocations
+
+
+async def test_persisted_delegate_run_v1_remains_resolvable_for_export(tmp_path: Path) -> None:
+    """Keep exact lookup available for pre-1.0.1 invocations and checkpoints."""
+
+    async with build(
+        settings=_delegation_settings(tmp_path),
+        principal=principal(),
+        fixed_clock_at=support.NOW,
+        sequential_ids=True,
+    ) as app:
+        registry = app.trajectories._tools
+        legacy = registry.get("delegate.run", "1.0.0")
+        current = registry.get("delegate.run")
+
+    assert legacy.spec.version == "1.0.0"
+    legacy_schema = json.dumps(
+        legacy.spec.input_schema,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    assert hashlib.sha256(legacy_schema).hexdigest() == (
+        "09b6e1616a36eef98b7c4fa2740f38b473017156ed6a155d74c08eae67b628d3"
+    )
+    assert current.spec.version == "1.0.1"
 
 
 def _delegation_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:

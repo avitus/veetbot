@@ -53,6 +53,88 @@ title: Changelog
   16/17, and 19 additions, and `AGENTS.md` and `CLAUDE.md` correct their
   milestone and specification counts.
 
+## 2026-08-25 — Milestone 13 capability scenario bound and hosted evidence
+
+- Raised the capability scenario schema's closed milestone ceiling from 10 to
+  13, as the delegation design requires. Focused regression coverage admits a
+  Milestone 13 trajectory-sourced scenario and rejects Milestone 14; it does
+  not fabricate the real failed trajectory that the publication gate requires.
+- Recorded the hosted evidence already completed by pull request 64. On final
+  head `071e6422503df592f8fe172484a7b1b304014540`, all five CircleCI lanes,
+  both Xcode Cloud archives, GitGuardian, and CodeRabbit passed; CodeRabbit had
+  no final-head finding and every review thread was resolved before the pull
+  request merged to `main`. That evidence covers the implementation on that
+  head, not this later local continuation. A real failed research trajectory
+  is now exported under the corrected `trajectory@5` privacy projection,
+  reviewed, and admitted. Its first baseline attempt established that the
+  USD 0.75 per-repeat cost ceiling is too low to reach the judge on the
+  configured balanced model. The owner approved a USD 50 evaluation budget,
+  now encoded as USD 5 per repeat, USD 25 per suite, and USD 50 per day; the
+  two live scores and hosted verification of the completed evidence head were
+  outstanding at that checkpoint. The scored baseline is recorded below; the
+  delegating score and hosted verification remain outstanding.
+- Preserved the validator's fixed, content-free invariant name in
+  `RunFailure.details` when a normalized model stream fails locally. The live
+  research baseline exposed that the prior generic failure discarded the one
+  diagnostic needed to distinguish a provider-stream defect from a governed
+  credential-content rejection.
+- Refined bare bearer-value detection so ordinary documentation such as
+  `Bearer authentication` remains model content, while raw authorization
+  headers, provider-key prefixes, JWT-shaped bearer values, and long opaque
+  bearer values remain rejected by the normalized-stream boundary. A second
+  live false positive extended that accepted terminology to short mixed-shape
+  phrases such as `Bearer token-based authorization`.
+- Taught the live capability driver to distinguish a genuine pending approval
+  from Milestone 13's approval-free child-run suspension. A delegated research
+  subject now drives both interactive and asynchronous queue classes through
+  queued children and the resumed parent instead of misclassifying
+  `WAITING_FOR_APPROVAL` as the subject's final state.
+- Made tool-free capability judges runnable without changing their zero-tool
+  evaluation budget: the runtime-facing limit receives a one-call floor while
+  no tools are registered and the harness still rejects any observed tool
+  call. Live additive-usage evidence also raised only the research scenario's
+  call ceilings from 40 model/60 tool calls to 80 model/200 tool calls; its USD
+  5 repeat, USD 25 suite, and USD 50 daily cost ceilings remain unchanged.
+- Normalized one exact outer `json` code fence from a capability judge before
+  applying the unchanged strict schema. Surrounding prose, nested fences,
+  missing or duplicate criteria, extra fields, and out-of-range values remain
+  invalid, and evaluation failures now report a content-free judge/schema
+  diagnostic rather than echoing Pydantic's candidate-output excerpt.
+- Completed the scored, delegation-disabled five-repeat research baseline on
+  exact staged build `11e5b90`: scores were 0.75, 0.55, 0.75, 0.65, and 0.75,
+  with mean 0.69, floor 0.55, population variance 0.0064, zero ceiling hits,
+  zero policy failures, and USD 7.855529 cost. The suite correctly remains
+  release-blocked because the second repeat is below the rubric's 0.60 floor.
+  The provider ledger reached USD 42.599510 of the approved USD 50 aggregate
+  cap, leaving the scored delegating re-run outstanding rather than knowingly
+  exceeding the approved limit.
+- Raised only the research capability evaluator's aggregate daily ceiling from
+  USD 50 to USD 100 after explicit owner approval. The USD 5 repeat and USD 25
+  suite ceilings remain unchanged, and the provider ledger continues to count
+  aborted attempts when enforcing the aggregate authorization operationally.
+- Preserved the first scored delegating distribution rather than cherry-picking
+  it: exact build `877b3ec` scored 0.75, 0.75, 0.775, 0.65, and 0.35 (mean
+  0.655, floor 0.35), with zero scenario ceiling hits, zero policy failures,
+  and USD 10.984242 cost. Child traces tied the failure to exhausted default or
+  caller-guessed child limits before a usable synthesis.
+- Calibrated the governed child defaults from 8/8/16 to 12/12/48
+  steps/model/tool calls, made each derived model/tool budget visible in the
+  child instructions with an explicit final-synthesis reserve, and revised
+  `delegate.run` to 1.0.1 so long-research callers know to omit optional limits
+  unless they intend stricter caps. Exact repaired build
+  `3c8772a-delegating-repair` then scored 0.65, 0.65, 0.90, 0.65, and 0.75
+  (mean 0.72, floor 0.65, population variance 0.0096), with zero scenario
+  ceiling hits, zero policy failures, `release_blocked: false`, and USD
+  11.104456 cost. That exceeds the recorded 0.69 single-agent baseline while
+  keeping aggregate provider spend at USD 64.688208 of the USD 100 cap.
+- Closed the final-review gaps without discarding that live evidence: the
+  runtime now enforces explicit step, model-call, and cost headroom for a
+  delegated child's tool-free final synthesis; `delegate.run@1.0.0` remains
+  registered for exact persisted-session recovery alongside 1.0.1; and the
+  normalized stream and trajectory exporter share one bearer-value rule that
+  covers short opaque credential-shaped values without rejecting ordinary
+  authorization prose.
+
 ## 2026-08-24 — Deployment sudo contract covers notifications
 
 - Repaired the production sudoers contract so notification-enabled releases

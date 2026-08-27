@@ -121,8 +121,19 @@ async def test_stream_invariant_5_usage_is_advisory_and_never_terminal() -> None
         await consume(invalid, completed(1))
 
 
-async def test_stream_invariant_6_credential_shaped_content_is_rejected() -> None:
-    credential = "sk-" + "not-a-real-provider-key"
+@pytest.mark.parametrize(
+    "credential",
+    (
+        "sk-" + "not-a-real-provider-key",
+        "Bearer " + "a1b2c3d4",
+        "Bearer synthetic-" + "test-value-12345678901234567890",
+    ),
+)
+async def test_stream_invariant_6_credential_shaped_content_is_rejected(
+    credential: str,
+) -> None:
+    """Reject every governed credential shape before a normalized event escapes."""
+
     with pytest.raises(ModelStreamError, match="credential-shaped"):
         await consume(text(0, 0, credential), completed(1))
 
@@ -135,11 +146,23 @@ async def test_all_six_stream_invariants() -> None:
     await test_stream_invariant_3_item_deltas_are_contiguous()
     await test_stream_invariant_4_tool_identity_is_stable_and_present()
     await test_stream_invariant_5_usage_is_advisory_and_never_terminal()
-    await test_stream_invariant_6_credential_shaped_content_is_rejected()
+    await test_stream_invariant_6_credential_shaped_content_is_rejected(
+        "sk-" + "not-a-real-provider-key"
+    )
 
 
-async def test_authorization_documentation_is_not_a_credential() -> None:
-    documentation = "Send Authorization: <token> only after approval."
+@pytest.mark.parametrize(
+    "documentation",
+    (
+        "Send Authorization: <token> only after approval.",
+        "Compare OAuth 2.0 Bearer authentication with API keys.",
+        "Compare Bearer token-based authorization with session cookies.",
+        "Use Bearer YOUR_API_TOKEN_HERE in the quickstart example.",
+    ),
+)
+async def test_authorization_documentation_is_not_a_credential(documentation: str) -> None:
+    """Keep ordinary authentication prose outside the opaque-value detector."""
+
     events = [
         event async for event in validated_stream(source(text(0, 0, documentation), completed(1)))
     ]
