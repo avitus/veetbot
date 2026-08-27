@@ -37,7 +37,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.tools import ToolRegistry
 
 BUILDER_VERSION = "trajectory@5"
-RULESET_VERSION = "secrets@1"
+RULESET_VERSION = "secrets@2"
 RETENTION = timedelta(days=30)
 logger = logging.getLogger(__name__)
 SENSITIVE_KEY = re.compile(r"secret|token|password|api_?key|authorization", re.IGNORECASE)

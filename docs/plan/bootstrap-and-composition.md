@@ -298,7 +298,7 @@ Milestone 16's memory lifecycle knobs — five decay time constants, two ranking
 penalties, two usage deltas, the established-facts switch, the three decay
 sweep bounds, and the operator trace retention — less the three interactive
 snapshot caps that leave `memory/profiles.yaml` for `context/plan.yaml`, plus
-Milestone 13's thirteen delegation knobs: the four fan-out caps, the five
+Milestone 13's thirteen delegation knobs: the four admission/depth caps, the five
 default child limits, the three final-synthesis reserves, and the summary byte
 ceiling. The plan originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and

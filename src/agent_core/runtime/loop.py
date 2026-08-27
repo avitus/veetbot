@@ -299,13 +299,18 @@ def _has_final_text(message: AssistantMessage | None) -> bool:
     )
 
 
-def _synthesis_reserve_dimension(run: Run) -> str | None:
+def _synthesis_reserve_dimension(
+    run: Run,
+    *,
+    step_in_progress: bool = False,
+) -> str | None:
     """Name the first delegated research budget whose synthesis reserve began."""
 
     if run.kind is not RunKind.DELEGATED:
         return None
     limits = run.limits
-    if limits.max_steps - run.step_count <= limits.synthesis_reserve_steps:
+    remaining_steps = limits.max_steps - run.step_count + int(step_in_progress)
+    if remaining_steps <= limits.synthesis_reserve_steps:
         return "steps"
     if limits.max_model_calls - run.model_call_count <= limits.synthesis_reserve_model_calls:
         return "model_calls"
@@ -413,12 +418,24 @@ async def _record_denials(
 
 
 async def _invoke_model(
-    context: RunContext, step: Step, request: ModelRequest
+    context: RunContext,
+    step: Step,
+    request: ModelRequest,
+    initial_synthesis_reserve: str | None,
 ) -> ModelTurn | RunOutcome:
     """Consume one bounded model attempt sequence and persist authoritative usage."""
 
     while step.attempt_count < context.max_internal_attempts:
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
+        synthesis_reserve = initial_synthesis_reserve or _synthesis_reserve_dimension(
+            context.run,
+            step_in_progress=True,
+        )
+        attempt_request = (
+            _synthesis_only_request(request, synthesis_reserve)
+            if synthesis_reserve is not None
+            else request
+        )
         step.attempt_count += 1
         attempt = ModelAttempt(
             attempt_id=context.ids.new_id(),
@@ -433,11 +450,11 @@ async def _invoke_model(
             {
                 "attempt_id": str(attempt.attempt_id),
                 "step_number": step.step_number,
-                "prefix_sha256": request.metadata.get("prefix_sha256"),
-                "context_epoch": request.metadata.get("context_epoch"),
-                "context_total_tokens": request.metadata.get("context_total_tokens"),
-                "context_capacity_tokens": request.metadata.get("context_capacity_tokens"),
-                "context_reserve_tokens": request.metadata.get("context_reserve_tokens"),
+                "prefix_sha256": attempt_request.metadata.get("prefix_sha256"),
+                "context_epoch": attempt_request.metadata.get("context_epoch"),
+                "context_total_tokens": attempt_request.metadata.get("context_total_tokens"),
+                "context_capacity_tokens": attempt_request.metadata.get("context_capacity_tokens"),
+                "context_reserve_tokens": attempt_request.metadata.get("context_reserve_tokens"),
             },
         )
         expected_sequence = 0
@@ -447,7 +464,11 @@ async def _invoke_model(
         try:
             stream = cast(
                 AsyncGenerator[ModelEvent, None],
-                context.model_provider.stream(request, context.resolved_model, attempt),
+                context.model_provider.stream(
+                    attempt_request,
+                    context.resolved_model,
+                    attempt,
+                ),
             )
             async with aclosing(stream):
                 async for event in validated_stream(stream):
@@ -513,7 +534,7 @@ async def _invoke_model(
                 failure_usage,
                 step=step,
                 attempt=attempt,
-                request=request,
+                request=attempt_request,
                 resolved_model=context.resolved_model,
                 model_turn=terminal.partial_turn,
                 registry_version=(
@@ -525,7 +546,7 @@ async def _invoke_model(
                     "transient" if isinstance(terminal.error, ModelTransientError) else "permanent"
                 ),
             )
-            _reconcile_context_estimate(context, request, failure_usage)
+            _reconcile_context_estimate(context, attempt_request, failure_usage)
             if (
                 isinstance(terminal.error, ModelTransientError)
                 and not terminal.error.stream_had_output
@@ -567,7 +588,7 @@ async def _invoke_model(
             terminal.turn.usage,
             step=step,
             attempt=attempt,
-            request=request,
+            request=attempt_request,
             resolved_model=context.resolved_model,
             model_turn=terminal.turn,
             registry_version=(
@@ -577,7 +598,7 @@ async def _invoke_model(
             ),
             stop_reason=terminal.stop_reason,
         )
-        _reconcile_context_estimate(context, request, terminal.turn.usage)
+        _reconcile_context_estimate(context, attempt_request, terminal.turn.usage)
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
@@ -617,10 +638,13 @@ async def run_loop(context: RunContext) -> RunOutcome:
             started_at=context.clock.now(),
         )
         request = await build_with_pressure(context, step)
-        if synthesis_reserve is not None:
-            request = _synthesis_only_request(request, synthesis_reserve)
         _apply_context_origin_trust(context.checkpoint, request)
-        invoked = await _invoke_model(context, step, request)
+        invoked = await _invoke_model(
+            context,
+            step,
+            request,
+            synthesis_reserve,
+        )
         if isinstance(invoked, RunOutcome):
             return invoked
         turn = invoked
@@ -661,6 +685,10 @@ async def run_loop(context: RunContext) -> RunOutcome:
             )
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
+        synthesis_reserve = _synthesis_reserve_dimension(
+            context.run,
+            step_in_progress=True,
+        )
         if synthesis_reserve is not None:
             return _failure(
                 context,

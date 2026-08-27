@@ -83,6 +83,7 @@ async def test_export_replaces_all_rules_and_fails_closed(tmp_path: Path) -> Non
     for value in source_values:
         assert value not in rendered
     replacements = document["redaction"]["replacements"]
+    assert document["redaction"]["ruleset_version"] == "secrets@2"
     assert set(replacements) >= {
         "provider_key",
         "private_key",
