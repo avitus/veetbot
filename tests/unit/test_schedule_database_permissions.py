@@ -9,6 +9,7 @@ from scripts.check_schedule_database_permissions import (
 
 def _role(
     *,
+    server_version_num: int = 160000,
     superuser: bool = False,
     createdb: bool = False,
     createrole: bool = False,
@@ -21,6 +22,7 @@ def _role(
 ) -> ScheduleDatabaseRole:
     return ScheduleDatabaseRole(
         name="veetbot_schedule",
+        server_version_num=server_version_num,
         superuser=superuser,
         createdb=createdb,
         createrole=createrole,
@@ -33,6 +35,19 @@ def _role(
         ),
         column_privileges={} if column_privileges is None else column_privileges,
     )
+
+
+def test_schedule_role_rejects_unsupported_postgresql_before_privilege_checks() -> None:
+    assert permission_failures(
+        _role(
+            server_version_num=170000,
+            superuser=True,
+            table_privileges={},
+        )
+    ) == [
+        "schedule database role 'veetbot_schedule' requires PostgreSQL 16; "
+        "connected server_version_num is 170000"
+    ]
 
 
 def test_schedule_role_requires_checkpoint_projection_privileges() -> None:

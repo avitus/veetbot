@@ -283,7 +283,7 @@ citations:
   - cite: "docs/plan/notifications-and-devices.md#docs/plan/multi-device-and-surfaces.md:441"
     excerpt: "## Open questions for review"
     digest: "b6a2adc3e0938fad"
-  - cite: "docs/plan/operational-hardening.md#docs/deployment.md:595-602"
+  - cite: "docs/plan/operational-hardening.md#docs/deployment.md:597-604"
     excerpt: "## Accepted limitations"
     digest: "ad0074ad56656b13"
   - cite: "docs/plan/operational-hardening.md#docs/plan/event-log-and-persistence.md:962-973"

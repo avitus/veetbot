@@ -46,6 +46,7 @@ COLUMN_PRIVILEGES = ("INSERT", "REFERENCES", "SELECT", "UPDATE")
 @dataclass(frozen=True)
 class ScheduleDatabaseRole:
     name: str
+    server_version_num: int
     superuser: bool
     createdb: bool
     createrole: bool
@@ -58,6 +59,11 @@ class ScheduleDatabaseRole:
 
 
 def permission_failures(role: ScheduleDatabaseRole) -> list[str]:
+    if not 160000 <= role.server_version_num < 170000:
+        return [
+            f"schedule database role {role.name!r} requires PostgreSQL 16; "
+            f"connected server_version_num is {role.server_version_num}"
+        ]
     failures: list[str] = []
     if role.superuser:
         failures.append(f"schedule database role {role.name!r} must not be a superuser")
@@ -105,7 +111,9 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
             row = (
                 await connection.execute(
                     text(
-                        "SELECT current_user AS name, rolsuper, rolcreatedb, "
+                        "SELECT current_user AS name, "
+                        "current_setting('server_version_num')::integer "
+                        "AS server_version_num, rolsuper, rolcreatedb, "
                         "rolcreaterole, rolinherit, rolreplication, rolbypassrls "
                         "FROM pg_roles WHERE rolname = current_user"
                     )
@@ -173,6 +181,7 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                 )
             return ScheduleDatabaseRole(
                 name=str(row.name),
+                server_version_num=int(row.server_version_num),
                 superuser=bool(row.rolsuper),
                 createdb=bool(row.rolcreatedb),
                 createrole=bool(row.rolcreaterole),

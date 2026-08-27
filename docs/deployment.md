@@ -233,7 +233,9 @@ effective table or column-level privilege in the `public` schema. The check is
 an exact allowlist, including grants inherited from another role or `PUBLIC`,
 rather than a presence-only checklist. Its privilege vocabulary intentionally
 matches the deployed PostgreSQL 16 release; PostgreSQL 17's `MAINTAIN`
-privilege is not accepted while production remains pinned to version 16.
+privilege is not accepted while production remains pinned to version 16. The
+checker reads `server_version_num` from the connected server and fails before
+the privilege comparison unless that server is PostgreSQL 16.
 
 ```sql
 ALTER ROLE veetbot_schedule

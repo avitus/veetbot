@@ -1101,6 +1101,59 @@ async def _assert_predispatch_credential_rejection_reauthenticates_once() -> Non
     assert write_client.reauthentication_count == 1
     assert write_client.call_count == 2
 
+    uncertain_retry_scripts = {
+        "gmail_read": ScriptedMCPServer(name="gmail_read", discovery=_discovery("read")),
+        "gmail_write": ScriptedMCPServer(
+            name="gmail_write",
+            discovery=_discovery("write"),
+            responses=(
+                ScriptedMCPResponse(
+                    name="create_draft",
+                    result=MCPCallResult(
+                        content=("gmail.credential_rejected",),
+                        structured={"effect_status": "not_applied"},
+                        is_error=True,
+                    ),
+                ),
+                ScriptedMCPResponse(
+                    name="create_draft",
+                    result=MCPCallResult(
+                        content=("gmail.credential_rejected",),
+                        structured={"effect_status": "unknown"},
+                        is_error=True,
+                    ),
+                ),
+            ),
+        ),
+        "gmail_send": ScriptedMCPServer(name="gmail_send", discovery=_discovery("send")),
+    }
+    uncertain_retry_factory = ScriptedMCPClientFactory(uncertain_retry_scripts)
+    async with build(
+        settings=_email_settings(),
+        sequential_ids=True,
+        mcp_client_factory=uncertain_retry_factory,
+        credential_resolver=_RotatingGmailCredentials(),
+    ) as composition:
+        session_id = await composition.sessions.create()
+        context = replace(
+            tool_context(),
+            session_id=session_id,
+            tenant_id="local",
+            principal=composition.principal,
+        )
+        config = next(
+            row for row in email_server_configs("local") if row.server_id == "gmail_write"
+        )
+        spec = next(
+            mapped.spec
+            for mapped in map_discovered_tools(config, _discovery("write").tools).accepted
+            if mapped.remote_name == "create_draft"
+        )
+        uncertain_retry_result = await composition.mcp.call_tool(context, spec, "create_draft", {})
+    assert uncertain_retry_result.failure is not None
+    assert uncertain_retry_result.failure.reason_code == "tool.outcome_unknown"
+    assert uncertain_retry_result.failure.retryable is False
+
     disconnected_scripts = {
         "gmail_read": ScriptedMCPServer(name="gmail_read", discovery=_discovery("read")),
         "gmail_write": ScriptedMCPServer(

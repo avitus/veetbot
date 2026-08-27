@@ -568,6 +568,13 @@ class MCPRuntime:
             result = await operation()
             if self._gmail_failure_code(result) == "gmail.credential_rejected":
                 connection.unavailable_reason = "tool.server_unauthorized"
+                effect_status = (
+                    result.structured.get("effect_status")
+                    if result.structured is not None
+                    else None
+                )
+                if self._non_idempotent_effect(spec) and effect_status != "not_applied":
+                    return self._outcome_unknown("MCP authorization failed after retry dispatch")
                 return self._unavailable(connection.unavailable_reason)
             return self._result(result, spec)
         except MCPUnauthorizedError:
