@@ -583,7 +583,7 @@ Authoritative, per Section 9.3. This is Section 9.2's matrix, keyed on
 | `NONE` | — | Allow | — |
 | `WORKSPACE_READ` | path inside workspace | Allow | Deny |
 | `WORKSPACE_WRITE` | path inside workspace | Allow | Deny |
-| `NETWORK_READ` | host on the allowlist | Allow | Deny |
+| `NETWORK_READ` | constructed provider target or operator-classified read-only MCP target | Allow | Deny |
 | `CODE_EXECUTION` | `target.isolated` | Allow | Deny |
 | `PACKAGE_INSTALL` | — | Deny | — |
 | `SANDBOX_NETWORK` | — | Deny | — |
@@ -604,7 +604,13 @@ They resolve as follows, without changing any outcome the plan states.
   was always a condition on the argument; the condition column is where it goes.
   [web-access.md](web-access.md) supplies the first constructed predicate: a
   `web_provider` execution target whose actual HTTPS API host is fixed by the
-  composition root. Model-authored URL fields do not satisfy the predicate.
+  composition root. Browser-provider reads use the same constructed-target arm.
+  Milestone 18 adds the MCP arm: an operator-classified `mcp` target satisfies
+  `host_on_allowlist` only when its declared side effect is `NETWORK_READ` and
+  its idempotency is `READ_ONLY`. The stdio command remains operator-owned and
+  the remote package confines its own destinations; no model-authored URL field
+  satisfies either arm. The exact `mcp.{server_id}.use` scope remains an
+  independent prerequisite.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in

@@ -106,7 +106,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
-from agent_core.domain.policies import PolicyProfileRecord
+from agent_core.domain.policies import IdempotencyClass, PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     Run,
@@ -1099,6 +1099,35 @@ class PostgresToolInvocationRepository:
             )
         ).one_or_none()
         return None if row is None else invocation_to_domain(row)
+
+    async def has_uncertain_non_idempotent(
+        self,
+        run_id: UUID,
+        *,
+        tool_name: str,
+        normalized_arguments_hash: str,
+        principal: Principal,
+    ) -> bool:
+        """Use the run index to detect one identical ambiguous mutation."""
+
+        await self._runs.get(run_id, principal)
+        invocation_id = await self._session.scalar(
+            select(ToolInvocationRow.id)
+            .where(
+                ToolInvocationRow.run_id == run_id,
+                ToolInvocationRow.status == ToolInvocationStatus.UNCERTAIN.value,
+                ToolInvocationRow.idempotency_class.not_in(
+                    (
+                        IdempotencyClass.READ_ONLY.value,
+                        IdempotencyClass.IDEMPOTENT.value,
+                    )
+                ),
+                ToolInvocationRow.tool_name == tool_name,
+                ToolInvocationRow.normalized_arguments_hash == normalized_arguments_hash,
+            )
+            .limit(1)
+        )
+        return invocation_id is not None
 
     async def transition(
         self,

@@ -37,7 +37,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
-from agent_core.domain.policies import PolicyProfileRecord
+from agent_core.domain.policies import IdempotencyClass, PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     Run,
@@ -656,6 +656,28 @@ class InMemoryToolInvocationRepository:
             if invocation_id is None:
                 return None
             return self._invocations[invocation_id].model_copy(deep=True)
+
+    async def has_uncertain_non_idempotent(
+        self,
+        run_id: UUID,
+        *,
+        tool_name: str,
+        normalized_arguments_hash: str,
+        principal: Principal,
+    ) -> bool:
+        """Return whether an identical ambiguous mutation already exists."""
+
+        await self._runs.get(run_id, principal)
+        async with self._lock:
+            return any(
+                invocation.run_id == run_id
+                and invocation.status is ToolInvocationStatus.UNCERTAIN
+                and invocation.idempotency_class
+                not in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
+                and invocation.tool_name == tool_name
+                and invocation.normalized_arguments_hash == normalized_arguments_hash
+                for invocation in self._invocations.values()
+            )
 
     async def transition(
         self,

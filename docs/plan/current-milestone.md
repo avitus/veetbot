@@ -111,9 +111,11 @@ title: Current Milestone
   hosted CI, GitGuardian, and the final CodeRabbit review passed on the
   dev-to-main pull request (merge `3faa978`), with supplemental end-to-end
   browser coverage later passing the same hosted gates in merge `07c8bdf`.
-  Milestone 18, the third parallel workstream, is
-  authorized and specified with thirteen registered gates; it has not
-  started. Milestone 19, the fourth parallel workstream, is in progress with
+  Milestone 18, the third parallel workstream, has its first-party Gmail MCP
+  package, composition, policy, bootstrap ceremony, and monitoring recipe
+  implemented, with all thirteen registered gates passing locally; the
+  owner's real-mailbox smoke, hosted CI, and the final CodeRabbit review remain
+  outstanding. Milestone 19, the fourth parallel workstream, is in progress with
   five registered gates; its one-time model tool, clarification-to-approval
   regression, complete non-live suite, and PostgreSQL lane pass locally, with
   only hosted CI and the final CodeRabbit review outstanding. Each in-progress

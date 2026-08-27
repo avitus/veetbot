@@ -529,6 +529,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert release.count(": $BROWSER_CONTROL_CREDENTIAL_FILE") == 3
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
+    assert "scripts/check_schedule_database_permissions.py" in release
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
     assert "veetbot-notify" in release
@@ -832,7 +833,10 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
     assert set(project["dependency-groups"]) == {"dev", "test", "docs"}
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/agent_core"]
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
+        "src/agent_core",
+        "src/gmail_mcp",
+    ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"
     )

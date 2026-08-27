@@ -125,6 +125,15 @@ class ToolInvocationRepository(Protocol):
         self, run_id: UUID, idempotency_key: str
     ) -> ToolInvocation | None: ...
 
+    async def has_uncertain_non_idempotent(
+        self,
+        run_id: UUID,
+        *,
+        tool_name: str,
+        normalized_arguments_hash: str,
+        principal: Principal,
+    ) -> bool: ...
+
     async def transition(
         self,
         invocation_id: UUID,

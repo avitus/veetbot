@@ -364,7 +364,7 @@ milestones:
       - consolidation and formation audit routes, knowledge documents
   "18":
     title: First-class email integration
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-24
     design: docs/plan/email-integration.md
     adr: docs/adr/0071-milestone-18-email-integration.md
@@ -382,6 +382,44 @@ milestones:
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
+    open_items:
+      - Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    verification:
+      - check: thirteen Milestone 18 gate.email gates
+        outcome: passed_locally
+        detail: >-
+          The thirteen registered entries in evals/gates/email.yaml resolve to
+          thirteen distinct live checks in tests/gates/test_email_m18.py. The
+          complete module passes all eighteen collected cases, including the
+          three-mode contract and roster matrices, property-generated child
+          environments, fixed-endpoint and failure-taxonomy cases, and the
+          in-memory scheduled-triage path through read, parked write approval,
+          content-free notification, approval resolution, and outcome report.
+          The harness continues to report post-ceiling gates as pending while
+          project.current_milestone remains 12, so this focused execution is
+          the local parallel-workstream evidence and does not move the verified
+          gate ceiling.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 589 files and Ruff linting pass, strict mypy
+          reports no issue in 545 source files, the static partition passes
+          1339 tests, the contract partition passes 368 tests, release,
+          rollback, and nginx deployment-script tests pass, and the strict
+          documentation build passes with 188 citations and 353 registry
+          entries reconciled.
+      - check: owner real-mailbox smoke
+        outcome: not_started
+        detail: >-
+          Completion still requires the owner's real-mailbox bootstrap consent,
+          a scheduled triage run, an approval delivered to the phone, and one
+          approved send. No fake-provider result is recorded as a substitute.
+      - check: hosted CI and the dev-to-main review loop
+        outcome: not_started
+        detail: >-
+          Hosted CI and the CodeRabbit review loop have not run on a final
+          dev-to-main head for this workstream.
   "19":
     title: Conversational schedule creation
     status: in_progress
