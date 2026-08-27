@@ -119,6 +119,21 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                     )
                 )
             ).one()
+            server_version_num = int(row.server_version_num)
+            if not 160000 <= server_version_num < 170000:
+                return ScheduleDatabaseRole(
+                    name=str(row.name),
+                    server_version_num=server_version_num,
+                    superuser=bool(row.rolsuper),
+                    createdb=bool(row.rolcreatedb),
+                    createrole=bool(row.rolcreaterole),
+                    inherit=bool(row.rolinherit),
+                    replication=bool(row.rolreplication),
+                    bypass_rls=bool(row.rolbypassrls),
+                    settable_roles=frozenset(),
+                    table_privileges={},
+                    column_privileges={},
+                )
             settable_role_rows = (
                 await connection.execute(
                     text(
@@ -181,7 +196,7 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                 )
             return ScheduleDatabaseRole(
                 name=str(row.name),
-                server_version_num=int(row.server_version_num),
+                server_version_num=server_version_num,
                 superuser=bool(row.rolsuper),
                 createdb=bool(row.rolcreatedb),
                 createrole=bool(row.rolcreaterole),
