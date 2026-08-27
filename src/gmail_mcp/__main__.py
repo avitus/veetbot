@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import sys
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -70,11 +71,16 @@ def _authorize_via_loopback(_mode: str, authorization_url: str) -> str:
             return
 
     server = HTTPServer((LOOPBACK_REDIRECT_HOST, redirect.port), Callback)
-    server.timeout = 300
     try:
         if not webbrowser.open(authorization_url, new=1):
             print(f"Open this authorization URL in a browser:\n{authorization_url}")
-        server.handle_request()
+        deadline = time.monotonic() + 300
+        while "code" not in result:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            server.timeout = remaining
+            server.handle_request()
     finally:
         server.server_close()
     code = result.get("code")

@@ -32,6 +32,12 @@ _EMAIL_CLASSIFICATIONS = {
         IdempotencyClass.NON_IDEMPOTENT,
     ),
 }
+EMAIL_SERVER_IDS = frozenset(_EMAIL_CLASSIFICATIONS)
+MUTATING_EMAIL_SERVER_IDS = frozenset(
+    server_id
+    for server_id, (_side_effect, _risk, idempotency) in _EMAIL_CLASSIFICATIONS.items()
+    if idempotency not in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
+)
 
 
 def email_server_configs(
@@ -87,7 +93,7 @@ def validate_mcp_config(
         if token_endpoint.scheme != "https" or token_endpoint.hostname is None:
             raise ValueError("MCP OAuth token endpoints require HTTPS")
     validate_required_scopes(set(config.required_scopes), mcp_server_id=config.server_id)
-    if config.server_id in _EMAIL_CLASSIFICATIONS and config.required_scopes != {
+    if config.server_id in EMAIL_SERVER_IDS and config.required_scopes != {
         f"mcp.{config.server_id}.use"
     }:
         raise ValueError("a Gmail MCP server requires exactly its use scope")

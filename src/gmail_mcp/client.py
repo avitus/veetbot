@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 import json
@@ -24,6 +25,8 @@ from gmail_mcp.errors import GmailError
 
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"[ \t\r\f\v]+")
+_THREAD_FANOUT_CONCURRENCY = 5
+_THREAD_FANOUT_TIMEOUT_SECONDS = 30.0
 type _QueryScalar = str | int | float | bool | None
 type _QueryValue = _QueryScalar | list[_QueryScalar]
 
@@ -366,19 +369,43 @@ class GmailClient:
         declarations = payload.get("threads", [])
         if not isinstance(declarations, list):
             raise GmailError("gmail.provider_output_invalid")
-        threads: list[dict[str, object]] = []
+        identifiers: list[str] = []
         for declaration in declarations[:max_results]:
             thread_id = declaration.get("id") if isinstance(declaration, dict) else None
             if not isinstance(thread_id, str) or not thread_id:
                 raise GmailError("gmail.provider_output_invalid")
-            detail = await self._request(
-                "GET",
-                f"/threads/{quote(thread_id, safe='')}",
-                params={
-                    "format": "metadata",
-                    "metadataHeaders": ["From", "Subject", "Date"],
-                },
-            )
+            identifiers.append(thread_id)
+
+        semaphore = asyncio.Semaphore(_THREAD_FANOUT_CONCURRENCY)
+
+        async def fetch_detail(thread_id: str) -> dict[str, Any]:
+            async with semaphore:
+                return await self._request(
+                    "GET",
+                    f"/threads/{quote(thread_id, safe='')}",
+                    params={
+                        "format": "metadata",
+                        "metadataHeaders": ["From", "Subject", "Date"],
+                    },
+                )
+
+        tasks = [asyncio.create_task(fetch_detail(thread_id)) for thread_id in identifiers]
+        try:
+            async with asyncio.timeout(_THREAD_FANOUT_TIMEOUT_SECONDS):
+                details = await asyncio.gather(*tasks)
+        except TimeoutError as exc:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise GmailError("gmail.provider_unavailable") from exc
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+        threads: list[dict[str, object]] = []
+        for thread_id, detail in zip(identifiers, details, strict=True):
             messages = detail.get("messages")
             if not isinstance(messages, list) or not messages:
                 raise GmailError("gmail.provider_output_invalid")
@@ -505,12 +532,17 @@ class GmailClient:
         removals = [self._required_text(item, "label_id", maximum=1024) for item in removals]
         changed: list[str] = []
         for thread_id in normalized_threads:
-            await self._request(
-                "POST",
-                f"/threads/{quote(thread_id, safe='')}/modify",
-                body={"addLabelIds": additions, "removeLabelIds": removals},
-                mutating=True,
-            )
+            try:
+                await self._request(
+                    "POST",
+                    f"/threads/{quote(thread_id, safe='')}/modify",
+                    body={"addLabelIds": additions, "removeLabelIds": removals},
+                    mutating=True,
+                )
+            except GmailError as exc:
+                if changed:
+                    raise GmailError("gmail.outcome_unknown") from exc
+                raise
             changed.append(thread_id)
         return {"thread_ids": changed, "add_label_ids": additions, "remove_label_ids": removals}
 

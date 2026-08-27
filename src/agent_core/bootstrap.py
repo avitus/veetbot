@@ -316,7 +316,11 @@ from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
 from agent_core.knowledge.service import KnowledgeService
-from agent_core.mcp.configuration import email_server_configs, validate_mcp_config
+from agent_core.mcp.configuration import (
+    EMAIL_SERVER_IDS,
+    email_server_configs,
+    validate_mcp_config,
+)
 from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
@@ -2446,9 +2450,7 @@ async def build(
             scopes=set(effective_settings.auth_scopes),
         )
     supplied_email_rows = tuple(
-        config
-        for config in mcp_servers
-        if config.server_id in {"gmail_read", "gmail_write", "gmail_send"}
+        config for config in mcp_servers if config.server_id in EMAIL_SERVER_IDS
     )
     if supplied_email_rows:
         raise ConfigurationError(

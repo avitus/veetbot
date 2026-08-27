@@ -550,13 +550,13 @@ class ToolPipeline:
         progress.append(5)
 
         async with self._uow_factory() as uow:
-            prior_invocations = await uow.invocations.list_for_run(run.id, principal)
-        if any(
-            invocation.status is ToolInvocationStatus.UNCERTAIN
-            and invocation.tool_name == tool.spec.name
-            and invocation.normalized_arguments_hash == arguments_hash
-            for invocation in prior_invocations
-        ):
+            uncertain_prior = await uow.invocations.has_uncertain_non_idempotent(
+                run.id,
+                tool_name=tool.spec.name,
+                normalized_arguments_hash=arguments_hash,
+                principal=principal,
+            )
+        if uncertain_prior:
             return await self._refusal(
                 run,
                 call,

@@ -139,18 +139,19 @@ async def bootstrap_credentials(
     created: list[Path] = []
     try:
         for path, document in zip(paths, documents, strict=True):
+            encoded = document.as_json().encode("utf-8")
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             created.append(path)
             try:
-                encoded = document.as_json().encode("utf-8")
-                with os.fdopen(descriptor, "wb", closefd=True) as stream:
-                    stream.write(encoded)
-                    stream.flush()
-                    os.fsync(stream.fileno())
+                stream = os.fdopen(descriptor, "wb", closefd=True)
             except BaseException:
                 with suppress(OSError):
                     os.close(descriptor)
                 raise
+            with stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
     except BaseException:
         for path in created:
             path.unlink(missing_ok=True)

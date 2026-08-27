@@ -227,13 +227,17 @@ Provision the `veetbot_schedule` login independently with a generated password,
 then grant only the tables its materialization transaction and schema-head check
 use. The release runs `scripts/check_schedule_database_permissions.py` through
 the protected schedule environment before promotion and refuses a role that is
-administrative, bypasses row-level security, or is missing any privilege below.
+administrative, inherits authority, can replicate or bypass row-level security,
+is missing any privilege below, or has any other effective table privilege in
+the `public` schema. The check is an exact allowlist, including grants inherited
+from another role or `PUBLIC`, rather than a presence-only checklist.
 
 ```sql
 ALTER ROLE veetbot_schedule
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 GRANT CONNECT ON DATABASE agent TO veetbot_schedule;
 GRANT USAGE ON SCHEMA public TO veetbot_schedule;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM veetbot_schedule;
 GRANT SELECT ON
   agents,
   alembic_version,
@@ -274,6 +278,12 @@ GRANT DELETE ON
   session_history_items
 TO veetbot_schedule;
 ```
+
+Run the revocation before reapplying the allowlist whenever this role is
+repaired. If the validator still reports a surplus effective privilege, remove
+the grant from the membership, ownership, `PUBLIC`, or default-privilege source
+that supplies it; revoking a direct grant cannot mask authority supplied by a
+different source.
 
 The projection grants are part of checkpoint seeding, not optional reporting:
 without them a due schedule can retry until its misfire window expires without

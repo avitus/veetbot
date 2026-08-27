@@ -1780,6 +1780,13 @@ failure only by returning the content-free structured marker
 `effect_status: not_applied`, which is its assertion that argument validation,
 credential refresh, or a definitive provider rejection proved no effect was
 applied. Missing or ambiguous status is conservative and therefore uncertain.
+`MCPRuntime._result` is the reader of
+`result.structured["effect_status"]`: for a side-effecting MCP call whose
+idempotency class is neither `READ_ONLY` nor `IDEMPOTENT`, every error maps to
+`ToolFailureKind.OUTCOME_UNKNOWN` unless that value is exactly `not_applied`,
+which permits the normal failure mapping. The within-run repeat guard asks the
+invocation repository directly for an identical `UNCERTAIN` mutation rather
+than loading the run's complete invocation history.
 
 **A stdio server inherits the worker's environment.** That is the default
 behaviour of every process-spawning API in the standard library, and it

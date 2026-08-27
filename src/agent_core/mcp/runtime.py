@@ -467,7 +467,7 @@ class MCPRuntime:
     @staticmethod
     def _non_idempotent_effect(spec: ToolSpec) -> bool:
         return (
-            spec.idempotency is IdempotencyClass.NON_IDEMPOTENT
+            spec.idempotency not in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
             and spec.side_effect is not SideEffectClass.NONE
         )
 

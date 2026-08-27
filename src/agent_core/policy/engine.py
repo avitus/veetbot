@@ -16,6 +16,7 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run
+from agent_core.mcp.configuration import MUTATING_EMAIL_SERVER_IDS
 from agent_core.policy.hardline import hardline_matches
 
 _WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch"})
@@ -121,7 +122,7 @@ def evaluate_deterministic(
     decision = rule.decision if allowed else (rule.otherwise or ruleset.default_effect)
     if (
         action.target.kind == "mcp"
-        and action.target.server_id in {"gmail_write", "gmail_send"}
+        and action.target.server_id in MUTATING_EMAIL_SERVER_IDS
         and _RANK[decision] < PolicyDecisionRank.REQUIRE_APPROVAL
     ):
         # ADR-0071 forbids policy profiles from turning mailbox mutations or

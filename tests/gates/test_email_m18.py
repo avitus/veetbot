@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import os
 import sys
+import webbrowser
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -23,6 +25,8 @@ from hypothesis import strategies as st
 from mcp.types import CallToolResult
 from pydantic import SecretStr
 
+import gmail_mcp.__main__ as gmail_main
+import gmail_mcp.client as gmail_client_module
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings, load_settings
@@ -68,6 +72,7 @@ from gmail_mcp.constants import (
     OUTPUT_MAXIMUM_BYTES,
     ROSTERS,
 )
+from gmail_mcp.errors import GmailError
 from gmail_mcp.server import create_server
 from scripts.architecture_checks import architecture_errors
 from tests.contract.support import tool_context
@@ -262,6 +267,146 @@ async def test_each_mode_advertises_only_its_declared_roster(mode: str) -> None:
     assert names == tuple(sorted(ROSTERS[mode]))
     assert not any("delete" in name for name in names)
     await client.close()
+
+
+async def test_search_threads_fanout_is_bounded_and_preserves_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeGmail()
+    client = await _client("read", fake)
+    active = 0
+    peak = 0
+
+    async def request(
+        _method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, Any]:
+        nonlocal active, peak
+        if path == "/threads":
+            return {"threads": [{"id": f"thread-{index}"} for index in range(6)]}
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        thread_id = path.rsplit("/", 1)[-1]
+        messages = _thread()["messages"]
+        assert isinstance(messages, list)
+        message = messages[0]
+        assert isinstance(message, dict)
+        return {"messages": [{**message, "threadId": thread_id}]}
+
+    monkeypatch.setattr(client, "_request", request)
+    result = await client.search_threads("newer_than:1d", 6)
+
+    assert peak == 5
+    assert [thread["thread_id"] for thread in result["threads"]] == [
+        f"thread-{index}" for index in range(6)
+    ]
+
+
+async def test_search_threads_fanout_has_one_overall_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeGmail()
+    client = await _client("read", fake)
+
+    async def request(
+        _method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, Any]:
+        if path == "/threads":
+            return {"threads": [{"id": "thread-1"}]}
+        await asyncio.sleep(1)
+        return _thread()
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(
+        gmail_client_module,
+        "_THREAD_FANOUT_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+
+    with pytest.raises(GmailError, match=r"gmail\.provider_unavailable"):
+        await client.search_threads("newer_than:1d", 1)
+
+
+async def test_partial_label_batch_reports_unknown_outcome() -> None:
+    class _PartialLabelFailure(_FakeGmail):
+        def __init__(self) -> None:
+            super().__init__()
+            self.modify_calls = 0
+
+        async def __call__(self, request: httpx.Request) -> httpx.Response:
+            if request.method == "POST" and request.url.path.endswith("/modify"):
+                self.requests.append(request)
+                self.modify_calls += 1
+                if self.modify_calls == 2:
+                    return httpx.Response(400, json={"error": {"message": "must not cross"}})
+                return httpx.Response(200, json={"id": request.url.path.split("/")[-2]})
+            return await super().__call__(request)
+
+    fake = _PartialLabelFailure()
+    client = await _client("write", fake)
+    server = create_server("write", client)
+
+    result = await server.call_tool(
+        "modify_labels",
+        {
+            "thread_ids": ["thread-1", "thread-2"],
+            "add_label_ids": ["STARRED"],
+        },
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is True
+    assert [item.text for item in result.content if hasattr(item, "text")] == [
+        "gmail.outcome_unknown"
+    ]
+    assert result.structured_content == {"effect_status": "unknown"}
+
+
+def test_loopback_authorization_ignores_stray_requests_until_matching_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    servers: list[Any] = []
+
+    class _Server:
+        def __init__(self, _address: object, callback: Any) -> None:
+            self.callback = callback
+            self.timeout: float | None = None
+            self.requests = 0
+            servers.append(self)
+
+        def handle_request(self) -> None:
+            paths = (
+                "/?state=wrong&code=stray",
+                "/?state=expected-state&code=accepted-code",
+            )
+            request = type("Request", (), {})()
+            request.path = paths[self.requests]
+            request.wfile = io.BytesIO()
+            request.send_response = lambda _status: None
+            request.send_header = lambda *_args: None
+            request.end_headers = lambda: None
+            self.requests += 1
+            self.callback.do_GET(request)
+
+        def server_close(self) -> None:
+            return
+
+    monkeypatch.setattr(gmail_main, "HTTPServer", _Server)
+    monkeypatch.setattr(webbrowser, "open", lambda *_args, **_kwargs: True)
+    authorization_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth?state=expected-state&"
+        "redirect_uri=http%3A%2F%2F127.0.0.1%3A8765"
+    )
+
+    assert gmail_main._authorize_via_loopback("read", authorization_url) == "accepted-code"
+    assert len(servers) == 1
+    assert servers[0].requests == 2
 
 
 def _discovery(mode: str) -> MCPDiscovery:
@@ -703,6 +848,7 @@ async def _assert_platform_maps_postdispatch_nonidempotent_failure_to_uncertain(
                         is_error=True,
                     ),
                 ),
+                ScriptedMCPResponse(name="create_draft", outcome="disconnect"),
             ),
         ),
         "gmail_send": ScriptedMCPServer(
@@ -757,6 +903,14 @@ async def _assert_platform_maps_postdispatch_nonidempotent_failure_to_uncertain(
         )
         read_result = await composition.mcp.call_tool(context, read_spec, "list_labels", {})
         write_result = await composition.mcp.call_tool(context, write_spec, "create_draft", {})
+        conditional_result = await composition.mcp.call_tool(
+            context,
+            write_spec.model_copy(
+                update={"idempotency": IdempotencyClass.CONDITIONALLY_IDEMPOTENT}
+            ),
+            "create_draft",
+            {},
+        )
         safe_send_result = await composition.mcp.call_tool(
             context,
             send_spec,
@@ -767,6 +921,9 @@ async def _assert_platform_maps_postdispatch_nonidempotent_failure_to_uncertain(
     assert write_result.failure is not None
     assert write_result.failure.reason_code == "tool.outcome_unknown"
     assert write_result.failure.retryable is False
+    assert conditional_result.failure is not None
+    assert conditional_result.failure.reason_code == "tool.outcome_unknown"
+    assert conditional_result.failure.retryable is False
     assert safe_send_result.failure is not None
     assert safe_send_result.failure.reason_code == "tool.server_error"
     assert safe_send_result.failure.retryable is True
@@ -1074,6 +1231,44 @@ async def test_bootstrap_consent_writes_exact_private_scope_files(
         )
     monkeypatch.setattr(os, "fdopen", real_fdopen)
     assert list(failed_directory.iterdir()) == []
+
+    class _WriteFailure:
+        def __init__(self, stream: Any) -> None:
+            self.stream = stream
+
+        def __enter__(self) -> _WriteFailure:
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args: object) -> object:
+            return self.stream.__exit__(*args)
+
+        def write(self, _value: bytes) -> int:
+            raise OSError("synthetic write failure")
+
+        def flush(self) -> None:
+            self.stream.flush()
+
+        def fileno(self) -> int:
+            return int(self.stream.fileno())
+
+    def fail_during_write(*args: Any, **kwargs: Any) -> _WriteFailure:
+        return _WriteFailure(real_fdopen(*args, **kwargs))
+
+    manual_closes: list[int] = []
+    monkeypatch.setattr(os, "fdopen", fail_during_write)
+    monkeypatch.setattr(os, "close", manual_closes.append)
+    write_failed_directory = tmp_path / "write-failed-publish"
+    with pytest.raises(OSError, match="synthetic write failure"):
+        await bootstrap_credentials(
+            client_id="oauth-client-id",
+            client_secret=bootstrap_secret,
+            output_directory=write_failed_directory,
+            authorize=authorize,
+            http_client=client,
+        )
+    assert manual_closes == []
+    assert list(write_failed_directory.iterdir()) == []
 
 
 async def test_daily_triage_recipe_reads_then_parks_write_and_reports_outcome() -> None:

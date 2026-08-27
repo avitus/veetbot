@@ -4,7 +4,7 @@ import pytest
 
 from agent_core.adapters.persistence.memory import InMemoryToolInvocationRepository
 from agent_core.domain.errors import ConflictError
-from agent_core.domain.policies import RiskLevel, SideEffectClass
+from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 
@@ -43,3 +43,35 @@ async def test_tool_invocation_repository_deduplicates_stable_keys() -> None:
     )
     with pytest.raises(ConflictError, match="immutable"):
         await repository.transition(first.id, ToolInvocationStatus.PROPOSED, changed_call)
+
+    read_only_unknown = first.model_copy(
+        update={
+            "id": UUID(int=83),
+            "idempotency_key": "read-only-unknown",
+            "idempotency_class": IdempotencyClass.READ_ONLY,
+            "status": ToolInvocationStatus.UNCERTAIN,
+            "normalized_arguments_hash": "matching-arguments",
+        }
+    )
+    await repository.create(read_only_unknown)
+    assert not await repository.has_uncertain_non_idempotent(
+        RUN_ID,
+        tool_name=first.tool_name,
+        normalized_arguments_hash="matching-arguments",
+        principal=principal(),
+    )
+
+    non_idempotent_unknown = read_only_unknown.model_copy(
+        update={
+            "id": UUID(int=84),
+            "idempotency_key": "non-idempotent-unknown",
+            "idempotency_class": IdempotencyClass.NON_IDEMPOTENT,
+        }
+    )
+    await repository.create(non_idempotent_unknown)
+    assert await repository.has_uncertain_non_idempotent(
+        RUN_ID,
+        tool_name=first.tool_name,
+        normalized_arguments_hash="matching-arguments",
+        principal=principal(),
+    )
