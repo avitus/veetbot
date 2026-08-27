@@ -228,13 +228,18 @@ then grant only the tables its materialization transaction and schema-head check
 use. The release runs `scripts/check_schedule_database_permissions.py` through
 the protected schedule environment before promotion and refuses a role that is
 administrative, inherits authority, can replicate or bypass row-level security,
-is missing any privilege below, or has any other effective table privilege in
-the `public` schema. The check is an exact allowlist, including grants inherited
-from another role or `PUBLIC`, rather than a presence-only checklist.
+can switch to any other role, is missing any privilege below, or has any other
+effective table or column-level privilege in the `public` schema. The check is
+an exact allowlist, including grants inherited from another role or `PUBLIC`,
+rather than a presence-only checklist. Its privilege vocabulary intentionally
+matches the deployed PostgreSQL 16 release; PostgreSQL 17's `MAINTAIN`
+privilege is not accepted while production remains pinned to version 16.
 
 ```sql
 ALTER ROLE veetbot_schedule
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+-- Do not grant veetbot_schedule membership in any other role: NOINHERIT does
+-- not prevent it from acquiring that role's authority with SET ROLE.
 GRANT CONNECT ON DATABASE agent TO veetbot_schedule;
 GRANT USAGE ON SCHEMA public TO veetbot_schedule;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM veetbot_schedule;
@@ -281,9 +286,9 @@ TO veetbot_schedule;
 
 Run the revocation before reapplying the allowlist whenever this role is
 repaired. If the validator still reports a surplus effective privilege, remove
-the grant from the membership, ownership, `PUBLIC`, or default-privilege source
-that supplies it; revoking a direct grant cannot mask authority supplied by a
-different source.
+the grant from the role membership, column grant, ownership, `PUBLIC`, or
+default-privilege source that supplies it; revoking a direct table grant cannot
+mask authority supplied by a different source.
 
 The projection grants are part of checkpoint seeding, not optional reporting:
 without them a due schedule can retry until its misfire window expires without

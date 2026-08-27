@@ -29,7 +29,9 @@ REQUIRED_TABLE_PRIVILEGES: Mapping[str, frozenset[str]] = {
     "session_history_items": frozenset({"DELETE", "INSERT", "SELECT"}),
     "sessions": frozenset({"INSERT", "SELECT", "UPDATE"}),
 }
-TABLE_PRIVILEGES = (
+# Production is pinned to PostgreSQL 16. PostgreSQL 17's MAINTAIN privilege is
+# intentionally absent until the deployment version changes.
+POSTGRESQL_16_TABLE_PRIVILEGES = (
     "DELETE",
     "INSERT",
     "REFERENCES",
@@ -38,6 +40,7 @@ TABLE_PRIVILEGES = (
     "TRUNCATE",
     "UPDATE",
 )
+COLUMN_PRIVILEGES = ("INSERT", "REFERENCES", "SELECT", "UPDATE")
 
 
 @dataclass(frozen=True)
@@ -49,7 +52,9 @@ class ScheduleDatabaseRole:
     inherit: bool
     replication: bool
     bypass_rls: bool
+    settable_roles: frozenset[str]
     table_privileges: Mapping[str, frozenset[str]]
+    column_privileges: Mapping[str, frozenset[str]]
 
 
 def permission_failures(role: ScheduleDatabaseRole) -> list[str]:
@@ -66,12 +71,23 @@ def permission_failures(role: ScheduleDatabaseRole) -> list[str]:
         failures.append(f"schedule database role {role.name!r} must not have REPLICATION")
     if role.bypass_rls:
         failures.append(f"schedule database role {role.name!r} must not have BYPASSRLS")
+    for settable_role in sorted(role.settable_roles):
+        failures.append(
+            f"schedule database role {role.name!r} can SET ROLE to unexpected role "
+            f"{settable_role!r}"
+        )
     for table_name, granted in sorted(role.table_privileges.items()):
         allowed = REQUIRED_TABLE_PRIVILEGES.get(table_name, frozenset())
         for privilege in sorted(granted - allowed):
             failures.append(
                 f"schedule database role {role.name!r} has unexpected {privilege} "
                 f"on public.{table_name}"
+            )
+    for table_name, granted in sorted(role.column_privileges.items()):
+        for privilege in sorted(granted):
+            failures.append(
+                f"schedule database role {role.name!r} has unexpected column-level "
+                f"{privilege} on public.{table_name}"
             )
     for table_name, required in sorted(REQUIRED_TABLE_PRIVILEGES.items()):
         granted = role.table_privileges.get(table_name, frozenset())
@@ -95,6 +111,17 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                     )
                 )
             ).one()
+            settable_role_rows = (
+                await connection.execute(
+                    text(
+                        "SELECT role.rolname AS role_name "
+                        "FROM pg_roles AS role "
+                        "WHERE role.rolname <> current_user "
+                        "AND pg_has_role(current_user, role.oid, 'SET') "
+                        "ORDER BY role.rolname"
+                    )
+                )
+            ).all()
             privilege_rows = (
                 await connection.execute(
                     text(
@@ -102,7 +129,9 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                         "FROM pg_class AS tables "
                         "JOIN pg_namespace AS schemas ON schemas.oid = tables.relnamespace "
                         "CROSS JOIN unnest(ARRAY["
-                        + ", ".join(f"'{privilege}'" for privilege in TABLE_PRIVILEGES)
+                        + ", ".join(
+                            f"'{privilege}'" for privilege in POSTGRESQL_16_TABLE_PRIVILEGES
+                        )
                         + "]) AS privileges(privilege) "
                         "WHERE schemas.nspname = 'public' "
                         "AND tables.relkind IN ('r', 'p') "
@@ -111,9 +140,35 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                     )
                 )
             ).all()
+            column_privilege_rows = (
+                await connection.execute(
+                    text(
+                        "SELECT tables.relname AS table_name, privileges.privilege "
+                        "FROM pg_class AS tables "
+                        "JOIN pg_namespace AS schemas ON schemas.oid = tables.relnamespace "
+                        "CROSS JOIN unnest(ARRAY["
+                        + ", ".join(f"'{privilege}'" for privilege in COLUMN_PRIVILEGES)
+                        + "]) AS privileges(privilege) "
+                        "WHERE schemas.nspname = 'public' "
+                        "AND tables.relkind IN ('r', 'p') "
+                        "AND has_any_column_privilege("
+                        "current_user, tables.oid, privileges.privilege"
+                        ") "
+                        "AND NOT has_table_privilege("
+                        "current_user, tables.oid, privileges.privilege"
+                        ") "
+                        "ORDER BY tables.relname, privileges.privilege"
+                    )
+                )
+            ).all()
             granted_sets: dict[str, set[str]] = {}
             for privilege_row in privilege_rows:
                 granted_sets.setdefault(str(privilege_row.table_name), set()).add(
+                    str(privilege_row.privilege)
+                )
+            column_granted_sets: dict[str, set[str]] = {}
+            for privilege_row in column_privilege_rows:
+                column_granted_sets.setdefault(str(privilege_row.table_name), set()).add(
                     str(privilege_row.privilege)
                 )
             return ScheduleDatabaseRole(
@@ -124,9 +179,16 @@ async def inspect_schedule_database_role(database_url: str) -> ScheduleDatabaseR
                 inherit=bool(row.rolinherit),
                 replication=bool(row.rolreplication),
                 bypass_rls=bool(row.rolbypassrls),
+                settable_roles=frozenset(
+                    str(settable_role_row.role_name) for settable_role_row in settable_role_rows
+                ),
                 table_privileges={
                     table_name: frozenset(privileges)
                     for table_name, privileges in granted_sets.items()
+                },
+                column_privileges={
+                    table_name: frozenset(privileges)
+                    for table_name, privileges in column_granted_sets.items()
                 },
             )
     finally:

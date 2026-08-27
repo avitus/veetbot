@@ -15,7 +15,9 @@ def _role(
     inherit: bool = False,
     replication: bool = False,
     bypass_rls: bool = False,
+    settable_roles: frozenset[str] = frozenset(),
     table_privileges: dict[str, frozenset[str]] | None = None,
+    column_privileges: dict[str, frozenset[str]] | None = None,
 ) -> ScheduleDatabaseRole:
     return ScheduleDatabaseRole(
         name="veetbot_schedule",
@@ -25,7 +27,11 @@ def _role(
         inherit=inherit,
         replication=replication,
         bypass_rls=bypass_rls,
-        table_privileges=table_privileges or dict(REQUIRED_TABLE_PRIVILEGES),
+        settable_roles=settable_roles,
+        table_privileges=(
+            dict(REQUIRED_TABLE_PRIVILEGES) if table_privileges is None else table_privileges
+        ),
+        column_privileges={} if column_privileges is None else column_privileges,
     )
 
 
@@ -73,6 +79,25 @@ def test_schedule_role_rejects_every_surplus_effective_table_privilege() -> None
             "schedule database role 'veetbot_schedule' has unexpected SELECT "
             "on public.unrelated_table"
         ),
+    ]
+
+
+def test_schedule_role_rejects_settable_membership_despite_noinherit() -> None:
+    assert permission_failures(
+        _role(inherit=False, settable_roles=frozenset({"database_admin"}))
+    ) == [
+        "schedule database role 'veetbot_schedule' can SET ROLE to unexpected role 'database_admin'"
+    ]
+
+
+def test_schedule_role_rejects_column_privilege_that_bypasses_table_allowlist() -> None:
+    assert permission_failures(
+        _role(column_privileges={"unrelated_table": frozenset({"SELECT"})})
+    ) == [
+        (
+            "schedule database role 'veetbot_schedule' has unexpected column-level SELECT "
+            "on public.unrelated_table"
+        )
     ]
 
 

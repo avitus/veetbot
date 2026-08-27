@@ -523,6 +523,8 @@ class MCPRuntime:
                     "outcome": "failed",
                 },
             )
+            if self._non_idempotent_effect(spec) and not safe_to_retry:
+                return self._outcome_unknown("MCP authorization failed after dispatch")
             return self._unavailable(connection.unavailable_reason)
         if not changed:
             connection.unavailable_reason = "tool.server_unauthorized"
@@ -535,6 +537,8 @@ class MCPRuntime:
                     "outcome": "credential_unchanged",
                 },
             )
+            if self._non_idempotent_effect(spec) and not safe_to_retry:
+                return self._outcome_unknown("MCP authorization failed after dispatch")
             return self._unavailable(connection.unavailable_reason)
         await self._event(
             connection.session_id,
@@ -632,7 +636,8 @@ class MCPRuntime:
                         detail="MCP server reported a normalized provider failure",
                         retryable=(
                             (
-                                spec.idempotency is IdempotencyClass.READ_ONLY
+                                spec.idempotency
+                                in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
                                 or effect_status == "not_applied"
                             )
                             and gmail_code in {"gmail.rate_limited", "gmail.provider_unavailable"}

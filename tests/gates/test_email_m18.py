@@ -863,6 +863,13 @@ async def _assert_platform_maps_postdispatch_nonidempotent_failure_to_uncertain(
                         is_error=True,
                     ),
                 ),
+                ScriptedMCPResponse(
+                    name="send_message",
+                    result=MCPCallResult(
+                        content=("gmail.provider_unavailable",),
+                        is_error=True,
+                    ),
+                ),
             ),
         ),
     }
@@ -917,6 +924,12 @@ async def _assert_platform_maps_postdispatch_nonidempotent_failure_to_uncertain(
             "send_message",
             {},
         )
+        idempotent_send_result = await composition.mcp.call_tool(
+            context,
+            send_spec.model_copy(update={"idempotency": IdempotencyClass.IDEMPOTENT}),
+            "send_message",
+            {},
+        )
     assert read_result.failure is not None and read_result.failure.retryable is True
     assert write_result.failure is not None
     assert write_result.failure.reason_code == "tool.outcome_unknown"
@@ -927,6 +940,9 @@ async def _assert_platform_maps_postdispatch_nonidempotent_failure_to_uncertain(
     assert safe_send_result.failure is not None
     assert safe_send_result.failure.reason_code == "tool.server_error"
     assert safe_send_result.failure.retryable is True
+    assert idempotent_send_result.failure is not None
+    assert idempotent_send_result.failure.reason_code == "tool.server_error"
+    assert idempotent_send_result.failure.retryable is True
 
     repeated_arguments = {
         "to": "recipient@example.test",
@@ -1012,6 +1028,25 @@ class _RotatingGmailCredentials:
             scope=credential.scope,
         )
         return SecretValue(replacement.as_json())
+
+
+class _UnavailableGmailRefresh:
+    def __init__(self) -> None:
+        self.calls: dict[str, int] = {}
+
+    async def resolve(self, reference: CredentialRef) -> SecretValue:
+        count = self.calls.get(reference.name, 0)
+        self.calls[reference.name] = count + 1
+        if count > 0:
+            raise PermissionError("synthetic credential refresh failure")
+        mode = reference.name.removeprefix("gmail_")
+        return SecretValue(_credential(mode).as_json())
+
+
+class _StableGmailCredentials:
+    async def resolve(self, reference: CredentialRef) -> SecretValue:
+        mode = reference.name.removeprefix("gmail_")
+        return SecretValue(_credential(mode).as_json())
 
 
 async def _assert_predispatch_credential_rejection_reauthenticates_once() -> None:
@@ -1111,6 +1146,51 @@ async def _assert_predispatch_credential_rejection_reauthenticates_once() -> Non
     assert result.failure is not None
     assert result.failure.reason_code == "tool.outcome_unknown"
     assert result.failure.retryable is False
+
+    ambiguous_scripts = {
+        "gmail_read": ScriptedMCPServer(name="gmail_read", discovery=_discovery("read")),
+        "gmail_write": ScriptedMCPServer(
+            name="gmail_write",
+            discovery=_discovery("write"),
+            responses=(
+                ScriptedMCPResponse(
+                    name="create_draft",
+                    result=MCPCallResult(
+                        content=("gmail.credential_rejected",),
+                        is_error=True,
+                    ),
+                ),
+            ),
+        ),
+        "gmail_send": ScriptedMCPServer(name="gmail_send", discovery=_discovery("send")),
+    }
+    for resolver in (_StableGmailCredentials(), _UnavailableGmailRefresh()):
+        ambiguous_factory = ScriptedMCPClientFactory(ambiguous_scripts)
+        async with build(
+            settings=_email_settings(),
+            sequential_ids=True,
+            mcp_client_factory=ambiguous_factory,
+            credential_resolver=resolver,
+        ) as composition:
+            session_id = await composition.sessions.create()
+            context = replace(
+                tool_context(),
+                session_id=session_id,
+                tenant_id="local",
+                principal=composition.principal,
+            )
+            config = next(
+                row for row in email_server_configs("local") if row.server_id == "gmail_write"
+            )
+            spec = next(
+                mapped.spec
+                for mapped in map_discovered_tools(config, _discovery("write").tools).accepted
+                if mapped.remote_name == "create_draft"
+            )
+            ambiguous_result = await composition.mcp.call_tool(context, spec, "create_draft", {})
+        assert ambiguous_result.failure is not None
+        assert ambiguous_result.failure.reason_code == "tool.outcome_unknown"
+        assert ambiguous_result.failure.retryable is False
 
 
 async def test_failure_taxonomy_is_bounded_and_nonidempotent_safe() -> None:
