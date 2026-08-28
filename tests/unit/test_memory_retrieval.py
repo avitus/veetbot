@@ -408,10 +408,14 @@ async def test_snapshot_uses_the_core_profile_and_is_reproducible() -> None:
 
 
 def _ids(start: int) -> SequenceIdFactory:
+    """Build a deterministic UUID sequence for one retrieval test."""
+
     return SequenceIdFactory(UUID(int=value) for value in range(start, start + 1_000))
 
 
 async def test_rrf_k_and_lifecycle_weights_come_from_the_retrieval_profile() -> None:
+    """Fusion and lifecycle scoring consume the reviewed retrieval profile."""
+
     clock, factory, _service, retriever = await formation_stack()
     async with factory() as uow:
         await uow.memories.upsert_belief(

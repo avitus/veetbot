@@ -29,6 +29,8 @@ CONTEXT_PLAN_DOCUMENT = "context/plan.yaml"
 
 
 def _document(relative: str) -> dict[str, Any]:
+    """Load one shipped YAML profile document as a string-keyed mapping."""
+
     loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return {str(key): value for key, value in loaded.items()}
@@ -66,6 +68,8 @@ def test_interactive_snapshot_knobs_are_not_in_the_memory_profile() -> None:
 
 
 def test_idle_seconds_is_not_a_profile_knob() -> None:
+    """The formation-policy idle boundary remains versioned code, not an overlay."""
+
     serialized = (PACKAGE_ROOT / MEMORY_PROFILE_DOCUMENT).read_text(encoding="utf-8")
 
     assert "idle" not in serialized

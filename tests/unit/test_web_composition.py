@@ -133,6 +133,8 @@ async def test_web_search_runs_through_policy_and_persists_untrusted_result() ->
 
 
 async def test_retryable_web_provider_outage_does_not_advise_argument_changes() -> None:
+    """Transient provider outages keep retry guidance distinct from bad input."""
+
     provider = FailingWebProvider()
     script = FakeModelScript(
         turns=[

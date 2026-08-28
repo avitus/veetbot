@@ -835,6 +835,8 @@ def test_token_auth_requires_a_configured_principal() -> None:
 def test_sandbox_overlay_values_are_semantically_validated(
     tmp_path: Path, overlay: str, message: str
 ) -> None:
+    """Sandbox overlays reject values that violate execution invariants."""
+
     path = tmp_path / "sandbox" / "limits.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(overlay, encoding="utf-8")
@@ -899,6 +901,8 @@ def test_delegated_research_defaults_leave_room_for_tool_use_and_synthesis() -> 
 
 
 def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
+    """Return dotted paths for every non-mapping value in a document."""
+
     leaves: set[str] = set()
     for key, value in document.items():
         path = f"{prefix}.{key}" if prefix else str(key)

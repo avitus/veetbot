@@ -670,6 +670,8 @@ def test_score_probe_counts_noise_returned_in_both_moments_once() -> None:
 
 
 def test_score_formation_separates_stale_from_fabricated() -> None:
+    """Formation scoring keeps stale expected beliefs separate from inventions."""
+
     scenario = _scenario(_valid_probe("update"), protected=["REDACTED-TOKEN"])
     live = [
         _record(
@@ -1052,6 +1054,8 @@ def test_compare_to_baseline_reports_regression_drift_and_improvement() -> None:
 
 
 def test_compare_to_baseline_reports_provider_formation_version_drift() -> None:
+    """A provider-formation policy change invalidates baseline comparability."""
+
     baseline = _baseline_of(_result())
 
     drifted = compare_to_baseline(

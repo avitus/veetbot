@@ -342,6 +342,8 @@ async def test_web_provider_rejects_unsuccessful_success_shaped_bodies(
     bodies: list[dict[str, object]] = []
 
     async def wire(request: httpx.Request) -> httpx.Response:
+        """Return the latest success-shaped body selected by the test."""
+
         del request
         return httpx.Response(200, json=bodies[-1])
 
@@ -370,9 +372,13 @@ async def test_web_provider_rejects_result_rows_that_fail_domain_validation(
     provider_name: str,
     factory: ProviderFactory,
 ) -> None:
+    """Provider rows still pass through the public-web domain boundary."""
+
     row = {"title": "t", "url": "https://127.0.0.1/private", "content": "x", "description": "x"}
 
     async def wire(request: httpx.Request) -> httpx.Response:
+        """Return one provider-shaped row with a disallowed result URL."""
+
         del request
         payload: dict[str, object] = (
             {"results": [row]}
@@ -408,9 +414,13 @@ async def test_web_provider_status_taxonomy_is_stable(
     reason_code: str,
     retryable: bool,
 ) -> None:
+    """HTTP failures retain provider-neutral reasons and retryability."""
+
     del provider_name
 
     async def wire(request: httpx.Request) -> httpx.Response:
+        """Return the status selected by the taxonomy case."""
+
         del request
         return httpx.Response(status, text="upstream-private-diagnostic")
 
@@ -430,6 +440,8 @@ async def test_tavily_custom_usage_limit_statuses_are_quota_failures(status: int
     credentials = MappingCredentialResolver({"tavily": "synthetic-tavily-credential"})
 
     async def wire(request: httpx.Request) -> httpx.Response:
+        """Return Tavily's selected private usage-limit status."""
+
         del request
         return httpx.Response(status, text="upstream-private-diagnostic")
 
@@ -449,6 +461,8 @@ async def test_non_tavily_custom_client_status_remains_a_provider_rejection() ->
     credentials = MappingCredentialResolver({"firecrawl": "synthetic-firecrawl-credential"})
 
     async def wire(request: httpx.Request) -> httpx.Response:
+        """Return a status with no Firecrawl-specific quota meaning."""
+
         del request
         return httpx.Response(432, text="upstream-private-diagnostic")
 
