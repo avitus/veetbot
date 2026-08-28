@@ -1280,18 +1280,24 @@ def compare_to_baseline(
         # stable population has a good direction.
         if recorded_total != observed_total:
             drift.append(_entry(f"{field} needed_total", "drifted", recorded_total, observed_total))
-        recorded_recalled = 0 if recorded_bin is None else recorded_bin.needed_recalled
-        observed_recalled = 0 if observed_bin is None else observed_bin.needed_recalled
-        if observed_recalled < recorded_recalled:
-            regressions.append(
-                _entry(
-                    f"{field} needed_recalled", "regressed", recorded_recalled, observed_recalled
+        else:
+            recorded_recalled = 0 if recorded_bin is None else recorded_bin.needed_recalled
+            observed_recalled = 0 if observed_bin is None else observed_bin.needed_recalled
+            if observed_recalled < recorded_recalled:
+                regressions.append(
+                    _entry(
+                        f"{field} needed_recalled",
+                        "regressed",
+                        recorded_recalled,
+                        observed_recalled,
+                    )
                 )
-            )
-        elif observed_recalled > recorded_recalled:
-            improvements.append(
-                _entry(f"{field} needed_recalled", "improved", recorded_recalled, observed_recalled)
-            )
+            elif observed_recalled > recorded_recalled:
+                improvements.append(
+                    _entry(
+                        f"{field} needed_recalled", "improved", recorded_recalled, observed_recalled
+                    )
+                )
     for field in _ATTRIBUTION_PARTITION:
         recorded, observed = getattr(baseline.metrics, field), getattr(result.metrics, field)
         if recorded != observed:

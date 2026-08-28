@@ -910,6 +910,8 @@ def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
 
 
 def test_memory_profiles_knob_paths_match_document() -> None:
+    """Keep the memory profile registry synchronized with its YAML leaves."""
+
     loaded: object = yaml.safe_load(
         (PACKAGE_ROOT / "memory/profiles.yaml").read_text(encoding="utf-8")
     )

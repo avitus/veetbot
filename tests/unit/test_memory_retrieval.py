@@ -452,6 +452,8 @@ async def test_rrf_k_and_lifecycle_weights_come_from_the_retrieval_profile() -> 
 
 
 def test_ranking_weights_come_from_the_retrieval_profile() -> None:
+    """Retrieval uses the reviewed profile coefficients instead of literals."""
+
     matchless_profile = RetrievalProfile.model_validate({"ranking_weights": {"match": 0.0}})
 
     shipped = RetrievalProfile().ranking_weights

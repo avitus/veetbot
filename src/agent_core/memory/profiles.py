@@ -44,9 +44,9 @@ class RankingWeights(_ProfileModel):
     """
 
     match: float = Field(default=0.4, ge=0.0, le=1.0)
-    confidence: float = Field(default=0.2, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.2, gt=0.0, le=1.0)
     reinforce: float = Field(default=0.1, ge=0.0, le=1.0)
-    authority: float = Field(default=0.15, ge=0.0, le=1.0)
+    authority: float = Field(default=0.15, gt=0.0, le=1.0)
     scope: float = Field(default=0.1, ge=0.0, le=1.0)
     utility: float = Field(default=0.05, ge=0.0, le=1.0)
 

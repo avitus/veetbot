@@ -20,6 +20,7 @@ from agent_core.memory.formation import SESSION_IDLE_SECONDS
 from agent_core.memory.profiles import (
     FormationProfile,
     MemoryProfiles,
+    RankingWeights,
     SnapshotProfiles,
 )
 
@@ -71,3 +72,11 @@ def test_idle_seconds_is_not_a_profile_knob() -> None:
     assert not [name for name in FormationProfile.model_fields if "idle" in name]
     assert not [path for path in SHIPPED_KNOB_PATHS[MEMORY_PROFILE_DOCUMENT] if "idle" in path]
     assert SESSION_IDLE_SECONDS == 30
+
+
+@pytest.mark.parametrize("field", ["confidence", "authority"])
+def test_ranking_profile_preserves_trust_sensitive_terms(field: str) -> None:
+    """Trust-bearing score terms cannot be disabled by an operator overlay."""
+
+    with pytest.raises(ValidationError, match="greater than 0"):
+        RankingWeights.model_validate({field: 0.0})

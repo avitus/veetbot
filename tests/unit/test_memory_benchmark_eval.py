@@ -750,6 +750,8 @@ def _probe_result(
     distinct_prefixes: int = 1,
     needed_by_distance: dict[str, dict[str, int]] | None = None,
 ) -> ProbeRetrievalResult:
+    """Build one compact probe result for aggregation and comparison tests."""
+
     return ProbeRetrievalResult(
         needed_by_distance={
             key: DistanceRecall.model_validate(value)
@@ -1061,6 +1063,8 @@ def test_compare_to_baseline_reports_provider_formation_version_drift() -> None:
 
 
 def test_score_probe_bins_needed_recall_by_evidence_distance() -> None:
+    """A probe attributes each needed label to its evidence-session distance."""
+
     update_probe = _valid_probe("update")
     update_scenario = _scenario(update_probe)
     portland = _recalled_belief(
@@ -1118,6 +1122,8 @@ def test_score_probe_bins_needed_recall_by_evidence_distance() -> None:
 
 
 def _consolidation(session_id: str, proposed: int) -> ConsolidationCounts:
+    """Build consolidation counts with the automatic-candidate ceiling applied."""
+
     return ConsolidationCounts(
         session_id=session_id,
         scope="general",
@@ -1132,6 +1138,8 @@ def _consolidation(session_id: str, proposed: int) -> ConsolidationCounts:
 def _binned_results(
     *, recalled_far: int = 2, first_proposed: int = 15
 ) -> list[DeterministicScenarioResult]:
+    """Build scenario results containing near and far recall bins."""
+
     first, second = _scenario_results()
     binned_first = _probe_result(
         probe_id="p01",
@@ -1179,6 +1187,8 @@ def _binned_results(
 
 
 def test_aggregate_sums_distance_bins_and_ceiling_drops() -> None:
+    """Aggregation preserves distance populations and ceiling losses."""
+
     metrics = aggregate_deterministic(_binned_results()).model_dump()
 
     # Fifteen proposals against the twelve-candidate ceiling drop three; the
@@ -1195,6 +1205,8 @@ def test_aggregate_sums_distance_bins_and_ceiling_drops() -> None:
 
 
 def test_compare_to_baseline_flags_distance_bins_and_ceiling_drops() -> None:
+    """Only stable distance populations receive directional comparisons."""
+
     baseline = _baseline_of(_result(_binned_results()))
 
     identical = compare_to_baseline(_result(_binned_results()), baseline)
@@ -1255,6 +1267,8 @@ def test_compare_to_baseline_flags_distance_bins_and_ceiling_drops() -> None:
     assert any(
         entry.startswith("recall_by_distance[2] needed_total drifted") for entry in drifted.drift
     )
+    assert not any(entry.startswith("recall_by_distance") for entry in drifted.regressions)
+    assert not any(entry.startswith("recall_by_distance") for entry in drifted.improvements)
 
 
 def test_load_corpus_rejects_paths_outside_repository(tmp_path: Path) -> None:

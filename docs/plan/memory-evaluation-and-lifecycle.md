@@ -650,11 +650,16 @@ scoring formula were literals inside `_score`, which meant retuning them was a
 code edit rather than a reviewed configuration diff. Moving them here follows
 the precedent this milestone set with `stale_penalty` and
 `near_duplicate_penalty` — ranking-shaping values live in the profile document
-at the values the recorded baseline was measured under — and takes the
-document to thirty-four knobs and the inventory to 143. The shipped values are
-identical to the former literals, so the deterministic benchmark baseline is
-unchanged by the move itself; a change to any of the six is a ranking change
-and re-records the baseline like any other.
+at the values the recorded baseline was measured under — and takes the document
+to thirty-four knobs. At that point the six additions took the milestone-era
+inventory from 137 to 143; later authorized configuration additions take the
+current repository-wide operator inventory to 156, as derived in
+[bootstrap-and-composition.md](bootstrap-and-composition.md). The shipped values
+are identical to the former literals, so the deterministic benchmark baseline
+is unchanged by the move itself; a change to any of the six is a ranking change
+and re-records the baseline like any other. The `confidence` and `authority`
+weights remain strictly positive so an overlay cannot flatten the required
+lifecycle or provenance ordering.
 
 `SESSION_IDLE_SECONDS` stays a constant and does not become a knob. The idle
 boundary is part of the formation policy that a belief's

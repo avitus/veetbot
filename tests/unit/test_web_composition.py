@@ -169,6 +169,8 @@ async def test_retryable_web_provider_outage_does_not_advise_argument_changes() 
 
 
 async def test_web_search_quota_failure_reports_operator_action() -> None:
+    """Quota failures surface safe capacity guidance through the run loop."""
+
     provider = FailingWebProvider(
         reason_code="tool.web.quota_exceeded",
         retryable=False,

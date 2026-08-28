@@ -425,6 +425,8 @@ async def test_web_provider_status_taxonomy_is_stable(
 
 @pytest.mark.parametrize("status", [432, 433])
 async def test_tavily_custom_usage_limit_statuses_are_quota_failures(status: int) -> None:
+    """Tavily's nonstandard usage-limit statuses retain quota semantics."""
+
     credentials = MappingCredentialResolver({"tavily": "synthetic-tavily-credential"})
 
     async def wire(request: httpx.Request) -> httpx.Response:
@@ -442,6 +444,8 @@ async def test_tavily_custom_usage_limit_statuses_are_quota_failures(status: int
 
 
 async def test_non_tavily_custom_client_status_remains_a_provider_rejection() -> None:
+    """Do not assign Tavily's private status meanings to another provider."""
+
     credentials = MappingCredentialResolver({"firecrawl": "synthetic-firecrawl-credential"})
 
     async def wire(request: httpx.Request) -> httpx.Response:
