@@ -386,12 +386,113 @@ private struct ChatDestination: View {
 #if os(macOS)
 enum MainWindowConfiguration {
     static let frameName: NSWindow.FrameAutosaveName = "VeetbotMainWindow"
+    static let storageKey = "veetbot.mainWindow.frame"
+    @MainActor private static let persistenceByWindow =
+        NSMapTable<NSWindow, FramePersistence>.weakToStrongObjects()
 
     @MainActor
     static func apply(to window: NSWindow) {
-        guard window.frameAutosaveName != frameName else { return }
-        window.setFrameUsingName(frameName)
-        window.setFrameAutosaveName(frameName)
+        if persistenceByWindow.object(forKey: window) == nil {
+            persistenceByWindow.setObject(FramePersistence(window: window), forKey: window)
+        }
+        applyImmediately(to: window)
+    }
+
+    @MainActor
+    private static func applyImmediately(to window: NSWindow) {
+        if
+            let value = UserDefaults.standard.string(forKey: storageKey),
+            let frame = validFrame(from: value)
+        {
+            let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) })
+                ?? window.screen
+                ?? NSScreen.main
+            window.setFrame(window.constrainFrameRect(frame, to: screen), display: false)
+        }
+        if window.frameAutosaveName != frameName {
+            window.setFrameAutosaveName(frameName)
+        }
+    }
+
+    @MainActor
+    static func saveFrame(of window: NSWindow) {
+        // SwiftUI.AppKitWindow owns AppKit autosave and ignores a caller-supplied
+        // save name, so keep the frame in an application-owned preference.
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: storageKey)
+    }
+
+    private static func validFrame(from value: String) -> NSRect? {
+        let frame = NSRectFromString(value)
+        guard
+            frame.origin.x.isFinite,
+            frame.origin.y.isFinite,
+            frame.width.isFinite,
+            frame.height.isFinite,
+            frame.width > 0,
+            frame.height > 0
+        else { return nil }
+        return frame
+    }
+
+    @MainActor
+    private final class FramePersistence: NSObject {
+        private weak var window: NSWindow?
+        private var isReadyForUserChanges: Bool
+
+        init(window: NSWindow) {
+            self.window = window
+            isReadyForUserChanges = window.isMainWindow || window.isKeyWindow
+            super.init()
+            let center = NotificationCenter.default
+            center.addObserver(
+                self,
+                selector: #selector(windowBecameReady(_:)),
+                name: NSWindow.didBecomeMainNotification,
+                object: window
+            )
+            center.addObserver(
+                self,
+                selector: #selector(windowBecameReady(_:)),
+                name: NSWindow.didBecomeKeyNotification,
+                object: window
+            )
+            center.addObserver(
+                self,
+                selector: #selector(windowFrameChanged(_:)),
+                name: NSWindow.didMoveNotification,
+                object: window
+            )
+            center.addObserver(
+                self,
+                selector: #selector(windowFrameChanged(_:)),
+                name: NSWindow.didResizeNotification,
+                object: window
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func windowBecameReady(_ notification: Notification) {
+            guard let window, notification.object as? NSWindow === window else { return }
+            isReadyForUserChanges = false
+            MainWindowConfiguration.applyImmediately(to: window)
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.window === window else { return }
+                MainWindowConfiguration.applyImmediately(to: window)
+                self.isReadyForUserChanges = true
+            }
+        }
+
+        @objc private func windowFrameChanged(_ notification: Notification) {
+            guard
+                isReadyForUserChanges,
+                let window,
+                notification.object as? NSWindow === window
+            else { return }
+            MainWindowConfiguration.saveFrame(of: window)
+        }
     }
 }
 
@@ -467,6 +568,10 @@ private struct MainWindowFrameAutosaveView: NSViewRepresentable {
 }
 
 private final class MainWindowFrameAutosaveNSView: NSView {
+    #if DEBUG
+    private var scheduledUITestFrame = false
+    #endif
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         applyConfigurationIfPossible()
@@ -475,7 +580,46 @@ private final class MainWindowFrameAutosaveNSView: NSView {
     func applyConfigurationIfPossible() {
         guard let window else { return }
         MainWindowConfiguration.apply(to: window)
+        #if DEBUG
+        scheduleUITestFrameIfRequested(on: window)
+        #endif
     }
+
+    #if DEBUG
+    private func scheduleUITestFrameIfRequested(on window: NSWindow) {
+        guard !scheduledUITestFrame else { return }
+        guard ProcessInfo.processInfo.arguments.contains(
+            "--ui-testing-conversation-navigation"
+        ) else { return }
+        guard
+            let value = ProcessInfo.processInfo.environment[
+                "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"
+            ]
+        else { return }
+        let components = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard
+            components.count == 2,
+            let width = Double(components[0]),
+            let height = Double(components[1]),
+            width.isFinite,
+            height.isFinite,
+            width > 0,
+            height > 0
+        else { return }
+
+        scheduledUITestFrame = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak window] in
+            guard let window else { return }
+            window.setFrame(
+                NSRect(
+                    origin: window.frame.origin,
+                    size: NSSize(width: width, height: height)
+                ),
+                display: true
+            )
+        }
+    }
+    #endif
 }
 #endif
 

@@ -44,3 +44,17 @@ notifications:
   fallback_poll_seconds: 30
   retry_delays_seconds: [30, 120, 600, 3600]
   terminal_expiry_seconds: 86400
+delegation:
+  max_children_per_call: 3
+  max_live_children_per_parent: 8
+  max_depth: 1
+  max_live_delegated_runs_per_tenant: 16
+  child_max_steps: 12
+  child_max_model_calls: 12
+  child_max_tool_calls: 48
+  child_max_cost: 2
+  child_wall_seconds: 900
+  synthesis_reserve_steps: 1
+  synthesis_reserve_model_calls: 1
+  synthesis_reserve_cost: 0.25
+  summary_max_bytes: 16384

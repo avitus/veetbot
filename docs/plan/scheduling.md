@@ -6,12 +6,13 @@ canonical: true
 
 # Scheduled runs
 
-This document specifies Milestone 11. The engineering plan states the
-requirement; this document states the mechanism. It is subordinate to
+This document specifies Milestones 11, 19, and 20. The engineering plan states
+the requirement; this document states the mechanism. It is subordinate to
 [engineering-plan.md](engineering-plan.md), and it reuses rather than replaces
 the durable run queue, run loop, policy engine, event log, and HTTP boundary.
 [ADR-0059](../adr/0059-milestone-11-scheduled-runs.md) records the architectural
-decisions.
+decisions for the control plane, ADR-0072 records the original one-time
+conversational bridge, and ADR-0073 records the calendar-recurrence extension.
 
 The scheduling entry condition is satisfied: PostgreSQL-backed on-demand runs,
 leases, fencing, checkpoints, recovery, cancellation, and the public run API
@@ -36,11 +37,19 @@ ordinary durable runs. It includes:
 - durable audit events, metrics, and offline result retrieval through the
   occurrence-to-run link.
 
-The milestone does not include arbitrary cron expressions, monthly calendar
+Milestone 11 does not include arbitrary cron expressions, monthly calendar
 rules, dependency graphs, workflow DAGs, user-selectable catch-up algorithms,
 push notifications, general-purpose subagents, or a second queue technology.
-It does not make a schedule a tool the model may create. Schedule management is
-an authenticated application surface.
+It deliberately did not make a schedule a tool the model may create; schedule
+management was an authenticated application surface. Milestone 19, authorized
+by the owner on 2026-08-24 and recorded in ADR-0072, adds the narrow
+model-callable creation surface specified below without changing the Milestone
+11 control plane or its completed gates. Milestone 20, authorized by the owner
+on 2026-08-27 and recorded in ADR-0073, adds monthly and yearly calendar rules
+and widens conversational creation to daily, weekly, monthly, and yearly
+schedules. Arbitrary cron or RFC 5545 input, interval multipliers, dependency
+graphs, workflow DAGs, continuous-session recurrence, and model-callable
+lifecycle mutation remain outside the closed extension.
 
 ## The boundary: a scheduler creates runs; it does not execute them
 
@@ -118,6 +127,8 @@ class CadenceKind(StrEnum):
     ONCE = "ONCE"
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
 
 
 class ScheduleRevision(BaseModel):
@@ -214,12 +225,22 @@ ONCE   {"at": RFC3339 timestamp with an offset}
 DAILY  {"local_time": "HH:MM[:SS]", "timezone": IANA name}
 WEEKLY {"local_time": "HH:MM[:SS]", "weekdays": [1..7],
         "timezone": IANA name}
+MONTHLY {"local_time": "HH:MM[:SS]", "days_of_month": [1..31],
+         "last_day": true|false, "timezone": IANA name}
+YEARLY {"local_time": "HH:MM[:SS]",
+        "dates": [{"month": 1..12, "day": 1..31}, ...],
+        "timezone": IANA name}
 ```
 
 ISO weekday 1 is Monday and 7 is Sunday. Weekly weekdays are unique and stored
-in ascending order. `zoneinfo` from the Python standard library is the time-zone
-authority; the runtime records the installed tzdata version in startup
-diagnostics.
+in ascending order. Monthly numbered days are unique and stored in ascending
+order; at least one numbered day or `last_day = true` is required. A numbered
+day absent from a month is skipped, while `last_day` explicitly selects that
+month's actual final day. If both select the same date, it fires once. Yearly
+month/day pairs are unique and sorted. February 29 is valid and fires only in
+leap years; a pair impossible in every Gregorian year, such as April 31, is
+invalid. `zoneinfo` from the Python standard library is the time-zone authority;
+the runtime records the installed tzdata version in startup diagnostics.
 
 Civil-time resolution is deterministic:
 
@@ -229,6 +250,9 @@ Civil-time resolution is deterministic:
   first valid local instant on that date and fires once.
 - A recurrence is calculated from the declared civil rule, never by adding 24
   hours or seven days to the preceding UTC instant.
+- Monthly and yearly lookup enumerates only a bounded set of candidate months
+  or years; coalesced counts use Gregorian calendar arithmetic rather than one
+  loop per missed occurrence.
 - `next_fire_at` is cached state. The immutable cadence plus the last recorded
   nominal instant can reconstruct it, and a repair command may replace a wrong
   cache only after emitting `schedule.next_fire_repaired`.
@@ -453,10 +477,11 @@ Cross-tenant or cross-principal access returns the same not-found envelope as
 the existing API. Every route declares its required schedule scope in OpenAPI.
 
 Validation rejects unknown cadence fields, naive datetimes, invalid IANA zones,
-duplicate or out-of-range weekdays, non-positive bounds, a grace or timeout
-above tenant ceilings, unknown scopes, mismatched agent policy, and secret-like
-instructions. Errors use the existing envelope and new stable reason codes
-under `schedule.*`.
+duplicate or out-of-range weekdays, duplicate or out-of-range monthly days,
+empty monthly selectors, duplicate or impossible yearly dates, empty yearly
+selectors, non-positive bounds, a grace or timeout above tenant ceilings,
+unknown scopes, mismatched agent policy, and secret-like instructions. Errors
+use the existing envelope and stable reason codes under `schedule.*`.
 
 ## Events and audit
 
@@ -651,9 +676,13 @@ roles in production. Interactive and async workers claim disjoint configured
 priority classes, preserving at least one slot for each workload. Multiple
 schedule workers are safe. The schedule worker has database access and no API
 bearer token, model-provider, tool, sandbox, or object-store credential because
-it executes none of those capabilities. Create, update, and resume issue a
-fixed-channel PostgreSQL notification after commit; the scheduler always keeps
-its bounded table-scan fallback.
+it executes none of those capabilities. Release validation connects through
+that role and verifies the exact table privileges needed to check the schema
+head, seed the session-history projection and checkpoint, materialize the run,
+and enqueue schedule notifications; it also rejects superuser and `BYPASSRLS`
+authority. Create, update, and resume issue a fixed-channel PostgreSQL
+notification after commit; the scheduler always keeps its bounded table-scan
+fallback.
 
 ## Tracked metrics
 
@@ -673,6 +702,91 @@ Track:
 
 Metrics contain tenant-safe identifiers or aggregates and never instructions or
 credentials.
+
+## Model-callable creation
+
+Milestone 19 closes the missing edge between a conversational request and the
+existing scheduling control plane. Milestone 20 widens the same capability to
+the four recurring calendar kinds without adding another tool:
+
+```text
+name                 schedule.create
+kind                 capability
+source               builtin
+target_kind          in_process
+side_effect          external_write
+risk                 high
+idempotency          conditionally_idempotent
+required_scopes      schedule.write
+timeout_seconds      15
+maximum_output_bytes 4096
+allow_parallel       false
+output_trust         internal_tool
+```
+
+The input schema is closed. `title` and `instruction` are always required, and
+exactly one of the compatible one-time `at` field or a recurring `cadence`
+object is required:
+
+```json
+{
+  "title": "Throw the ball for Marzipan",
+  "instruction": "Remind me to throw the ball for Marzipan.",
+  "at": "2026-08-25T02:00:00+00:00"
+}
+```
+
+```json
+{
+  "title": "Month-end review",
+  "instruction": "Review the month and summarize unfinished commitments.",
+  "cadence": {
+    "kind": "MONTHLY",
+    "local_time": "18:00:00",
+    "days_of_month": [],
+    "last_day": true,
+    "timezone": "America/Los_Angeles"
+  }
+}
+```
+
+`at` is one timezone-aware ISO 8601 instant. A recurring `cadence` is exactly
+one `DAILY`, `WEEKLY`, `MONTHLY`, or `YEARLY` payload from the closed domain
+union above. Natural-language parsing is not part of the tool: the model uses
+`system.current_time` and, when the date, local time, calendar selector, or
+timezone is not known, `conversation.ask_user` before proposing a call.
+Supplying both `at` and `cadence`, or neither, fails before schedule state.
+
+The tool is registered and present in the default agent only when both
+`AGENT_SCHEDULE_API_ENABLED` and `AGENT_SCHEDULE_WORKER_ENABLED` are true.
+`schedule` becomes a build-time builtin domain. The ordinary pipeline checks
+the exact `schedule.write` scope and the default policy requires approval for
+its `EXTERNAL_WRITE` classification. The approval view contains the concrete
+title, instruction, exact instant or complete recurring cadence, and the empty
+requested-scope set.
+
+Execution calls `ScheduleService.create` directly with
+`ToolExecutionContext.principal` and `ToolExecutionContext.idempotency_key`.
+It performs no internal HTTP request and sees no credential. The application
+service remains the one validator and persistence path, including request-key
+replay. A past or naive instant, invalid calendar selector, or cadence with no
+future occurrence is an argument failure and leaves no schedule.
+
+The definition pins the active agent version and its policy profile and always
+sets `requested_scopes = frozenset()`. Its step, model-call, and tool-call
+limits are the minimum of the active agent's limits and the existing schedule
+ceilings. Cost is the minimum of the active agent's finite cost or `1` and the
+schedule cost ceiling; run timeout is the lesser of 300 seconds and its
+ceiling; misfire grace is the lesser of 3,600 seconds and its ceiling; the
+schedule permits one consecutive failure before automatic pause. No model
+argument can widen any of these values.
+
+The successful result contains `schedule_id`, `state`, `next_fire_at`, and
+whether the application request replayed. Milestone 12's notification behavior
+is unchanged: after the occurrence's run is accounted, the outbox emits the
+generic content-free `schedule_run_finished` notification. The push does not
+contain the title or instruction and can arrive after the nominal instant by
+the duration of the scheduled run.
 
 ## Build sequence
 
@@ -694,6 +808,22 @@ credentials.
 9. Run the full non-live suite, PostgreSQL integration and resilience lanes,
    hosted CI, and the required GitHub CodeRabbit loop on one final head.
    **M11.**
+10. Add the closed `schedule.create` schema, classification, approval view,
+    exact-instant conversion, and application-service adapter. **M19.**
+11. Register the tool only with both schedule flags, add it to the enabled
+    agent roster on the same condition, and prove scope denial and retry
+    idempotency through the ordinary pipeline. **M19.**
+12. Run the five Milestone 19 gates, the scheduling and notification
+    partitions, the complete non-live suite, PostgreSQL integration, hosted CI,
+    and the CodeRabbit loop on the final head. **M19.**
+13. Add monthly and yearly domain values, bounded calendar lookup and counting,
+    and deterministic civil-time regression and property coverage. **M20.**
+14. Widen the HTTP definition union and the compatible `schedule.create`
+    schema, approval view, and application-service adapter for all four
+    recurring kinds. **M20.**
+15. Run the six Milestone 20 gates, every scheduling partition, the complete
+    non-live suite, PostgreSQL integration, hosted CI, and the CodeRabbit loop
+    on the final head. **M20.**
 
 ## Hard gates
 
@@ -802,15 +932,68 @@ credentials.
     security and repository predicates prevent cross-tenant and cross-principal
     reads and mutations. Registered as `gate.schedule.persistence_isolated`,
     case. **M11.**
+24. **Conversational creation is a governed, default-off capability.**
+    `schedule.create` registers only when both schedule flags are enabled and
+    is classified as approval-gated, conditionally idempotent, non-parallel,
+    and exactly scoped by `schedule.write`. Registered as
+    `gate.schedule.model_create_contract`, structural. **M19.**
+25. **A direct reminder request can create one schedule through the ordinary
+    tool pipeline.** The call waits for approval, persists one future one-time
+    definition, pins the active agent, and delegates no tool scopes. Registered
+    as `gate.schedule.model_create_happy_path`, case. **M19.**
+26. **Conversational creation cannot outrun its principal.** A run without
+    `schedule.write` is denied before execution and leaves no schedule state.
+    Registered as `gate.schedule.model_create_authorization`, case. **M19.**
+27. **One-time conversational input accepts only an exact future instant.** A
+    past or non-timezone-aware `at` instant returns a stable argument failure
+    and leaves no schedule state. Registered as
+    `gate.schedule.model_create_validation`, case. **M19.**
+28. **Conversational creation is retry-safe.** Replaying one tool idempotency
+    key and identical normalized arguments returns the original schedule rather
+    than creating a duplicate. Registered as
+    `gate.schedule.model_create_retry`, case. **M19.**
+29. **Calendar cadence values are closed and canonical.** Monthly selectors
+    require unique valid numbered days or explicit month-end, yearly selectors
+    require unique possible month/day pairs, and every accepted value
+    round-trips without semantic drift. Registered as
+    `gate.schedule.calendar_values`, property. **M20.**
+30. **Monthly and yearly recurrence is deterministic.** Numbered monthly days
+    skip missing dates, last-day selects each actual month end, February 29
+    skips non-leap years, and both new kinds obey the existing IANA fold, gap,
+    and no-early rules. Registered as `gate.schedule.calendar_recurrence`,
+    property. **M20.**
+31. **Calendar downtime remains bounded.** Next, latest, and inclusive count
+    operations cross long month and year spans without iterating once per
+    missed occurrence, and one materializer scan still records at most one
+    candidate plus one coalescing event. Registered as
+    `gate.schedule.calendar_misfire_bounded`, case. **M20.**
+32. **The HTTP control plane round-trips every calendar kind.** Create and
+    update accept daily, weekly, monthly, and yearly definitions through the
+    existing route and immutable revision path, returning the canonical
+    cadence and exact next civil instant. Registered as
+    `gate.schedule.calendar_http_roundtrip`, case. **M20.**
+33. **Conversational recurring creation stays governed and least privilege.**
+    Daily, weekly, monthly, and yearly calls use the one `schedule.create`
+    capability, wait for ordinary approval, persist one definition, pin the
+    active agent, and delegate no scopes. Registered as
+    `gate.schedule.model_create_recurring`, case. **M20.**
+34. **Conversational calendar validation and replay fail closed.** Both/neither
+    `at` and `cadence`, invalid calendar values, and an idempotency key reused
+    with different recurrence content create no duplicate state, while an
+    identical retry returns the original schedule. Registered as
+    `gate.schedule.model_create_recurring_validation`, case. **M20.**
 
 ## Open questions
 
-1. Push notification delivery is intentionally outside this milestone. The
-   occurrence API is the durable inbox; email, mobile, and webhook delivery need
-   their own destination authorization, retry, and secret-handling contract.
+1. Milestone 12 delivered Apple push for schedule outcomes. Email and webhook
+   delivery still need their own destination authorization, retry, and
+   secret-handling contracts.
 2. Arbitrary cron and RFC 5545 recurrence are intentionally outside the closed
    cadence union. Evaluation of real schedule demand should choose which one, if
    either, expands it.
-3. A future continuous-session mode would conflict with the one-active-run
+3. Interval multipliers such as every second week require an explicit anchor
+   and revision-update phase contract. They remain outside the unanchored
+   calendar values rather than acquiring an implicit creation-date phase.
+4. A future continuous-session mode would conflict with the one-active-run
    constraint and unbounded conversation growth. It requires separate evidence
    and is not an alternate interpretation of the dedicated-session rule here.

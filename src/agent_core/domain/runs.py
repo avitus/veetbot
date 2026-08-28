@@ -30,6 +30,7 @@ class RunStatus(StrEnum):
 class RunKind(StrEnum):
     INTERACTIVE = "interactive"
     SKILL_REVIEW = "skill_review"
+    DELEGATED = "delegated"
 
 
 class CancelReason(StrEnum):
@@ -55,6 +56,27 @@ class RunLimits(BaseModel):
     max_output_tokens: int | None = None
     max_cost: Decimal | None = None
     deadline_at: datetime | None = None
+    synthesis_reserve_steps: int = Field(default=0, ge=0)
+    synthesis_reserve_model_calls: int = Field(default=0, ge=0)
+    synthesis_reserve_cost: Decimal = Field(default=Decimal("0"), ge=0)
+
+    @model_validator(mode="after")
+    def synthesis_reserve_fits(self) -> RunLimits:
+        """Keep final-synthesis headroom strictly inside each total limit."""
+
+        if self.synthesis_reserve_steps > 0 and self.synthesis_reserve_steps >= self.max_steps:
+            raise ValueError("the synthesis step reserve must be below max_steps")
+        if (
+            self.synthesis_reserve_model_calls > 0
+            and self.synthesis_reserve_model_calls >= self.max_model_calls
+        ):
+            raise ValueError("the synthesis model-call reserve must be below max_model_calls")
+        if self.max_cost is None:
+            if self.synthesis_reserve_cost != 0:
+                raise ValueError("a synthesis cost reserve requires max_cost")
+        elif self.synthesis_reserve_cost > 0 and self.synthesis_reserve_cost >= self.max_cost:
+            raise ValueError("the synthesis cost reserve must be below max_cost")
+        return self
 
 
 class RunUsage(BaseModel):

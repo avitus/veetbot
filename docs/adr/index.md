@@ -80,3 +80,5 @@ implementation without one.
 - [ADR-0069 — Milestone 16 memory evaluation and lifecycle (Proposed)](0069-milestone-16-memory-evaluation-and-lifecycle.md)
 - [ADR-0070 — Milestone 17 memory read API and native browser (Proposed)](0070-milestone-17-memory-read-api-and-browser.md)
 - [ADR-0071 — Milestone 18 first-class email integration (Proposed)](0071-milestone-18-email-integration.md)
+- [ADR-0072 — Milestone 19 conversational schedule creation (Proposed)](0072-milestone-19-conversational-schedule-creation.md)
+- [ADR-0073 — Milestone 20 calendar recurrence and conversational schedules (Proposed)](0073-milestone-20-calendar-recurrence.md)

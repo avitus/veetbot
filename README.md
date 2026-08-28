@@ -1,9 +1,44 @@
-# Modular General-Purpose AI Agent
+# Veetbot
 
-This repository implements the provider-neutral agent platform defined by the
-canonical [engineering plan](docs/plan/engineering-plan.md). Work is strictly
-milestone-gated: Milestones 0 through 9 are complete, and Milestones 10 and 11
-have separately authorized workstreams in progress.
+**A durable, governed AI agent platform built to turn model calls into reliable,
+inspectable work.**
+
+Veetbot combines production-grade execution, long-term memory, tools, schedules,
+notifications, and native clients behind one provider-neutral core. Runs survive
+process failures, every consequential action passes through explicit policy, and
+the event log preserves enough evidence to understand what happened and resume
+safely.
+
+## Built for real agent workloads
+
+- **Reliable by design** — durable runs, leases, checkpoints, idempotency, and
+  replayable events replace fragile, process-bound conversations.
+- **Governed at every boundary** — deterministic policy, scoped credentials,
+  approvals, isolated execution, and auditable memory keep authority explicit.
+- **Open where it matters** — OpenAI, Anthropic, OpenAI-compatible models, MCP,
+  web providers, a public HTTP API, and multiple clients share stable internal
+  contracts instead of locking the platform to one vendor.
+- **Ready to operate** — schedules, offline results, push notifications,
+  deployment automation, evaluation gates, and recovery tooling make Veetbot a
+  platform you can run, test, and improve over time.
+
+## Project status
+
+Veetbot is in active implementation under the canonical
+[engineering plan](docs/plan/engineering-plan.md). Milestones 0 through 12 are
+complete, as are the independently delivered Milestone 16 memory-evaluation
+and lifecycle workstream and Milestone 17 memory read API and native browser.
+The verified sequential ceiling remains Milestone 12, backed by 247 cumulative
+gates.
+
+Milestone 13's core subagent and delegation path is implemented with all
+twenty-one gates passing locally; its activation evidence, hosted CI, and final
+review remain. Milestone 19's focused one-time conversational scheduling tool
+is implemented locally, with full repository verification and hosted review
+still outstanding. Milestones 14 (inbound surfaces and pairing), 15
+(operational hardening), and 18 (email integration) are authorized and fully
+specified but have not started.
+Model-routing changes and the rest of the longer-term roadmap remain deferred.
 
 ## Features
 
@@ -28,16 +63,23 @@ have separately authorized workstreams in progress.
   deterministic compaction, and typed, durable working state.
 - **Skills and MCP** — versioned, immutable skill packages pinned at session
   open, plus MCP servers over the official SDK.
-- **Long-term memory and knowledge** — governed memory formation with
-  provenance and corrections, hybrid recall with an auditable trace, and
-  knowledge-document ingestion with cited passage retrieval.
+- **Long-term memory and knowledge** — governed formation with provenance and
+  corrections, hybrid recall with an auditable trace, configurable lifecycle
+  policies, reproducible evaluation, and cited knowledge-document retrieval.
+- **Memory API and native browser** — a default-off, read-only,
+  principal-isolated HTTP surface with explicit sensitivity ceilings, plus a
+  SwiftUI browser for the complete governed belief view.
 - **Provider-neutral web access** — independently selectable Tavily and
   Firecrawl adapters behind stable `web.search` and `web.fetch` tools, with a
   recommended Tavily-search/Firecrawl-fetch deployment.
+- **Scheduled work and notifications** — default-off one-time, daily, and
+  weekly schedules with durable offline results, plus a device registry,
+  transactional notification outbox, APNs delivery, and Apple deep links.
 - **Governed trajectory export** — consent-gated, redacted, and verified
   before any artifact is committed.
-- **Evaluation harness** — deterministic evaluation cases, a 223-entry gate
-  registry, and a credential- and cost-gated live capability lane.
+- **Evaluation harness** — deterministic evaluation cases, a 353-entry gate
+  registry spanning every authorized milestone, and credential- and cost-gated
+  live capability lanes.
 - **Clients** — a dependency-free downloadable terminal client and a native
   SwiftUI client for iOS and macOS.
 - **Production deployment** — CircleCI-driven atomic releases to
@@ -45,38 +87,27 @@ have separately authorized workstreams in progress.
   plus the release-matched static documentation site at
   [`docs.veetbot.com`](https://docs.veetbot.com/).
 
-### In progress (Milestones 10 and 11)
+### In progress and authorized next
 
-Five separately authorized workstreams are underway. Optional capabilities
-stay behind default-off controls:
+- **Subagents and delegation (Milestone 13)** — bounded `delegate.run` child
+  runs now have separate sessions, leases, budgets, traces, durable suspension
+  and join behavior, and downward cancellation. All registered gates pass
+  locally; activation evidence, hosted CI, and final review remain.
 
-- **Automatic memory formation** — post-run extraction and consolidation of
-  durable memories from ordinary conversations, with audited caps, conflict
-  handling, and provenance.
-- **Self-authored skills** — the agent creating and revising its own skills
-  through `skill.manage` behind diff-carrying approvals, with an optional
-  confined background-review child run.
-- **Public-web access** — read-only search and page extraction through
-  independently configured providers; every result remains external-untrusted.
-- **Authenticated browser automation** — default-off browser navigation,
-  observation, and approval-governed actions with scoped profiles and grants.
-- **Scheduled runs** — default-off one-time, daily, and weekly task management
-  with immutable revisions, exact scopes, bounded misfires and costs, a
-  least-privilege production scheduler role, and durable offline results. The
-  local Milestone 11 implementation and all schedule gate targets are present;
-  hosted CI and final review remain.
+- **Conversational scheduling (Milestone 19)** — a focused one-time schedule
+  creation tool and its gate suite are implemented locally; full repository
+  verification and hosted review are pending.
+- **Inbound surfaces and pairing (Milestone 14)** — a default-off Telegram
+  surface, secure pairing ceremony, and shared run-submission path are specified.
+- **Operational hardening (Milestone 15)** — encrypted off-host backups,
+  restore rehearsal, health alerts, firewall hardening, and rollback are
+  specified.
+- **Email integration (Milestone 18)** — a parallel, default-off Gmail MCP
+  workstream is specified with read/triage tools, drafts, approval-gated send,
+  and broker-held credentials.
 
-### Planned
-
-The remaining Milestone 10 extensions are designed but deliberately deferred
-and not yet authorized:
-
-- **Model routing** — richer routing behavior across the declared model
-  policies.
-- **General-purpose subagents** — `delegate.run` child runs with their own
-  leases, budgets, and traces.
-- **Multi-device surfaces** — inbound messaging surfaces and device pairing
-  over the shared core.
+All of these capabilities remain subject to their milestone gates. Richer model
+routing and everything else on the long-term roadmap are not yet authorized.
 
 ## Prerequisites
 
@@ -132,9 +163,9 @@ make check
 ```
 
 It runs formatting validation, linting, strict type checking, the static and
-contract partitions, isolated deployment-script tests, citation validation, the 177-entry gate-registry
-reconciliation, and strict documentation builds. It requires neither a database
-nor a provider credential.
+contract partitions, isolated deployment-script tests, citation validation, the
+353-entry gate-registry reconciliation, and strict documentation builds. It
+requires neither a database nor a provider credential.
 
 Additional targets are explicit about their requirements:
 
@@ -147,7 +178,7 @@ Additional targets are explicit about their requirements:
 | `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
 | `make test-live` | Explicitly enable credentialed provider tests |
 | `make test-apple` | Run the Apple client's Swift Testing suite (requires full Xcode) |
-| `make test-apple-ui` | Run conversation-navigation UI tests on available iPhone and iPad simulators |
+| `make test-apple-ui` | Run the macOS window-restart test and conversation-navigation tests on available iPhone and iPad simulators |
 | `make test-deploy` | Exercise release and Nginx installers against isolated command stubs |
 | `make production-check` | Validate release identity, model credential, gVisor, sandbox image, storage, and migration head |
 | `make docs` | Build the MkDocs site and standalone HTML publication |
@@ -288,9 +319,11 @@ output against the durable final message. See the
 `clients/apple` holds a SwiftUI client for iOS 15+ and macOS 12+ with no
 third-party dependencies. It restores complete durable transcripts, replays the
 active run over SSE, keeps a reconciled local session history, and stores its
-bearer token only in Keychain. See its
-[README](clients/apple/README.md) for signing, settings, and test
-instructions.
+bearer token only in Keychain. It also registers devices for APNs, reconciles
+the offline notification inbox, and restores notification deep links. The
+Milestone 17 read-only memory browser is complete, with local and hosted Apple
+verification and a clean final review. See its
+[README](clients/apple/README.md) for signing, settings, and test instructions.
 
 ## Configuration
 
@@ -406,17 +439,26 @@ action. Scheduling those runs belongs to Milestone 11.
 
 ## Workflow availability
 
-Every workflow the engineering plan reserved for Milestones 0 through 9 is
-implemented: durable submission and workers, the three provider profiles,
-live-provider tests, normalized usage accounting, consent-gated trajectory
-export, CLI approval resolution, the HTTP API, deterministic evaluation cases,
-and named gate status by milestone or area. Two boundaries remain so
-availability is not confused with implementation:
+Every workflow the engineering plan reserved through Milestone 12 is
+implemented, together with the independently completed Milestone 16 memory
+evaluation and lifecycle work: durable submission and workers, model providers,
+policy and approvals, isolated tools, long-term memory, skills, web and browser
+access, schedules, notifications, clients, and named gate status by milestone
+or area. These boundaries keep availability distinct from authorization and
+local implementation:
 
 - The live capability harness is implemented but has no publishable scenario;
   admission requires a real checked-in redacted failed trajectory.
-- Milestone 10's authoring surfaces default off, and the deferred extensions
-  listed under [Planned](#planned) have no commands yet.
+- Optional authoring, web, browser, scheduling, and notification capabilities
+  retain their documented default-off controls.
+- Milestones 13 and 17 have locally passing implementations but are not complete
+  until their remaining evidence and hosted review conditions pass. Milestone
+  19's focused implementation also awaits full repository verification and
+  hosted review.
+- Milestones 14, 15, and 18 are authorized and specified, but not yet
+  implemented.
+- Model-routing changes and the remaining roadmap are deferred and have no
+  commands yet.
 
 `agent run`, `agent run export`, `agent session create`, `agent session
 export-consent`, `agent worker`, `agent api`, and `agent eval run` are available

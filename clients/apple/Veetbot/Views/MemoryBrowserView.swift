@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if os(macOS)
+import AppKit
+#endif
+
 /// Browses the calling principal's beliefs (memory-read-api-and-browser.md).
 /// A peer of the conversation list rather than a mode inside a conversation,
 /// because a belief outlives the session that formed it.
@@ -43,7 +47,14 @@ public struct MemoryBrowserView: View {
         .accessibilityIdentifier("memory.browser")
         .task { await model.reload() }
         #if os(macOS)
-        .frame(minWidth: 560, minHeight: 520)
+        .frame(
+            minWidth: 560,
+            maxWidth: .infinity,
+            minHeight: 520,
+            maxHeight: .infinity
+        )
+        .background(MemoryBrowserWindowResizeView())
+        .memoryBrowserPresentationSizing()
         #endif
     }
 
@@ -243,6 +254,77 @@ public struct MemoryBrowserView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+#if os(macOS)
+private extension View {
+    @ViewBuilder
+    func memoryBrowserPresentationSizing() -> some View {
+        if #available(macOS 15.0, *) {
+            presentationSizing(.fitted)
+        } else {
+            self
+        }
+    }
+}
+
+enum MemoryBrowserWindowConfiguration {
+    static let minimumSize = NSSize(width: 560, height: 520)
+    static let maximumSize = NSSize(width: 10_000, height: 10_000)
+
+    @MainActor
+    static func apply(to window: NSWindow) {
+        window.styleMask.insert(.resizable)
+        window.contentMinSize = minimumSize
+        window.contentMaxSize = maximumSize
+    }
+}
+
+private struct MemoryBrowserWindowResizeView: NSViewRepresentable {
+    func makeNSView(context: Context) -> MemoryBrowserWindowResizeNSView {
+        MemoryBrowserWindowResizeNSView()
+    }
+
+    func updateNSView(_ view: MemoryBrowserWindowResizeNSView, context: Context) {
+        view.applyConfigurationIfPossible()
+    }
+}
+
+private final class MemoryBrowserWindowResizeNSView: NSView {
+    private var keyWindowObserver: NSObjectProtocol?
+
+    deinit {
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+        keyWindowObserver = nil
+        guard let window else { return }
+
+        applyConfigurationIfPossible()
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.applyConfigurationIfPossible()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.applyConfigurationIfPossible()
+        }
+    }
+
+    func applyConfigurationIfPossible() {
+        guard let window else { return }
+        MemoryBrowserWindowConfiguration.apply(to: window)
+    }
+}
+#endif
 
 /// Shared by the browser row and the detail view's Classification section.
 func memoryDisplayText(_ raw: String) -> String {

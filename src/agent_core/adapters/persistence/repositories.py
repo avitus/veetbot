@@ -106,7 +106,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
-from agent_core.domain.policies import PolicyProfileRecord
+from agent_core.domain.policies import IdempotencyClass, PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     Run,
@@ -1099,6 +1099,35 @@ class PostgresToolInvocationRepository:
             )
         ).one_or_none()
         return None if row is None else invocation_to_domain(row)
+
+    async def has_uncertain_non_idempotent(
+        self,
+        run_id: UUID,
+        *,
+        tool_name: str,
+        normalized_arguments_hash: str,
+        principal: Principal,
+    ) -> bool:
+        """Use the run index to detect one identical ambiguous mutation."""
+
+        await self._runs.get(run_id, principal)
+        invocation_id = await self._session.scalar(
+            select(ToolInvocationRow.id)
+            .where(
+                ToolInvocationRow.run_id == run_id,
+                ToolInvocationRow.status == ToolInvocationStatus.UNCERTAIN.value,
+                ToolInvocationRow.idempotency_class.not_in(
+                    (
+                        IdempotencyClass.READ_ONLY.value,
+                        IdempotencyClass.IDEMPOTENT.value,
+                    )
+                ),
+                ToolInvocationRow.tool_name == tool_name,
+                ToolInvocationRow.normalized_arguments_hash == normalized_arguments_hash,
+            )
+            .limit(1)
+        )
+        return invocation_id is not None
 
     async def transition(
         self,
@@ -2327,6 +2356,20 @@ class PostgresArtifactRepository:
                 select(ArtifactRow.id).where(ArtifactRow.id == artifact_id).limit(1)
             )
         )
+
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]:
+        rows = (
+            await self._session.scalars(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.run_id == run_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .order_by(ArtifactRow.created_at, ArtifactRow.id)
+            )
+        ).all()
+        return [artifact_to_domain(row) for row in rows]
 
     async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
         row = (

@@ -223,6 +223,8 @@ async def test_empty_model_turn_retries_within_one_step() -> None:
 async def test_event_after_terminal_is_a_model_protocol_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Turn a post-terminal provider event into a safe protocol failure."""
+
     original_stream = FakeModelProvider.stream
 
     async def post_terminal_stream(
@@ -256,6 +258,7 @@ async def test_event_after_terminal_is_a_model_protocol_failure(
     assert failed.status is RunStatus.FAILED
     assert failed.failure is not None
     assert failed.failure.reason is FailureReason.MODEL_PERMANENT_ERROR
+    assert failed.failure.details == {"protocol_detail": "an event followed the terminal event"}
 
 
 @pytest.mark.asyncio

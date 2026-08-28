@@ -69,6 +69,16 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    promoted directory; and
 9. retains the five newest valid releases.
 
+Release pruning normally runs as the deployment identity. Older releases may
+contain service-owned Python bytecode from deployments that predate the strict
+read-only systemd filesystem policy. If direct removal of such a release fails,
+the script retries with the just-built sandbox image as uid 0 in a one-shot,
+network-disabled container. The container has a read-only root filesystem, only
+the releases directory is mounted writable, and its fixed entrypoint removes
+only the validated release name selected by the retention loop. This fallback
+uses the deployment identity's existing Docker trust boundary; application
+identities still receive no Docker access.
+
 A successful server release returns control to CircleCI, which polls the public
 TLS readiness endpoint until it reports the same release ID. Exhausting that
 bounded public-probe budget fails the CircleCI job after promotion; it is not a
@@ -212,6 +222,79 @@ schedule child-table isolation depends on the forced row-level-security policy
 on `schedules` applying inside each child-policy lookup. Reserve `BYPASSRLS`
 roles for explicit administration and never use one for API, worker, or
 scheduler tenant access.
+
+Provision the `veetbot_schedule` login independently with a generated password,
+then grant only the tables its materialization transaction and schema-head check
+use. The release runs `scripts/check_schedule_database_permissions.py` through
+the protected schedule environment before promotion and refuses a role that is
+administrative, inherits authority, can replicate or bypass row-level security,
+can switch to any other role, is missing any privilege below, or has any other
+effective table or column-level privilege in the `public` schema. The check is
+an exact allowlist, including grants inherited from another role or `PUBLIC`,
+rather than a presence-only checklist. Its privilege vocabulary intentionally
+matches the deployed PostgreSQL 16 release; PostgreSQL 17's `MAINTAIN`
+privilege is not accepted while production remains pinned to version 16. The
+checker reads `server_version_num` from the connected server and fails before
+the privilege comparison unless that server is PostgreSQL 16.
+
+```sql
+ALTER ROLE veetbot_schedule
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+-- Do not grant veetbot_schedule membership in any other role: NOINHERIT does
+-- not prevent it from acquiring that role's authority with SET ROLE.
+GRANT CONNECT ON DATABASE agent TO veetbot_schedule;
+GRANT USAGE ON SCHEMA public TO veetbot_schedule;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM veetbot_schedule;
+GRANT SELECT ON
+  agents,
+  alembic_version,
+  checkpoints,
+  derived_event_keys,
+  events,
+  notification_outbox,
+  process_events,
+  projection_watermarks,
+  runs,
+  schedule_occurrences,
+  schedule_revisions,
+  schedules,
+  session_history_items,
+  sessions
+TO veetbot_schedule;
+GRANT INSERT ON
+  checkpoints,
+  derived_event_keys,
+  events,
+  notification_outbox,
+  process_events,
+  projection_watermarks,
+  runs,
+  schedule_occurrences,
+  session_history_items,
+  sessions
+TO veetbot_schedule;
+GRANT UPDATE ON
+  projection_watermarks,
+  runs,
+  schedules,
+  sessions
+TO veetbot_schedule;
+GRANT DELETE ON
+  checkpoints,
+  projection_watermarks,
+  session_history_items
+TO veetbot_schedule;
+```
+
+Run the revocation before reapplying the allowlist whenever this role is
+repaired. If the validator still reports a surplus effective privilege, remove
+the grant from the role membership, column grant, ownership, `PUBLIC`, or
+default-privilege source that supplies it; revoking a direct table grant cannot
+mask authority supplied by a different source.
+
+The projection grants are part of checkpoint seeding, not optional reporting:
+without them a due schedule can retry until its misfire window expires without
+ever committing the session and run.
 
 ```bash
 sudo chown root:veetbot /etc/veetbot/veetbot-schedule.env
@@ -395,14 +478,20 @@ all application units return.
 
 ## Manual rollback
 
-Choose a retained target only after checking that its code is compatible with
-the current database schema. Never run an automatic Alembic downgrade as part
-of rollback. Run the complete block below in one shell so file descriptor 9
-holds the same deployment lock from before the symlink change through readiness
-verification.
+Schema-head equality is not enough for versioned JSONB discriminators: once any
+schedule revision has a `definition.cadence.kind` of `MONTHLY` or `YEARLY`, a
+release from before Milestone 20 cannot deserialize the database and is not a
+valid code-only rollback target. The runbook below detects the target's cadence
+support and checks the stored values while all schedule writers are stopped.
+If it refuses the target, roll forward instead, or restore a database snapshot
+from before the first such revision and then roll the code back. Never run an
+automatic Alembic downgrade as part of rollback. Run the complete block in one
+shell so file descriptor 9 holds the same deployment lock from before writer
+quiescence through readiness verification.
 
 ```bash
 set -euo pipefail
+environment_file="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
 exec 9>/opt/veetbot/shared/deploy.lock
 if ! flock -w 900 9; then
   echo "Could not acquire /opt/veetbot/shared/deploy.lock" >&2
@@ -414,6 +503,7 @@ target="/opt/veetbot/releases/$target_id"
 docs_target="/opt/veetbot/shared/docs/releases/$target_id"
 test -d "$target"
 test -f "$target/.release.env"
+test -x "$target/.venv/bin/python"
 grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"
 test -d "$docs_target"
 test -f "$docs_target/release.txt"
@@ -422,19 +512,49 @@ test -L /opt/veetbot/current
 test -L /opt/veetbot/shared/docs/current
 previous_target="$(readlink -f /opt/veetbot/current)"
 previous_docs_target="$(readlink -f /opt/veetbot/shared/docs/current)"
+test -f "$environment_file"
 docker image inspect "agent-core-sandbox:$target_id" >/dev/null
 previous_production_image="$(
   docker image inspect --format '{{.Id}}' agent-core-sandbox:production
 )"
 test -n "$previous_production_image"
 
+managed_units=(
+  veetbot-execution
+  veetbot-maintenance
+  veetbot-worker
+  veetbot-async-worker
+  veetbot-api
+)
+for optional_unit in veetbot-schedule veetbot-notify; do
+  if sudo systemctl is-enabled --quiet "$optional_unit"; then
+    managed_units+=("$optional_unit")
+  fi
+done
+
+target_calendar_compatibility="$({
+  cd "$target"
+  "$target/.venv/bin/python" - <<'PY'
+from agent_core.domain.schedules import CadenceKind
+
+required = {"MONTHLY", "YEARLY"}
+available = {kind.value for kind in CadenceKind}
+print("compatible" if required <= available else "incompatible")
+PY
+})"
+case "$target_calendar_compatibility" in
+  compatible | incompatible) ;;
+  *)
+    echo "Could not determine the target's schedule cadence compatibility" >&2
+    exit 1
+    ;;
+esac
+
 app_next="/opt/veetbot/.rollback-$target_id-$$"
 docs_next="/opt/veetbot/shared/docs/.rollback-$target_id-$$"
 app_restore="/opt/veetbot/.rollback-restore-$$"
 docs_restore="/opt/veetbot/shared/docs/.rollback-restore-$$"
 health_headers=""
-ln -s "$target" "$app_next"
-ln -s "$docs_target" "$docs_next"
 
 rollback_pending=0
 rollback_on_exit() {
@@ -448,8 +568,7 @@ rollback_on_exit() {
     mv -Tf "$app_restore" /opt/veetbot/current
     mv -Tf "$docs_restore" /opt/veetbot/shared/docs/current
     docker tag "$previous_production_image" agent-core-sandbox:production
-    sudo systemctl restart \
-      veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+    sudo systemctl restart "${managed_units[@]}"
   fi
   if test -n "$health_headers"; then
     rm -f -- "$health_headers"
@@ -460,13 +579,50 @@ rollback_on_exit() {
 trap rollback_on_exit EXIT
 
 rollback_pending=1
+sudo systemctl stop "${managed_units[@]}"
+if test "$target_calendar_compatibility" = incompatible; then
+  incompatible_schedule_revisions="$({
+    set -a
+    # shellcheck disable=SC1090
+    . "$environment_file"
+    set +a
+    : "${POSTGRES_USER:?POSTGRES_USER is required}"
+    : "${POSTGRES_DB:?POSTGRES_DB is required}"
+    timeout --signal=TERM --kill-after=5s 20s \
+      docker compose \
+        --env-file "$environment_file" \
+        --project-directory "$previous_target" \
+        --project-name "${COMPOSE_PROJECT_NAME:-veetbot}" \
+        -f "$previous_target/docker-compose.yml" \
+        -f "$previous_target/deploy/docker-compose.production.yml" \
+        exec -T \
+        --env PGCONNECT_TIMEOUT=5 \
+        --env 'PGOPTIONS=-c statement_timeout=5000' \
+        postgres psql \
+        --no-psqlrc --tuples-only --no-align \
+        --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+        --command "SELECT count(*) FROM schedule_revisions WHERE definition #>> '{cadence,kind}' IN ('MONTHLY','YEARLY');" \
+      | tr -d '[:space:]'
+  })"
+  case "$incompatible_schedule_revisions" in
+    '' | *[!0-9]*)
+      echo "Could not validate stored schedule cadence values" >&2
+      exit 1
+      ;;
+  esac
+  if test "$incompatible_schedule_revisions" -ne 0; then
+    echo "Refusing a pre-Milestone-20 target: incompatible schedule revisions exist" >&2
+    exit 1
+  fi
+fi
+ln -s "$target" "$app_next"
+ln -s "$docs_target" "$docs_next"
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
 mv -Tf "$docs_next" /opt/veetbot/shared/docs/current
 docs_next=""
-sudo systemctl restart \
-  veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+sudo systemctl restart "${managed_units[@]}"
 health_headers="$(mktemp /opt/veetbot/shared/rollback-health.XXXXXX)"
 curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
   --dump-header "$health_headers" --output /dev/null \
@@ -481,12 +637,7 @@ awk -F ': *' -v expected="$target_id" '
 rm -f -- "$health_headers"
 health_headers=""
 test "$(cat /opt/veetbot/shared/docs/current/release.txt)" = "$target_id"
-for unit in \
-  veetbot-execution \
-  veetbot-maintenance \
-  veetbot-worker \
-  veetbot-async-worker \
-  veetbot-api; do
+for unit in "${managed_units[@]}"; do
   sudo systemctl is-active --quiet "$unit"
   pid="$(sudo systemctl show --property MainPID --value "$unit")"
   test "$pid" -gt 0

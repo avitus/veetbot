@@ -7,10 +7,11 @@ keeps scenario, suite, and daily cost ceilings separate from score.
 A scenario is admitted only when its `source` points to a checked-in, redacted
 trajectory whose `export_id`, `run_id`, and failed outcome match the scenario.
 Synthetic failures and hand-written anecdotes are not publishable scenarios.
-This repository intentionally has no scenario yet because no actual failed,
-redacted trajectory is present. Add the first real export under
-`fixtures/trajectories/`, diagnose it, and then add its scenario under
-`scenarios/`.
+The `research` suite contains the first admitted scenario: a production
+long-research run that exhausted its single-agent tool-call budget before it
+could answer. Its governed, reviewed trajectory is checked in under
+`fixtures/trajectories/`, and the scenario under `scenarios/` records the
+matching export, run, failed outcome, and diagnosis.
 
 Run the track with:
 

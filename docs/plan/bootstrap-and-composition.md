@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **143 configuration knobs** across the specifications;
+The corpus now declares **156 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -298,12 +298,18 @@ Milestone 16's memory lifecycle knobs — five decay time constants, two ranking
 penalties, two usage deltas, the established-facts switch, the three decay
 sweep bounds, and the operator trace retention — less the three interactive
 snapshot caps that leave `memory/profiles.yaml` for `context/plan.yaml`, plus
-the six ranking-weight coefficients the post-Milestone-16 tuning pass moved
-out of the ranker's literals and into the same document. The
-plan originally names **three
+Milestone 13's thirteen delegation knobs: the four admission/depth caps, the five
+default child limits, the three final-synthesis reserves, and the summary byte
+ceiling, plus the six ranking-weight coefficients the post-Milestone-16 tuning
+pass moved out of the ranker's literals into `memory/profiles.yaml`. The plan
+originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
-worker feature flags. Those facts are not in tension by accident. Read
+worker feature flags, and Milestone 13 the default-off delegation flag.
+Milestone 19 reuses the schedule pair: the composition root registers
+`schedule.create` only when both are enabled, so it cannot create
+work that no materializer will claim. Those facts are not in tension by
+accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
 `MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 15,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
@@ -319,13 +325,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-143 falls out.
+156 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-143 tuning knobs in YAML.
+156 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -333,7 +339,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 143 knobs live, at the values the
+    module that owns it. This is where all 156 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -389,7 +395,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 143. Schema versions, profile names, rule identifiers,
+and asserts the total is 156. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -399,9 +405,9 @@ or invariants rather than knobs and are not counted.
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 26 |
 | `tools/limits.yaml` | 20 |
-| `runtime/limits.yaml` | 36 |
+| `runtime/limits.yaml` | 49 |
 | `memory/profiles.yaml` | 34 |
-| **Total** | **143** |
+| **Total** | **156** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -512,7 +518,8 @@ SANDBOX_MECHANISM=docker
 AGENT_CONFIG_DIR=
 
 # Scheduled task control plane and materializer. Both default off and
-# production activation requires changing them together.
+# production activation requires changing them together. New sessions expose
+# schedule.create only while both are enabled.
 AGENT_SCHEDULE_API_ENABLED=0
 AGENT_SCHEDULE_WORKER_ENABLED=0
 
@@ -936,6 +943,15 @@ and is empty at Milestone 1, because there is no memory yet — its absence
 changes no bytes, which is the property that lets it be added later without
 breaking a cached prefix.
 
+The default agent's instructions also establish a least-powerful-tool routing
+rule. Routine arithmetic, date/time questions, and public facts prefer the
+available read-only capabilities (`math.calculate`, `system.current_time`, and
+`web.search`) and do not fall back to `sandbox.run_command`. If no read-only
+capability can answer, the agent explains the limitation or asks before
+proposing arbitrary code execution. This is model guidance, not authorization:
+the deterministic policy and approval pipeline remains authoritative for every
+tool call the model does propose.
+
 ### The invariant, and its test
 
 Region A is built once per session, serialized to bytes with a fixed
@@ -1230,7 +1246,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 143 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 156 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1252,7 +1268,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 143 declared knobs into files and leaves ten fields in
+   sorts all 156 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,

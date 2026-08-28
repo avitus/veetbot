@@ -67,6 +67,23 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.invalid_arguments.not_text": "Not a UTF-8 text file. This tool reads text only.",
     "tool.invalid_arguments.not_a_file": ("That path is a directory. Use workspace.list_files."),
     "tool.invalid_arguments.not_a_directory": ("That path is a file. Use workspace.read_text."),
+    "delegation.brief_invalid": "Not performed. A delegation brief failed validation.",
+    "delegation.tools_not_subset": (
+        "Not performed. A brief requested tools outside this run's advertised set."
+    ),
+    "delegation.depth_exceeded": "Not performed. A delegated child cannot delegate further.",
+    "delegation.fanout_exceeded": "Not performed. The request exceeds a delegation fan-out cap.",
+    "delegation.tenant_cap": (
+        "Not performed. The tenant's live delegated-run cap would be exceeded."
+    ),
+    "delegation.budget_insufficient": (
+        "Not performed. This run has no remaining budget to delegate."
+    ),
+    "delegation.child_failed": (
+        "A delegated child run failed or was cancelled; its reason is in the result."
+    ),
+    "tool.unavailable": "The tool is unavailable in this deployment.",
+    "tool.run_cancelled": "Not performed. The run was cancelled.",
 }
 
 

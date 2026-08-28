@@ -842,11 +842,28 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_143_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_156_versioned_knobs_are_present_and_non_null() -> None:
+    """Keep the declared configuration inventory exact and fully populated."""
+
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 143
+    assert len(qualified_paths) == 156
+    assert {
+        "runtime/limits.yaml:delegation.max_children_per_call",
+        "runtime/limits.yaml:delegation.max_live_children_per_parent",
+        "runtime/limits.yaml:delegation.max_depth",
+        "runtime/limits.yaml:delegation.max_live_delegated_runs_per_tenant",
+        "runtime/limits.yaml:delegation.child_max_steps",
+        "runtime/limits.yaml:delegation.child_max_model_calls",
+        "runtime/limits.yaml:delegation.child_max_tool_calls",
+        "runtime/limits.yaml:delegation.child_max_cost",
+        "runtime/limits.yaml:delegation.child_wall_seconds",
+        "runtime/limits.yaml:delegation.synthesis_reserve_steps",
+        "runtime/limits.yaml:delegation.synthesis_reserve_model_calls",
+        "runtime/limits.yaml:delegation.synthesis_reserve_cost",
+        "runtime/limits.yaml:delegation.summary_max_bytes",
+    } <= qualified_paths
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
@@ -857,6 +874,28 @@ def test_all_143_versioned_knobs_are_present_and_non_null() -> None:
                 assert isinstance(value, dict), f"{relative}:{path} is not a mapping path"
                 value = cast(dict[str, object], value)[component]
             assert value is not None, f"{relative}:{path} is null"
+
+
+def test_delegated_research_defaults_leave_room_for_tool_use_and_synthesis() -> None:
+    """Pin the governed child research limits and final-synthesis reserves."""
+
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert loaded["delegation"] == {
+        "max_children_per_call": 3,
+        "max_live_children_per_parent": 8,
+        "max_depth": 1,
+        "max_live_delegated_runs_per_tenant": 16,
+        "child_max_steps": 12,
+        "child_max_model_calls": 12,
+        "child_max_tool_calls": 48,
+        "child_max_cost": 2,
+        "child_wall_seconds": 900,
+        "synthesis_reserve_steps": 1,
+        "synthesis_reserve_model_calls": 1,
+        "synthesis_reserve_cost": 0.25,
+        "summary_max_bytes": 16384,
+    }
 
 
 def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:

@@ -131,6 +131,7 @@ for required in \
   deploy/systemd/veetbot-schedule.service \
   deploy/systemd/veetbot-notify.service \
   execution/sandbox.Dockerfile \
+  scripts/check_schedule_database_permissions.py \
   scripts/check_production_deployment.py; do
   [[ -f "$STAGE/$required" ]] || fail "staged release is missing $required"
 done
@@ -242,6 +243,17 @@ export VEETBOT_RELEASE_ID="$RELEASE_ID"
 export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
 "$STAGE/.venv/bin/alembic" upgrade head
 "$STAGE/.venv/bin/python" scripts/check_production_deployment.py
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  if ! (
+    set -a
+    # shellcheck disable=SC1090
+    . "$SCHEDULE_ENV_FILE"
+    set +a
+    "$STAGE/.venv/bin/python" scripts/check_schedule_database_permissions.py
+  ); then
+    fail "schedule database role does not satisfy the materialization contract"
+  fi
+fi
 
 sudo install -d -m 0755 "$SYSTEMD_DIR"
 sudo install -m 0644 "$STAGE/deploy/systemd/"*.service "$SYSTEMD_DIR/"
@@ -337,7 +349,16 @@ while IFS= read -r candidate; do
   [[ -d "$candidate_path" ]] || continue
   kept=$((kept + 1))
   if (( kept > KEEP_RELEASES )) && [[ "$candidate_path" != "$STAGE" ]]; then
-    rm -rf -- "$candidate_path"
+    if ! rm -rf -- "$candidate_path"; then
+      printf 'Direct pruning of %s failed; retrying with the trusted deployment container.\n' \
+        "$candidate" >&2
+      docker run --rm --pull=never --network none --read-only --user 0:0 \
+        --volume "$RELEASES_DIR:/releases" \
+        --entrypoint /bin/rm "$RELEASE_IMAGE" \
+        -rf -- "/releases/$candidate"
+      [[ ! -e "$candidate_path" && ! -L "$candidate_path" ]] || fail \
+        "the trusted deployment container could not prune $candidate_path"
+    fi
     docker image rm "agent-core-sandbox:$candidate" >/dev/null 2>&1 || true
   fi
 done < <(

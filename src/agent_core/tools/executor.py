@@ -14,16 +14,19 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalRequest, ApprovalStatus
 from agent_core.domain.artifacts import ArtifactOrigin
+from agent_core.domain.delegations import Delegation, DelegationRequest
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
+    ChildRunRequiredError,
     ConflictError,
+    DelegationValidationError,
     NotFoundError,
     RunCancelledError,
     ToolTrustRejectedError,
@@ -79,6 +82,7 @@ from agent_core.ports.policies import PolicyEngine, StandingAuthorizer
 from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
+from agent_core.tools.delegate_run import DELEGATE_RUN_TOOL_NAME
 from agent_core.tools.messages import message_for
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME
 from agent_core.tools.skill_manage import SKILL_MANAGE_TOOL_NAME
@@ -87,6 +91,23 @@ from agent_core.tools.validation import validate_and_normalize, validate_output
 logger = logging.getLogger(__name__)
 
 PIPELINE_STEP_SEQUENCE = tuple(range(1, 15))
+
+
+class DelegationStarter(Protocol):
+    """Materialize one delegation for a suspending delegate.run invocation."""
+
+    async def materialize(
+        self,
+        *,
+        request: DelegationRequest,
+        run: Run,
+        agent: AgentSpec,
+        principal: Principal,
+        invocation: ToolInvocation,
+        pinned_tools: Mapping[str, ToolSpec],
+        lease: WorkerLease | None = None,
+    ) -> Delegation: ...
+
 
 _SENSITIVE_ARGUMENT_KEY = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential)", re.I
@@ -347,6 +368,7 @@ class ToolPipeline:
         maximum_skill_body_tokens: int = 6_000,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
+        delegations: DelegationStarter | None = None,
     ) -> None:
         self._registry = registry
         self._uow_factory = uow_factory
@@ -380,6 +402,7 @@ class ToolPipeline:
             }
         )
         self._standing_authorizer = standing_authorizer
+        self._delegations = delegations
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
         self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
@@ -525,6 +548,26 @@ class ToolPipeline:
                 run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED, lease
             )
         progress.append(5)
+
+        async with self._uow_factory() as uow:
+            uncertain_prior = await uow.invocations.has_uncertain_non_idempotent(
+                run.id,
+                tool_name=tool.spec.name,
+                normalized_arguments_hash=arguments_hash,
+                principal=principal,
+            )
+        if uncertain_prior:
+            return await self._refusal(
+                run,
+                call,
+                "tool.outcome_unknown",
+                ToolOutcomeStatus.DENIED,
+                lease,
+                message=(
+                    "Not performed. An identical prior call has an unknown outcome and "
+                    "must not be repeated."
+                ),
+            )
 
         key = _idempotency_key(run, step, call, tool, arguments_hash)
         result_item = await self._execute_once(
@@ -849,6 +892,85 @@ class ToolPipeline:
             ):
                 raise ConflictError("ask-user invocation has an invalid suspension marker")
             raise UserInputRequiredError(question_id, invocation.id)
+
+        if tool.spec.name == DELEGATE_RUN_TOOL_NAME:
+            if invocation.suspended_kind not in (None, "child_run"):
+                raise ConflictError("delegate invocation has an invalid suspension marker")
+            if self._delegations is None:
+                return await self._finish(
+                    run,
+                    call,
+                    tool,
+                    invocation,
+                    ToolResult(
+                        ok=False,
+                        content=[],
+                        failure=ToolFailure(
+                            kind=ToolFailureKind.TRANSPORT,
+                            reason_code="tool.unavailable",
+                            detail="delegation is not enabled in this deployment",
+                            retryable=False,
+                        ),
+                    ),
+                    lease,
+                )
+            try:
+                delegation_request = DelegationRequest.model_validate(arguments)
+            except ValueError as error:
+                return await self._finish(
+                    run,
+                    call,
+                    tool,
+                    invocation,
+                    ToolResult(
+                        ok=False,
+                        content=[],
+                        failure=ToolFailure(
+                            kind=ToolFailureKind.INVALID_ARGUMENTS,
+                            reason_code="delegation.brief_invalid",
+                            detail=f"delegation request failed validation: {error}",
+                            retryable=False,
+                        ),
+                    ),
+                    lease,
+                )
+            try:
+                delegation = await self._delegations.materialize(
+                    request=delegation_request,
+                    run=run,
+                    agent=agent,
+                    principal=principal,
+                    invocation=invocation,
+                    pinned_tools=checkpoint.pinned_tool_specs,
+                    lease=lease,
+                )
+            except DelegationValidationError as error:
+                return await self._finish(
+                    run,
+                    call,
+                    tool,
+                    invocation,
+                    ToolResult(
+                        ok=False,
+                        content=[],
+                        failure=ToolFailure(
+                            kind=ToolFailureKind.INVALID_ARGUMENTS,
+                            reason_code=error.reason,
+                            detail=str(error),
+                            retryable=False,
+                        ),
+                    ),
+                    lease,
+                )
+            raise ChildRunRequiredError(
+                delegation.id,
+                invocation.id,
+                [
+                    child.child_run_id
+                    for child in delegation.children
+                    if child.child_run_id is not None
+                ],
+            )
 
         effect_guard = asyncio.Lock()
 

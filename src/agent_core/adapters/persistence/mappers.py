@@ -10,6 +10,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
     ArtifactRow,
+    DelegationRow,
     DeviceRegistrationIdempotencyRow,
     DeviceRow,
     EventRow,
@@ -29,6 +30,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec
 from agent_core.domain.approvals import ApprovalRequest
+from agent_core.domain.delegations import Delegation
 from agent_core.domain.devices import (
     Device,
     DeviceKind,
@@ -766,4 +768,48 @@ def trajectory_export_values(export: TrajectoryExport) -> dict[str, Any]:
         "builder_version": export.builder_version,
         "ruleset_version": export.ruleset_version,
         "created_at": export.created_at,
+    }
+
+
+def delegation_to_domain(row: DelegationRow) -> Delegation:
+    return Delegation.model_validate(
+        {
+            "id": row.id,
+            "tenant_id": row.tenant_id,
+            "principal_id": row.principal_id,
+            "parent_run_id": row.parent_run_id,
+            "parent_session_id": row.parent_session_id,
+            "invocation_id": row.invocation_id,
+            "depth": row.depth,
+            "request": row.brief,
+            "derived_limits": row.derived_limits,
+            "granted_scopes": row.granted_scopes,
+            "status": row.status,
+            "children": row.children,
+            "result": row.result,
+            "links_erased_at": row.links_erased_at,
+            "created_at": row.created_at,
+            "joined_at": row.joined_at,
+        }
+    )
+
+
+def delegation_values(delegation: Delegation) -> dict[str, Any]:
+    return {
+        "id": delegation.id,
+        "tenant_id": delegation.tenant_id,
+        "principal_id": delegation.principal_id,
+        "parent_run_id": delegation.parent_run_id,
+        "parent_session_id": delegation.parent_session_id,
+        "invocation_id": delegation.invocation_id,
+        "depth": delegation.depth,
+        "brief": delegation.request.model_dump(mode="json"),
+        "derived_limits": [limits.model_dump(mode="json") for limits in delegation.derived_limits],
+        "granted_scopes": [sorted(scopes) for scopes in delegation.granted_scopes],
+        "status": delegation.status.value,
+        "children": [child.model_dump(mode="json") for child in delegation.children],
+        "result": None if delegation.result is None else delegation.result.model_dump(mode="json"),
+        "links_erased_at": delegation.links_erased_at,
+        "created_at": delegation.created_at,
+        "joined_at": delegation.joined_at,
     }

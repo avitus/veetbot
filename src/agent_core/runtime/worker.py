@@ -183,6 +183,7 @@ class MaintenanceWorker:
         clock: Clock,
         poll_interval_seconds: float = 5,
         reclaim_limit: int = 100,
+        sweep_approvals: Callable[[], Awaitable[int]] | None = None,
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
         sweep_artifacts: Callable[[], Awaitable[int]] | None = None,
         sweep_sandboxes: SandboxSweep | None = None,
@@ -199,6 +200,7 @@ class MaintenanceWorker:
         self._clock = clock
         self._poll_interval = poll_interval_seconds
         self._reclaim_limit = reclaim_limit
+        self._sweep_approvals = sweep_approvals
         self._sweep_exports = sweep_exports
         self._sweep_artifacts = sweep_artifacts
         self._sweep_sandboxes = sweep_sandboxes
@@ -254,6 +256,11 @@ class MaintenanceWorker:
         for run_id, terminal in checkpoints:
             async with self._uow_factory() as uow:
                 await uow.checkpoints.prune(run_id, terminal=terminal)
+        if self._sweep_approvals is not None:
+            try:
+                await self._sweep_approvals()
+            except Exception:
+                logger.exception("approval expiry sweep failed")
         if self._sweep_exports is not None:
             try:
                 await self._sweep_exports()

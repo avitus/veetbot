@@ -27,19 +27,26 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UsageEvent,
 )
+from agent_core.domain.security import (
+    CREDENTIAL_VALUE_CHARS_PATTERN,
+    OPAQUE_BEARER_VALUE_PATTERN,
+)
 
 
 class ModelStreamError(ValueError):
     """A normalized adapter stream broke a provider-neutral invariant."""
 
     def __init__(self, message: str, *, failure: ModelFailure | None = None) -> None:
+        """Retain safe normalized failure detail for terminal diagnostics."""
+
         super().__init__(message)
         self.failure = failure
 
 
 SECRET_VALUE = re.compile(
-    r"(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?[a-z0-9._~+/=-]{8,}|"
-    r"bearer\s+[a-z0-9._~+/=-]{8,}|"
+    rf"(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?"
+    rf"{CREDENTIAL_VALUE_CHARS_PATTERN}{{8,}}|"
+    rf"bearer\s+{OPAQUE_BEARER_VALUE_PATTERN}|"
     r"sk-(?:ant-|proj-)?[a-z0-9_-]{8,}|-----begin [a-z ]*private key-----)"
 )
 

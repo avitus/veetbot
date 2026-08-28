@@ -13,6 +13,7 @@ PLATFORM_SCOPES = frozenset(
         "run.read",
         "run.write",
         "run.cancel",
+        "run.delegate",
         "approval.read",
         "approval.resolve",
         "artifact.read",

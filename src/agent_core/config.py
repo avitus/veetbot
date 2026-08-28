@@ -93,6 +93,8 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    delegation_enabled: bool = False
+    email_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
     apns_key_id: str | None = None
@@ -133,7 +135,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 143 operator-reviewable knobs. Metadata such as
+# The design corpus declares 156 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -256,6 +258,19 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "notifications.fallback_poll_seconds",
             "notifications.retry_delays_seconds",
             "notifications.terminal_expiry_seconds",
+            "delegation.max_children_per_call",
+            "delegation.max_live_children_per_parent",
+            "delegation.max_depth",
+            "delegation.max_live_delegated_runs_per_tenant",
+            "delegation.child_max_steps",
+            "delegation.child_max_model_calls",
+            "delegation.child_max_tool_calls",
+            "delegation.child_max_cost",
+            "delegation.child_wall_seconds",
+            "delegation.synthesis_reserve_steps",
+            "delegation.synthesis_reserve_model_calls",
+            "delegation.synthesis_reserve_cost",
+            "delegation.summary_max_bytes",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -326,6 +341,19 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:notifications.lease_seconds": 1,
         "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
         "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
+        "runtime/limits.yaml:delegation.max_children_per_call": 1,
+        "runtime/limits.yaml:delegation.max_live_children_per_parent": 1,
+        "runtime/limits.yaml:delegation.max_depth": 1,
+        "runtime/limits.yaml:delegation.max_live_delegated_runs_per_tenant": 1,
+        "runtime/limits.yaml:delegation.child_max_steps": 1,
+        "runtime/limits.yaml:delegation.child_max_model_calls": 1,
+        "runtime/limits.yaml:delegation.child_max_tool_calls": 1,
+        "runtime/limits.yaml:delegation.child_max_cost": 0.01,
+        "runtime/limits.yaml:delegation.child_wall_seconds": 1,
+        "runtime/limits.yaml:delegation.synthesis_reserve_steps": 1,
+        "runtime/limits.yaml:delegation.synthesis_reserve_model_calls": 1,
+        "runtime/limits.yaml:delegation.synthesis_reserve_cost": 0.01,
+        "runtime/limits.yaml:delegation.summary_max_bytes": 1,
         "memory/profiles.yaml:formation.scheduled_interval_seconds": 1,
         "memory/profiles.yaml:formation.decay.max_per_sweep": 1,
         "memory/profiles.yaml:retrieval.reciprocal_rank_fusion_k": 1,
@@ -406,6 +434,57 @@ def _read_private_credential_file(raw_path: str) -> str:
     if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
         raise ConfigurationError("browser control-plane credential file is invalid")
     return value
+
+
+_GMAIL_CREDENTIAL_FILES = {
+    "gmail_read": (
+        "GMAIL_READ_CREDENTIAL_FILE",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ),
+    "gmail_write": (
+        "GMAIL_WRITE_CREDENTIAL_FILE",
+        "https://www.googleapis.com/auth/gmail.modify",
+    ),
+    "gmail_send": (
+        "GMAIL_SEND_CREDENTIAL_FILE",
+        "https://www.googleapis.com/auth/gmail.send",
+    ),
+}
+
+
+def _read_gmail_credential_file(raw_path: str, name: str, expected_scope: str) -> str:
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or not 1 <= metadata.st_size <= 16_384
+    ):
+        raise ConfigurationError(f"{name} must be a 0600 regular file under 16 KiB")
+    try:
+        loaded: object = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigurationError(f"{name} is not a valid credential document") from exc
+    if not isinstance(loaded, dict) or set(loaded) != {
+        "client_id",
+        "client_secret",
+        "refresh_token",
+        "scope",
+    }:
+        raise ConfigurationError(f"{name} has an invalid credential shape")
+    for field in ("client_id", "client_secret", "refresh_token"):
+        value = loaded.get(field)
+        if not isinstance(value, str) or not value or len(value) > 4096:
+            raise ConfigurationError(f"{name} has an invalid credential shape")
+    if loaded.get("scope") != expected_scope:
+        raise ConfigurationError(f"{name} does not carry its exact Google scope")
+    return json.dumps(loaded, sort_keys=True, separators=(",", ":"))
 
 
 def _validate_private_regular_file(path: Path, name: str) -> None:
@@ -689,6 +768,12 @@ def validate_settings(
         raise ConfigurationError(
             "notification API and dispatch flags must be enabled or disabled together"
         )
+    gmail_credential_names = set(_GMAIL_CREDENTIAL_FILES)
+    configured_gmail_credentials = gmail_credential_names & set(settings.credentials)
+    if settings.email_enabled and configured_gmail_credentials != gmail_credential_names:
+        raise ConfigurationError("email enablement requires all three Gmail credential files")
+    if not settings.email_enabled and configured_gmail_credentials:
+        raise ConfigurationError("Gmail credentials require AGENT_EMAIL_ENABLED=1")
     apns_values = {
         "APNS_KEY_FILE": settings.apns_key_file,
         "APNS_KEY_ID": settings.apns_key_id,
@@ -916,6 +1001,31 @@ def _load_settings(
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
+    delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
+    email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
+    configured_gmail_files = {
+        credential_name: (variable, values.get(variable, "").strip(), scope)
+        for credential_name, (variable, scope) in _GMAIL_CREDENTIAL_FILES.items()
+        if values.get(variable, "").strip()
+    }
+    if configured_gmail_files and not email_enabled:
+        raise ConfigurationError("Gmail credential files require AGENT_EMAIL_ENABLED=1")
+    if email_enabled:
+        missing_gmail_files = [
+            variable
+            for credential_name, (variable, _scope) in _GMAIL_CREDENTIAL_FILES.items()
+            if credential_name not in configured_gmail_files
+        ]
+        if missing_gmail_files:
+            raise ConfigurationError(
+                "AGENT_EMAIL_ENABLED=1 requires " + ", ".join(missing_gmail_files)
+            )
+        for credential_name, (variable, raw_path, scope) in configured_gmail_files.items():
+            if credential_name in credentials:
+                raise ConfigurationError(f"duplicate credential source for {credential_name}")
+            credentials[credential_name] = SecretStr(
+                _read_gmail_credential_file(raw_path, variable, scope)
+            )
     push_provider = _parse_enum(
         PushProviderKind,
         values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
@@ -1030,6 +1140,8 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        delegation_enabled=delegation_enabled,
+        email_enabled=email_enabled,
         push_provider=push_provider,
         apns_key_file=apns_key_file,
         apns_key_id=apns_key_id,

@@ -125,6 +125,15 @@ class ToolInvocationRepository(Protocol):
         self, run_id: UUID, idempotency_key: str
     ) -> ToolInvocation | None: ...
 
+    async def has_uncertain_non_idempotent(
+        self,
+        run_id: UUID,
+        *,
+        tool_name: str,
+        normalized_arguments_hash: str,
+        principal: Principal,
+    ) -> bool: ...
+
     async def transition(
         self,
         invocation_id: UUID,
@@ -321,6 +330,8 @@ class ArtifactRepository(Protocol):
     async def exists(self, artifact_id: UUID) -> bool: ...
 
     async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef: ...
+
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]: ...
 
     async def retain_for_knowledge(
         self, artifact_id: UUID, principal: Principal

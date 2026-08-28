@@ -282,11 +282,54 @@ public struct RunFailureView: Codable, Sendable {
     public let attemptNumber: Int?
     public let occurredAt: Date
 
+    public var userFacingMessage: String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "The run ended because \(reason.displayName.lowercased())."
+        }
+        return trimmed
+    }
+
+    public var diagnosticSummary: String {
+        var parts = [reason.displayName]
+        if let stepNumber { parts.append("Step \(stepNumber)") }
+        if let attemptNumber { parts.append("Attempt \(attemptNumber)") }
+        return parts.joined(separator: " · ")
+    }
+
     enum CodingKeys: String, CodingKey {
         case reason, message
         case stepNumber = "step_number"
         case attemptNumber = "attempt_number"
         case occurredAt = "occurred_at"
+    }
+}
+
+private extension FailureReason {
+    var displayName: String {
+        switch self {
+        case .maxAttemptsExceeded: "Maximum attempts exceeded"
+        case .budgetExceeded: "Budget exceeded"
+        case .deadlineExceeded: "Deadline exceeded"
+        case .maxStepsExceeded: "Maximum steps exceeded"
+        case .toolLoopDetected: "Tool loop detected"
+        case .repeatedDenial: "Repeated denial"
+        case .approvalExpired: "Approval expired"
+        case .inputDeadlineExceeded: "Input deadline exceeded"
+        case .contextOverflow: "Context overflow"
+        case .modelPermanentError: "Model error"
+        case .emptyModelTurn: "Empty model response"
+        case .authorizationError: "Authorization error"
+        case .childRunFailed: "Child run failed"
+        case .internalError: "Internal error"
+        case .unknown(let value):
+            sentenceCase(value.replacingOccurrences(of: "_", with: " "))
+        }
+    }
+
+    private func sentenceCase(_ value: String) -> String {
+        guard let first = value.first else { return "Unknown failure" }
+        return first.uppercased() + value.dropFirst()
     }
 }
 

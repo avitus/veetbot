@@ -22,6 +22,7 @@ from agent_core.evals.capability import (
     load_scenarios,
     resolve_build_ref,
     run_suite,
+    score_judge_output,
 )
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.unit.test_capability_eval import NOW, EvalUnitOfWorkFactory, _fixture
@@ -267,17 +268,69 @@ def test_trajectory_provenance_mismatch_is_rejected(tmp_path: Path) -> None:
         load_scenarios(tmp_path, "research")
 
 
-def test_milestone_ten_capability_scenario_is_accepted(tmp_path: Path) -> None:
+def test_milestone_thirteen_capability_scenario_is_accepted(tmp_path: Path) -> None:
+    """Admit the authorized Milestone 13 capability ceiling."""
+
     _fixture(tmp_path)
     path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
     path.write_text(
-        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 10"),
+        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 13"),
         encoding="utf-8",
     )
 
     _settings, scenarios = load_scenarios(tmp_path, "research")
 
-    assert scenarios[0].scenario.milestone == 10
+    assert scenarios[0].scenario.milestone == 13
+
+
+def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> None:
+    """Keep the capability schema closed above Milestone 13."""
+
+    _fixture(tmp_path)
+    path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 14"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="less than or equal to 13"):
+        load_scenarios(tmp_path, "research")
+
+
+def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> None:
+    """Validate the checked-in failed research trajectory and governed ceilings."""
+
+    repository_root = Path(__file__).resolve().parents[2]
+
+    settings, scenarios = load_scenarios(repository_root, "research")
+
+    assert len(scenarios) == 1
+    assert settings.daily_cost_usd == Decimal("100.00")
+    assert settings.suites["research"].cost_usd == Decimal("25.00")
+    scenario = scenarios[0].scenario
+    assert scenario.milestone == 13
+    assert scenario.ceiling.model_calls == 80
+    assert scenario.ceiling.tool_calls == 200
+    assert scenario.ceiling.cost_usd == Decimal("5.00")
+    assert scenario.source.outcome == "FAILED"
+    assert "independent parallel work" in scenario.source.diagnosis
+
+
+def test_judge_scoring_accepts_one_exact_json_fence_and_no_surrounding_prose(
+    tmp_path: Path,
+) -> None:
+    """Accept one exact JSON fence while rejecting explanatory prose."""
+
+    _fixture(tmp_path)
+    _, [loaded] = load_scenarios(tmp_path, "research")
+    raw = _judge_output()
+
+    score, observations = score_judge_output(loaded.rubric, f"```json\n{raw}\n```")
+
+    assert score == Decimal("0.9375")
+    assert [item.criterion for item in observations] == ["correctness", "clarity"]
+    with pytest.raises(ValueError):
+        score_judge_output(loaded.rubric, f"Judge output:\n```json\n{raw}\n```")
 
 
 async def test_tied_cost_ceiling_uses_scenario_scope(tmp_path: Path) -> None:
@@ -377,6 +430,8 @@ async def test_replaying_build_uses_canonical_process_event_keys(tmp_path: Path)
 async def test_live_execution_bounds_non_advancing_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Bound a worker loop that reports progress without advancing the run."""
+
     run_id = UUID(int=700)
 
     class FakeRuns:
@@ -391,6 +446,8 @@ async def test_live_execution_bounds_non_advancing_worker(
             self.calls = 0
 
         async def run_once(self) -> bool:
+            """Report progress without changing the projected run state."""
+
             self.calls += 1
             return True
 
@@ -398,9 +455,12 @@ async def test_live_execution_bounds_non_advancing_worker(
 
     @asynccontextmanager
     async def fake_build(**_kwargs: object) -> Any:
+        """Provide the non-advancing worker composition test double."""
+
         yield SimpleNamespace(
             runs=FakeRuns(),
             worker_factory=lambda _worker_id: worker,
+            async_worker_factory=lambda _worker_id: worker,
         )
 
     monkeypatch.setattr(bootstrap_module, "build", fake_build)
@@ -421,3 +481,179 @@ async def test_live_execution_bounds_non_advancing_worker(
         )
 
     assert worker.calls == 2
+
+
+async def test_live_execution_drives_child_run_suspension_to_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drive interactive and async workers until a delegated parent completes."""
+
+    run_id = UUID(int=701)
+
+    def run(status: RunStatus) -> SimpleNamespace:
+        """Build one projected parent-run state for the worker sequence."""
+
+        return SimpleNamespace(
+            id=run_id,
+            status=status,
+            final_message="delegated research complete" if status is RunStatus.COMPLETED else None,
+            provider_pin=SimpleNamespace(provider="openai", model="gpt-5.6-sol"),
+            usage=SimpleNamespace(
+                model_calls=3,
+                tool_calls=2,
+                cost=Decimal("0.25"),
+            ),
+            failure=None,
+        )
+
+    class FakeRuns:
+        def __init__(self) -> None:
+            """Seed the parent states observed across worker iterations."""
+
+            self.states = iter(
+                (
+                    run(RunStatus.RUNNING),
+                    run(RunStatus.WAITING_FOR_APPROVAL),
+                    run(RunStatus.QUEUED),
+                    run(RunStatus.COMPLETED),
+                )
+            )
+
+        async def submit(self, _prompt: str) -> UUID:
+            """Return the stable subject run identifier."""
+
+            return run_id
+
+        async def get(self, _run_id: UUID) -> SimpleNamespace:
+            """Advance to the next projected parent state."""
+
+            return next(self.states)
+
+        async def events(self, _run_id: UUID) -> list[object]:
+            """Return no policy events for this worker-focused fixture."""
+
+            return []
+
+    class FakeApprovals:
+        async def list_pending(self, *, run_id: UUID) -> list[object]:
+            """Prove child-run suspension is not an approval wait."""
+
+            assert run_id == UUID(int=701)
+            return []
+
+    class FakeWorker:
+        def __init__(self, results: tuple[bool, ...]) -> None:
+            """Seed deterministic worker-progress outcomes."""
+
+            self.results = iter(results)
+            self.calls = 0
+
+        async def run_once(self) -> bool:
+            """Return the next deterministic progress outcome."""
+
+            self.calls += 1
+            return next(self.results)
+
+    interactive_worker = FakeWorker((True, False, True))
+    async_worker = FakeWorker((True,))
+
+    @asynccontextmanager
+    async def fake_build(**_kwargs: object) -> Any:
+        """Provide both priority-class workers to live execution."""
+
+        yield SimpleNamespace(
+            approvals=FakeApprovals(),
+            runs=FakeRuns(),
+            worker_factory=lambda _worker_id: interactive_worker,
+            async_worker_factory=lambda _worker_id: async_worker,
+        )
+
+    monkeypatch.setattr(bootstrap_module, "build", fake_build)
+
+    execution = await _live_execution(
+        "balanced",
+        ("delegate.run",),
+        CapabilityBudget(
+            model_calls=4,
+            tool_calls=4,
+            cost_usd=Decimal("1.00"),
+            wall_seconds=30,
+        ),
+        "prompt",
+        clock=FixedClock(NOW),
+        ids=_ids(4100),
+    )
+
+    assert execution.status is RunStatus.COMPLETED
+    assert execution.output == "delegated research complete"
+    assert interactive_worker.calls == 3
+    assert async_worker.calls == 1
+
+
+async def test_live_execution_translates_a_tool_free_budget_to_a_runnable_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate a zero-tool judge ceiling into the runtime's positive minimum."""
+
+    run_id = UUID(int=702)
+    observed_tool_limits: list[int] = []
+    completed_run = SimpleNamespace(
+        id=run_id,
+        status=RunStatus.COMPLETED,
+        final_message='{"criteria": []}',
+        provider_pin=SimpleNamespace(provider="anthropic", model="claude-opus-5"),
+        usage=SimpleNamespace(
+            model_calls=1,
+            tool_calls=0,
+            cost=Decimal("0.10"),
+        ),
+        failure=None,
+    )
+
+    class FakeRuns:
+        async def submit(self, _prompt: str) -> UUID:
+            """Return the stable judge run identifier."""
+
+            return run_id
+
+        async def get(self, _run_id: UUID) -> SimpleNamespace:
+            """Return the completed judge run projection."""
+
+            return completed_run
+
+        async def events(self, _run_id: UUID) -> list[object]:
+            """Return no policy events for the tool-free judge."""
+
+            return []
+
+    @asynccontextmanager
+    async def fake_build(**kwargs: object) -> Any:
+        """Capture the translated runtime limit from the composition call."""
+
+        limits = cast(Any, kwargs["limits"])
+        observed_tool_limits.append(limits.max_tool_calls)
+        yield SimpleNamespace(
+            runs=FakeRuns(),
+            worker_factory=lambda _worker_id: SimpleNamespace(),
+            async_worker_factory=lambda _worker_id: SimpleNamespace(),
+        )
+
+    monkeypatch.setattr(bootstrap_module, "build", fake_build)
+
+    execution = await _live_execution(
+        "flagship",
+        (),
+        CapabilityBudget(
+            model_calls=2,
+            tool_calls=0,
+            cost_usd=Decimal("0.50"),
+            wall_seconds=30,
+        ),
+        "judge prompt",
+        clock=FixedClock(NOW),
+        ids=_ids(4200),
+    )
+
+    assert execution.status is RunStatus.COMPLETED
+    assert execution.tool_calls == 0
+    assert observed_tool_limits == [1]

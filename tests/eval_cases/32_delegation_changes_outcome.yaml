@@ -1,0 +1,25 @@
+name: delegation_changes_outcome
+milestone: 13
+tags: [delegation, comparison]
+input:
+  text: Research the delegated question and report the confirmed finding.
+model_fixture: delegation_changes_outcome
+fixtures:
+  tools: [math.calculate]
+arms:
+  - name: without_delegation
+    expected:
+      terminal_status: FAILED
+      failure_reason: model_permanent_error
+      model_calls: 1
+      tool_started_count: 0
+  - name: with_delegation
+    tools: [math.calculate, delegate.run]
+    expected:
+      terminal_status: COMPLETED
+      final_text: FINDING_CONFIRMED
+      model_calls: 2
+      tool_started_count: 1
+delta:
+  policy_failures: same
+  outcome: improves

@@ -9,9 +9,9 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestone 16 was authorized as a parallel workstream on 2026-08-22
-  # (ADR-0069) and Milestone 17 on 2026-08-23 (ADR-0070); the gates of
-  # neither advance the verified ceiling past 15.
+  # Milestones 16 through 20 are independently authorized parallel
+  # workstreams under ADRs 0069, 0070, 0071, 0072, and 0073; their gates do not
+  # advance the verified ceiling past the sequential work through 15.
   authorized_milestones:
     - 0
     - 1
@@ -32,6 +32,8 @@ project:
     - 16
     - 17
     - 18
+    - 19
+    - 20
 
 milestones:
   "0":
@@ -112,7 +114,7 @@ milestones:
       - email and webhook transports
   "13":
     title: General-purpose subagents and delegation
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-20
     design: docs/plan/subagents-and-delegation.md
     adr: docs/adr/0063-milestone-13-subagents-and-delegation.md
@@ -126,6 +128,173 @@ milestones:
     deferred_scope:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
+    open_items:
+      - Hosted CI on the milestone's final head
+      - CodeRabbit review loop on the dev to main pull request (build step 7)
+    evidence:
+      - check: twenty-one Milestone 13 gate.delegate.* gates
+        outcome: passed_locally
+        detail: >-
+          All twenty-one registered Milestone 13 entries in
+          evals/gates/delegate.yaml resolve to live checks — seventeen in
+          tests/gates/test_delegate_m13.py, one in
+          tests/unit/test_persistence_schema.py, and three in the
+          PostgreSQL integration lane
+          (tests/integration/test_delegation_materializer_m13.py and
+          tests/integration/test_migrations.py) — and all pass when
+          executed by node identifier. The harness cannot execute them
+          through agent eval gates yet for the reason Milestones 16 and 17
+          recorded: --milestone 13 would also activate the still-pending
+          Milestone 14 and 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
+      - check: build sequence steps 1 through 5 and the deterministic half of 6
+        outcome: passed_locally
+        detail: >-
+          The delegation domain values and limit derivation, the
+          delegations ledger persistence with erasure and its shared
+          repository contract on both tiers, delegate.run and the
+          one-transaction materializer with write-probe crash coverage,
+          the child_run suspension, join, requeue_after_child edge, and
+          downward-only cancel cascade, the delegation limits block with
+          the tenant admission lock and the default-off flag, and case 32
+          with the tools arm overlay are implemented and verified by the
+          static, contract, and PostgreSQL integration lanes. The capability
+          scenario schema now admits the Milestone 13 scenario while keeping
+          Milestone 14 outside its closed bound.
+      - check: red-green discipline for the Milestone 13 suites
+        outcome: recorded
+        detail: >-
+          Every build step began with a recorded failing run before its
+          green implementation. The focused red commands and their expected
+          failures were, in build order, pytest
+          tests/gates/test_delegate_m13.py failing on the unimplemented
+          limit derivation and materializer, tests/unit/
+          test_delegation_domain_m13.py failing on unenforced brief bounds,
+          tests/contract/test_delegation_repository_contract.py and
+          tests/unit/test_persistence_schema.py failing on the unimplemented
+          repositories and constraint-free row, the end-to-end suspension
+          suite failing with the parent completing without any delegation
+          machinery, and tests/unit/test_config.py failing on the ten
+          missing delegation knobs. The capability-bound continuation ran
+          pytest tests/unit/test_capability_boundaries.py -k
+          'milestone_thirteen or milestone_fourteen', which failed because
+          the pre-change schema rejected 13 and reported 10, not 13, as its
+          upper bound.
+      - check: hosted CI and final review for pull request 64
+        outcome: passed_on_final_head
+        detail: >-
+          On final head 071e6422503df592f8fe172484a7b1b304014540 all five
+          CircleCI lanes, the Xcode Cloud iOS and macOS archives, GitGuardian,
+          and CodeRabbit passed. CodeRabbit reviewed that exact head with no
+          new finding, every review thread was resolved, and GitHub merged the
+          dev-to-main pull request as 07c8bdfec085a2e6aef75311ea1d5cb046391ab5.
+          This evidence covers the implementation on that head, not the later
+          local capability-bound continuation or the still-unwritten live
+          scenario.
+      - check: capability scenario from a real failed trajectory
+        outcome: admitted_locally
+        detail: >-
+          Production run 85487ddf-5deb-45c3-a89b-a22b752f5406 supplies the
+          required real long-research failure: the single agent spent all 32
+          permitted tool calls across six providers and their second-source
+          cross-checks, then failed with budget_exceeded before producing an
+          answer. With active export consent, corrected trajectory@5 export
+          65b5b347-2891-4e58-a3f1-d9c583088f85 produced the checked-in
+          trajectory. Review confirmed the export's digest, matching failed
+          provenance, rule-based redactions, absence of event sequences and
+          principal identity, and successful redaction rescan. The repository
+          admission regression first failed because no trajectory-backed
+          scenario existed, then passed after the fixture and diagnosed
+          research scenario were added. Single-agent baseline and delegating
+          re-run scoring, hosted CI, and final review on the completed evidence
+          head remain.
+      - check: first single-agent live baseline attempt
+        outcome: blocked_by_cost_ceiling
+        detail: >-
+          Exact integrated build e238ce7 ran against a dedicated PostgreSQL
+          evaluation database with delegation explicitly disabled. Repeats 0
+          through 3 each exhausted the shared subject-and-judge cost ceiling
+          before any judge call, at USD 0.917954, USD 0.9954325, USD 0.861420,
+          and USD 0.913695 respectively. Repeat 4 then ended with zero usage
+          when the normalized model stream violated its contract, and the
+          suite emitted a release-blocking evaluation_error. The persisted
+          attempt cost is USD 3.6885015, with zero criterion rows and zero
+          scores. The owner then explicitly approved a USD 50 evaluation
+          budget. The governed ceilings are now USD 5.00 per repeat, USD 25.00
+          per suite invocation, and USD 50.00 per day, leaving the scored
+          five-repeat baseline and delegating arm to run under the approved
+          bound at that checkpoint.
+      - check: governed baseline and delegation calibration under the approved budget
+        outcome: blocked_by_call_ceiling
+        detail: >-
+          Exact staged build 95b3236 completed the five-repeat single-agent
+          baseline with five release-blocking ceiling hits, zero policy
+          failures, no criterion rows, and USD 7.8022225 persisted cost. Exact
+          staged build d0b0eed then completed the five-repeat delegation arm
+          with five tool-call ceiling hits, zero policy failures, no criterion
+          rows, and per-repeat costs USD 5.0662285, USD 2.6579855, USD
+          2.9546355, USD 2.4501290, and USD 1.7449210. The live failures exposed
+          three harness defects now covered by regressions: model-stream
+          invariant detail was discarded, approval-free child suspension was
+          treated as terminal and only the interactive queue was driven, and a
+          zero-tool judge was stopped by the runtime before its first model
+          call. A bearer-terminology false positive was also narrowed without
+          admitting raw authorization headers or credential-shaped values.
+          Because child usage is correctly additive, the scenario now allows
+          80 model and 200 tool calls while retaining every approved cost
+          ceiling. At that checkpoint, the final scored baseline and
+          delegating distributions remained outstanding; these calibration
+          runs are recorded rather than reclassified retrospectively.
+      - check: scored single-agent baseline under the approved budget
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          Exact staged build 11e5b90 completed the delegation-disabled
+          five-repeat research baseline against the dedicated PostgreSQL
+          evaluation database. Repeats 0 through 4 scored 0.75, 0.55, 0.75,
+          0.65, and 0.75, for mean 0.69, floor 0.55, and population variance
+          0.0064. All five rows have zero ceiling hits and zero policy
+          failures, with USD 7.855529 total persisted and provider-ledger
+          cost. The suite correctly remained release-blocked because repeat 1
+          fell below the rubric's 0.60 floor. The aggregate provider ledger
+          reached USD 42.599510 of the owner-approved USD 50 cap, leaving USD
+          7.400490. The prior unscored five-repeat delegation calibration cost
+          USD 14.8738995, so the scored delegating re-run remains outstanding
+          rather than knowingly exceeding the approved aggregate cap.
+      - check: first scored delegating re-run under the raised aggregate cap
+        outcome: blocked_by_comparison
+        detail: >-
+          Exact staged build 877b3ec completed five delegation-enabled repeats
+          at scores 0.75, 0.75, 0.775, 0.65, and 0.35, for mean 0.655, floor
+          0.35, and population variance 0.0251. It persisted zero scenario
+          ceiling hits, zero policy failures, and USD 10.984242 cost, taking
+          aggregate provider spend to USD 53.583752 of the owner-approved USD
+          100 cap. The arm remained release-blocked and did not score above the
+          0.69 baseline. Its child ledger showed repeated exhaustion at the
+          shipped eight-step/eight-model/16-tool defaults or caller-guessed
+          lower caps, including the 0.35 repeat whose children returned no
+          usable research summary. The failed distribution remains recorded;
+          it was not reclassified or discarded.
+      - check: scored delegating exit evidence after child-budget calibration
+        outcome: passed_live
+        detail: >-
+          The failed arm drove a red-green calibration on exact code head
+          3c8772a: governed child defaults moved from 8 model/16 tool calls to
+          12 model/48 tool calls, child instructions expose the derived budget
+          and reserve a final synthesis model call, and delegate.run@1.0.1
+          tells callers to omit guessed per-brief limits unless stricter caps
+          are intended. The focused red test failed on all three old contracts;
+          its green run passed, as did 103 delegation/configuration tests and
+          the complete local check. Exact staged build
+          3c8772a-delegating-repair then scored 0.65, 0.65, 0.90, 0.65, and
+          0.75, for mean 0.72, floor 0.65, and population variance 0.0096.
+          All five rows and the durable suite event report zero scenario
+          ceiling hits, zero policy failures, and release_blocked false. The
+          arm cost USD 11.104456 and aggregate provider spend is USD 64.688208
+          of the USD 100 authorization. This satisfies ADR-0063 because the
+          delegating mean is above the scored single-agent baseline's 0.69;
+          the lower baseline is retained as the required failed-trajectory
+          comparison rather than retrospectively repaired.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
@@ -177,8 +346,9 @@ milestones:
       - belief merge and global consolidation, HTTP memory surface
   "17":
     title: Memory read API and browser
-    status: authorized
+    status: complete
     authorized_on: 2026-08-23
+    completed_on: 2026-08-24
     design: docs/plan/memory-read-api-and-browser.md
     adr: docs/adr/0070-milestone-17-memory-read-api-and-browser.md
     gates_registered: 10
@@ -193,108 +363,9 @@ milestones:
       - every write, edit, retraction, and deletion over HTTP
       - recall-trace viewing, blocked on tenant and principal trace predicates
       - consolidation and formation audit routes, knowledge documents
-    evidence:
-      - check: ten Milestone 17 gate.memory.read_api_* and browse_contract_parity gates
-        outcome: passed_locally
-        detail: >-
-          The ten registered Milestone 17 entries in evals/gates/memory.yaml
-          resolve to ten distinct checks, all in
-          tests/gates/test_memory_read_api_m17.py, and all ten pass when
-          executed by node identifier — one test function per gate, so the
-          whole file passes its ten tests. Each was confirmed to be a live
-          instrument by mutating the implementation it observes and watching
-          it fail: defaulting the route's ceiling parameter trips gate 1;
-          removing the detail ceiling filter trips gates 2 and 10; dropping
-          the principal predicate from the store's browse trips gate 3;
-          widening the default status set from the live one trips gate 5;
-          turning the detail route into a POST trips gate 6; mounting the
-          router unconditionally trips gate 7; returning the in-memory
-          subject predicate to casefold trips gate 8; adding store_position
-          to MemoryView trips gate 9. The harness cannot execute these ten
-          through agent eval gates yet, for the same reason Milestone 16's
-          evidence recorded: --milestone means treat every gate at or below
-          MILESTONE as active, so --milestone 17 activates the fifty-eight
-          still-pending Milestone 13 through 15 gates and the registry
-          validator correctly refuses. They become executable through the
-          harness when project.current_milestone advances past them.
-      - check: cumulative gate registry
-        outcome: passed_locally
-        detail: >-
-          agent eval gates reports 247 active gates across Milestones 0
-          through 12 with 247 passing and none failing, and 88 pending across
-          Milestones 13 through 17, for the 335 registry entries the milestone
-          map declares. make docs-check reconciles all 335 entries and
-          AST-resolves every check, including the ten Milestone 17 entries
-          repointed off tests/gates/pending.py in this change. The verified
-          gate ceiling stays at Milestone 12.
-      - check: make check
-        outcome: passed_locally
-        detail: >-
-          Ruff formatting over 564 files and Ruff linting pass, strict mypy
-          reports no issue in 519 source files, the static partition passes
-          1252 tests, the contract partition passes 364, the release, manual
-          rollback, and nginx deployment-script tests pass, and the strict
-          documentation build passes with 179 citations checked.
-      - check: PostgreSQL integration lane
-        outcome: passed_locally
-        detail: >-
-          make test-integration passes all 138 selected tests against
-          PostgreSQL 16 on the dedicated development database, with 1628
-          deselected. That includes the three new cases in
-          tests/integration/test_memory_read_postgres_m17.py — full-text
-          search through the read service, a keyset walk over real gapped
-          store positions with an interleaved write, and the ceiling
-          predicate over all four sensitivity values with above-ceiling
-          detail reads indistinguishable from absent ones — and the four
-          browse cases in tests/integration/test_memory_postgres_m9.py,
-          which now include a non-ASCII subject proving both adapters agree
-          on lowercased matching and a keyset tiebreak inclusion case.
-      - check: complete non-live suite
-        outcome: passed_locally
-        detail: >-
-          pytest -m "not live" passes all 1764 tests with 2 deselected,
-          against the development database.
-      - check: Apple package and simulator lanes
-        outcome: passed_locally
-        detail: >-
-          Build-sequence steps 6 and 7 are complete on the m17/pr2-client
-          branch: the Apple client's MemoryView model and
-          listMemories/getMemory client methods (step 6), and MemoryViewModel,
-          MemoryBrowserView, MemoryDetailView, the sidebar entry point, and
-          their native Swift Testing coverage (step 7). make test-apple passes
-          its full Swift Testing suite over the VeetbotCore package, and make
-          test-apple-ui passes ConversationNavigationUITests on both an
-          iPhone and an iPad simulator, which also builds the Veetbot app
-          target and so validates the corresponding Xcode project entries. No
-          Python gate observes Swift (ADR-0049 decision 9), so none of the ten
-          gates above is satisfied by client code, and none of them is
-          blocked by its absence either.
-      - check: manual smoke of the read API over HTTP
-        outcome: passed
-        detail: >-
-          2026-08-24, development-mode server (AUTH_MODE=dev, loopback
-          principal local/local-user, fake sandbox) over the shared dev
-          Postgres with AGENT_MEMORY_API_ENABLED=1: list returned the
-          principal's four live beliefs as twenty-six-field views with a null
-          terminal cursor; limit=2 walked two disjoint pages ending null;
-          a request without ceiling was a 400 malformed_request naming
-          query.ceiling with empty details; detail returned all
-          twenty-six fields including the provenance trio; an unknown id was
-          the plain not_found envelope; text search matched all four rows on
-          a shared statement token (the rows are gate-run residue, which is
-          what the shared development database holds); ceiling=public
-          filtered to one row. With the flag unset the routes were absent
-          (plain 404). The 401/403 arms are not reachable under dev auth and
-          rest on gates 3, 6, and 10 plus the boundary suite.
-      - check: hosted CI and the dev-to-main review loop
-        outcome: not_started
-        detail: >-
-          Build-sequence step 8's remaining half is still outstanding: hosted
-          CI has not run on this milestone's branches, and the CodeRabbit
-          review loop has not run on one final head from `dev` to `main`.
   "18":
     title: First-class email integration
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-24
     design: docs/plan/email-integration.md
     adr: docs/adr/0071-milestone-18-email-integration.md
@@ -312,8 +383,192 @@ milestones:
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
+    open_items:
+      - Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    verification:
+      - check: thirteen Milestone 18 gate.email gates
+        outcome: passed_locally
+        detail: >-
+          The thirteen registered entries in evals/gates/email.yaml resolve to
+          thirteen distinct live checks in tests/gates/test_email_m18.py. The
+          complete module passes all eighteen collected cases, including the
+          three-mode contract and roster matrices, property-generated child
+          environments, fixed-endpoint and failure-taxonomy cases, and the
+          in-memory scheduled-triage path through read, parked write approval,
+          content-free notification, approval resolution, and outcome report.
+          The harness continues to report post-ceiling gates as pending while
+          project.current_milestone remains 12, so this focused execution is
+          the local parallel-workstream evidence and does not move the verified
+          gate ceiling.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 589 files and Ruff linting pass, strict mypy
+          reports no issue in 545 source files, the static partition passes
+          1339 tests, the contract partition passes 368 tests, release,
+          rollback, and nginx deployment-script tests pass, and the strict
+          documentation build passes with 188 citations and 353 registry
+          entries reconciled.
+      - check: owner real-mailbox smoke
+        outcome: not_started
+        detail: >-
+          Completion still requires the owner's real-mailbox bootstrap consent,
+          a scheduled triage run, an approval delivered to the phone, and one
+          approved send. No fake-provider result is recorded as a substitute.
+      - check: hosted CI and the dev-to-main review loop
+        outcome: not_started
+        detail: >-
+          Hosted CI and the CodeRabbit review loop have not run on a final
+          dev-to-main head for this workstream.
+  "19":
+    title: Conversational schedule creation
+    status: in_progress
+    authorized_on: 2026-08-24
+    design: docs/plan/scheduling.md
+    adr: docs/adr/0072-milestone-19-conversational-schedule-creation.md
+    gates_registered: 5
+    authorized_scope:
+      - one-time schedule creation through the model-callable schedule.create tool
+      - exact aware instants after the current time
+      - mandatory approval and the exact schedule.write scope
+      - empty delegated scopes and finite per-occurrence limits
+      - direct reuse of the existing ScheduleService and notification lifecycle
+    deferred_scope:
+      - recurring schedule creation through the model
+      - schedule update, pause, resume, delete, occurrence list, and run list tools
+      - a separate reminder record or notification payload with user content
+      - notification transports beyond the existing Milestone 12 delivery path
+    open_items:
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    evidence:
+      - check: five Milestone 19 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          The five registered Milestone 19 entries in evals/gates/schedule.yaml
+          all resolve to checks in tests/gates/test_schedule_tool_m19.py, and
+          the file's seven tests pass locally (2026-08-25, uv run pytest
+          tests/gates/test_schedule_tool_m19.py). The harness cannot execute
+          them through agent eval gates yet for the reason Milestones 16 and
+          17 recorded: --milestone 19 would also activate the still-pending
+          Milestone 13 through 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
+      - check: Milestone 19 gate-area red phase
+        outcome: observed_expected_failure
+        detail: >-
+          The gate-area test was reconstructed on the exact pre-implementation
+          parent e79d517 with the test version introduced by 20d9c82. Running
+          pytest tests/gates/test_gate_registry.py::
+          test_conversational_scheduling_has_complete_milestone_19_gate_area
+          failed at its intended assertion because the registry contained zero
+          Milestone 19 entries rather than five; this was a behavioral gate
+          failure rather than an environment, import, or fixture error.
+      - check: clarification, approval, and schedule creation journey
+        outcome: passed_locally
+        detail: >-
+          pytest tests/gates/test_schedule_tool_m19.py
+          tests/integration/test_schedule_conversation_m19.py passes all eight
+          tests against isolated PostgreSQL 16. The integration journey asks
+          for missing time context, records exactly one answer tool result,
+          resumes once, waits for ordinary approval, and persists one future
+          one-time schedule.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 580 files and Ruff linting pass, strict mypy
+          reports no issue in 536 source files, the static partition passes
+          1297 tests, the contract partition passes 368, all deployment-script
+          tests pass, and strict documentation validation reconciles all 353
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          make test-integration passes all 155 selected tests against isolated
+          PostgreSQL 16, with 1677 deselected. This includes the scheduling and
+          notification persistence paths and the clarification journey.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          pytest -m "not live" passes all 1830 selected tests with the two
+          live-model tests deselected.
+  "20":
+    title: Calendar recurrence and conversational schedules
+    status: in_progress
+    authorized_on: 2026-08-27
+    design: docs/plan/scheduling.md
+    adr: docs/adr/0073-milestone-20-calendar-recurrence.md
+    gates_registered: 6
+    authorized_scope:
+      - daily and multi-day weekly conversational schedule creation
+      - monthly numbered-day and explicit last-day recurrence
+      - yearly month/day recurrence including leap-day skip semantics
+      - IANA-zone civil-time behavior and bounded calendar misfires
+      - HTTP create and update support through the existing cadence union
+      - approval-gated schedule.create reuse with empty delegated scopes
+    deferred_scope:
+      - arbitrary cron or RFC 5545 input and interval multipliers
+      - continuous-session recurrence, dependency graphs, and workflow DAGs
+      - model-callable lifecycle mutation and delegated tool scopes
+      - content-bearing notifications or new delivery transports
+    open_items:
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    evidence:
+      - check: six Milestone 20 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          All six registered Milestone 20 entries in evals/gates/schedule.yaml
+          resolve to live checks in tests/gates/test_schedule_calendar_m20.py.
+          That file's nine test results pass, covering the closed calendar
+          values, deterministic and property-generated recurrence, bounded
+          long-range counting, the widened HTTP union, approval proposals,
+          validation, and idempotent replay.
+      - check: Milestone 20 red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After installing the repository environment, uv run pytest
+          tests/gates/test_schedule_calendar_m20.py -q produced nine expected
+          behavioral failures: the monthly and yearly domain types were
+          absent, the HTTP boundary rejected those recurrence kinds, and the
+          model tool neither proposed recurring approval nor enforced the
+          exclusive at-or-cadence input contract. The environment error from
+          the earlier pre-install attempt was discarded and was not counted
+          as red evidence.
+      - check: deterministic civil-calendar behavior
+        outcome: passed_locally
+        detail: >-
+          Numbered monthly dates skip months that do not contain the date,
+          explicit last-day rules select the actual month end, yearly leap-day
+          rules skip non-leap years, existing gap and fold behavior is reused,
+          and long downtime counting uses bounded calendar arithmetic rather
+          than one recurrence step per missed occurrence.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          uv run pytest -m 'not live' passes 1753 tests with 141 PostgreSQL-
+          gated tests skipped and the two live-model tests deselected. The
+          first run exposed an existing Milestone 13 property-test classifier
+          that omitted requested child budgets at the documented final-
+          synthesis reserve; the assertion was repaired without changing
+          delegation behavior and the complete rerun passed.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 593 files and Ruff linting pass, strict mypy
+          reports no issue in 548 source files, the static partition passes
+          1360 tests, the contract partition passes 368, all deployment-script
+          tests pass, and strict documentation validation reconciles all 359
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          A fresh isolated PostgreSQL 16 database migrated from base through
+          head a9c5e2f7d413, the twenty existing schedule integration tests
+          passed, and make test-integration passed all 156 selected tests. The
+          new PostgreSQL gate round-trips monthly and yearly definitions
+          through the existing JSONB schedule revision without a migration.
 
-# Evidence for completed milestones 0 through 12 and 16 lives in
+# Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
 # evidence will stay here until it completes.
 verification:
@@ -355,21 +610,30 @@ readiness:
     evaluation and lifecycle completed on 2026-08-23 as a parallel
     workstream: all twenty registered gates pass and hosted review on the
     dev to main pull request finished clean; the verified gate ceiling
-    stays at Milestone 12. On 2026-08-23 the owner authorized Milestone 17,
-    the memory read API and the native memory browser, as a second parallel
-    workstream (ADR-0070), specified by memory-read-api-and-browser.md with
-    ten registered gates. On 2026-08-24 the owner authorized Milestone 18,
+    stays at Milestone 12. Milestone 17, the memory read API and the native
+    memory browser, completed on 2026-08-24 as a second parallel workstream:
+    all ten registered gates, the Python, PostgreSQL, Apple package and
+    simulator lanes, hosted CI, GitGuardian, and the final CodeRabbit review
+    passed, without moving the verified ceiling. On 2026-08-24 the owner
+    authorized Milestone 18,
     first-class email integration, as a third parallel workstream (ADR-0071),
     meeting roadmap item B11's entry condition for its email half; it is
     specified by email-integration.md with thirteen registered gates in a
-    new email area. Model routing remains
+    new email area. On 2026-08-24 the owner also authorized Milestone 19,
+    conversational one-time schedule creation, as a fourth parallel workstream
+    (ADR-0072); scheduling.md declares its five `gate.schedule.*` entries.
+    On 2026-08-27 the owner authorized Milestone 20, calendar recurrence and
+    conversational schedules, as a fifth parallel workstream (ADR-0073),
+    promoting the monthly-rule portion of roadmap item B5 and adding yearly
+    recurrence; scheduling.md declares its six `gate.schedule.*` entries.
+    Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-24T07:32:16Z
+last_updated: 2026-08-28T02:54:24Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

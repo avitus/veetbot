@@ -309,12 +309,15 @@ schedule.read      schedule.write      schedule.cancel
 The fifteen-string list remains the completed Milestone 4 baseline and the
 subject of its historical gate. The four browser scopes added by Milestone 10
 and the three schedule scopes added by Milestone 11 make the executable
-platform vocabulary twenty-two strings. The three scheduling additions authorize the
-application-level schedule routes in [scheduling.md](scheduling.md), not model
-tools: read covers schedule and occurrence reads, write covers create, update,
-pause, and resume, and cancel covers the terminal schedule transition. Exact
-matching, MCP namespace isolation, and every other rule in this section are
-unchanged.
+platform vocabulary twenty-two strings. The three scheduling additions
+authorize the application-level schedule routes in
+[scheduling.md](scheduling.md): read covers schedule and occurrence reads,
+write covers create, update, pause, and resume, and cancel covers the terminal
+schedule transition. That was the complete Milestone 11 surface. Milestone 19
+also gives the one-time model tool `schedule.create` exactly `schedule.write`;
+its `EXTERNAL_WRITE`/`HIGH` classification makes approval mandatory under the
+existing matrix. Exact matching, MCP namespace isolation, and every other rule
+in this section are unchanged.
 
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`
 for the device and notification routes in
@@ -344,7 +347,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1219` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1221` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -580,7 +583,7 @@ Authoritative, per Section 9.3. This is Section 9.2's matrix, keyed on
 | `NONE` | — | Allow | — |
 | `WORKSPACE_READ` | path inside workspace | Allow | Deny |
 | `WORKSPACE_WRITE` | path inside workspace | Allow | Deny |
-| `NETWORK_READ` | host on the allowlist | Allow | Deny |
+| `NETWORK_READ` | constructed provider target or operator-classified read-only MCP target | Allow | Deny |
 | `CODE_EXECUTION` | `target.isolated` | Allow | Deny |
 | `PACKAGE_INSTALL` | — | Deny | — |
 | `SANDBOX_NETWORK` | — | Deny | — |
@@ -601,7 +604,13 @@ They resolve as follows, without changing any outcome the plan states.
   was always a condition on the argument; the condition column is where it goes.
   [web-access.md](web-access.md) supplies the first constructed predicate: a
   `web_provider` execution target whose actual HTTPS API host is fixed by the
-  composition root. Model-authored URL fields do not satisfy the predicate.
+  composition root. Browser-provider reads use the same constructed-target arm.
+  Milestone 18 adds the MCP arm: an operator-classified `mcp` target satisfies
+  `host_on_allowlist` only when its declared side effect is `NETWORK_READ` and
+  its idempotency is `READ_ONLY`. The stdio command remains operator-owned and
+  the remote package confines its own destinations; no model-authored URL field
+  satisfies either arm. The exact `mcp.{server_id}.use` scope remains an
+  independent prerequisite.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in

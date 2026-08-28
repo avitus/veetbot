@@ -41,7 +41,7 @@ class EvalResult:
     memories: tuple[MemoryRecord, ...] = ()
 
 
-def _settings() -> Settings:
+def _settings(*, delegation_enabled: bool = False) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/eval",
         deployment_mode=DeploymentMode.DEVELOPMENT,
@@ -51,6 +51,7 @@ def _settings() -> Settings:
         config_dir=None,
         credentials=MappingProxyType({}),
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
+        delegation_enabled=delegation_enabled,
     )
 
 
@@ -159,9 +160,11 @@ async def _run_single(
     arm_name: str | None = None,
     skill_source: Literal["operator", "agent"] = "operator",
     carried_memories: tuple[MemoryRecord, ...] = (),
+    enabled_tools: list[str] | None = None,
 ) -> EvalResult:
     script = resolve_model_fixture(fixture_root, case.model_fixture)
     limits = RunLimits(**case.fixtures.run_limits.model_dump())
+    effective_tools = case.fixtures.tools if enabled_tools is None else enabled_tools
     principal = Principal(
         tenant_id="tenant_eval",
         principal_id=case.principal,
@@ -184,12 +187,12 @@ async def _run_single(
     )
     bootstrap: Any = importlib.import_module("agent_core.bootstrap")
     async with bootstrap.build(
-        settings=_settings(),
+        settings=_settings(delegation_enabled="delegate.run" in effective_tools),
         script=script,
         fixed_clock_at=case.clock.start,
         sequential_ids=True,
         limits=limits,
-        enabled_tools=case.fixtures.tools,
+        enabled_tools=effective_tools,
         enabled_skills=enabled_skills,
         skill_packages=bootstrap_skill_packages,
         mcp_servers=tuple(fixture.config for fixture in resolved_mcp),
@@ -357,6 +360,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         enabled_skills=first_arm.skills,
         arm_name=first_arm.name,
         skill_source=first_arm.skill_source,
+        enabled_tools=first_arm.tools,
     )
     carried_memories = first.memories if "memory" in second_arm.carry else ()
     second = await _run_single(
@@ -367,6 +371,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         arm_name=second_arm.name,
         skill_source=second_arm.skill_source,
         carried_memories=carried_memories,
+        enabled_tools=second_arm.tools,
     )
     arm_results = (first, second)
     before, after = arm_results

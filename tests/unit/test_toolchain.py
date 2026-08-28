@@ -456,6 +456,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
+    writer_stop = 'sudo systemctl stop "${managed_units[@]}"'
+    compatibility_query = "SELECT count(*) FROM schedule_revisions"
+    external_timeout = "timeout --signal=TERM --kill-after=5s 20s"
+    connection_timeout = "--env PGCONNECT_TIMEOUT=5"
+    statement_timeout = "--env 'PGOPTIONS=-c statement_timeout=5000'"
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -476,10 +481,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
-    unit_validation_start = manual.index("for unit in \\")
-    unit_validation = manual[unit_validation_start : manual.index("done", unit_validation_start)]
+    unit_list_start = manual.index("managed_units=(")
+    unit_list = manual[unit_list_start : manual.index(")", unit_list_start)]
     for unit in required_units:
-        assert f"  {unit}" in unit_validation
+        assert f"  {unit}" in unit_list
+    assert 'for unit in "${managed_units[@]}"; do' in manual
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
     assert manual.index(image_tag) < manual.index(app_switch)
@@ -488,6 +494,13 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index("flock -w 900 9") < manual.index(writer_stop)
+    assert manual.index(writer_stop) < manual.index(compatibility_query)
+    assert manual.index(compatibility_query) < manual.index(app_switch)
+    assert manual.index(compatibility_query) < manual.index(docs_switch)
+    assert external_timeout in manual
+    assert connection_timeout in manual
+    assert statement_timeout in manual
     restart_position = manual.rindex("sudo systemctl restart")
     validation_position = manual.index(unit_process_validation)
     assert manual.index(app_switch) < restart_position < validation_position
@@ -529,6 +542,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert release.count(": $BROWSER_CONTROL_CREDENTIAL_FILE") == 3
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
+    assert "scripts/check_schedule_database_permissions.py" in release
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
     assert "veetbot-notify" in release
@@ -832,7 +846,10 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
     assert set(project["dependency-groups"]) == {"dev", "test", "docs"}
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/agent_core"]
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
+        "src/agent_core",
+        "src/gmail_mcp",
+    ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"
     )
@@ -1334,13 +1351,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 18 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 20 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(19)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(21)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1363,7 +1380,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 19):
+    for milestone in range(12, 21):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
@@ -1466,14 +1483,22 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     assert units_match is not None
     units = units_match.group(1).split()
     scheduled_units = ["veetbot-schedule", *units]
-    for argv in (units, scheduled_units):
+    notification_units = ["veetbot-notify", *units]
+    scheduled_notification_units = ["veetbot-notify", *scheduled_units]
+    for argv in (units, scheduled_units, notification_units, scheduled_notification_units):
         assert f"/usr/bin/systemctl enable --now {' '.join(argv)}" in specs
         assert f"/usr/bin/systemctl restart {' '.join(argv)}" in specs
-    for unit in scheduled_units:
+    for unit in [*scheduled_units, "veetbot-notify"]:
         assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
         assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
     assert "/usr/bin/systemctl daemon-reload" in specs
     assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
+    assert "/usr/bin/systemctl disable --now veetbot-notify" in specs
+    assert (
+        "/usr/bin/install -m 0644 "
+        "/opt/veetbot/releases/*/.veetbot-notify.service "
+        "/etc/systemd/system/veetbot-notify.service"
+    ) in specs
 
     used = set()
     for script in ("deploy/app/release.sh", "deploy/nginx/deploy.sh"):
@@ -1488,3 +1513,219 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     assert used <= rule_binaries, (
         f"sudo commands without a contract rule: {sorted(used - rule_binaries)}"
     )
+
+
+def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
+    """The macOS UI-test arm must not require a certificate or profile.
+
+    CircleCI mac runners hold no Mac Development certificate for the team,
+    and the app's entitlements (aps-environment, keychain access groups)
+    require a provisioning profile no runner can mint. The macOS destination
+    therefore builds with manual ad-hoc signing and no entitlements; the iOS
+    simulator destinations never needed signing at all.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+    parts = recipe.split("-destination 'platform=macOS'")
+    assert len(parts) == 2, "the macOS UI-test destination is missing"
+    invocation_tail = parts[1].split("|| exit", 1)[0]
+    for override in (
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_IDENTITY=-",
+        "CODE_SIGNING_REQUIRED=NO",
+        "CODE_SIGN_ENTITLEMENTS=",
+        "PROVISIONING_PROFILE_SPECIFIER=",
+        "DEVELOPMENT_TEAM=",
+    ):
+        assert override in invocation_tail, f"macOS UI-test arm is missing {override}"
+
+
+def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
+    status = tmp_path / "docs" / "status"
+    status.mkdir(parents=True, exist_ok=True)
+    milestones = {
+        "0": {"title": "Repository and engineering foundation", "status": "complete"},
+        "1": {
+            "title": "In-memory vertical slice",
+            "status": "in_progress",
+            "open_items": ["Hosted CI on the final head", "Owner smoke of the flow"],
+        },
+        "2": {"title": "PostgreSQL persistence and durable worker", "status": "authorized"},
+    }
+    (status / "project-state.yaml").write_text(
+        yaml.safe_dump({"project": {"current_milestone": 0}, "milestones": milestones}),
+        encoding="utf-8",
+    )
+    if page is not None:
+        (status / "milestones.md").write_text(page, encoding="utf-8")
+
+
+_CONSISTENT_MILESTONES_PAGE = """\
+# Milestones
+
+## Complete
+
+- **Milestone 0 — Repository and engineering foundation** — delivered.
+
+## In progress
+
+### Milestone 1 — In-memory vertical slice
+
+- [ ] Hosted CI on the final head
+- [ ] Owner smoke of the flow
+
+## Authorized
+
+- **Milestone 2 — PostgreSQL persistence and durable worker**
+
+## Deferred
+
+Roadmap prose only; no milestone entries live here.
+"""
+
+
+def _milestones_page_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, page: str | None
+) -> list[str]:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, page)
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_milestones_page()
+    return list(check_docs.errors)
+
+
+def test_milestones_page_reconciles_against_project_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert _milestones_page_errors(monkeypatch, tmp_path, _CONSISTENT_MILESTONES_PAGE) == []
+
+
+def test_milestones_page_reports_nonnumeric_state_key_and_continues(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["current"] = {
+        "title": "Invalid milestone key",
+        "status": "authorized",
+    }
+    state["milestones"]["2"]["title"] = "Drifted title"
+    state_path.write_text(yaml.safe_dump(state), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert "project-state.yaml has a non-numeric milestone key 'current'" in check_docs.errors
+    assert any("milestone 2" in error and "title" in error for error in check_docs.errors)
+
+
+def test_milestones_page_rejects_duplicate_normalized_state_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["01"] = dict(state["milestones"]["1"])
+    state["milestones"]["01"]["title"] = "Duplicate milestone record"
+    state_path.write_text(yaml.safe_dump(state, sort_keys=False), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert check_docs.errors == ["project-state.yaml declares milestone 1 more than once"]
+
+
+def test_milestones_page_accepts_normalized_state_key_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    state["milestones"]["01"] = state["milestones"].pop("1")
+    state_path.write_text(yaml.safe_dump(state, sort_keys=False), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+
+    check_docs.check_milestones_page()
+
+    assert check_docs.errors == []
+
+
+def test_milestones_page_flags_absence_coverage_and_grouping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    errors = _milestones_page_errors(monkeypatch, tmp_path, None)
+    assert any("docs/status/milestones.md" in e and "missing" in e for e in errors)
+
+    dropped = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**\n", ""
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, dropped)
+    assert any("milestone 2" in e and "missing" in e for e in errors)
+
+    misgrouped = _CONSISTENT_MILESTONES_PAGE.replace(
+        "## Authorized\n\n- **Milestone 2 — PostgreSQL persistence and durable worker**",
+        "## Authorized\n",
+    ).replace(
+        "- **Milestone 0 — Repository and engineering foundation** — delivered.",
+        "- **Milestone 0 — Repository and engineering foundation** — delivered.\n"
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, misgrouped)
+    assert any("milestone 2" in e and "'Complete'" in e and "'authorized'" in e for e in errors)
+
+    retitled = _CONSISTENT_MILESTONES_PAGE.replace(
+        "Milestone 0 — Repository and engineering foundation",
+        "Milestone 0 — Repository foundation",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, retitled)
+    assert any("milestone 0" in e and "title" in e for e in errors)
+
+    duplicated = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**\n"
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, duplicated)
+    assert any("milestone 2" in e and "once" in e for e in errors)
+
+
+def test_milestones_page_flags_checklist_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    drifted = _CONSISTENT_MILESTONES_PAGE.replace("- [ ] Owner smoke of the flow\n", "")
+    errors = _milestones_page_errors(monkeypatch, tmp_path, drifted)
+    assert any("milestone 1" in e and "open_items" in e for e in errors)
+
+    checked = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- [ ] Hosted CI on the final head", "- [x] Hosted CI on the final head"
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, checked)
+    assert any("milestone 1" in e and "checked" in e for e in errors)
+
+
+def test_milestones_page_requires_open_items_for_in_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    del state["milestones"]["1"]["open_items"]
+    state_path.write_text(yaml.safe_dump(state), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_milestones_page()
+    assert any("milestone 1" in e and "open_items" in e for e in check_docs.errors)

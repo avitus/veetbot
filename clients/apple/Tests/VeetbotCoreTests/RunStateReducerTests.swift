@@ -5,6 +5,71 @@ import Testing
 @MainActor
 @Suite struct RunStateReducerTests {
     @Test
+    func testFailedRunPresentsThePublicMessageReasonAndLocation() {
+        let reducer = RunStateReducer()
+
+        reducer.reduce(
+            SSEFrame(
+                id: 9,
+                event: "run.failed",
+                data: [
+                    "failure": .object([
+                        "reason": .string("internal_error"),
+                        "message": .string("The web search provider returned an invalid response."),
+                        "step_number": .number(2),
+                        "attempt_number": .number(1),
+                        "occurred_at": .string("2026-08-24T22:06:00Z"),
+                    ])
+                ]
+            )
+        )
+
+        #expect(reducer.runStatus == .failed)
+        #expect(
+            reducer.failure?.userFacingMessage
+                == "The web search provider returned an invalid response."
+        )
+        #expect(reducer.failure?.diagnosticSummary == "Internal error · Step 2 · Attempt 1")
+    }
+
+    @Test
+    func testBlankFailureMessageFallsBackToTheInterpolatedReason() {
+        let reducer = RunStateReducer()
+
+        reducer.reduce(
+            SSEFrame(
+                id: 10,
+                event: "run.failed",
+                data: [
+                    "failure": .object([
+                        "reason": .string("budget_exceeded"),
+                        "message": .string("   "),
+                        "occurred_at": .string("2026-08-25T09:00:00Z"),
+                    ])
+                ]
+            )
+        )
+
+        #expect(reducer.failure?.userFacingMessage == "The run ended because budget exceeded.")
+    }
+
+    @Test
+    func testChatRendersTheStructuredRunFailureInTheConversation() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ChatView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("if let failure = state.failure {"))
+        #expect(source.contains("RunFailureCard(failure: failure)"))
+        #expect(source.contains(".accessibilityIdentifier(\"conversation.failure\")"))
+    }
+
+    @Test
     func testTransientTextReconcilesToDurableAssistantMessage() {
         let reducer = RunStateReducer()
         reducer.reduce(
@@ -378,6 +443,44 @@ import Testing
     }
 
     @Test
+    func testRetryableArgumentFailureRendersAsCorrectedAfterSuccessfulRetry() {
+        let reducer = RunStateReducer()
+        let failedOutcome = retryableArgumentFailureOutcome
+        reducer.reduce(retryableArgumentFailureFrame(id: 1, callID: "remember-portable"))
+
+        #expect(reducer.tools[0].status.rawValue == "needs correction")
+
+        reducer.reduce(
+            toolFrame(
+                id: 2,
+                callID: "remember-contextual",
+                name: "memory.remember"
+            )
+        )
+
+        #expect(reducer.tools.map(\.status.rawValue) == ["corrected and retried", "completed"])
+        #expect(reducer.tools[0].result?.content.first?.text == failedOutcome)
+    }
+
+    @Test
+    func testLaterSameToolCallDoesNotClaimAnInterruptedCorrection() {
+        let reducer = RunStateReducer()
+        reducer.reduce(retryableArgumentFailureFrame(id: 1, callID: "remember-portable"))
+        reducer.reduce(
+            toolFrame(id: 2, callID: "time", name: "system.current_time")
+        )
+        reducer.reduce(
+            toolFrame(
+                id: 3,
+                callID: "remember-unrelated",
+                name: "memory.remember"
+            )
+        )
+
+        #expect(reducer.tools[0].status.rawValue == "needs correction")
+    }
+
+    @Test
     func testDeniedAndUncertainToolsBreakCompletedToolBundles() {
         for (event, expectedStatus) in [
             ("tool.call.denied", ToolActivityStatus.denied),
@@ -544,6 +647,31 @@ import Testing
             id: id,
             event: event,
             data: data
+        )
+    }
+
+    private var retryableArgumentFailureOutcome: String {
+        #"{"status":"failed","action":"memory.remember","reason_code":"tool.invalid_arguments.portability_ceiling","message":"Use contextual portability.","retryable":true,"remediation":"modify_arguments"}"#
+    }
+
+    private func retryableArgumentFailureFrame(id: Int, callID: String) -> SSEFrame {
+        SSEFrame(
+            id: id,
+            event: "tool.call.failed",
+            data: [
+                "call_id": .string(callID),
+                "name": .string("memory.remember"),
+                "result_item": .object([
+                    "content": .array([
+                        .object([
+                            "type": .string("text"),
+                            "text": .string(retryableArgumentFailureOutcome),
+                        ]),
+                    ]),
+                    "is_error": .bool(true),
+                    "trust": .string("internal_tool"),
+                ]),
+            ]
         )
     }
 }

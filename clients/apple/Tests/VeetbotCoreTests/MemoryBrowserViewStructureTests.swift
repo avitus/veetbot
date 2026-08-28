@@ -1,6 +1,10 @@
 import Foundation
 import Testing
 
+#if os(macOS)
+import AppKit
+#endif
+
 @testable import VeetbotCore
 
 /// `MemoryBrowserView`'s degradation and identifier placement cannot be
@@ -26,6 +30,48 @@ import Testing
             "memory.browser must be attached to the NavigationView result, not nested inside its searchable/toolbar content chain"
         )
     }
+
+    @Test
+    func testTheMacModalCanGrowInBothDimensions() throws {
+        let source = try memoryBrowserViewSource()
+        let normalizedSource = source
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        #expect(
+            normalizedSource.contains(
+                "#if os(macOS) .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
+            )
+        )
+        #expect(source.contains(".background(MemoryBrowserWindowResizeView())"))
+    }
+
+    @Test
+    func testTheMacModalUsesTheResizableSwiftUIPresentationSizing() throws {
+        let source = try memoryBrowserViewSource()
+
+        #expect(source.contains(".memoryBrowserPresentationSizing()"))
+        #expect(source.contains("if #available(macOS 15.0, *)"))
+        #expect(source.contains("presentationSizing(.fitted)"))
+    }
+
+    #if os(macOS)
+    @Test @MainActor
+    func testTheMacModalWindowAllowsUserResizing() {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: MemoryBrowserWindowConfiguration.minimumSize),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+
+        MemoryBrowserWindowConfiguration.apply(to: window)
+
+        #expect(window.styleMask.contains(.resizable))
+        #expect(window.contentMinSize == MemoryBrowserWindowConfiguration.minimumSize)
+        #expect(window.contentMaxSize == MemoryBrowserWindowConfiguration.maximumSize)
+    }
+    #endif
 
     @Test
     func testAPopulatedListIsNeverReplacedByAFullScreenDegradedState() throws {

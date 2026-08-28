@@ -347,7 +347,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `system` `math` `workspace` `sandbox` `artifact` | builtin | build time |
 | `demo` `delegate` | builtin | build time |
 | `conversation` `context` | builtin, control | build time |
-| `skill` `memory` | builtin | build time |
+| `skill` `memory` `schedule` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `web` | builtin, external data | build time |
 | `mcp` | reserved for MCP | at discovery |
@@ -356,6 +356,8 @@ The first segment is the **domain**, and domains are partitioned:
 The control annotation is on the two domains that hold nothing else.
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
+`schedule` holds the Milestone 19 one-time `schedule.create` capability; its
+registration remains conditional on the scheduling deployment flags.
 `web` holds the read-only `web.search` and `web.fetch` capabilities designed in
 [web-access.md](web-access.md). Their `web_provider` target is valid only with
 `NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any
@@ -1770,6 +1772,22 @@ idempotent call is retried once, and the outcome is `unavailable` with
 whose watermark is set becomes `UNCERTAIN` instead, because a 401 arriving
 after the effect was sent is not evidence that the effect failed.
 
+**A non-idempotent MCP call fails after dispatch.** Any error or transport
+failure after the effect watermark becomes `UNCERTAIN` with
+`tool.outcome_unknown` and is never retried, regardless of server name or
+provider-specific failure vocabulary. A server may preserve an ordinary
+failure only by returning the content-free structured marker
+`effect_status: not_applied`, which is its assertion that argument validation,
+credential refresh, or a definitive provider rejection proved no effect was
+applied. Missing or ambiguous status is conservative and therefore uncertain.
+`MCPRuntime._result` is the reader of
+`result.structured["effect_status"]`: for a side-effecting MCP call whose
+idempotency class is neither `READ_ONLY` nor `IDEMPOTENT`, every error maps to
+`ToolFailureKind.OUTCOME_UNKNOWN` unless that value is exactly `not_applied`,
+which permits the normal failure mapping. The within-run repeat guard asks the
+invocation repository directly for an identical `UNCERTAIN` mutation rather
+than loading the run's complete invocation history.
+
 **A stdio server inherits the worker's environment.** That is the default
 behaviour of every process-spawning API in the standard library, and it
 hands an operator-configured child process the database URL and every
@@ -1953,6 +1971,9 @@ evidence that the surface is the same one.
     `skill_manage` is a capability tool for the reason given above. The set
     stays closed at build time, and every member is now derivable from the
     document that declares it.
+26. Every non-idempotent MCP failure lacking the server's content-free
+    `effect_status: not_applied` proof becomes `UNCERTAIN` once dispatched;
+    this rule is keyed on idempotency and side effect, never a server name.
 
 ## Open questions for review
 

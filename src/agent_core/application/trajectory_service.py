@@ -24,6 +24,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.events import conversation_items
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
+from agent_core.domain.security import SECRET_RULES
 from agent_core.domain.trajectory import (
     ArtifactRef,
     ExportConsent,
@@ -35,32 +36,14 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "trajectory@3"
-RULESET_VERSION = "secrets@1"
+BUILDER_VERSION = "trajectory@5"
+RULESET_VERSION = "secrets@2"
 RETENTION = timedelta(days=30)
 logger = logging.getLogger(__name__)
 SENSITIVE_KEY = re.compile(r"secret|token|password|api_?key|authorization", re.IGNORECASE)
 QUANTIFIED_GROUP = re.compile(r"\)(?:[*+]|\{\d)")
 UNSAFE_TENANT_PATTERN = re.compile(r"(?:\.\*|\.\+|\\[1-9]|\(\?P=|\(\?<?[=!]|\(\?\()")
-BUILTIN_RULES: tuple[tuple[str, Pattern[str]], ...] = (
-    ("provider_key", re.compile(r"\b(?:sk-ant-|sk-)[A-Za-z0-9_-]{12,}")),
-    ("private_key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
-    (
-        "bearer_literal",
-        re.compile(r"Authorization\s*:\s*Bearer\s+[^\s<>{}\[\]]+", re.IGNORECASE),
-    ),
-    (
-        "dsn_password",
-        re.compile(r"[a-z][a-z0-9+.-]*://[^\s:/]+:[^\s@/]+@", re.IGNORECASE),
-    ),
-    (
-        "assigned_secret",
-        re.compile(
-            r"(?i)\b(?:[A-Z0-9_]*(?:secret|token|password|api_?key)[A-Z0-9_]*)"
-            r"\s*=\s*[\"'][^\"'\n]{13,}[\"']"
-        ),
-    ),
-)
+BUILTIN_RULES: tuple[tuple[str, Pattern[str]], ...] = tuple(SECRET_RULES.items())
 
 
 class TrajectoryRedactor:
@@ -338,10 +321,17 @@ class TrajectoryExportService:
                     if call_id in seen_tool_results:
                         continue
                     seen_tool_results.add(call_id)
-                messages.append(item.model_dump(mode="json"))
+                messages.append(
+                    item.model_dump(
+                        mode="json",
+                        exclude={"principal_id", "source_event_sequence"},
+                    )
+                )
         return messages
 
     def _tool_descriptors(self, invocations: list[Any]) -> list[dict[str, str]]:
+        """Render stable schema hashes for every exact tool version the run used."""
+
         result: dict[str, dict[str, str]] = {}
         for invocation in invocations:
             tool = self._tools.get(invocation.tool_name, invocation.tool_version)

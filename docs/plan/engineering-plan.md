@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.6"
+version: "2.8"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -75,6 +75,34 @@ Version 2.6 (memory read surface pass, 2026-08-23):
 - Memory becomes readable over HTTP for the first time: two GET routes under `/v1/memories`, one exact scope, `memory.read`, and one default-off feature flag. ADR-0045's closure of the route set is superseded for inspection only; every write stays on the governed `agent memory` command line.
 - The sensitivity ceiling is a required parameter on every request rather than a value the server infers, and the native Apple client browses at full parity by declaring the `restricted` ceiling explicitly.
 - Milestone 16's exclusion of an HTTP memory surface gives up its read half and keeps the rest; recall-trace viewing, consolidation audits, and knowledge documents stay out.
+
+Version 2.7 (conversational scheduling pass, 2026-08-24):
+
+- Section 21 gains Milestone 19 — conversational schedule creation —
+  authorized by the repository owner as a parallel workstream and specified by
+  the existing scheduling design with five additional gates (ADR-0072).
+- `schedule.create` gives the model one approval-gated path to create a future
+  one-time schedule through the existing application service. It accepts an
+  exact aware instant, pins the active agent, delegates no scopes, and reuses
+  tool-invocation idempotency.
+- Daily and weekly conversational creation and every model-callable schedule
+  mutation remain deferred. Milestone 12's content-free notification trigger
+  and payload are unchanged.
+
+Version 2.8 (calendar recurrence pass, 2026-08-27):
+
+- Section 21 gains Milestone 20 — calendar recurrence and conversational
+  schedules — authorized by the repository owner as a parallel workstream and
+  specified by the existing scheduling design with six additional gates
+  (ADR-0073).
+- The closed cadence union gains monthly numbered-day and explicit last-day
+  rules plus yearly month/day rules. Missing numbered dates are skipped,
+  February 29 fires only in leap years, and every rule retains the existing
+  IANA-zone fold and gap semantics.
+- `schedule.create` keeps its compatible one-time `at` input and alternatively
+  accepts one closed daily, weekly, monthly, or yearly cadence object. Approval,
+  exact `schedule.write` scope, empty delegated scopes, bounded execution,
+  idempotency, and content-free outcome notifications are unchanged.
 
 ## 1. Mission
 
@@ -3442,6 +3470,102 @@ Gmail push; interval or cron recurrence (B5); the email inbound Surface (B3)
 or the email notification transport (B4); a second provider or account; or
 any auto-approval or standing-grant mechanism (B8).
 
+### Milestone 19: Conversational schedule creation
+
+The owner authorized this milestone on 2026-08-24 (ADR-0072) as a parallel
+workstream after the native chat exposed the missing edge between two complete
+subsystems: Milestone 11 can create and run schedules through HTTP, and
+Milestone 12 can push schedule outcomes, but the model has no schedule tool.
+The detailed design remains [scheduling.md](scheduling.md), which declares the
+five additional gates owned by this tranche.
+
+Implement:
+
+- A builtin `schedule.create` capability accepting a title, instruction, and
+  exact timezone-aware ISO 8601 instant and creating only a one-time schedule.
+- `EXTERNAL_WRITE`/`HIGH`/`CONDITIONALLY_IDEMPOTENT` classification,
+  non-parallel execution, exact `schedule.write` scope, and an approval view
+  containing the concrete proposed definition.
+- Direct reuse of `ScheduleService.create` with the run principal and tool
+  idempotency key; no internal HTTP, bearer credential, second persistence
+  path, or new schedule state.
+- Least-privilege derived definitions: the active agent and policy are pinned,
+  every finite bound is capped, and `requested_scopes` is always empty.
+- Registration and default advertisement only when both existing schedule
+  flags are enabled.
+
+Acceptance criteria:
+
+- Every additional hard gate declared by
+  [scheduling.md](scheduling.md#hard-gates) for Milestone 19 passes.
+- A direct reminder request reaches `schedule.create`, waits for the ordinary
+  approval, and commits exactly one future one-time schedule.
+- Missing `schedule.write`, an invalid or past instant, and a reused key with
+  different content fail closed without creating schedule state.
+- Replaying the same tool invocation returns the original schedule, and the
+  created revision grants the scheduled run no tool scope.
+- The tool is absent unless both schedule flags are on; existing sessions keep
+  their pinned catalogs.
+- Notification production remains the Milestone 12 schedule-outcome trigger:
+  generic, content-free, and emitted after the run is accounted rather than at
+  the nominal instant.
+
+Daily and weekly conversational creation; model-callable list, update, pause,
+resume, and cancel; arbitrary cron and monthly recurrence; delegated scopes;
+direct reminder payloads; and any content-bearing push remain outside this
+milestone.
+
+### Milestone 20: Calendar recurrence and conversational schedules
+
+The owner authorized this milestone on 2026-08-27 (ADR-0073), promoting the
+calendar-recurrence part of roadmap item B5 after identifying daily, weekly,
+monthly, and yearly schedules as core personal-agent behavior. It is a parallel
+workstream and does not advance the verified gate ceiling past unfinished
+Milestones 13 through 15. The detailed design remains
+[scheduling.md](scheduling.md), which declares six additional gates.
+
+Implement:
+
+- `MONTHLY` cadence with one or more numbered days, an explicit last-day rule,
+  or both; and `YEARLY` cadence with one or more unique month/day pairs.
+- Deterministic missing-date behavior: numbered days absent from a month are
+  skipped, last-day is calculated from that month, February 29 fires only in
+  leap years, and impossible yearly dates are rejected.
+- The existing IANA-zone, daylight-saving fold/gap, pure-clock, no-early,
+  bounded-misfire, no-overlap, immutable-revision, and occurrence-ledger
+  semantics for both new cadence kinds.
+- HTTP create and update support for the widened closed cadence union without a
+  new route, table, migration, scheduler, queue, or persistence path.
+- A compatible `schedule.create` input that accepts either the existing exact
+  future `at` instant or exactly one daily, weekly, monthly, or yearly cadence
+  object, with concrete recurrence details in the approval view.
+- The existing least-privilege definition derivation: active agent and policy
+  pinned, finite limits capped, requested scopes empty, approval mandatory, and
+  exact `schedule.write` authorization.
+
+Acceptance criteria:
+
+- Every additional hard gate declared by
+  [scheduling.md](scheduling.md#hard-gates) for Milestone 20 passes.
+- Daily, multi-day weekly, numbered-day and month-end monthly, and multi-date
+  yearly definitions round-trip through the HTTP boundary and materialize on
+  their exact civil calendar instants.
+- A monthly 31st rule skips shorter months; a monthly last-day rule fires at
+  each actual month end; a yearly February 29 rule skips non-leap years without
+  drifting.
+- Calendar lookup and coalesced misfire counting remain bounded across long
+  downtime and do not iterate once per missed occurrence.
+- A direct conversational request for each recurring kind waits for the
+  ordinary approval and creates exactly one revision with no delegated scopes.
+- Both/neither one-time and recurring inputs, invalid zones, duplicate or
+  impossible calendar values, and idempotency-key content mismatches fail
+  closed without duplicate schedule state.
+
+Arbitrary cron or RFC 5545 input; interval multipliers; model-callable list,
+update, pause, resume, and cancel; continuous-session recurrence; dependency
+graphs; workflow DAGs; delegated scopes; and content-bearing notifications
+remain later extensions.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3456,7 +3580,7 @@ owner's current ranking, not a schedule.
 | B2 | Dynamic model routing and a second provider adapter (this section, Milestone 10) | An ADR; data residency and evaluation-performance inputs still undesigned |
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
-| B5 | Scheduling extensions: monthly rules, arbitrary cron, continuous-session recurrence, dependency graphs | A separate ADR; not alternate implementations of Milestone 11 |
+| B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
 | B6 | Memory residue after Milestone 16: the semantic arm and `pgvector`, an external memory provider, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |

@@ -15,6 +15,7 @@ from sqlalchemy.sql.functions import func
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.devices import (
     DeviceRegistrationIdempotencyRepository,
     DeviceRegistry,
@@ -105,6 +106,7 @@ class UnitOfWorkRepositories:
     devices: DeviceRegistry
     device_registration_idempotency: DeviceRegistrationIdempotencyRepository
     notification_outbox: NotificationOutbox
+    delegations: DelegationRepository
     queue: RunQueue | None
 
 
@@ -159,6 +161,7 @@ class MemoryUnitOfWork:
         self.devices = repositories.devices
         self.device_registration_idempotency = repositories.device_registration_idempotency
         self.notification_outbox = repositories.notification_outbox
+        self.delegations = repositories.delegations
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -269,6 +272,7 @@ class PostgresUnitOfWork:
         self.devices = repositories.devices
         self.device_registration_idempotency = repositories.device_registration_idempotency
         self.notification_outbox = repositories.notification_outbox
+        self.delegations = repositories.delegations
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self

@@ -19,7 +19,7 @@ The plan designed subagents under Milestone 10 and deferred them behind a gate:
 "add subagents only when evaluation evidence shows that a single agent fails"
 for one of five reasons — independent parallel work, context isolation,
 specialized permissions, specialized tools, or independent verification
-(engineering-plan.md:2981-2991). This document honours that gate as written.
+(engineering-plan.md:3009-3019). This document honours that gate as written.
 Construction is authorized now; tenant activation requires the evidence the
 gate names, and the evidence is part of the milestone rather than a
 precondition for starting it, because the platform has to be able to delegate
@@ -33,13 +33,13 @@ eighth run state (runtime-loop.md:284-292); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
 (runtime-loop.md:1136-1147); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
-principal (tool-system.md:968-974); the child seeds from the parent's concise
+principal (tool-system.md:970-976); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
 (context-engine.md:291-294, memory-retrieval-and-ranking.md:87); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:982): the
+The readiness review measured what was left (readiness.md:987): the
 objective had a carrier and no schema, the child budget was additive with no
 rule deriving a child's own limits, the separate trace and the artifact
 references were picked up by no specification, and a child run could not be
@@ -71,8 +71,8 @@ materializes bounded child runs. It includes:
   failures.
 
 The milestone does not include handoffs (the parent retains the user
-interaction and the final response, engineering-plan.md:2979); role-named
-agents for planning, writing, or criticism (engineering-plan.md:2991);
+interaction and the final response, engineering-plan.md:3007); role-named
+agents for planning, writing, or criticism (engineering-plan.md:3019);
 delegation deeper than one level; cross-tenant or cross-principal delegation;
 any change to model routing; a new `WAITING_FOR_CHILD` run status; a child that
 may itself call `delegate.run` or `skill.manage`; or push notification of child
@@ -207,7 +207,7 @@ In one unit of work, `DelegationMaterializer` does the following:
 7. Inserts one `delegations` row carrying every child and marks the parent's
    `tool_invocations` row `RUNNING` with `suspended_kind = child_run` and
    `suspended_ref` equal to the delegation identifier (the nullable columns
-   tool-system.md:960-963 already declares). Steps 3 through 6 repeat per
+   tool-system.md:962-965 already declares). Steps 3 through 6 repeat per
    brief inside the one transaction.
 8. Commits, then dispatches the child through the existing run dispatcher.
 
@@ -278,7 +278,7 @@ completes once and the parent re-queues once.
 ## Limits, budget, and deadline
 
 The plan requires a child budget and a child deadline and says fan-out usage
-is additive (engineering-plan.md:580). The rule that derives a child's own
+is additive (engineering-plan.md:608). The rule that derives a child's own
 limits — the partial the readiness review named — is:
 
 ```text
@@ -287,6 +287,10 @@ child.max_model_calls  = min(requested or default, parent.remaining_model_calls)
 child.max_tool_calls   = min(requested or default, parent.remaining_tool_calls)
 child.max_cost         = min(requested or default, parent.remaining_cost - reserved)
 child.deadline_at      = min(parent.deadline_at, now + (requested or default wall_seconds))
+
+research.max_steps       = child.max_steps - synthesis_reserve_steps
+research.max_model_calls = child.max_model_calls - synthesis_reserve_model_calls
+research.max_cost        = child.max_cost - synthesis_reserve_cost
 ```
 
 The rule is applied per brief, in order, against what remains after the
@@ -301,6 +305,15 @@ existing usage-recording path, and the parent may fail on budget while
 suspended if the children's actual spend exceeds what remains — the behaviour
 [runtime-loop.md](runtime-loop.md) already describes for the child-run join
 wake.
+
+The derived child total includes a closed final-synthesis reserve: one step,
+one model call, and USD 0.25 by default. A child limit that cannot contain both
+research work and those reserves is rejected before materialization. Once any
+research boundary is reached, the runtime adds a platform-trusted,
+synthesis-only control to the volatile request and refuses another tool call;
+the child must return the best-supported answer from evidence already in its
+conversation or fail closed. The reserve does not widen the child's total or
+the amount charged to the parent.
 
 Caps are closed and configured: briefs per `delegate.run` call (default
 three), live children per parent run (default eight, counted across calls),
@@ -324,7 +337,7 @@ Trust is already decided: the brief goes down as enveloped data in a `USER`
 message the child's own instruction frames; the result comes up labelled
 `EXTERNAL_UNTRUSTED`, exactly as the model gateway labels any model output; the
 child cannot raise its trust and the parent cannot inherit the child's
-authorizations (tool-system.md:968-974). A child result that instructs the
+authorizations (tool-system.md:970-976). A child result that instructs the
 parent is therefore in the same position as web content — it can be read and
 it cannot authorize. The result enters the parent's working conversation as a
 tool result, not its stable prefix, so the prefix-stability invariant is
@@ -341,7 +354,7 @@ Cancelling a suspended parent cascades: `cancel_parked_run` requests
 cancellation of every non-terminal `DELEGATED` child (a queued child through
 the same parked path, a running child through the lazy cancellation token) and
 completes the suspended invocation as `failed` with `tool.run_cancelled`, the
-rule tool-system.md:963-967 already states for a suspended invocation whose run
+rule tool-system.md:965-969 already states for a suspended invocation whose run
 is cancelled. A child's deadline is never later than its parent's, so the
 deadline sweep ends children first and the parent's own sweep handles the
 parent. A child's cancellation or failure never cancels its siblings.
@@ -359,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1000). The resolution is the one the review log recorded as
+(readiness.md:1005). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation
@@ -524,7 +537,9 @@ Delegation adds no role and no unit. The `delegation:` block in the versioned
 limits file declares `max_children_per_call`, `max_live_children_per_parent`,
 `max_depth`, `max_live_delegated_runs_per_tenant`, the default child
 `max_steps`, `max_model_calls`, `max_tool_calls`, `max_cost`, and
-`wall_seconds`, and the summary byte ceiling. Children use async priority 10
+`wall_seconds`, the final `synthesis_reserve_steps`,
+`synthesis_reserve_model_calls`, and `synthesis_reserve_cost`, and the summary
+byte ceiling. Children use async priority 10
 and the existing reserved-capacity rule keeps them from starving interactive
 work.
 

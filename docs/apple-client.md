@@ -24,7 +24,9 @@ make test-apple-ui
 `make test-apple` requires full Xcode and guarantees that Swift Testing suites
 execute; it fails instead of accepting the Command Line Tools behavior that can
 compile the bundle without running it. `make test-apple-ui` also requires full
-Xcode, selects available iPhone and iPad simulators, and launches a debug-only,
+Xcode. It uses a debug-only hook to resize the real macOS SwiftUI window,
+terminates the app, and verifies the relaunched window has the same size. It
+then selects available iPhone and iPad simulators and launches a debug-only,
 in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
 Both targets run in the required CircleCI Apple job.
@@ -56,10 +58,12 @@ deletes the local bearer and clears the local connection if revocation fails.
 A `404` from the feature-gated device surface marks notifications unavailable
 without preventing the rest of the client from using an older server.
 
-The tracked entitlement declares `aps-environment`; enabling the push capability
-for the application identifier and regenerating provisioning profiles remain
-owner actions in the Apple Developer portal. Debug and release simulator builds
-remain unsigned-build compatible, and the debug UI-test fixture suppresses the
+The tracked target selects platform-specific push entitlements: iOS declares
+`aps-environment`, and macOS declares
+`com.apple.developer.aps-environment`. Enabling the push capability for the
+application identifier and regenerating provisioning profiles remain owner
+actions in the Apple Developer portal. Debug and release simulator builds remain
+unsigned-build compatible, and the debug UI-test fixture suppresses the
 permission request.
 
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
@@ -118,7 +122,10 @@ transient deltas are best effort. It does not infer a gap from non-contiguous
 sequence values. Disconnects and overflow reconnect with `Last-Event-ID`,
 suspension keeps the logical stream alive, and only completed, failed, or
 cancelled run events close it. Raw reasoning text is discarded at the reducer
-boundary and represented by a compact activity indicator.
+boundary and represented by a compact activity indicator. A failed run renders
+the API's public failure message inside the conversation together with its
+stable reason and available step and attempt numbers; the header status is not
+the only failure indication.
 
 The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS

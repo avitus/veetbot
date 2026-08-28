@@ -60,7 +60,7 @@ class CapabilityScenario(BaseModel):
 
     id: str = Field(pattern=r"^cap-[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}$")
     suite: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
-    milestone: int = Field(ge=0, le=10)
+    milestone: int = Field(ge=0, le=13)
     task: str = Field(min_length=1)
     attachments: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
@@ -307,7 +307,16 @@ def judge_request(loaded: LoadedScenario, subject_output: str) -> str:
 def score_judge_output(
     rubric: CapabilityRubric, raw_output: str
 ) -> tuple[Decimal, list[JudgeObservation]]:
-    judged = JudgeOutput.model_validate_json(raw_output)
+    """Validate one judge document and calculate its weighted rubric score."""
+
+    payload = raw_output.strip()
+    fence_prefix = "```json\n"
+    fence_suffix = "\n```"
+    if payload.startswith(fence_prefix) and payload.endswith(fence_suffix):
+        payload = payload[len(fence_prefix) : -len(fence_suffix)]
+        if "```" in payload:
+            raise ValueError("judge output contained a nested code fence")
+    judged = JudgeOutput.model_validate_json(payload)
     expected = {criterion.id: criterion for criterion in rubric.criteria}
     observed = {observation.criterion: observation for observation in judged.criteria}
     if len(observed) != len(judged.criteria) or set(observed) != set(expected):
@@ -456,6 +465,8 @@ async def run_suite(
     clock: Clock,
     ids: IdFactory,
 ) -> CapabilitySuiteResult:
+    """Execute, judge, persist, and aggregate every repeat in one capability suite."""
+
     settings, scenarios = load_scenarios(repository_root, suite)
     suite_settings = settings.suites[suite]
     day_start = clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -593,14 +604,17 @@ async def run_suite(
                             )
                         try:
                             score, observations = score_judge_output(loaded.rubric, judged.output)
-                        except ValueError as exc:
+                        except ValueError:
                             await _abort_suite(
                                 uow_factory,
                                 suite=suite,
                                 build_ref=build_ref,
                                 saved=saved,
                                 clock=clock,
-                                message=str(exc),
+                                message=(
+                                    f"judge {loaded.judge.id} output did not match the "
+                                    "rubric schema"
+                                ),
                             )
             if ceiling == "cost_usd":
                 ceiling = cost_ceiling_scope
@@ -722,6 +736,8 @@ async def _live_execution(
     clock: Clock,
     ids: IdFactory,
 ) -> CapabilityExecution:
+    """Drive one live subject run through both worker priority classes to terminal."""
+
     bootstrap: Any = __import__("agent_core.bootstrap", fromlist=["build"])
     principal = Principal(
         tenant_id="tenant_eval",
@@ -733,7 +749,7 @@ async def _live_execution(
     limits = RunLimits(
         max_steps=max(2, budget.model_calls + budget.tool_calls),
         max_model_calls=budget.model_calls,
-        max_tool_calls=budget.tool_calls,
+        max_tool_calls=max(1, budget.tool_calls),
         max_cost=budget.cost_usd,
         deadline_at=started_at + timedelta(seconds=budget.wall_seconds),
     )
@@ -746,29 +762,38 @@ async def _live_execution(
         limits=limits,
     ) as composition:
         run_id = await composition.runs.submit(prompt)
-        worker = composition.worker_factory(f"eval-capability:{ids.new_id()}")
+        workers = (
+            composition.worker_factory(f"eval-capability-interactive:{ids.new_id()}"),
+            composition.async_worker_factory(f"eval-capability-async:{ids.new_id()}"),
+        )
         run = await composition.runs.get(run_id)
         loop = asyncio.get_running_loop()
         poll_deadline = loop.time() + budget.wall_seconds
         maximum_polls = limits.max_steps
         polls = 0
-        while run.status not in TERMINAL_RUN_STATUSES | {
-            RunStatus.WAITING_FOR_APPROVAL,
-            RunStatus.WAITING_FOR_USER,
-        }:
+        while run.status not in TERMINAL_RUN_STATUSES | {RunStatus.WAITING_FOR_USER}:
+            if (
+                run.status is RunStatus.WAITING_FOR_APPROVAL
+                and await composition.approvals.list_pending(run_id=run_id)
+            ):
+                break
             remaining = poll_deadline - loop.time()
             if remaining <= 0 or polls >= maximum_polls:
                 raise RuntimeError(
                     "capability run did not reach a terminal state within "
                     f"{budget.wall_seconds} seconds"
                 )
-            try:
-                claimed = await asyncio.wait_for(worker.run_once(), timeout=remaining)
-            except TimeoutError as exc:
-                raise RuntimeError(
-                    "capability run did not reach a terminal state within "
-                    f"{budget.wall_seconds} seconds"
-                ) from exc
+            claimed = False
+            for worker in workers:
+                try:
+                    claimed = await asyncio.wait_for(worker.run_once(), timeout=remaining)
+                except TimeoutError as exc:
+                    raise RuntimeError(
+                        "capability run did not reach a terminal state within "
+                        f"{budget.wall_seconds} seconds"
+                    ) from exc
+                if claimed:
+                    break
             if not claimed:
                 raise RuntimeError("capability worker could not claim its submitted run")
             polls += 1

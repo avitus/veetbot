@@ -2,22 +2,26 @@
 
 The gates in `tests/gates/test_memory_read_api_m17.py` observe the read
 surface over the in-memory adapter, and the browse contract suite fixes the
-behavior there. Three things only a live store can answer are covered here:
-full-text search reaching the API through `to_tsvector`, keyset pagination
-over the gapped cluster-wide sequence that supplies real store positions,
-and the ceiling predicate over all four sensitivity values. Cross-adapter
-browse parity lives beside the rest of it in
+behavior there. This file adds a real-composition HTTP browse journey plus
+the three things only a live store can answer: full-text search through
+`to_tsvector`, keyset pagination over the gapped cluster-wide sequence that
+supplies real store positions, and the ceiling predicate over all four
+sensitivity values. Cross-adapter browse parity lives beside the rest of it in
 `tests/integration/test_memory_postgres_m9.py`.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 
+from agent_core.api import create_app
 from agent_core.application.public_services import PublicMemoryService
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
@@ -63,6 +67,22 @@ def _reader(composition: Composition) -> Principal:
 
 def _service(composition: Composition) -> PublicMemoryService:
     return PublicMemoryService(uow_factory=composition.uow_factory)
+
+
+@asynccontextmanager
+async def _http_client(composition: Composition) -> AsyncIterator[httpx.AsyncClient]:
+    """Exercise the production router and composition over the live store."""
+
+    app = create_app(
+        composition.services,
+        composition.settings,
+        composition.principal,
+        composition.new_request_id,
+        composition.readiness_probe,
+    )
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://agent.test") as client:
+        yield client
 
 
 async def _list(
@@ -132,6 +152,57 @@ async def _write(
             }
         )
         return await uow.memories.upsert_belief(record)
+
+
+async def test_postgres_memory_http_journey_lists_pages_and_opens_detail(tmp_path: Path) -> None:
+    """The real composition serves a basic browse journey over PostgreSQL."""
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"m17http{uuid4().hex[:10]}"
+        older = await _write(
+            composition,
+            session_id,
+            subject=marker,
+            statement=f"{marker} older belief",
+        )
+        newer = await _write(
+            composition,
+            session_id,
+            subject=marker,
+            statement=f"{marker} newer belief",
+            sensitivity=Sensitivity.RESTRICTED,
+        )
+
+        async with _http_client(composition) as client:
+            first = await client.get(
+                "/v1/memories",
+                params={"ceiling": "restricted", "subject": marker, "limit": 1},
+            )
+            assert first.status_code == 200, first.text
+            assert first.headers["cache-control"] == "private, no-store"
+            first_body = first.json()
+            assert [item["id"] for item in first_body["items"]] == [str(newer.id)]
+            assert first_body["next_cursor"] is not None
+
+            second = await client.get(
+                "/v1/memories",
+                params={
+                    "ceiling": "restricted",
+                    "subject": marker,
+                    "limit": 1,
+                    "cursor": first_body["next_cursor"],
+                },
+            )
+            assert second.status_code == 200, second.text
+            second_body = second.json()
+            assert [item["id"] for item in second_body["items"]] == [str(older.id)]
+            assert second_body["next_cursor"] is None
+
+            detail = await client.get(f"/v1/memories/{newer.id}", params={"ceiling": "restricted"})
+            assert detail.status_code == 200, detail.text
+            assert detail.headers["cache-control"] == "private, no-store"
+            assert detail.json()["statement"] == newer.statement
 
 
 async def test_postgres_text_search_reaches_the_read_service(tmp_path: Path) -> None:
