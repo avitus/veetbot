@@ -456,6 +456,8 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
+    writer_stop = 'sudo systemctl stop "${managed_units[@]}"'
+    compatibility_query = "SELECT count(*) FROM schedule_revisions"
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -476,10 +478,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
-    unit_validation_start = manual.index("for unit in \\")
-    unit_validation = manual[unit_validation_start : manual.index("done", unit_validation_start)]
+    unit_list_start = manual.index("managed_units=(")
+    unit_list = manual[unit_list_start : manual.index(")", unit_list_start)]
     for unit in required_units:
-        assert f"  {unit}" in unit_validation
+        assert f"  {unit}" in unit_list
+    assert 'for unit in "${managed_units[@]}"; do' in manual
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
     assert manual.index(image_tag) < manual.index(app_switch)
@@ -488,6 +491,10 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index("flock -w 900 9") < manual.index(writer_stop)
+    assert manual.index(writer_stop) < manual.index(compatibility_query)
+    assert manual.index(compatibility_query) < manual.index(app_switch)
+    assert manual.index(compatibility_query) < manual.index(docs_switch)
     restart_position = manual.rindex("sudo systemctl restart")
     validation_position = manual.index(unit_process_validation)
     assert manual.index(app_switch) < restart_position < validation_position
