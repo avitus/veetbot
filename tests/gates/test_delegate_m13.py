@@ -209,6 +209,7 @@ def _check_generated_child_limits(
         return
 
     assert not exhausted
+    assert not requested_reserve_exhausted
     assert len(derived) == len(briefs)
     for child in derived:
         assert 0 < child.max_steps <= remaining_steps

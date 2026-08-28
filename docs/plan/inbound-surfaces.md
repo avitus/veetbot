@@ -408,7 +408,7 @@ resolution entry point.
   never exceeds the paired principal: `granted_scopes` is a subset of the
   minter's scopes at minting, intersected with the principal's current scopes
   at every message, and revocation is effective before the next message
-  (engineering-plan.md:4055).
+  (engineering-plan.md:3243-3245).
 - Outbound redaction: secrets and raw provider errors never reach the chat;
   reasoning is never in events and so never in a reply.
 - Abuse controls: per-sender messages per minute, per-tenant active surface

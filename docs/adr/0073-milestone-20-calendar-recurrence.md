@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-08-27
 - Related: Sections 8, 9, 21, 22, and 29 of the engineering plan;
-  ADR-0021, ADR-0024, ADR-0026, ADR-0059, ADR-0062, ADR-0072
+  ADR-0021, ADR-0024, ADR-0026, ADR-0059, ADR-0062, ADR-0065, ADR-0072
 - Detailed design: `docs/plan/scheduling.md`
 
 ## Context
@@ -56,6 +56,12 @@ the model-callable input shape.
    deterministic calendar recurrence, bounded coalescing, HTTP round trips,
    governed conversational creation across all four recurring kinds, and
    invalid/replayed calls without duplicate state.
+10. **The new cadence values create a semantic rollback boundary.** No schema
+    migration is needed, but a pre-Milestone-20 binary cannot deserialize a
+    persisted `MONTHLY` or `YEARLY` revision. Once either value exists in
+    `schedule_revisions.definition`, code-only rollback to a pre-Milestone-20
+    release is forbidden. Recovery must roll forward, or restore a database
+    snapshot from before the first such revision and then roll the code back.
 
 ## Consequences
 
@@ -63,6 +69,9 @@ the model-callable input shape.
   monthly, and multi-date yearly schedules in the cloud and create each form
   from conversation after approval.
 - Existing stored schedule definitions remain valid and require no migration.
+- Alembic-head compatibility alone is insufficient when selecting a rollback
+  target across Milestone 20; operators must also check the persisted cadence
+  discriminator values.
 - A request for "the 31st" skips shorter months; a request for "the last day"
   follows the end of every month. Leap-day yearly schedules remain stable and
   do not drift to February 28 or March 1.

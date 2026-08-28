@@ -479,10 +479,15 @@ all application units return.
 ## Manual rollback
 
 Choose a retained target only after checking that its code is compatible with
-the current database schema. Never run an automatic Alembic downgrade as part
-of rollback. Run the complete block below in one shell so file descriptor 9
-holds the same deployment lock from before the symlink change through readiness
-verification.
+the current database schema and stored data values. Schema-head equality is not
+enough for versioned JSONB discriminators: once any schedule revision has a
+`definition.cadence.kind` of `MONTHLY` or `YEARLY`, a release from before
+Milestone 20 cannot deserialize the database and is not a valid code-only
+rollback target. Roll forward instead, or restore a database snapshot from
+before the first such revision and then roll the code back. Never run an
+automatic Alembic downgrade as part of rollback. Run the complete block below
+in one shell so file descriptor 9 holds the same deployment lock from before
+the symlink change through readiness verification.
 
 ```bash
 set -euo pipefail

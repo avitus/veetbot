@@ -715,7 +715,7 @@ class ModelPricing(BaseModel):
 ```
 
 The router is a port with one implementation in 0.1, reading the model
-registry described at `engineering-plan.md:1343-1350`. The registry is
+registry described at `engineering-plan.md:1347-1352`. The registry is
 configuration, not code: a YAML file per provider profile, validated at load,
 hashed the way the policy profile is hashed so that a run records which
 registry it resolved against. That document's schema, its validation, and the
@@ -725,8 +725,8 @@ call sites.
 
 ### Pinning, and the contradiction with availability routing
 
-Section 10 (`engineering-plan.md:1360`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:2978`) wants routing to move work
+Section 10 (`engineering-plan.md:1345`) requires a run to be pinned to one
+provider. Milestone 10 (`engineering-plan.md:2976-2983`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -760,9 +760,9 @@ compound that into a provider switch on resume.
 
 ## The provider profile document
 
-`engineering-plan.md:1343` calls a provider profile "a plugin the registry
+`engineering-plan.md:1347` calls a provider profile "a plugin the registry
 loads and the user can override without editing core" and
-`engineering-plan.md:1345-1348` says what it declares: an API mode, aliases
+`engineering-plan.md:1349-1352` says what it declares: an API mode, aliases
 and capabilities and limits and prices, credential pools, and a
 model-catalog import. ADR-0012 decision 2 requires that a new
 OpenAI-compatible provider be addable without writing code. Neither
@@ -1081,7 +1081,7 @@ sentence.
 ## Usage, cost, and where the numbers live
 
 Section 6.5 fixes the precedence order for cost figures and Section 15 has no
-table to put them in. `runs.usage JSONB` at `engineering-plan.md:1735` is the
+table to put them in. `runs.usage JSONB` at `engineering-plan.md:1739` is the
 only persistence the plan gives usage, and a JSONB blob on the run cannot
 answer the questions the budget enforcement in Section 6.5 needs to ask: what
 did this step cost, which attempt burned the tokens, and what were we charged
@@ -1146,7 +1146,7 @@ denormalized rather than computed on read for the same reason.
 `runs.usage` stays exactly as Section 15 defines it. It becomes a rollup of
 `model_calls` for that run rather than the source of truth, and it is
 maintained in the same transaction that writes the attempt row so that the two
-never disagree. The usage repository port named at `engineering-plan.md:865`
+never disagree. The usage repository port named at `engineering-plan.md:869`
 and never typed is:
 
 ```python
@@ -1191,8 +1191,8 @@ not an oversight.
 
 ## Provider metadata, and why the key set is closed
 
-`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1260` as
-`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1262`:
+`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1264` as
+`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1266`:
 it "may include response IDs and cache information, but application logic
 must not rely on provider-specific fields." That is a constraint on readers.
 It says nothing about writers, and an adapter is a writer.
@@ -1325,7 +1325,7 @@ Flattening `metadata` into columns happens in the persistence adapter and is
 the first of exactly two places in the system that read `ProviderMetadata`
 at all. The second is the span builder in the telemetry section below.
 Nothing in the runtime, the policy engine, the context engine, or any tool
-reads it, which is what `engineering-plan.md:1262`'s "application logic must
+reads it, which is what `engineering-plan.md:1266`'s "application logic must
 not rely on provider-specific fields" means once it is a rule a test can
 evaluate.
 
@@ -1374,7 +1374,7 @@ telemetry rather than hidden behind eventual success.
 ### Timeouts
 
 No document defines a model-call timeout. `ToolSpec.timeout_seconds` exists at
-`engineering-plan.md:892` and has no counterpart here, which means today a
+`engineering-plan.md:896` and has no counterpart here, which means today a
 hung provider connection stalls a run until the worker's own deadline fires,
 if it has one. Two timeouts close that:
 
@@ -1440,7 +1440,7 @@ ordered and the order has to survive a round trip. `token_count` is added
 because `ModelPricing.reasoning_priced_separately` exists and Section 6.5's
 cost precedence has nothing to attribute reasoning tokens to otherwise.
 `provider` and `trust_level` are unchanged, and the plan's rules for
-provider-opaque items at `engineering-plan.md:649` — store verbatim, never
+provider-opaque items at `engineering-plan.md:653` — store verbatim, never
 log or summarize or place in long-term memory, carry only for the life of
 the active tool loop, drop on a provider switch — govern the renamed field
 without change. The rename is recorded as an open question rather than
@@ -1552,7 +1552,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2182-2191`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2186-2204`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1654,7 +1654,7 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:206-210` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2606`) requires "the same contract suite against OpenAI,
+(`engineering-plan.md:2610`) requires "the same contract suite against OpenAI,
 Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2354`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
