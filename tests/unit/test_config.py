@@ -842,11 +842,11 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_137_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_143_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 137
+    assert len(qualified_paths) == 143
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
@@ -880,4 +880,4 @@ def test_memory_profiles_knob_paths_match_document() -> None:
     declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
 
     assert declared == _leaf_paths(document) - {"schema_version"}
-    assert len(declared) == 28
+    assert len(declared) == 34

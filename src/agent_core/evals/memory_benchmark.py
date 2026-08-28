@@ -36,6 +36,7 @@ from agent_core.evals.memory_formation import (
     ExpectedBelief,
     _normalized,
 )
+from agent_core.memory.formation import MAX_AUTOMATIC_CANDIDATES
 
 CORPUS_PATH = Path("evals/capability/memory-benchmark.v1.json")
 BASELINE_PATH = Path("evals/capability/memory-benchmark.baseline.json")
@@ -100,6 +101,7 @@ _LOWER_IS_BETTER = (
     "stale_live_beliefs",
     "noise_total",
     "dropped_for_budget",
+    "dropped_for_ceiling",
     "blocked_rendered",
     "currency_violations",
     "currency_unformed",
@@ -500,6 +502,22 @@ class FormationMetrics(BaseModel):
     policy_failures: int = Field(ge=0)
 
 
+class DistanceRecall(BaseModel):
+    """Needed-label recall at one evidence distance.
+
+    Distance is counted in sessions: a label stated in the scenario's last
+    session sits one session back from the probe, which always runs after
+    every session.  Binning recall by it makes long-range degradation visible
+    — a ranking change can hold `needed_recalled` steady overall while losing
+    exactly the labels whose evidence is oldest.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    needed_total: int = Field(ge=0)
+    needed_recalled: int = Field(ge=0)
+
+
 class ProbeRetrievalResult(BaseModel):
     """What one probe formed, recalled, returned, and rendered."""
 
@@ -511,6 +529,7 @@ class ProbeRetrievalResult(BaseModel):
     needed_total: int = Field(ge=0)
     needed_formed: int = Field(ge=0)
     needed_recalled: int = Field(ge=0)
+    needed_by_distance: dict[str, DistanceRecall] = Field(default_factory=dict)
     recalled_snapshot_only: int = Field(ge=0)
     recalled_in_turn_only: int = Field(ge=0)
     recalled_both: int = Field(ge=0)
@@ -585,12 +604,14 @@ class DeterministicMetrics(BaseModel):
     needed_total: int = Field(ge=0)
     needed_formed: int = Field(ge=0)
     needed_recalled: int = Field(ge=0)
+    recall_by_distance: dict[str, DistanceRecall] = Field(default_factory=dict)
     recalled_snapshot_only: int = Field(ge=0)
     recalled_in_turn_only: int = Field(ge=0)
     recalled_both: int = Field(ge=0)
     returned_total: int = Field(ge=0)
     noise_total: int = Field(ge=0)
     dropped_for_budget: int = Field(ge=0)
+    dropped_for_ceiling: int = Field(default=0, ge=0)
     blocked_rendered: int = Field(ge=0)
     currency_violations: int = Field(ge=0)
     currency_unformed: int = Field(ge=0)
@@ -957,6 +978,7 @@ def score_probe(
         needed_total=len(needed),
         needed_formed=len(formed),
         needed_recalled=len(from_snapshot | from_in_turn),
+        needed_by_distance=_needed_by_distance(scenario, needed, from_snapshot | from_in_turn),
         recalled_snapshot_only=len(from_snapshot - from_in_turn),
         recalled_in_turn_only=len(from_in_turn - from_snapshot),
         recalled_both=len(from_snapshot & from_in_turn),
@@ -981,6 +1003,32 @@ def score_probe(
         snapshot_trace_id=snapshot_trace_id,
         in_turn_trace_ids=list(in_turn_trace_ids),
     )
+
+
+def _needed_by_distance(
+    scenario: BenchmarkScenario,
+    needed: Sequence[LabeledBelief],
+    recalled: set[str],
+) -> dict[str, DistanceRecall]:
+    """Bin a probe's needed labels by how many sessions back each is stated.
+
+    Every probe runs after the scenario's last session, so a label stated in
+    that session is one session away and the scenario's first session is
+    `len(sessions)` away.  Keys are the decimal distance, ordered nearest
+    first so the serialized mapping is deterministic.
+    """
+
+    session_order = {session.id: index for index, session in enumerate(scenario.sessions)}
+    totals: Counter[int] = Counter()
+    hits: Counter[int] = Counter()
+    for label in needed:
+        distance = len(scenario.sessions) - session_order[label.session]
+        totals[distance] += 1
+        hits[distance] += int(label.label in recalled)
+    return {
+        str(distance): DistanceRecall(needed_total=totals[distance], needed_recalled=hits[distance])
+        for distance in sorted(totals)
+    }
 
 
 def _record_matches(record: MemoryRecord, label: LabeledBelief) -> bool:
@@ -1067,12 +1115,18 @@ def aggregate_deterministic(
         needed_total=sum(probe.needed_total for probe in probes),
         needed_formed=sum(probe.needed_formed for probe in probes),
         needed_recalled=sum(probe.needed_recalled for probe in probes),
+        recall_by_distance=_sum_distance_bins(probes),
         recalled_snapshot_only=sum(probe.recalled_snapshot_only for probe in probes),
         recalled_in_turn_only=sum(probe.recalled_in_turn_only for probe in probes),
         recalled_both=sum(probe.recalled_both for probe in probes),
         returned_total=sum(probe.returned_total for probe in probes),
         noise_total=sum(probe.noise_total for probe in probes),
         dropped_for_budget=sum(probe.dropped_for_budget for probe in probes),
+        dropped_for_ceiling=sum(
+            max(0, consolidation.candidates_proposed - MAX_AUTOMATIC_CANDIDATES)
+            for scenario in scenarios
+            for consolidation in scenario.consolidations
+        ),
         blocked_rendered=sum(probe.blocked_rendered for probe in probes),
         currency_violations=sum(probe.currency_violations for probe in probes),
         currency_unformed=sum(probe.currency_unformed for probe in probes),
@@ -1085,6 +1139,21 @@ def aggregate_deterministic(
         ),
         per_category=_per_category(probes),
     )
+
+
+def _sum_distance_bins(probes: Sequence[ProbeRetrievalResult]) -> dict[str, DistanceRecall]:
+    """Sum every probe's distance bins, ordered nearest first."""
+
+    totals: Counter[int] = Counter()
+    hits: Counter[int] = Counter()
+    for probe in probes:
+        for key, bin_ in probe.needed_by_distance.items():
+            totals[int(key)] += bin_.needed_total
+            hits[int(key)] += bin_.needed_recalled
+    return {
+        str(distance): DistanceRecall(needed_total=totals[distance], needed_recalled=hits[distance])
+        for distance in sorted(totals)
+    }
 
 
 def _per_category(probes: Sequence[ProbeRetrievalResult]) -> dict[str, CategoryMetrics]:
@@ -1197,6 +1266,32 @@ def compare_to_baseline(
             regressions.append(_entry(field, "regressed", recorded, observed))
         elif observed < recorded:
             improvements.append(_entry(field, "improved", recorded, observed))
+    distances = sorted(
+        {*baseline.metrics.recall_by_distance, *result.metrics.recall_by_distance}, key=int
+    )
+    for distance in distances:
+        recorded_bin = baseline.metrics.recall_by_distance.get(distance)
+        observed_bin = result.metrics.recall_by_distance.get(distance)
+        recorded_total = 0 if recorded_bin is None else recorded_bin.needed_total
+        observed_total = 0 if observed_bin is None else observed_bin.needed_total
+        field = f"recall_by_distance[{distance}]"
+        # A bin's population is a function of the corpus and the session
+        # mapping, so a moved population is drift; only the recall inside a
+        # stable population has a good direction.
+        if recorded_total != observed_total:
+            drift.append(_entry(f"{field} needed_total", "drifted", recorded_total, observed_total))
+        recorded_recalled = 0 if recorded_bin is None else recorded_bin.needed_recalled
+        observed_recalled = 0 if observed_bin is None else observed_bin.needed_recalled
+        if observed_recalled < recorded_recalled:
+            regressions.append(
+                _entry(
+                    f"{field} needed_recalled", "regressed", recorded_recalled, observed_recalled
+                )
+            )
+        elif observed_recalled > recorded_recalled:
+            improvements.append(
+                _entry(f"{field} needed_recalled", "improved", recorded_recalled, observed_recalled)
+            )
     for field in _ATTRIBUTION_PARTITION:
         recorded, observed = getattr(baseline.metrics, field), getattr(result.metrics, field)
         if recorded != observed:

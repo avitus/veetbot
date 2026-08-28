@@ -451,6 +451,25 @@ async def test_rrf_k_and_lifecycle_weights_come_from_the_retrieval_profile() -> 
     assert downweighted.score < shipped_score.score
 
 
+def test_ranking_weights_come_from_the_retrieval_profile() -> None:
+    matchless_profile = RetrievalProfile.model_validate({"ranking_weights": {"match": 0.0}})
+
+    shipped = RetrievalProfile().ranking_weights
+    assert (
+        shipped.match,
+        shipped.confidence,
+        shipped.reinforce,
+        shipped.authority,
+        shipped.scope,
+        shipped.utility,
+    ) == (0.4, 0.2, 0.1, 0.15, 0.1, 0.05)
+
+    default_score = _score(memory(), recall_query())
+    matchless = _score(memory(), recall_query(min_score=0.0), profile=matchless_profile)
+    assert default_score is not None and matchless is not None
+    assert matchless.score < default_score.score
+
+
 async def test_snapshot_reserves_durable_share() -> None:
     _clock, factory, _service, retriever = await formation_stack()
     preference = memory(belief_id=671).model_copy(

@@ -533,14 +533,15 @@ def _score(
         now is not None and record.expires_at is not None and record.expires_at <= now
     )
     penalty = (0.2 if record.flagged_for_review else 0) + (profile.stale_penalty if stale else 0)
+    ranking = profile.ranking_weights
     score = min(
         1.0,
-        0.4 * match
-        + 0.2 * confidence
-        + 0.1 * reinforce
-        + 0.15 * authority
-        + 0.1 * scope
-        + 0.05 * max(0, record.utility)
+        ranking.match * match
+        + ranking.confidence * confidence
+        + ranking.reinforce * reinforce
+        + ranking.authority * authority
+        + ranking.scope * scope
+        + ranking.utility * max(0, record.utility)
         - penalty,
     )
     if score < query.min_score:
