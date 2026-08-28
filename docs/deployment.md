@@ -588,13 +588,17 @@ if test "$target_calendar_compatibility" = incompatible; then
     set +a
     : "${POSTGRES_USER:?POSTGRES_USER is required}"
     : "${POSTGRES_DB:?POSTGRES_DB is required}"
-    docker compose \
-      --env-file "$environment_file" \
-      --project-directory "$previous_target" \
-      --project-name "${COMPOSE_PROJECT_NAME:-veetbot}" \
-      -f "$previous_target/docker-compose.yml" \
-      -f "$previous_target/deploy/docker-compose.production.yml" \
-      exec -T postgres psql \
+    timeout --signal=TERM --kill-after=5s 20s \
+      docker compose \
+        --env-file "$environment_file" \
+        --project-directory "$previous_target" \
+        --project-name "${COMPOSE_PROJECT_NAME:-veetbot}" \
+        -f "$previous_target/docker-compose.yml" \
+        -f "$previous_target/deploy/docker-compose.production.yml" \
+        exec -T \
+        --env PGCONNECT_TIMEOUT=5 \
+        --env 'PGOPTIONS=-c statement_timeout=5000' \
+        postgres psql \
         --no-psqlrc --tuples-only --no-align \
         --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
         --command "SELECT count(*) FROM schedule_revisions WHERE definition #>> '{cadence,kind}' IN ('MONTHLY','YEARLY');" \

@@ -56,6 +56,17 @@ write_stub() {
 }
 
 write_stub flock 'exit 0'
+write_stub timeout '
+  printf "timeout %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  while (($#)); do
+    case "$1" in
+      --signal=* | --kill-after=*) shift ;;
+      *s) shift; break ;;
+      *) exit 1 ;;
+    esac
+  done
+  "$@"
+'
 write_stub readlink '
   if [[ "${1:-}" == -f ]]; then
     shift
@@ -183,6 +194,9 @@ fi
 [[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
 grep -Fq "docker compose --env-file $ENV_FILE" "$LOG_FILE"
 grep -Fq 'systemctl stop veetbot-execution' "$LOG_FILE"
+grep -Fq 'timeout --signal=TERM --kill-after=5s 20s docker compose' "$LOG_FILE"
+grep -Fq -- '--env PGCONNECT_TIMEOUT=5' "$LOG_FILE"
+grep -Fq -- '--env PGOPTIONS=-c statement_timeout=5000' "$LOG_FILE"
 : >"$LOG_FILE"
 
 if VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE=1 run_rollback \

@@ -458,6 +458,9 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
     writer_stop = 'sudo systemctl stop "${managed_units[@]}"'
     compatibility_query = "SELECT count(*) FROM schedule_revisions"
+    external_timeout = "timeout --signal=TERM --kill-after=5s 20s"
+    connection_timeout = "--env PGCONNECT_TIMEOUT=5"
+    statement_timeout = "--env 'PGOPTIONS=-c statement_timeout=5000'"
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -495,6 +498,9 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(writer_stop) < manual.index(compatibility_query)
     assert manual.index(compatibility_query) < manual.index(app_switch)
     assert manual.index(compatibility_query) < manual.index(docs_switch)
+    assert external_timeout in manual
+    assert connection_timeout in manual
+    assert statement_timeout in manual
     restart_position = manual.rindex("sudo systemctl restart")
     validation_position = manual.index(unit_process_validation)
     assert manual.index(app_switch) < restart_position < validation_position
