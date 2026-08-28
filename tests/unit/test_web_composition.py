@@ -168,6 +168,56 @@ async def test_retryable_web_provider_outage_does_not_advise_argument_changes() 
     assert invocations[0].outcome.remediation == "none"
 
 
+async def test_web_search_quota_failure_reports_operator_action() -> None:
+    provider = FailingWebProvider(
+        reason_code="tool.web.quota_exceeded",
+        retryable=False,
+    )
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="web.search",
+                        arguments={
+                            "query": (
+                                "Bun appears to have been a big breakthrough. "
+                                "Why is it so much better than NodeJS?"
+                            )
+                        },
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="The search provider needs operator attention."),
+        ]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        sequential_ids=True,
+        web_search_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit(
+            "Bun appears to have been a big breakthrough. Why is it so much better than NodeJS?"
+        )
+        await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+
+    assert len(invocations) == 1
+    assert invocations[0].outcome is not None
+    assert invocations[0].outcome.reason_code == "tool.web.quota_exceeded"
+    assert invocations[0].outcome.message == (
+        "The web provider's usage or billing limit has been reached; "
+        "an operator must restore provider capacity."
+    )
+    assert invocations[0].outcome.retryable is False
+    assert invocations[0].outcome.remediation == "none"
+
+
 async def test_web_result_reaches_the_next_model_step_inside_an_untrusted_envelope() -> None:
     provider = FakeWebProvider()
     script = FakeModelScript(

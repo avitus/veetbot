@@ -393,6 +393,7 @@ async def test_web_provider_rejects_result_rows_that_fail_domain_validation(
 @pytest.mark.parametrize(
     ("status", "reason_code", "retryable"),
     [
+        (402, "tool.web.quota_exceeded", False),
         (403, "tool.web.auth_failed", False),
         (408, "tool.web.provider_unavailable", True),
         (425, "tool.web.provider_unavailable", True),
@@ -419,6 +420,41 @@ async def test_web_provider_status_taxonomy_is_stable(
 
     assert raised.value.reason_code == reason_code
     assert raised.value.retryable is retryable
+    assert "upstream-private-diagnostic" not in str(raised.value)
+
+
+@pytest.mark.parametrize("status", [432, 433])
+async def test_tavily_custom_usage_limit_statuses_are_quota_failures(status: int) -> None:
+    credentials = MappingCredentialResolver({"tavily": "synthetic-tavily-credential"})
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(status, text="upstream-private-diagnostic")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        provider = TavilyWebProvider(credentials=credentials, client=client)
+        with pytest.raises(WebProviderError) as raised:
+            await provider.search(WebSearchRequest(query="Ada Lovelace"))
+
+    assert raised.value.reason_code == "tool.web.quota_exceeded"
+    assert raised.value.retryable is False
+    assert "upstream-private-diagnostic" not in str(raised.value)
+
+
+async def test_non_tavily_custom_client_status_remains_a_provider_rejection() -> None:
+    credentials = MappingCredentialResolver({"firecrawl": "synthetic-firecrawl-credential"})
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(432, text="upstream-private-diagnostic")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        provider = FirecrawlWebProvider(credentials=credentials, client=client)
+        with pytest.raises(WebProviderError) as raised:
+            await provider.search(WebSearchRequest(query="Ada Lovelace"))
+
+    assert raised.value.reason_code == "tool.web.provider_rejected"
+    assert raised.value.retryable is False
     assert "upstream-private-diagnostic" not in str(raised.value)
 
 

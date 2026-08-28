@@ -149,6 +149,7 @@ class FailingWebProvider(FakeWebProvider):
         ("tool.web.auth_failed", False, ToolFailureKind.PERMISSION),
         ("tool.web.output_invalid", False, ToolFailureKind.OUTPUT_INVALID),
         ("tool.web.provider_unavailable", True, ToolFailureKind.TRANSPORT),
+        ("tool.web.quota_exceeded", False, ToolFailureKind.UPSTREAM_ERROR),
         ("tool.web.provider_rejected", False, ToolFailureKind.UPSTREAM_ERROR),
     ],
 )
