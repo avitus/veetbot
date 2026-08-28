@@ -23,10 +23,11 @@ MAP_ROW = re.compile(
 )
 # The highest milestone the corpus authorizes; Milestones 12 through 15 were
 # authorized on 2026-08-20 (ADR-0061), Milestone 16 on 2026-08-22 (ADR-0069),
-# Milestone 17 on 2026-08-23 (ADR-0070), and Milestones 18 and 19 on 2026-08-24
-# (ADR-0071 and ADR-0072). The census reports a zero row for each authorized milestone
-# whose specification has not yet declared gates.
-MAX_MILESTONE = 19
+# Milestone 17 on 2026-08-23 (ADR-0070), Milestones 18 and 19 on 2026-08-24
+# (ADR-0071 and ADR-0072), and Milestone 20 on 2026-08-27 (ADR-0073). The census
+# reports a zero row for each authorized milestone whose specification has not
+# yet declared gates.
+MAX_MILESTONE = 20
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -47,7 +48,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "knowledge-documents.md": (12, 0),
     "web-access.md": (7, 0),
     "browser-automation.md": (10, 0),
-    "scheduling.md": (28, 0),
+    "scheduling.md": (34, 0),
     "notifications-and-devices.md": (20, 0),
     "subagents-and-delegation.md": (21, 0),
     "inbound-surfaces.md": (21, 0),

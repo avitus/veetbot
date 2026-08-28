@@ -183,12 +183,29 @@ def _check_generated_child_limits(
         or remaining_model_calls <= DEFAULTS.synthesis_reserve_model_calls
         or (remaining_cost is not None and remaining_cost <= DEFAULTS.synthesis_reserve_cost)
     )
+    requested_reserve_exhausted = any(
+        limits is not None
+        and (
+            (limits.max_steps is not None and limits.max_steps <= DEFAULTS.synthesis_reserve_steps)
+            or (
+                limits.max_model_calls is not None
+                and limits.max_model_calls <= DEFAULTS.synthesis_reserve_model_calls
+            )
+            or (limits.max_cost is not None and limits.max_cost <= DEFAULTS.synthesis_reserve_cost)
+        )
+        for limits in requested
+    )
 
     try:
         derived = derive_child_limits(parent, briefs, DEFAULTS, now=NOW)
     except DelegationValidationError as error:
         assert error.reason == "delegation.budget_insufficient"
-        assert exhausted or reserve_exhausted or (remaining_cost is not None and len(briefs) > 1)
+        assert (
+            exhausted
+            or reserve_exhausted
+            or requested_reserve_exhausted
+            or (remaining_cost is not None and len(briefs) > 1)
+        )
         return
 
     assert not exhausted

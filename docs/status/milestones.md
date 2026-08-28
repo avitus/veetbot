@@ -73,6 +73,15 @@ thirteen gates and full local repository check pass. Remaining:
 - [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
 - [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
 
+### Milestone 20 — Calendar recurrence and conversational schedules
+
+A fifth parallel workstream extending the existing scheduler with monthly and
+yearly civil-calendar rules and widening `schedule.create` to daily, weekly,
+monthly, and yearly recurrence. Its six gates, complete non-live suite, and
+fresh PostgreSQL integration lane pass locally. Remaining:
+
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -90,8 +99,8 @@ is authorized until the owner says so and a specification with gates exists
 for it. That roadmap holds, among its items: tenant activation of
 self-authored skills (B1), dynamic model routing and a second provider
 adapter (B2), Slack and email inbound surfaces (B3), email and webhook
-notification transports (B4), scheduling extensions such as cron and monthly
-recurrence (B5), the memory residue after Milestone 16 — the semantic arm,
+notification transports (B4), scheduling residue such as cron, interval
+multipliers, and dependency graphs (B5), the memory residue after Milestone 16 — the semantic arm,
 `pgvector`, an external memory provider (B6) — device-scoped tools and
 presence routing (B7), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),

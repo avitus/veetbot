@@ -38,7 +38,7 @@ all written down, and none of them runs.
 Milestone 16 closes both halves, in that order: the yardstick first and the
 lifecycle second, so that every lifecycle change is a measured change and the
 plan's standing rule that a capability enters on evaluation evidence rather
-than on argument (engineering-plan.md:2840) has something to read.
+than on argument (engineering-plan.md:2855) has something to read.
 
 Milestone 16 is authorized as a parallel workstream alongside Milestones 12
 through 15. Its gates may become green independently, but the verified gate

@@ -28,6 +28,10 @@ title: Current Milestone
   named in ADR-0071. Milestone 19 — conversational schedule creation — is
   specified by [scheduling.md](scheduling.md) with five gates and is a fourth
   parallel workstream, limited to one-time creation through the model.
+  Milestone 20 — calendar recurrence and conversational schedules — is
+  specified by [scheduling.md](scheduling.md) with six gates and is a fifth
+  parallel workstream, adding monthly and yearly rules and conversational
+  creation for all four recurring calendar kinds.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -40,7 +44,9 @@ title: Current Milestone
   Milestone 18, first-class email integration, was authorized on 2026-08-24
   as a third (ADR-0071), on the same terms again. Milestone 19,
   conversational schedule creation, was authorized on 2026-08-24 as a fourth
-  (ADR-0072), again without advancing the verified ceiling.
+  (ADR-0072), and Milestone 20, calendar recurrence and conversational
+  schedules, was authorized on 2026-08-27 as a fifth (ADR-0073), each without
+  advancing the verified ceiling.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -118,6 +124,10 @@ title: Current Milestone
   outstanding. Milestone 19, the fourth parallel workstream, is in progress with
   five registered gates; its one-time model tool, clarification-to-approval
   regression, complete non-live suite, and PostgreSQL lane pass locally, with
+  only hosted CI and the final CodeRabbit review outstanding. Milestone 20,
+  the fifth parallel workstream, is in progress with six registered gates for
+  monthly and yearly recurrence and recurring conversational creation; its six
+  gates, complete non-live suite, and fresh PostgreSQL lane pass locally, with
   only hosted CI and the final CodeRabbit review outstanding. Each in-progress
   milestone's remaining work is itemized on the
   [milestones page](../status/milestones.md), which `make docs-check`
@@ -173,6 +183,8 @@ way on 2026-08-24, adding thirteen `gate.email.*` entries in a new area of
 their own. Milestone 19 reuses [scheduling.md](scheduling.md) and the existing
 `schedule` area under ADR-0072, adding five gates for the deliberately narrow
 one-time creation bridge.
+Milestone 20 reuses the same design and gate area under ADR-0073, adding six
+gates for calendar recurrence and recurring conversational creation.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -219,6 +231,7 @@ substitute.
 - [Milestone 17 — memory read API and browser](engineering-plan.md#milestone-17-memory-read-api-and-browser)
 - [Milestone 18 — first-class email integration](engineering-plan.md#milestone-18-first-class-email-integration)
 - [Milestone 19 — conversational schedule creation](engineering-plan.md#milestone-19-conversational-schedule-creation)
+- [Milestone 20 — calendar recurrence and conversational schedules](engineering-plan.md#milestone-20-calendar-recurrence-and-conversational-schedules)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -259,7 +272,9 @@ Milestone 18's contract is its thirteen `gate.email.*` entries plus the
 plan's acceptance criteria and the
 [email-integration design](email-integration.md). Milestone 19's contract is
 its five new `gate.schedule.*` entries plus the plan's acceptance criteria and
-the [scheduling design](scheduling.md#model-callable-one-time-creation).
+the [scheduling design](scheduling.md#model-callable-creation). Milestone 20's
+contract is its six new `gate.schedule.*` entries plus the plan's acceptance
+criteria and the same scheduling design.
 
 ## Completion rule
 
@@ -315,3 +330,9 @@ Milestone 19 completes when its five gates and the cumulative registry pass,
 all relevant local and hosted lanes pass on the final head, and the final
 CodeRabbit review is clean. Because it is a parallel workstream, completion
 does not advance the verified gate ceiling past the sequential milestones.
+
+Milestone 20 completes when its six gates and the cumulative registry pass,
+all relevant local and PostgreSQL lanes pass, hosted CI passes on the final
+head, and the final CodeRabbit review is clean. Because it is a parallel
+workstream, completion does not advance the verified gate ceiling past the
+sequential milestones.

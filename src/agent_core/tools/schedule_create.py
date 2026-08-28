@@ -1,4 +1,4 @@
-"""Governed model-callable creation of one-time scheduled runs."""
+"""Governed model-callable creation of calendar scheduled runs."""
 
 from __future__ import annotations
 
@@ -6,13 +6,20 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from agent_core.application.services import ScheduleService
 from agent_core.domain.agents import AgentSpec
 from agent_core.domain.errors import AuthorizationError, ConflictError, ScheduleValidationError
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.runs import RunLimits
-from agent_core.domain.schedules import OnceCadence, ScheduleDefinition, ScheduleDefinitionLimits
+from agent_core.domain.schedules import (
+    Cadence,
+    OnceCadence,
+    ScheduleDefinition,
+    ScheduleDefinitionLimits,
+)
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
@@ -34,10 +41,102 @@ INPUT_SCHEMA: dict[str, Any] = {
         "title": {"type": "string", "minLength": 1, "maxLength": 1024},
         "instruction": {"type": "string", "minLength": 1, "maxLength": 65_536},
         "at": {"type": "string", "format": "date-time"},
+        "cadence": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "DAILY"},
+                        "local_time": {"type": "string", "format": "time"},
+                        "timezone": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["kind", "local_time", "timezone"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "WEEKLY"},
+                        "local_time": {"type": "string", "format": "time"},
+                        "weekdays": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 1, "maximum": 7},
+                            "minItems": 1,
+                            "maxItems": 7,
+                            "uniqueItems": True,
+                        },
+                        "timezone": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["kind", "local_time", "weekdays", "timezone"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "MONTHLY"},
+                        "local_time": {"type": "string", "format": "time"},
+                        "days_of_month": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 1, "maximum": 31},
+                            "maxItems": 31,
+                            "uniqueItems": True,
+                        },
+                        "last_day": {"type": "boolean"},
+                        "timezone": {"type": "string", "minLength": 1},
+                    },
+                    "required": [
+                        "kind",
+                        "local_time",
+                        "days_of_month",
+                        "last_day",
+                        "timezone",
+                    ],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "YEARLY"},
+                        "local_time": {"type": "string", "format": "time"},
+                        "dates": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "month": {"type": "integer", "minimum": 1, "maximum": 12},
+                                    "day": {"type": "integer", "minimum": 1, "maximum": 31},
+                                },
+                                "required": ["month", "day"],
+                                "additionalProperties": False,
+                            },
+                            "minItems": 1,
+                            "maxItems": 366,
+                            "uniqueItems": True,
+                        },
+                        "timezone": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["kind", "local_time", "dates", "timezone"],
+                    "additionalProperties": False,
+                },
+            ]
+        },
     },
-    "required": ["title", "instruction", "at"],
+    "required": ["title", "instruction"],
+    "oneOf": [
+        {"required": ["at"], "not": {"required": ["cadence"]}},
+        {"required": ["cadence"], "not": {"required": ["at"]}},
+    ],
     "additionalProperties": False,
 }
+CADENCE_ADAPTER: TypeAdapter[Cadence] = TypeAdapter(Cadence)
+
+
+class _CadenceInputError(ValueError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason_code = reason_code
+
+
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -76,14 +175,15 @@ def _failure(
 
 
 class ScheduleCreateTool:
-    """Create an approval-gated one-time schedule with no delegated tool scopes."""
+    """Create an approval-gated schedule with no delegated tool scopes."""
 
     spec = ToolSpec(
         name=SCHEDULE_CREATE_TOOL_NAME,
-        version="1.0.0",
+        version="1.1.0",
         description=(
-            "Create one future one-time scheduled run. Resolve an exact timezone-aware "
-            "ISO 8601 instant first; ask the user when the date or timezone is ambiguous."
+            "Create one future one-time, daily, weekly, monthly, or yearly scheduled run. "
+            "Use an exact aware instant or a complete IANA-zone civil cadence; ask the user "
+            "when the date, calendar selector, local time, or timezone is ambiguous."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
@@ -115,15 +215,25 @@ class ScheduleCreateTool:
     ) -> tuple[str, dict[str, Any]]:
         del tenant_id
         title = str(arguments["title"])
-        at = str(arguments["at"])
+        proposal: dict[str, Any] = {
+            "title": title,
+            "instruction": str(arguments["instruction"]),
+            "requested_scopes": [],
+        }
+        try:
+            cadence = _parse_cadence(arguments)
+        except _CadenceInputError:
+            proposal.update({key: arguments[key] for key in ("at", "cadence") if key in arguments})
+            return f"Create schedule {title!r}", proposal
+        if isinstance(cadence, OnceCadence):
+            proposal["at"] = cadence.at.isoformat()
+            summary = f"Create one-time schedule {title!r} for {cadence.at.isoformat()}"
+        else:
+            proposal["cadence"] = cadence.model_dump(mode="json")
+            summary = f"Create {cadence.kind.value.lower()} schedule {title!r}"
         return (
-            f"Create one-time schedule {title!r} for {at}",
-            {
-                "title": title,
-                "instruction": str(arguments["instruction"]),
-                "at": at,
-                "requested_scopes": [],
-            },
+            summary,
+            proposal,
         )
 
     async def execute(
@@ -132,12 +242,11 @@ class ScheduleCreateTool:
         context: ToolExecutionContext,
     ) -> ToolResult:
         try:
-            at = datetime.fromisoformat(str(arguments["at"]).replace("Z", "+00:00"))
-            cadence = OnceCadence(at=at)
-        except (KeyError, TypeError, ValueError) as exc:
+            cadence = _parse_cadence(arguments)
+        except _CadenceInputError as exc:
             return _failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
-                "schedule.instant_invalid",
+                exc.reason_code,
                 str(exc),
                 retryable=True,
             )
@@ -229,3 +338,29 @@ class ScheduleCreateTool:
                 self._limits.max_cost_per_run,
             ),
         )
+
+
+def _parse_cadence(arguments: dict[str, Any]) -> Cadence:
+    has_at = "at" in arguments
+    has_cadence = "cadence" in arguments
+    if has_at == has_cadence:
+        raise _CadenceInputError(
+            "schedule.cadence_invalid",
+            "provide exactly one of at or cadence",
+        )
+    if has_at:
+        try:
+            at = datetime.fromisoformat(str(arguments["at"]).replace("Z", "+00:00"))
+            return OnceCadence(at=at)
+        except (KeyError, TypeError, ValueError, ValidationError) as exc:
+            raise _CadenceInputError("schedule.instant_invalid", str(exc)) from exc
+    try:
+        cadence = CADENCE_ADAPTER.validate_python(arguments["cadence"])
+    except (KeyError, TypeError, ValueError, ValidationError) as exc:
+        raise _CadenceInputError("schedule.cadence_invalid", str(exc)) from exc
+    if isinstance(cadence, OnceCadence):
+        raise _CadenceInputError(
+            "schedule.cadence_invalid",
+            "cadence must be DAILY, WEEKLY, MONTHLY, or YEARLY",
+        )
+    return cadence
