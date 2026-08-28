@@ -30,8 +30,10 @@ from agent_core.evals.memory_benchmark import (
     BenchmarkSession,
     BenchmarkTurn,
     CategoryMetrics,
+    ConsolidationCounts,
     DeterministicBenchmarkResult,
     DeterministicScenarioResult,
+    DistanceRecall,
     FormationMetrics,
     LabeledBelief,
     MemoryBenchmarkBaseline,
@@ -668,6 +670,8 @@ def test_score_probe_counts_noise_returned_in_both_moments_once() -> None:
 
 
 def test_score_formation_separates_stale_from_fabricated() -> None:
+    """Formation scoring keeps stale expected beliefs separate from inventions."""
+
     scenario = _scenario(_valid_probe("update"), protected=["REDACTED-TOKEN"])
     live = [
         _record(
@@ -746,8 +750,15 @@ def _probe_result(
     forbidden_rendered: int = 0,
     policy_failures: int = 0,
     distinct_prefixes: int = 1,
+    needed_by_distance: dict[str, dict[str, int]] | None = None,
 ) -> ProbeRetrievalResult:
+    """Build one compact probe result for aggregation and comparison tests."""
+
     return ProbeRetrievalResult(
+        needed_by_distance={
+            key: DistanceRecall.model_validate(value)
+            for key, value in (needed_by_distance or {}).items()
+        },
         probe_id=probe_id,
         category=category,
         run_completed=run_completed,
@@ -1043,6 +1054,8 @@ def test_compare_to_baseline_reports_regression_drift_and_improvement() -> None:
 
 
 def test_compare_to_baseline_reports_provider_formation_version_drift() -> None:
+    """A provider-formation policy change invalidates baseline comparability."""
+
     baseline = _baseline_of(_result())
 
     drifted = compare_to_baseline(
@@ -1051,6 +1064,215 @@ def test_compare_to_baseline_reports_provider_formation_version_drift() -> None:
 
     assert any(entry.startswith("provider_formation_policy_version") for entry in drifted.drift)
     assert drifted.regressions == []
+
+
+def test_score_probe_bins_needed_recall_by_evidence_distance() -> None:
+    """A probe attributes each needed label to its evidence-session distance."""
+
+    update_probe = _valid_probe("update")
+    update_scenario = _scenario(update_probe)
+    portland = _recalled_belief(
+        belief_id=802,
+        subject="home location",
+        statement="User lives in Portland.",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+    )
+
+    recalled_update = score_probe(
+        update_probe,
+        update_scenario,
+        store_live=[
+            _record(
+                belief_id=802,
+                subject="home location",
+                statement="User lives in Portland.",
+                belief_type=BeliefType.USER_MODEL_ATTR,
+            )
+        ],
+        snapshot=_recall_trace(trace_id=901, moment=RecallMoment.SNAPSHOT, beliefs=[portland]),
+        in_turn=[],
+        distinct_prefixes=1,
+        policy_failures=0,
+        run_completed=True,
+    )
+
+    # home_portland is stated in s02, the last of the scenario's two sessions,
+    # so its evidence sits one session back from the probe.
+    assert recalled_update.model_dump()["needed_by_distance"] == {
+        "1": {"needed_total": 1, "needed_recalled": 1}
+    }
+
+    multi_probe = _valid_probe("multi_hop")
+    multi_scenario = _scenario(multi_probe)
+    concise = _recalled_belief(
+        belief_id=701, subject="answer style", statement="User prefers concise answers."
+    )
+
+    partial = score_probe(
+        multi_probe,
+        multi_scenario,
+        store_live=[],
+        snapshot=_recall_trace(trace_id=902, moment=RecallMoment.SNAPSHOT, beliefs=[concise]),
+        in_turn=[],
+        distinct_prefixes=1,
+        policy_failures=0,
+        run_completed=True,
+    )
+
+    # Both needed labels are stated in s01, two sessions back; one came back.
+    assert partial.model_dump()["needed_by_distance"] == {
+        "2": {"needed_total": 2, "needed_recalled": 1}
+    }
+
+
+def _consolidation(session_id: str, proposed: int) -> ConsolidationCounts:
+    """Build consolidation counts with the automatic-candidate ceiling applied."""
+
+    return ConsolidationCounts(
+        session_id=session_id,
+        scope="general",
+        candidates_proposed=proposed,
+        committed=min(proposed, 12),
+        reinforced=0,
+        superseded=0,
+        rejected=max(0, proposed - 12),
+    )
+
+
+def _binned_results(
+    *, recalled_far: int = 2, first_proposed: int = 15
+) -> list[DeterministicScenarioResult]:
+    """Build scenario results containing near and far recall bins."""
+
+    first, second = _scenario_results()
+    binned_first = _probe_result(
+        probe_id="p01",
+        category="single_hop",
+        needed_total=1,
+        needed_formed=1,
+        needed_recalled=1,
+        recalled_snapshot_only=1,
+        returned_snapshot=2,
+        returned_total=2,
+        noise_snapshot=1,
+        noise_total=1,
+        needed_by_distance={"1": {"needed_total": 1, "needed_recalled": 1}},
+    )
+    binned_second = _probe_result(
+        probe_id="p01",
+        category="single_hop",
+        needed_total=2,
+        needed_formed=2,
+        needed_recalled=recalled_far,
+        recalled_in_turn_only=recalled_far,
+        returned_in_turn=3,
+        returned_total=3,
+        noise_in_turn=1,
+        noise_total=1,
+        needed_by_distance={
+            "1": {"needed_total": 1, "needed_recalled": 1},
+            "2": {"needed_total": 1, "needed_recalled": recalled_far - 1},
+        },
+    )
+    return [
+        first.model_copy(
+            update={
+                "probes": [binned_first, first.probes[1]],
+                "consolidations": [_consolidation("s01", first_proposed)],
+            }
+        ),
+        second.model_copy(
+            update={
+                "probes": [binned_second],
+                "consolidations": [_consolidation("s01", 12)],
+            }
+        ),
+    ]
+
+
+def test_aggregate_sums_distance_bins_and_ceiling_drops() -> None:
+    """Aggregation preserves distance populations and ceiling losses."""
+
+    metrics = aggregate_deterministic(_binned_results()).model_dump()
+
+    # Fifteen proposals against the twelve-candidate ceiling drop three; the
+    # second scenario's session fits under it and drops nothing.
+    assert metrics["dropped_for_ceiling"] == 3
+    assert metrics["recall_by_distance"] == {
+        "1": {"needed_total": 2, "needed_recalled": 2},
+        "2": {"needed_total": 1, "needed_recalled": 1},
+    }
+
+    empty = aggregate_deterministic([]).model_dump()
+    assert empty["dropped_for_ceiling"] == 0
+    assert empty["recall_by_distance"] == {}
+
+
+def test_compare_to_baseline_flags_distance_bins_and_ceiling_drops() -> None:
+    """Only stable distance populations receive directional comparisons."""
+
+    baseline = _baseline_of(_result(_binned_results()))
+
+    identical = compare_to_baseline(_result(_binned_results()), baseline)
+
+    assert identical.drift == []
+    assert identical.regressions == []
+    assert identical.improvements == []
+
+    regressed = compare_to_baseline(
+        _result(_binned_results(recalled_far=1, first_proposed=20)), baseline
+    )
+
+    assert any(
+        entry.startswith("recall_by_distance[2] needed_recalled regressed")
+        for entry in regressed.regressions
+    )
+    assert any(entry.startswith("dropped_for_ceiling regressed") for entry in regressed.regressions)
+
+    improved = compare_to_baseline(
+        _result(_binned_results()),
+        _baseline_of(_result(_binned_results(recalled_far=1, first_proposed=20))),
+    )
+
+    assert any(
+        entry.startswith("recall_by_distance[2] needed_recalled improved")
+        for entry in improved.improvements
+    )
+    assert any(entry.startswith("dropped_for_ceiling improved") for entry in improved.improvements)
+
+    # A bin whose population moved measures a different corpus mapping: drift.
+    shifted_population = _binned_results()
+    moved = _probe_result(
+        probe_id="p01",
+        category="single_hop",
+        needed_total=2,
+        needed_formed=2,
+        needed_recalled=2,
+        recalled_in_turn_only=2,
+        returned_in_turn=3,
+        returned_total=3,
+        noise_in_turn=1,
+        noise_total=1,
+        needed_by_distance={"1": {"needed_total": 2, "needed_recalled": 2}},
+    )
+    drifted = compare_to_baseline(
+        _result(
+            [
+                shifted_population[0],
+                shifted_population[1].model_copy(update={"probes": [moved]}),
+            ]
+        ),
+        baseline,
+    )
+
+    assert any(
+        entry.startswith("recall_by_distance[1] needed_total drifted") for entry in drifted.drift
+    )
+    assert any(
+        entry.startswith("recall_by_distance[2] needed_total drifted") for entry in drifted.drift
+    )
+    assert not any(entry.startswith("recall_by_distance") for entry in drifted.regressions)
+    assert not any(entry.startswith("recall_by_distance") for entry in drifted.improvements)
 
 
 def test_load_corpus_rejects_paths_outside_repository(tmp_path: Path) -> None:

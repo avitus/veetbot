@@ -379,9 +379,17 @@ needed_formed              needed labels with a live match at probe time
 needed_recalled            needed labels matched by the snapshot trace or by
                            any in-turn trace, attributed snapshot-only,
                            in-turn-only, or both
+needed_by_distance         the same recall, binned by how many sessions back
+                           the needed label is stated — the last session is
+                           distance one — so long-range degradation is visible
+                           when the overall count holds steady
 returned_*                 distinct beliefs in trace.returned, per moment and
                            as a union; recall counts returned items only
 dropped_for_budget         counted separately from returned
+dropped_for_ceiling        proposals over the automatic-candidate commit
+                           ceiling, summed over the run's consolidations, so a
+                           formation-recall gap can be attributed to the
+                           ceiling or acquitted of it
 noise_*                    returned beliefs matching no needed label
 end_to_end_recall          needed_recalled / needed_total
 retrieval_recall_given_formed
@@ -430,9 +438,13 @@ drift          the corpus digest, the benchmark version, a policy version, the
 regressions    a higher-is-better count fell — supported beliefs, needed
                formed, needed recalled, completed probe runs — or a
                lower-is-better count rose — fabricated, stale live, noise,
-               dropped for budget, blocked, currency violations, abstention
-               leaks, false transfers, run policy failures, distinct
-               prefixes — or any per-probe row's needed_recalled fell.
+               dropped for budget, dropped for the candidate ceiling, blocked,
+               currency violations, abstention leaks, false transfers, run
+               policy failures, distinct prefixes — or any per-probe row's
+               needed_recalled fell, or a distance bin's recall fell. A
+               distance bin's population is a function of the corpus and the
+               session mapping, so a moved population is drift, like the
+               structural counts it derives from.
 improvements   the mirror image, reported and never required.
 shifts         an attribution count moved. The three partition needed
                recalled by the moment that found the belief, so a move says
@@ -608,6 +620,8 @@ models behind it:
 ```text
 RetrievalProfile   semantic_enabled | reciprocal_rank_fusion_k
                    durable_item_share
+                   ranking_weights{match, confidence, reinforce,
+                                   authority, scope, utility}
                    lifecycle_weights{active, provisional}
                    decay_tau_days{fact, preference, relationship,
                                   user_model_attr, procedure_pointer}
@@ -629,6 +643,23 @@ knobs and adds fourteen, taking the memory profile document from seventeen
 knobs to twenty-eight and the shipped operator-reviewable inventory from 126 to
 137; the derivation paragraph and the table in
 [bootstrap-and-composition.md](bootstrap-and-composition.md) move with it.
+
+`ranking_weights` arrives after this milestone, in the tuning pass the ranking
+section below anticipates: the six additive coefficients of the retrieval
+scoring formula were literals inside `_score`, which meant retuning them was a
+code edit rather than a reviewed configuration diff. Moving them here follows
+the precedent this milestone set with `stale_penalty` and
+`near_duplicate_penalty` — ranking-shaping values live in the profile document
+at the values the recorded baseline was measured under — and takes the document
+to thirty-four knobs. At that point the six additions took the milestone-era
+inventory from 137 to 143; later authorized configuration additions take the
+current repository-wide operator inventory to 156, as derived in
+[bootstrap-and-composition.md](bootstrap-and-composition.md). The shipped values
+are identical to the former literals, so the deterministic benchmark baseline
+is unchanged by the move itself; a change to any of the six is a ranking change
+and re-records the baseline like any other. The `confidence` and `authority`
+weights remain strictly positive so an overlay cannot flatten the required
+lifecycle or provenance ordering.
 
 `SESSION_IDLE_SECONDS` stays a constant and does not become a knob. The idle
 boundary is part of the formation policy that a belief's

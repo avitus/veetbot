@@ -41,6 +41,11 @@ async def post_json(
         ) as response:
             if response.status_code in {401, 403}:
                 raise WebProviderError("tool.web.auth_failed", retryable=False)
+            quota_exceeded = response.status_code == 402 or (
+                credential_name == "tavily" and response.status_code in {432, 433}
+            )
+            if quota_exceeded:
+                raise WebProviderError("tool.web.quota_exceeded", retryable=False)
             if response.status_code in {408, 425, 429} or response.status_code >= 500:
                 raise WebProviderError("tool.web.provider_unavailable", retryable=True)
             if response.status_code < 200 or response.status_code >= 300:

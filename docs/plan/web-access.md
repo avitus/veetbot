@@ -144,13 +144,15 @@ inline. Redirect following is disabled for provider API calls so a bearer
 credential cannot be forwarded to another host.
 
 The adapter never returns upstream response text. Stable failures distinguish
-credential rejection, temporary provider unavailability, permanent provider
-rejection, invalid provider output, and a disallowed fetch URL; arguments that
-fail the tool schema return the platform's ordinary `tool.arguments_invalid`.
-Timeouts, transport failures, HTTP 408/425/429, and server errors are
-retryable; auth, other client errors, schema failures, and local URL refusals
-are not. The tool pipeline retains ownership of any retry decision within the
-run deadline.
+credential rejection, provider quota exhaustion, temporary provider
+unavailability, permanent provider rejection, invalid provider output, and a
+disallowed fetch URL; arguments that fail the tool schema return the platform's
+ordinary `tool.arguments_invalid`. HTTP 402 and Tavily's documented 432/433
+usage-limit responses become `tool.web.quota_exceeded` with an operator-action
+message and without the upstream body. Timeouts, transport failures, HTTP
+408/425/429, and server errors are retryable; auth, exhausted quota, other
+client errors, schema failures, and local URL refusals are not. The tool
+pipeline retains ownership of any retry decision within the run deadline.
 
 ## Acceptance criteria
 
@@ -166,7 +168,8 @@ run deadline.
 - A complete agent tool call passes schema validation and policy, persists its
   invocation, and returns external-untrusted content to the next model step.
 - Credentials and raw upstream diagnostics never appear in tool results or
-  durable events; retryability is stable and platform-defined.
+  durable events; credential, quota, and request rejections remain distinct,
+  and retryability is stable and platform-defined.
 - Fetch rejects non-public or non-HTTPS destinations before provider
   execution, and provider responses and tool outputs are bounded.
 
@@ -185,10 +188,10 @@ run deadline.
 5. **Invocation trust.** A complete web invocation passes validation and
    policy, persists its invocation, and returns `EXTERNAL_UNTRUSTED` content to
    the next model step. **M10.**
-6. **Failure and secret boundary.** Missing or rejected credentials, rate
-   limits, transport failures, permanent rejections, and invalid output produce
-   stable platform failures without exposing credentials or upstream text.
-   **M10.**
+6. **Failure and secret boundary.** Missing or rejected credentials, exhausted
+   provider quota, rate limits, transport failures, permanent rejections, and
+   invalid output produce stable platform failures without exposing credentials
+   or upstream text. **M10.**
 7. **Fetch confinement and bounds.** Non-public and non-HTTPS URLs are rejected
    before provider dispatch, provider responses are hard-bounded, and complete
    tool output remains within its declared byte ceiling. **M10.**
