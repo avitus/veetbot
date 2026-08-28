@@ -161,7 +161,7 @@
   milestone: 19
   kind: case
   spec: docs/plan/scheduling.md#hard-gates
-  statement: "**Conversational creation accepts only an exact future instant.** A past or non-timezone-aware instant returns a stable argument failure and leaves no schedule state."
+  statement: "**One-time conversational input accepts only an exact future instant.** A past or non-timezone-aware at instant returns a stable argument failure and leaves no schedule state."
   check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_rejects_a_past_instant_without_state
 - id: gate.schedule.model_create_retry
   milestone: 19
@@ -169,3 +169,39 @@
   spec: docs/plan/scheduling.md#hard-gates
   statement: "**Conversational creation is retry-safe.** Replaying one tool idempotency key and identical normalized arguments returns the original schedule rather than creating a duplicate."
   check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_replays_one_idempotent_schedule
+- id: gate.schedule.calendar_values
+  milestone: 20
+  kind: property
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Calendar cadence values are closed and canonical.** Monthly selectors and yearly month/day pairs validate, normalize, and round-trip without semantic drift."
+  check: tests/gates/test_schedule_calendar_m20.py::test_calendar_cadence_values_are_closed_and_canonical
+- id: gate.schedule.calendar_recurrence
+  milestone: 20
+  kind: property
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Monthly and yearly recurrence is deterministic.** Missing numbered dates skip, month-end and leap-day intent remain explicit, and IANA fold, gap, and no-early rules hold."
+  check: tests/gates/test_schedule_calendar_m20.py::test_monthly_and_yearly_recurrence_is_deterministic
+- id: gate.schedule.calendar_misfire_bounded
+  milestone: 20
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Calendar downtime remains bounded.** Next, latest, and count calculations cross long calendar spans without one iteration per missed occurrence."
+  check: tests/gates/test_schedule_calendar_m20.py::test_calendar_downtime_lookup_and_counting_are_bounded
+- id: gate.schedule.calendar_http_roundtrip
+  milestone: 20
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**The HTTP control plane round-trips every calendar kind.** Existing create and update routes preserve canonical daily, weekly, monthly, and yearly definitions and exact next instants."
+  check: tests/gates/test_schedule_calendar_m20.py::test_schedule_http_round_trips_every_calendar_kind
+- id: gate.schedule.model_create_recurring
+  milestone: 20
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational recurring creation stays governed and least privilege.** Every recurring kind uses approval-gated schedule.create and persists one empty-scope revision."
+  check: tests/gates/test_schedule_calendar_m20.py::test_schedule_create_supports_every_recurring_kind_through_approval
+- id: gate.schedule.model_create_recurring_validation
+  milestone: 20
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational calendar validation and replay fail closed.** Invalid exactly-one-of and calendar inputs leave no state, identical retries replay, and changed recurrence content conflicts."
+  check: tests/gates/test_schedule_calendar_m20.py::test_schedule_create_calendar_validation_and_replay_fail_closed

@@ -456,6 +456,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
+    writer_stop = 'sudo systemctl stop "${managed_units[@]}"'
+    compatibility_query = "SELECT count(*) FROM schedule_revisions"
+    external_timeout = "timeout --signal=TERM --kill-after=5s 20s"
+    connection_timeout = "--env PGCONNECT_TIMEOUT=5"
+    statement_timeout = "--env 'PGOPTIONS=-c statement_timeout=5000'"
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -476,10 +481,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
-    unit_validation_start = manual.index("for unit in \\")
-    unit_validation = manual[unit_validation_start : manual.index("done", unit_validation_start)]
+    unit_list_start = manual.index("managed_units=(")
+    unit_list = manual[unit_list_start : manual.index(")", unit_list_start)]
     for unit in required_units:
-        assert f"  {unit}" in unit_validation
+        assert f"  {unit}" in unit_list
+    assert 'for unit in "${managed_units[@]}"; do' in manual
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
     assert manual.index(image_tag) < manual.index(app_switch)
@@ -488,6 +494,13 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index("flock -w 900 9") < manual.index(writer_stop)
+    assert manual.index(writer_stop) < manual.index(compatibility_query)
+    assert manual.index(compatibility_query) < manual.index(app_switch)
+    assert manual.index(compatibility_query) < manual.index(docs_switch)
+    assert external_timeout in manual
+    assert connection_timeout in manual
+    assert statement_timeout in manual
     restart_position = manual.rindex("sudo systemctl restart")
     validation_position = manual.index(unit_process_validation)
     assert manual.index(app_switch) < restart_position < validation_position
@@ -1338,13 +1351,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 19 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 20 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(20)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(21)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1367,7 +1380,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 20):
+    for milestone in range(12, 21):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
