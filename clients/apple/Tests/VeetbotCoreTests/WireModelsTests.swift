@@ -159,6 +159,42 @@ import Testing
     }
 
     @Test
+    func testScheduleSummaryAndDetailDecodeCalendarValuesAndUnknownState() throws {
+        let summaryData = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000701","state":"ARCHIVED","pause_reason":null,"current_revision":3,"next_fire_at":"2026-09-30T01:00:00Z","title":"Month-end review","instruction_preview":"Review unfinished commitments.","cadence":{"kind":"MONTHLY","local_time":"18:00:00","days_of_month":[15],"last_day":true,"timezone":"America/Los_Angeles"},"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T01:00:00Z"}"#
+                .utf8
+        )
+
+        let summary = try JSONDecoder.server.decode(ScheduleListItemView.self, from: summaryData)
+
+        #expect(summary.id.uuidString == "00000000-0000-0000-0000-000000000701")
+        #expect(summary.state == "ARCHIVED")
+        #expect(summary.stateKind == nil)
+        #expect(summary.cadence.kindKind == .monthly)
+        #expect(summary.cadence.daysOfMonth == [15])
+        #expect(summary.cadence.lastDay == true)
+        #expect(summary.cadence.timezone == "America/Los_Angeles")
+
+        let detailData = Data(
+            #"{"schedule":{"id":"00000000-0000-0000-0000-000000000701","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":3,"next_fire_at":"2026-09-30T01:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T01:00:00Z"},"revision":{"schedule_id":"00000000-0000-0000-0000-000000000701","revision":3,"title":"Month-end review","instruction":"Review the month and summarize unfinished commitments.","agent_id":"00000000-0000-0000-0000-000000000702","agent_version":"3","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":10,"max_tool_calls":20,"max_input_tokens":null,"max_output_tokens":4096,"max_cost":"1.25","deadline_at":null},"run_timeout_seconds":300,"cadence":{"kind":"YEARLY","local_time":"09:30:00","dates":[{"month":2,"day":29},{"month":12,"day":31}],"timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":2,"created_by_principal_id":"principal","created_at":"2026-08-29T01:00:00Z"},"replayed":false}"#
+                .utf8
+        )
+
+        let detail = try JSONDecoder.server.decode(ScheduleRecordView.self, from: detailData)
+
+        #expect(detail.schedule.stateKind == .active)
+        #expect(detail.revision.instruction == "Review the month and summarize unfinished commitments.")
+        #expect(detail.revision.cadence.kindKind == .yearly)
+        #expect(detail.revision.cadence.dates == [
+            ScheduleMonthDayView(month: 2, day: 29),
+            ScheduleMonthDayView(month: 12, day: 31),
+        ])
+        #expect(detail.revision.limits.maxCost == "1.25")
+        #expect(detail.revision.limits.synthesisReserveSteps == nil)
+        #expect(detail.revision.requestedScopes.isEmpty)
+    }
+
+    @Test
     func testUnknownSessionMessageRoleRoundTripsWithoutRejectingThePage() throws {
         let page = Data(
             #"{"items":[{"sequence":1,"role":"system","content":[{"type":"text","text":"Notice"}]}],"next_cursor":null}"#.utf8

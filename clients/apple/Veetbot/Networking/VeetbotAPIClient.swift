@@ -8,6 +8,7 @@ public enum ArtifactContentResponse: Sendable {
 public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case serverUpgradeRequired
     case memoryBrowsingUnavailable
+    case scheduleBrowsingUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -15,6 +16,8 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
             return "This server is running an older Veetbot API that does not support synchronized conversation history or Delete Everywhere. Update the server and try again."
         case .memoryBrowsingUnavailable:
             return "This server does not support memory browsing yet."
+        case .scheduleBrowsingUnavailable:
+            return "This server does not support schedule browsing yet."
         }
     }
 }
@@ -397,6 +400,29 @@ public struct VeetbotAPIClient: Sendable {
             )
         )
     }
+
+    public func listSchedules(
+        limit: Int = 50,
+        cursor: String? = nil
+    ) async throws -> Page<ScheduleListItemView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/schedules", queryItems: query)
+            )
+        } catch {
+            throw scheduleBrowsingCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func getSchedule(_ id: UUID) async throws -> ScheduleRecordView {
+        try await transport.send(
+            TransportRequest(method: .get, path: "/v1/schedules/\(id.uuidString)")
+        )
+    }
 }
 
 private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
@@ -415,6 +441,14 @@ private func memoryBrowsingCompatibilityError(from error: Error) -> VeetbotAPICl
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
     if apiError.statusCode == 404 || apiError.statusCode == 405 {
         return .memoryBrowsingUnavailable
+    }
+    return nil
+}
+
+private func scheduleBrowsingCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 404 || apiError.statusCode == 405 {
+        return .scheduleBrowsingUnavailable
     }
     return nil
 }

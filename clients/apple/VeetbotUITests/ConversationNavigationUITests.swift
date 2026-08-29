@@ -88,6 +88,29 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["User"].exists)
     }
 
+    func testScheduleBrowserListsAndOpensPointReadDetail() {
+        let scheduleButton = app.buttons["sidebar.schedules"]
+        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 10))
+        scheduleButton.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["schedule.browser"].waitForExistence(timeout: 5)
+        )
+        let scheduleRow = app.descendants(matching: .any)[
+            "schedule.row.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Daily review"].exists)
+        XCTAssertTrue(app.staticTexts["Preview from the schedule index."].exists)
+
+        scheduleRow.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["schedule.detail"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
+    }
+
     func testWebsiteAccessCreatesARecoverableBrowserHandoff() {
         let settingsButton = app.buttons["Settings"]
         XCTAssertTrue(settingsButton.waitForExistence(timeout: 10))

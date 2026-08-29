@@ -6,13 +6,14 @@ canonical: true
 
 # Scheduled runs
 
-This document specifies Milestones 11, 19, and 20. The engineering plan states
-the requirement; this document states the mechanism. It is subordinate to
+This document specifies Milestones 11, 19, and 20 and the authorized native
+schedule browser. The engineering plan states the requirement; this document states the mechanism. It is subordinate to
 [engineering-plan.md](engineering-plan.md), and it reuses rather than replaces
 the durable run queue, run loop, policy engine, event log, and HTTP boundary.
 [ADR-0059](../adr/0059-milestone-11-scheduled-runs.md) records the architectural
 decisions for the control plane, ADR-0072 records the original one-time
-conversational bridge, and ADR-0073 records the calendar-recurrence extension.
+conversational bridge, ADR-0073 records the calendar-recurrence extension, and
+ADR-0075 records the transport-only Apple inspection surface.
 
 The scheduling entry condition is satisfied: PostgreSQL-backed on-demand runs,
 leases, fencing, checkpoints, recovery, cancellation, and the public run API
@@ -50,6 +51,11 @@ and widens conversational creation to daily, weekly, monthly, and yearly
 schedules. Arbitrary cron or RFC 5545 input, interval multipliers, dependency
 graphs, workflow DAGs, continuous-session recurrence, and model-callable
 lifecycle mutation remain outside the closed extension.
+
+The owner authorized a native Apple schedule browser on 2026-08-29. It reuses
+the existing Milestone 11 list and point-read routes and therefore adds no
+milestone, gate, API route, scope, feature flag, or persistence behavior. Its
+client contract is specified below.
 
 ## The boundary: a scheduler creates runs; it does not execute them
 
@@ -482,6 +488,55 @@ empty monthly selectors, duplicate or impossible yearly dates, empty yearly
 selectors, non-positive bounds, a grace or timeout above tenant ceilings,
 unknown scopes, mismatched agent policy, and secret-like instructions. Errors
 use the existing envelope and stable reason codes under `schedule.*`.
+
+## Native Apple schedule browser
+
+The browser is a presentation of the authenticated principal's existing
+schedule control-plane records, not a second schedule service. A calendar entry
+beside Memory in the native sidebar opens a list/detail sheet. Presentation
+reloads page one from the server; the client holds only a discardable view
+cache and never computes a schedule's next occurrence locally.
+
+The list calls `GET /v1/schedules` with a bounded limit and the server's opaque
+cursor. It displays every returned lifecycle state rather than hiding terminal
+records: ACTIVE, PAUSED, COMPLETED, CANCELLED, or a future unknown value. Each
+row contains the title, a text-labeled state, a human-readable cadence summary,
+`next_fire_at` when present, and the server-provided `instruction_preview`.
+The preview remains bounded and is never promoted to the complete instruction.
+
+Following a row calls `GET /v1/schedules/{schedule_id}`. Only that authorized
+point read supplies the complete instruction. Detail displays the server's
+current record and revision: state and pause reason, next firing, cadence,
+revision number, complete instruction, requested scopes, pinned agent and
+policy identifiers, finite execution limits, failure policy, and lifecycle
+timestamps. If the schedule is removed or becomes inaccessible between the
+list and point reads, the detail shows the ordinary not-found failure and a
+retry affordance; it does not reinterpret the result as version skew.
+
+The client models state and cadence kind as raw strings with typed known-case
+accessors. Unknown values render by replacing separators with spaces and
+capitalizing the result. Known cadence summaries are:
+
+- ONCE: the absolute `at` instant;
+- DAILY: the local time and IANA zone;
+- WEEKLY: ISO weekday names, local time, and zone;
+- MONTHLY: numbered days and explicit last day, local time, and zone;
+- YEARLY: month/day selectors, local time, and zone.
+
+List pagination shares the native client's established safeguards: duplicate
+schedule IDs are ignored, a repeated cursor terminates paging, stale page
+responses cannot overwrite a newer reload, and a later-page failure retains
+the already loaded rows with an inline retry. A 404 or 405 from the list route
+means schedule browsing is unavailable on that server. The same statuses from
+a point read retain their ordinary HTTP meaning.
+
+The surface is read-only. It has no create, update, pause, resume, cancel,
+delete, occurrence, or run-history control and therefore needs only the
+existing `schedule.read` scope. Swift transport, model, view-model, structure,
+and in-process iOS navigation tests are the acceptance evidence under
+ADR-0049's native verification contract. This client-only extension adds no
+registered Python gate and does not alter the historical Milestone 11 or
+Milestone 20 gate counts.
 
 ## Events and audit
 

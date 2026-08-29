@@ -142,6 +142,8 @@ private struct SessionSidebar: View {
         SessionSidebarDestination.freshConversation()
     @StateObject private var memoryViewModel = MemoryViewModel()
     @State private var showingMemoryBrowser = false
+    @StateObject private var scheduleViewModel = ScheduleViewModel()
+    @State private var showingScheduleBrowser = false
 
     var body: some View {
         Group {
@@ -192,9 +194,22 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Memory")
                 .accessibilityIdentifier("sidebar.memory")
             }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showingScheduleBrowser = true
+                } label: {
+                    Image(systemName: "calendar")
+                        .foregroundColor(AppTheme.orange)
+                }
+                .accessibilityLabel("Schedules")
+                .accessibilityIdentifier("sidebar.schedules")
+            }
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
+        }
+        .sheet(isPresented: $showingScheduleBrowser) {
+            ScheduleBrowserView(model: scheduleViewModel)
         }
     }
 

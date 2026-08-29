@@ -182,4 +182,5 @@ nav:
       - ADR-0072 Milestone 19 conversational schedule creation: adr/0072-milestone-19-conversational-schedule-creation.md
       - ADR-0073 Milestone 20 calendar recurrence: adr/0073-milestone-20-calendar-recurrence.md
       - ADR-0074 Automated macOS TestFlight delivery: adr/0074-automated-macos-testflight-delivery.md
+      - ADR-0075 Native schedule browser: adr/0075-native-schedule-browser.md
   - Changelog: changelog.md
