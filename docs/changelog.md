@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-29 — Model stream accepts ordinary `risk-...` URLs
+
+- Boundary-anchored the normalized stream's `sk-` provider-key detector so it
+  no longer starts inside an ordinary word such as the `sk-...` substring of a
+  `risk-...` URL. Genuine provider-key prefixes, authorization headers, bearer
+  values, and private-key markers remain rejected. A production-derived model
+  stream regression covers the URL false positive.
+
 ## 2026-08-26 — Routine fact lookups avoid sandbox approval
 
 - Added least-powerful-tool guidance to the versioned default agent: routine

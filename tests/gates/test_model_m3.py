@@ -169,6 +169,15 @@ async def test_authorization_documentation_is_not_a_credential(documentation: st
     assert [event.text for event in events if isinstance(event, TextDeltaEvent)] == [documentation]
 
 
+async def test_provider_key_detector_does_not_start_inside_an_ordinary_url_word() -> None:
+    """Keep a production-derived ``risk-...`` URL outside the provider-key detector."""
+
+    url = "https://valueaddvc.com/blog/anthropic-pentagon-supply-chain-risk-shows-why-this-matters"
+    events = [event async for event in validated_stream(source(text(0, 0, url), completed(1)))]
+
+    assert [event.text for event in events if isinstance(event, TextDeltaEvent)] == [url]
+
+
 def test_provider_sdks_are_isolated_to_their_own_adapter_modules() -> None:
     assert architecture_errors(ROOT) == []
     adapter_dir = ROOT / "src/agent_core/adapters/models"

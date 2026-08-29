@@ -47,7 +47,7 @@ SECRET_VALUE = re.compile(
     rf"(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?"
     rf"{CREDENTIAL_VALUE_CHARS_PATTERN}{{8,}}|"
     rf"bearer\s+{OPAQUE_BEARER_VALUE_PATTERN}|"
-    r"sk-(?:ant-|proj-)?[a-z0-9_-]{8,}|-----begin [a-z ]*private key-----)"
+    r"\bsk-(?:ant-|proj-)?[a-z0-9_-]{8,}|-----begin [a-z ]*private key-----)"
 )
 
 
