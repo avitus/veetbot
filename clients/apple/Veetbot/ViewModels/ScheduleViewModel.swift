@@ -109,8 +109,8 @@ public final class ScheduleViewModel: ObservableObject {
             guard reloadRequestID == requestID else { return }
             unavailable = false
             lastFailedListOperation = nil
-            let existingIDs = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
+            var existingIDs = Set(items.map(\.id))
+            items.append(contentsOf: page.items.filter { existingIDs.insert($0.id).inserted })
             nextCursor = consumeNextCursor(page.nextCursor)
         } catch VeetbotAPIClientError.scheduleBrowsingUnavailable {
             guard reloadRequestID == requestID else { return }

@@ -323,9 +323,11 @@ destination with `pipeline.number` as `CFBundleVersion`, verifies that number,
 the bundle identifier, and the signature, and uploads through Xcode with the
 restricted `veetbot-apple-testflight` context. Xcode's independent
 build-number management is disabled so the value the job inspects is the value
-Apple receives. The API key exists only in a temporary file and the signed
-archive is not retained as an artifact. ADR-0074 defines the credential
-boundary, serialization, and external App Store Connect prerequisites.
+Apple receives. The base64-encoded private key is supplied through the job's
+restricted CircleCI context; the decoded `.p8` exists only in a mode-restricted
+temporary file that the exit trap deletes, and the signed archive is not
+retained as an artifact. ADR-0074 defines the credential boundary,
+serialization, and external App Store Connect prerequisites.
 
 Job 1 also runs the reading-lane floor first:
 `python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git

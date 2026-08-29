@@ -437,7 +437,8 @@ Second, create a restricted context named `veetbot-apple-testflight` with:
 Encode the private key without creating another plaintext copy:
 
 ```bash
-base64 -i AuthKey_KEYID.p8 -o -
+APP_STORE_CONNECT_API_KEY_ID=REPLACE_WITH_KEY_ID
+base64 -i "AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -o -
 ```
 
 Paste that output as the context value. Add a CircleCI project restriction for

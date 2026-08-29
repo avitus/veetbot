@@ -26,7 +26,7 @@ import FoundationNetworking
             }
             return Self.response(
                 request,
-                body: #"{"items":[\#(Self.summaryJSON(id: firstID)),\#(Self.summaryJSON(id: secondID))],"next_cursor":"page-2"}"#
+                body: #"{"items":[\#(Self.summaryJSON(id: firstID)),\#(Self.summaryJSON(id: secondID)),\#(Self.summaryJSON(id: secondID))],"next_cursor":"page-2"}"#
             )
         }
 
