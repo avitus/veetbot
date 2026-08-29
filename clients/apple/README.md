@@ -92,6 +92,7 @@ activity bundle. Expanding the bundle retains access to every call's arguments
 and result, including its individual risk. The collapsed bundle uses the
 highest risk among its calls. Messages, different tools, approvals, failures,
 denials, uncertain outcomes, and error results remain separate activity items.
+On iOS, submitting a valid composer message dismisses the software keyboard.
 
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute

@@ -65,6 +65,35 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
+    func testSendingMessageDismissesKeyboard() {
+        let historicalRow = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-000000000123"
+        ]
+        XCTAssertTrue(historicalRow.waitForExistence(timeout: 10))
+        historicalRow.tap()
+
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("Follow up")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+
+        let send = app.buttons["Send"]
+        XCTAssertTrue(send.isHittable)
+        send.tap()
+
+        let keyboardDismissed = NSPredicate(format: "exists == false")
+        let expectation = XCTNSPredicateExpectation(
+            predicate: keyboardDismissed,
+            object: app.keyboards.firstMatch
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: 5),
+            .completed,
+            "the keyboard remained visible after the message was sent"
+        )
+    }
+
     func testMemoryBrowserListsAndOpensDetail() {
         let memoryButton = app.buttons["sidebar.memory"]
         XCTAssertTrue(memoryButton.waitForExistence(timeout: 10))
