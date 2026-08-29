@@ -656,6 +656,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "apple-testflight",
         "live",
         "package-release",
         "deploy-app",
@@ -665,8 +666,10 @@ def test_ci_has_the_required_partitions() -> None:
         if name == "sandbox":
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
-        if name == "apple":
-            assert job["macos"] == {"xcode": "26.6.0"}
+        if name in {"apple", "apple-testflight"}:
+            assert job["macos"]["xcode"] == "26.6.0"
+            if name == "apple":
+                assert job["macos"] == {"xcode": "26.6.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = (
@@ -702,6 +705,25 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-sandbox" in commands["sandbox"]
     assert "make test-apple" in commands["apple"]
     assert "make test-apple-ui" in commands["apple"]
+    testflight_job = jobs["apple-testflight"]
+    assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
+    assert "install_signing_bundle" in testflight_job["steps"]
+    assert any(
+        'apple_build_number="<< pipeline.number >>"' in command
+        and 'CURRENT_PROJECT_VERSION="$apple_build_number"' in command
+        and '-destination "generic/platform=macOS"' in command
+        and "xcodebuild archive" in command
+        and "codesign --verify --deep --strict" in command
+        for command in commands["apple-testflight"]
+    )
+    assert any(
+        "xcodebuild -exportArchive" in command
+        and "plutil -insert manageAppVersionAndBuildNumber -bool false" in command
+        and "APP_STORE_CONNECT_API_KEY_BASE64" in command
+        and "APP_STORE_CONNECT_API_KEY_ID" in command
+        and "APP_STORE_CONNECT_ISSUER_ID" in command
+        for command in commands["apple-testflight"]
+    )
     assert "make test-live" in commands["live"]
     assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
     assert any(
@@ -769,7 +791,12 @@ def test_ci_has_the_required_partitions() -> None:
         for job in verify["jobs"][5:]
         if isinstance(job, dict)
     }
-    assert set(delivery_jobs) == {"package-release", "deploy-app", "deploy-nginx"}
+    assert set(delivery_jobs) == {
+        "package-release",
+        "deploy-app",
+        "deploy-nginx",
+        "apple-testflight",
+    }
     assert delivery_jobs["package-release"]["requires"] == [
         "static",
         "contract",
@@ -786,6 +813,11 @@ def test_ci_has_the_required_partitions() -> None:
     assert delivery_jobs["deploy-nginx"]["context"] == "veetbot-production"
     assert delivery_jobs["deploy-nginx"]["serial-group"] == (
         "<< pipeline.project.slug >>/veetbot-production"
+    )
+    assert delivery_jobs["apple-testflight"]["requires"] == ["deploy-app"]
+    assert delivery_jobs["apple-testflight"]["context"] == "veetbot-apple-testflight"
+    assert delivery_jobs["apple-testflight"]["serial-group"] == (
+        "<< pipeline.project.slug >>/veetbot-apple-testflight"
     )
     for name, job in delivery_jobs.items():
         assert job["filters"] == {"branches": {"only": "main"}}, name

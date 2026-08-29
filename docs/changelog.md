@@ -135,6 +135,20 @@ title: Changelog
   covers short opaque credential-shaped values without rejecting ordinary
   authorization prose.
 
+## 2026-08-26 — Automated macOS TestFlight delivery
+
+- Added a `main`-only `apple-testflight` CircleCI job after the production API
+  deploy. It installs CircleCI's managed Apple signing bundle, uses the
+  project-scoped pipeline number as `CFBundleVersion`, verifies the archived
+  bundle identifier, build number, and signature, and uploads directly to App
+  Store Connect with a restricted API-key context. The key exists only in a
+  mode-restricted temporary file and the signed archive is not retained.
+- Added ADR-0074 and documented the signing-bundle, context, TestFlight-group,
+  automatic-update, counter, and first-delivery prerequisites. The Apple
+  signing authority remains separate from the production-host deployment
+  context, and the job reports upload acceptance rather than claiming Apple's
+  later processing or device installation has completed.
+
 ## 2026-08-24 — Deployment sudo contract covers notifications
 
 - Repaired the production sudoers contract so notification-enabled releases
