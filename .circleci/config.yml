@@ -109,6 +109,85 @@ jobs:
           name: Apple client UI tests
           command: make test-apple-ui
 
+  apple-testflight:
+    macos:
+      xcode: "26.6.0"
+      code_signing:
+        - veetbot-app-store
+    resource_class: m4pro.medium
+    steps:
+      - install_signing_bundle
+      - checkout
+      - run:
+          name: Archive and upload the macOS client to TestFlight
+          command: |
+            set -euo pipefail
+            : "${APPLE_TEAM_ID:?set APPLE_TEAM_ID in the veetbot-apple-testflight context}"
+            : "${APP_STORE_CONNECT_API_KEY_BASE64:?set APP_STORE_CONNECT_API_KEY_BASE64 in the veetbot-apple-testflight context}"
+            : "${APP_STORE_CONNECT_API_KEY_ID:?set APP_STORE_CONNECT_API_KEY_ID in the veetbot-apple-testflight context}"
+            : "${APP_STORE_CONNECT_ISSUER_ID:?set APP_STORE_CONNECT_ISSUER_ID in the veetbot-apple-testflight context}"
+            [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]
+            [[ "$APP_STORE_CONNECT_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]
+            [[ "$APP_STORE_CONNECT_ISSUER_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+
+            apple_build_number="<< pipeline.number >>"
+            [[ "$apple_build_number" =~ ^[1-9][0-9]*$ ]]
+
+            testflight_dir="build/testflight"
+            archive_path="$testflight_dir/Veetbot-macOS.xcarchive"
+            export_path="$testflight_dir/export"
+            export_options="$testflight_dir/ExportOptions.plist"
+            temporary_root="${TMPDIR:-/tmp}"
+            asc_auth_dir="$(mktemp -d "${temporary_root%/}/veetbot-app-store-key.XXXXXX")"
+            asc_auth_file="$asc_auth_dir/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+            cleanup_asc_auth() {
+              rm -f -- "$asc_auth_file"
+              rmdir "$asc_auth_dir"
+            }
+            trap cleanup_asc_auth EXIT
+            umask 077
+            mkdir -p "$testflight_dir" "$export_path"
+            printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" \
+              | base64 --decode > "$asc_auth_file"
+            test -s "$asc_auth_file"
+
+            plutil -create xml1 "$export_options"
+            plutil -insert destination -string upload "$export_options"
+            plutil -insert method -string app-store-connect "$export_options"
+            plutil -insert signingStyle -string automatic "$export_options"
+            plutil -insert teamID -string "$APPLE_TEAM_ID" "$export_options"
+            plutil -insert manageAppVersionAndBuildNumber -bool false "$export_options"
+
+            xcodebuild archive \
+              -project clients/apple/Veetbot.xcodeproj \
+              -scheme Veetbot \
+              -configuration Release \
+              -destination "generic/platform=macOS" \
+              -archivePath "$archive_path" \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CURRENT_PROJECT_VERSION="$apple_build_number"
+
+            app_path="$archive_path/Products/Applications/Veetbot.app"
+            app_info="$app_path/Contents/Info.plist"
+            archived_build_number="$(
+              /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info"
+            )"
+            archived_bundle_id="$(
+              /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info"
+            )"
+            test "$archived_build_number" = "$apple_build_number"
+            test "$archived_bundle_id" = "com.veetbot.apple"
+            codesign --verify --deep --strict --verbose=2 "$app_path"
+
+            xcodebuild -exportArchive \
+              -archivePath "$archive_path" \
+              -exportPath "$export_path" \
+              -exportOptionsPlist "$export_options" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$asc_auth_file" \
+              -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" \
+              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+
   live:
     docker:
       - image: cimg/python:3.12
@@ -355,6 +434,14 @@ workflows:
       - deploy-nginx:
           context: veetbot-production
           serial-group: << pipeline.project.slug >>/veetbot-production
+          requires:
+            - deploy-app
+          filters:
+            branches:
+              only: main
+      - apple-testflight:
+          context: veetbot-apple-testflight
+          serial-group: << pipeline.project.slug >>/veetbot-apple-testflight
           requires:
             - deploy-app
           filters:

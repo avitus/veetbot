@@ -448,6 +448,173 @@ public struct Page<Item: Codable & Sendable>: Codable, Sendable {
     }
 }
 
+public enum ScheduleStateKind: String, Codable, CaseIterable, Sendable {
+    case active = "ACTIVE"
+    case paused = "PAUSED"
+    case completed = "COMPLETED"
+    case cancelled = "CANCELLED"
+}
+
+public enum ScheduleCadenceKind: String, Codable, CaseIterable, Sendable {
+    case once = "ONCE"
+    case daily = "DAILY"
+    case weekly = "WEEKLY"
+    case monthly = "MONTHLY"
+    case yearly = "YEARLY"
+}
+
+public struct ScheduleMonthDayView: Codable, Equatable, Sendable {
+    public let month: Int
+    public let day: Int
+
+    public init(month: Int, day: Int) {
+        self.month = month
+        self.day = day
+    }
+}
+
+/// A forward-compatible projection of the server's closed cadence union.
+/// `kind` remains a raw string so an additive server value can still render
+/// generically on an older client (ADR-0075 decision 7).
+public struct ScheduleCadenceView: Codable, Equatable, Sendable {
+    public let kind: String
+    public let at: Date?
+    public let localTime: String?
+    public let timezone: String?
+    public let weekdays: [Int]?
+    public let daysOfMonth: [Int]?
+    public let lastDay: Bool?
+    public let dates: [ScheduleMonthDayView]?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, at, timezone, weekdays, dates
+        case localTime = "local_time"
+        case daysOfMonth = "days_of_month"
+        case lastDay = "last_day"
+    }
+
+    public var kindKind: ScheduleCadenceKind? { ScheduleCadenceKind(rawValue: kind) }
+}
+
+public struct ScheduleListItemView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let state: String
+    public let pauseReason: String?
+    public let currentRevision: Int
+    public let nextFireAt: Date?
+    public let title: String
+    public let instructionPreview: String
+    public let cadence: ScheduleCadenceView
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, state, title, cadence
+        case pauseReason = "pause_reason"
+        case currentRevision = "current_revision"
+        case nextFireAt = "next_fire_at"
+        case instructionPreview = "instruction_preview"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public var stateKind: ScheduleStateKind? { ScheduleStateKind(rawValue: state) }
+}
+
+public struct ScheduleIdentityView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let tenantID: String
+    public let principalID: String
+    public let state: String
+    public let pauseReason: String?
+    public let currentRevision: Int
+    public let nextFireAt: Date?
+    public let consecutiveFailures: Int
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, state
+        case tenantID = "tenant_id"
+        case principalID = "principal_id"
+        case pauseReason = "pause_reason"
+        case currentRevision = "current_revision"
+        case nextFireAt = "next_fire_at"
+        case consecutiveFailures = "consecutive_failures"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public var stateKind: ScheduleStateKind? { ScheduleStateKind(rawValue: state) }
+}
+
+public struct ScheduleRunLimitsView: Codable, Equatable, Sendable {
+    public let maxSteps: Int
+    public let maxModelCalls: Int
+    public let maxToolCalls: Int
+    public let maxInputTokens: Int?
+    public let maxOutputTokens: Int?
+    public let maxCost: String?
+    public let deadlineAt: Date?
+    /// Added after the original scheduling control plane. These stay optional
+    /// so a client can inspect schedules on an older server that still exposes
+    /// the Milestone 11 routes.
+    public let synthesisReserveSteps: Int?
+    public let synthesisReserveModelCalls: Int?
+    public let synthesisReserveCost: String?
+
+    enum CodingKeys: String, CodingKey {
+        case maxSteps = "max_steps"
+        case maxModelCalls = "max_model_calls"
+        case maxToolCalls = "max_tool_calls"
+        case maxInputTokens = "max_input_tokens"
+        case maxOutputTokens = "max_output_tokens"
+        case maxCost = "max_cost"
+        case deadlineAt = "deadline_at"
+        case synthesisReserveSteps = "synthesis_reserve_steps"
+        case synthesisReserveModelCalls = "synthesis_reserve_model_calls"
+        case synthesisReserveCost = "synthesis_reserve_cost"
+    }
+}
+
+public struct ScheduleRevisionView: Codable, Equatable, Sendable {
+    public let scheduleID: UUID
+    public let revision: Int
+    public let title: String
+    public let instruction: String
+    public let agentID: UUID
+    public let agentVersion: String
+    public let policyProfile: String
+    public let requestedScopes: [String]
+    public let limits: ScheduleRunLimitsView
+    public let runTimeoutSeconds: Int
+    public let cadence: ScheduleCadenceView
+    public let timezone: String?
+    public let misfireGraceSeconds: Int
+    public let maxConsecutiveFailures: Int
+    public let createdByPrincipalID: String
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case revision, title, instruction, limits, cadence, timezone
+        case scheduleID = "schedule_id"
+        case agentID = "agent_id"
+        case agentVersion = "agent_version"
+        case policyProfile = "policy_profile"
+        case requestedScopes = "requested_scopes"
+        case runTimeoutSeconds = "run_timeout_seconds"
+        case misfireGraceSeconds = "misfire_grace_seconds"
+        case maxConsecutiveFailures = "max_consecutive_failures"
+        case createdByPrincipalID = "created_by_principal_id"
+        case createdAt = "created_at"
+    }
+}
+
+public struct ScheduleRecordView: Codable, Equatable, Sendable {
+    public let schedule: ScheduleIdentityView
+    public let revision: ScheduleRevisionView
+}
+
 public enum MemoryStatusKind: String, Codable, CaseIterable, Sendable {
     case candidate
     case provisional

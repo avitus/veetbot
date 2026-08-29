@@ -82,3 +82,5 @@ implementation without one.
 - [ADR-0071 — Milestone 18 first-class email integration (Proposed)](0071-milestone-18-email-integration.md)
 - [ADR-0072 — Milestone 19 conversational schedule creation (Proposed)](0072-milestone-19-conversational-schedule-creation.md)
 - [ADR-0073 — Milestone 20 calendar recurrence and conversational schedules (Proposed)](0073-milestone-20-calendar-recurrence.md)
+- [ADR-0074 — Automated macOS TestFlight delivery](0074-automated-macos-testflight-delivery.md)
+- [ADR-0075 — Native schedule browser over the existing control plane (Proposed)](0075-native-schedule-browser.md)

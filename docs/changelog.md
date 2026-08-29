@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-29 — Model stream accepts ordinary `risk-...` URLs
+
+- Boundary-anchored the normalized stream's `sk-` provider-key detector so it
+  no longer starts inside an ordinary word such as the `sk-...` substring of a
+  `risk-...` URL. Genuine provider-key prefixes, authorization headers, bearer
+  values, and private-key markers remain rejected. A production-derived model
+  stream regression covers the URL false positive.
+
 ## 2026-08-26 — Routine fact lookups avoid sandbox approval
 
 - Added least-powerful-tool guidance to the versioned default agent: routine
@@ -134,6 +142,20 @@ title: Changelog
   normalized stream and trajectory exporter share one bearer-value rule that
   covers short opaque credential-shaped values without rejecting ordinary
   authorization prose.
+
+## 2026-08-26 — Automated macOS TestFlight delivery
+
+- Added a `main`-only `apple-testflight` CircleCI job after the production API
+  deploy. It installs CircleCI's managed Apple signing bundle, uses the
+  project-scoped pipeline number as `CFBundleVersion`, verifies the archived
+  bundle identifier, build number, and signature, and uploads directly to App
+  Store Connect with a restricted API-key context. The key exists only in a
+  mode-restricted temporary file and the signed archive is not retained.
+- Added ADR-0074 and documented the signing-bundle, context, TestFlight-group,
+  automatic-update, counter, and first-delivery prerequisites. The Apple
+  signing authority remains separate from the production-host deployment
+  context, and the job reports upload acceptance rather than claiming Apple's
+  later processing or device installation has completed.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

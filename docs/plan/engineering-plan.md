@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.8"
+version: "2.9"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -103,6 +103,18 @@ Version 2.8 (calendar recurrence pass, 2026-08-27):
   accepts one closed daily, weekly, monthly, or yearly cadence object. Approval,
   exact `schedule.write` scope, empty delegated scopes, bounded execution,
   idempotency, and content-free outcome notifications are unchanged.
+
+Version 2.9 (native schedule inspection pass, 2026-08-29):
+
+- The native Apple client gains a read-only schedule browser over the existing
+  Milestone 11 list and point-read routes (ADR-0075). This transport-only
+  extension adds no route, scope, feature flag, schedule state, or milestone.
+- The browser pages every schedule retained for the authenticated principal,
+  including terminal records, and shows a bounded instruction preview in the
+  list before using the authorized point read for full detail.
+- Unknown schedule states and cadence kinds degrade to generic text, an older
+  server degrades at the list boundary, and schedule creation and lifecycle
+  mutation remain outside the native surface.
 
 ## 1. Mission
 
@@ -3565,6 +3577,42 @@ Arbitrary cron or RFC 5545 input; interval multipliers; model-callable list,
 update, pause, resume, and cancel; continuous-session recurrence; dependency
 graphs; workflow DAGs; delegated scopes; and content-bearing notifications
 remain later extensions.
+
+### Native schedule browser
+
+The owner authorized the native schedule browser on 2026-08-29 (ADR-0075) as
+a transport-only Apple client extension over the completed Milestone 11
+control plane. It is not a new milestone and does not reopen Milestone 11 or
+broaden Milestone 20's gates. The detailed display and compatibility contract
+is in [scheduling.md](scheduling.md#native-apple-schedule-browser).
+
+Implement:
+
+- A schedule entry beside Memory in the native sidebar, opening a resizable
+  list/detail browser that reloads authoritative server state when presented.
+- Cursor-paginated summary rows for every schedule retained for the calling
+  principal, with title, text-labeled lifecycle state, cadence, next firing,
+  and bounded instruction preview.
+- Point-read detail containing the full instruction, current revision,
+  cadence, execution bounds, and lifecycle timestamps; the client never treats
+  the list preview as full content.
+- Forward-compatible rendering for unknown states and cadence kinds, and an
+  explicit unavailable state when an older server does not expose the index.
+
+Acceptance criteria:
+
+- The surface makes only the existing schedule GET requests and requests no
+  schedule write or cancellation authority.
+- ACTIVE, PAUSED, COMPLETED, and CANCELLED records can all be inspected, while
+  an unknown future state or cadence still renders without failing the page.
+- Pagination ignores duplicate IDs, stops on a repeated cursor, survives a
+  later-page error without discarding loaded rows, and offers a retry for the
+  failed operation.
+- The iOS in-process UI fixture opens the schedule browser, lists a schedule,
+  follows its point read, and renders the full instruction in detail.
+
+Native creation, update, pause, resume, cancellation, occurrence history, and
+run history remain outside this read-only extension.
 
 ### Roadmap beyond Milestone 15
 

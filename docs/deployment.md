@@ -411,10 +411,56 @@ The context does not contain the API bearer token, database password, or model
 provider keys. Those stay in the protected server environment. Restrict context
 use to the repository and protected `main` branch.
 
+### macOS TestFlight delivery
+
+The `apple-testflight` job uses two Apple credential boundaries that are
+deliberately separate from `veetbot-production`.
+
+First, upload an active Apple distribution signing identity and the macOS App
+Store provisioning profile for `com.veetbot.apple` to CircleCI's code-signing
+store, then create a signing bundle named `veetbot-app-store`. The profile must
+carry the production entitlements used by the Release target, including APNs.
+CircleCI's supported setup flow accepts the password-protected `.p12` identity
+and `.provisionprofile` once, installs both into a temporary keychain for the
+job, and removes them afterward. Do not place either binary in the repository,
+a context variable, a cache, a workspace, or an artifact.
+
+Second, create a restricted context named `veetbot-apple-testflight` with:
+
+| Variable | Value |
+| --- | --- |
+| `APPLE_TEAM_ID` | Ten-character Apple Developer team identifier |
+| `APP_STORE_CONNECT_API_KEY_ID` | Ten-character App Store Connect key identifier |
+| `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect issuer UUID |
+| `APP_STORE_CONNECT_API_KEY_BASE64` | Base64 encoding of the downloaded `.p8` private key |
+
+Encode the private key without creating another plaintext copy:
+
+```bash
+APP_STORE_CONNECT_API_KEY_ID=REPLACE_WITH_KEY_ID
+base64 -i "AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -o -
+```
+
+Paste that output as the context value. Add a CircleCI project restriction for
+this repository to the context and restrict it to the protected `main` delivery
+path. Treat the organization-level signing bundle and any CircleCI role that can
+reference or replace it as publication authority. The API key needs only the App
+Store Connect role and resource access required to upload Veetbot and manage its
+signing; it grants no server, model-provider, database, or Veetbot API authority.
+Keep the original `.p8` in the owner's protected credential store because App
+Store Connect does not offer it for download a second time.
+
+Before enabling the job, confirm that CircleCI's next `pipeline.number` is
+greater than the latest accepted macOS TestFlight build number for the current
+marketing version. Then configure the intended TestFlight group for automatic
+distribution and enable automatic updates in TestFlight on each Mac. Once CI
+owns the build counter, do not make a manual upload with a build number ahead of
+that counter.
+
 ## Automatic delivery
 
 An ordinary branch or pull request runs verification only. On `main`, after all
-four required verification lanes pass:
+five required verification lanes pass:
 
 - `package-release` archives the exact tested commit, builds MkDocs in strict
   mode, and records both artifacts' SHA-256 values;
@@ -426,7 +472,10 @@ four required verification lanes pass:
   application release, the older proxy job detects the release-identity
   mismatch, reports a distinct stale outcome, and exits without overwriting the
   newer site or config. CircleCI skips that older job's documentation identity
-  probe because the newer release remains authoritative.
+  probe because the newer release remains authoritative; and
+- `apple-testflight` follows a successful application release in a separate
+  serial group, archives and verifies the macOS application with
+  `pipeline.number` as its build number, and uploads it to App Store Connect.
 
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and
@@ -450,6 +499,9 @@ deliberately prevents the deploy identity from dereferencing that process's
 status for each managed unit before reporting the manual rollback target.
 
 The manual and nightly `live-model` workflows remain tests; they do not deploy.
+The TestFlight upload job does not claim that Apple's asynchronous processing or
+device installation has completed; verify those external states in App Store
+Connect after the first automated delivery.
 
 ## Verification
 
