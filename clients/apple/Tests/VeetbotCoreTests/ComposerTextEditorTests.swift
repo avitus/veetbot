@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import VeetbotCore
 
@@ -9,6 +10,30 @@ import UIKit
 #endif
 
 @Suite struct ComposerTextEditorTests {
+    @Test
+    func testChatDismissesIOSKeyboardOnlyAfterSuccessfulSend() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ChatView.swift"),
+            encoding: .utf8
+        )
+        let submitStart = try #require(source.range(of: "private func submitDraft()"))
+        let submission = String(source[submitStart.lowerBound...])
+        let send = try #require(submission.range(of: "let sent = await model.send(message)"))
+        let success = try #require(submission.range(of: "if sent {"))
+        let resign = try #require(
+            submission.range(of: "UIApplication.shared.sendAction(")
+        )
+        let failure = try #require(submission.range(of: "} else if draft.isEmpty {"))
+
+        #expect(send.lowerBound < success.lowerBound)
+        #expect(success.lowerBound < resign.lowerBound)
+        #expect(resign.lowerBound < failure.lowerBound)
+    }
+
     @Test(arguments: [
         (commandPressed: false, expected: ComposerReturnAction.send),
         (commandPressed: true, expected: ComposerReturnAction.insertNewline),
