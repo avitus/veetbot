@@ -24,14 +24,41 @@ import UIKit
         let submission = String(source[submitStart.lowerBound...])
         let send = try #require(submission.range(of: "let sent = await model.send(message)"))
         let success = try #require(submission.range(of: "if sent {"))
-        let resign = try #require(
-            submission.range(of: "UIApplication.shared.sendAction(")
-        )
-        let failure = try #require(submission.range(of: "} else if draft.isEmpty {"))
+        let successBody = try bracedBody(in: submission, startingAt: success)
+        let dismissal = "UIApplication.shared.sendAction("
 
         #expect(send.lowerBound < success.lowerBound)
-        #expect(success.lowerBound < resign.lowerBound)
-        #expect(resign.lowerBound < failure.lowerBound)
+        #expect(successBody.contains(dismissal))
+        #expect(submission.components(separatedBy: dismissal).count == 2)
+    }
+
+    private func bracedBody(
+        in source: String,
+        startingAt marker: Range<String.Index>
+    ) throws -> Substring {
+        let openingBrace = try #require(
+            source[marker].firstIndex(of: "{")
+        )
+        var depth = 0
+        var cursor = openingBrace
+
+        while cursor < source.endIndex {
+            switch source[cursor] {
+            case "{":
+                depth += 1
+            case "}":
+                depth -= 1
+                if depth == 0 {
+                    return source[source.index(after: openingBrace)..<cursor]
+                }
+            default:
+                break
+            }
+            cursor = source.index(after: cursor)
+        }
+
+        Issue.record("Unbalanced success branch in ChatView.submitDraft")
+        return source[source.endIndex..<source.endIndex]
     }
 
     @Test(arguments: [
