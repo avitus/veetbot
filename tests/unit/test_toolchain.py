@@ -708,6 +708,15 @@ def test_ci_has_the_required_partitions() -> None:
     testflight_job = jobs["apple-testflight"]
     assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
+    xcode_project = (
+        ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj"
+    ).read_text(encoding="utf-8")
+    project_team_ids = set(re.findall(r"DEVELOPMENT_TEAM = ([A-Z0-9]{10});", xcode_project))
+    assert len(project_team_ids) == 1
+    testflight_command = "\n".join(commands["apple-testflight"])
+    assert "APPLE_TEAM_ID" not in testflight_command
+    assert "plutil -insert teamID" not in testflight_command
+    assert "DEVELOPMENT_TEAM=" not in testflight_command
     assert any(
         'apple_build_number="<< pipeline.number >>"' in command
         and 'CURRENT_PROJECT_VERSION="$apple_build_number"' in command

@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 enum ConversationScrollTarget: Equatable {
     case bottom
     case notification(NotificationFocus)
@@ -214,7 +218,16 @@ public struct ChatView: View {
         draft = ""
         Task {
             let sent = await model.send(message)
-            if !sent, draft.isEmpty {
+            if sent {
+#if os(iOS)
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil,
+                    from: nil,
+                    for: nil
+                )
+#endif
+            } else if draft.isEmpty {
                 draft = message
             }
         }

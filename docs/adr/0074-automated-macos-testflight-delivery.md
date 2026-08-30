@@ -47,12 +47,14 @@ shared with an Apple publication job.
    and macOS App Store provisioning profile in a signing bundle named
    `veetbot-app-store`. The job invokes `install_signing_bundle`; certificate and
    profile bytes never become repository variables or workspace artifacts.
-5. A separate restricted context, `veetbot-apple-testflight`, supplies only the
-   Apple team ID and the App Store Connect API key's base64-encoded private key,
-   key ID, and issuer ID. The private key is decoded under a process-local
-   temporary directory with mode-restricting umask, passed directly to
-   `xcodebuild`, and deleted on every shell exit. The archive is not stored as a
-   CircleCI artifact.
+5. The non-secret Apple team ID remains authoritative in the checked-in Xcode
+   project. The archive uses that Release build setting, and export defaults to
+   the team recorded in the archive. A separate restricted context,
+   `veetbot-apple-testflight`, supplies only the App Store Connect API key's
+   base64-encoded private key, key ID, and issuer ID. The private key is decoded
+   under a process-local temporary directory with mode-restricting umask,
+   passed directly to `xcodebuild`, and deleted on every shell exit. The archive
+   is not stored as a CircleCI artifact.
 6. `xcodebuild -exportArchive` uses `app-store-connect` with `destination=upload`
    and API-key authentication. Xcode's accepted upload is the CI success
    boundary. Apple's later processing, TestFlight group assignment, and device

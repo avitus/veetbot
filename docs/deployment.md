@@ -429,10 +429,14 @@ Second, create a restricted context named `veetbot-apple-testflight` with:
 
 | Variable | Value |
 | --- | --- |
-| `APPLE_TEAM_ID` | Ten-character Apple Developer team identifier |
 | `APP_STORE_CONNECT_API_KEY_ID` | Ten-character App Store Connect key identifier |
 | `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect issuer UUID |
 | `APP_STORE_CONNECT_API_KEY_BASE64` | Base64 encoding of the downloaded `.p8` private key |
+
+The non-secret Apple team identifier remains authoritative in the checked-in
+Xcode project. The archive uses that Release build setting, and export defaults
+to the team recorded in the archive; do not duplicate the identifier in the
+restricted context.
 
 Encode the private key without creating another plaintext copy:
 

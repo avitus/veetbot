@@ -88,6 +88,21 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                   {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Historical answer loaded"}]}
                 ],"next_cursor":null}
                 """
+        case (
+            "POST",
+            "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/messages"
+        ):
+            statusCode = 202
+            body =
+                "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
+        case ("GET", "/v1/runs/\(Self.runID)/events"):
+            statusCode = 200
+            body = """
+                id: 1
+                event: run.completed
+                data: {"run_id":"\(Self.runID)"}
+
+                """
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)"):
             statusCode = 200
             body = Self.secondSessionJSON
@@ -177,6 +192,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let browserProfileID = "00000000-0000-0000-0000-000000000789"
     private static let authenticationID = "00000000-0000-0000-0000-000000000790"
+    private static let runID = "00000000-0000-0000-0000-000000000791"
     private static let browserProfileJSON = """
         {"id":"\(browserProfileID)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}
         """

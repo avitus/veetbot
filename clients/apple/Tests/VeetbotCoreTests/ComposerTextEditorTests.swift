@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import VeetbotCore
 
@@ -9,6 +10,57 @@ import UIKit
 #endif
 
 @Suite struct ComposerTextEditorTests {
+    @Test
+    func testChatDismissesIOSKeyboardOnlyAfterSuccessfulSend() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ChatView.swift"),
+            encoding: .utf8
+        )
+        let submitStart = try #require(source.range(of: "private func submitDraft()"))
+        let submission = String(source[submitStart.lowerBound...])
+        let send = try #require(submission.range(of: "let sent = await model.send(message)"))
+        let success = try #require(submission.range(of: "if sent {"))
+        let successBody = try bracedBody(in: submission, startingAt: success)
+        let dismissal = "UIApplication.shared.sendAction("
+
+        #expect(send.lowerBound < success.lowerBound)
+        #expect(successBody.contains(dismissal))
+        #expect(submission.components(separatedBy: dismissal).count == 2)
+    }
+
+    private func bracedBody(
+        in source: String,
+        startingAt marker: Range<String.Index>
+    ) throws -> Substring {
+        let openingBrace = try #require(
+            source[marker].firstIndex(of: "{")
+        )
+        var depth = 0
+        var cursor = openingBrace
+
+        while cursor < source.endIndex {
+            switch source[cursor] {
+            case "{":
+                depth += 1
+            case "}":
+                depth -= 1
+                if depth == 0 {
+                    return source[source.index(after: openingBrace)..<cursor]
+                }
+            default:
+                break
+            }
+            cursor = source.index(after: cursor)
+        }
+
+        Issue.record("Unbalanced success branch in ChatView.submitDraft")
+        return source[source.endIndex..<source.endIndex]
+    }
+
     @Test(arguments: [
         (commandPressed: false, expected: ComposerReturnAction.send),
         (commandPressed: true, expected: ComposerReturnAction.insertNewline),

@@ -122,11 +122,9 @@ jobs:
           name: Archive and upload the macOS client to TestFlight
           command: |
             set -euo pipefail
-            : "${APPLE_TEAM_ID:?set APPLE_TEAM_ID in the veetbot-apple-testflight context}"
             : "${APP_STORE_CONNECT_API_KEY_BASE64:?set APP_STORE_CONNECT_API_KEY_BASE64 in the veetbot-apple-testflight context}"
             : "${APP_STORE_CONNECT_API_KEY_ID:?set APP_STORE_CONNECT_API_KEY_ID in the veetbot-apple-testflight context}"
             : "${APP_STORE_CONNECT_ISSUER_ID:?set APP_STORE_CONNECT_ISSUER_ID in the veetbot-apple-testflight context}"
-            [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]
             [[ "$APP_STORE_CONNECT_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]
             [[ "$APP_STORE_CONNECT_ISSUER_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
 
@@ -155,7 +153,6 @@ jobs:
             plutil -insert destination -string upload "$export_options"
             plutil -insert method -string app-store-connect "$export_options"
             plutil -insert signingStyle -string automatic "$export_options"
-            plutil -insert teamID -string "$APPLE_TEAM_ID" "$export_options"
             plutil -insert manageAppVersionAndBuildNumber -bool false "$export_options"
 
             xcodebuild archive \
@@ -164,7 +161,6 @@ jobs:
               -configuration Release \
               -destination "generic/platform=macOS" \
               -archivePath "$archive_path" \
-              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
               CURRENT_PROJECT_VERSION="$apple_build_number"
 
             app_path="$archive_path/Products/Applications/Veetbot.app"

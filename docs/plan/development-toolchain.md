@@ -323,7 +323,10 @@ destination with `pipeline.number` as `CFBundleVersion`, verifies that number,
 the bundle identifier, and the signature, and uploads through Xcode with the
 restricted `veetbot-apple-testflight` context. Xcode's independent
 build-number management is disabled so the value the job inspects is the value
-Apple receives. The base64-encoded private key is supplied through the job's
+Apple receives. The archive uses the checked-in Xcode project's Apple team and
+export defaults to the team recorded in that archive, avoiding a duplicate
+CircleCI setting for the non-secret identifier. The base64-encoded private key
+is supplied through the job's
 restricted CircleCI context; the decoded `.p8` exists only in a mode-restricted
 temporary file that the exit trap deletes, and the signed archive is not
 retained as an artifact. ADR-0074 defines the credential boundary,
