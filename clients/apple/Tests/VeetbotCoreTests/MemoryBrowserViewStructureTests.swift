@@ -55,6 +55,20 @@ import AppKit
         #expect(source.contains("presentationSizing(.fitted)"))
     }
 
+    @Test
+    func testTheMacModalAttachesExplicitResizePersistence() throws {
+        let source = try memoryBrowserViewSource()
+        let normalizedSource = source
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        #expect(
+            normalizedSource.contains(
+                "resizePersistence = PopupWindowResizePersistence( window: window, key: MemoryBrowserWindowConfiguration.storageKey )"
+            )
+        )
+    }
+
     #if os(macOS)
     @Test @MainActor
     func testTheMacModalWindowAllowsUserResizing() {

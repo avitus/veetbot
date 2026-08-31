@@ -268,6 +268,7 @@ private extension View {
 }
 
 enum MemoryBrowserWindowConfiguration {
+    static let storageKey = "veetbot.memoryBrowser.contentSize"
     static let minimumSize = NSSize(width: 560, height: 520)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
 
@@ -276,6 +277,12 @@ enum MemoryBrowserWindowConfiguration {
         window.styleMask.insert(.resizable)
         window.contentMinSize = minimumSize
         window.contentMaxSize = maximumSize
+        PopupWindowContentSizeStore.restore(
+            window: window,
+            key: storageKey,
+            minimumSize: minimumSize,
+            maximumSize: maximumSize
+        )
     }
 }
 
@@ -291,6 +298,7 @@ private struct MemoryBrowserWindowResizeView: NSViewRepresentable {
 
 private final class MemoryBrowserWindowResizeNSView: NSView {
     private var keyWindowObserver: NSObjectProtocol?
+    private var resizePersistence: PopupWindowResizePersistence?
 
     deinit {
         if let keyWindowObserver {
@@ -304,16 +312,25 @@ private final class MemoryBrowserWindowResizeNSView: NSView {
             NotificationCenter.default.removeObserver(keyWindowObserver)
         }
         keyWindowObserver = nil
+        resizePersistence = nil
         guard let window else { return }
 
-        applyConfigurationIfPossible()
+        applyConfigurationAfterPresentation()
+        resizePersistence = PopupWindowResizePersistence(
+            window: window,
+            key: MemoryBrowserWindowConfiguration.storageKey
+        )
         keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: window,
             queue: .main
         ) { [weak self] _ in
-            self?.applyConfigurationIfPossible()
+            self?.applyConfigurationAfterPresentation()
         }
+    }
+
+    private func applyConfigurationAfterPresentation() {
+        applyConfigurationIfPossible()
         DispatchQueue.main.async { [weak self] in
             self?.applyConfigurationIfPossible()
         }

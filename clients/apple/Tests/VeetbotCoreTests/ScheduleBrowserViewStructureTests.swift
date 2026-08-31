@@ -47,6 +47,20 @@ import Testing
         #expect(source.contains("presentationSizing(.fitted)"))
     }
 
+    @Test
+    func testTheMacModalAttachesExplicitResizePersistence() throws {
+        let source = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")
+        let normalizedSource = source
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        #expect(
+            normalizedSource.contains(
+                "resizePersistence = PopupWindowResizePersistence( window: window, key: ScheduleBrowserWindowConfiguration.storageKey )"
+            )
+        )
+    }
+
     private func source(at relativePath: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
