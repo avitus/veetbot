@@ -1,487 +1,204 @@
-# Veetbot
+<p align="center">
+  <img src="assets/brand/veetbot-icon.svg" width="112" alt="Veetbot">
+</p>
 
-**A durable, governed AI agent platform built to turn model calls into reliable,
-inspectable work.**
+<h1 align="center">Veetbot</h1>
 
-Veetbot combines production-grade execution, long-term memory, tools, schedules,
-notifications, and native clients behind one provider-neutral core. Runs survive
-process failures, every consequential action passes through explicit policy, and
-the event log preserves enough evidence to understand what happened and resume
-safely.
+<p align="center">
+  <strong>An AI agent that can do useful work, remember what matters, and show its work.</strong>
+</p>
 
-## Built for real agent workloads
+## Meet Veetbot
 
-- **Reliable by design** — durable runs, leases, checkpoints, idempotency, and
-  replayable events replace fragile, process-bound conversations.
-- **Governed at every boundary** — deterministic policy, scoped credentials,
-  approvals, isolated execution, and auditable memory keep authority explicit.
-- **Open where it matters** — OpenAI, Anthropic, OpenAI-compatible models, MCP,
-  web providers, a public HTTP API, and multiple clients share stable internal
-  contracts instead of locking the platform to one vendor.
-- **Ready to operate** — schedules, offline results, push notifications,
-  deployment automation, evaluation gates, and recovery tooling make Veetbot a
-  platform you can run, test, and improve over time.
+Veetbot is a self-hostable AI agent for work that takes more than a single
+prompt. Give it a goal and it can use tools, keep track of context, remember
+useful information, pause when it needs your approval, and continue after a
+process restart.
 
-## Project status
+It is designed for people who want a capable assistant without giving up
+control. Every run leaves a durable record, important actions pass through
+explicit policy, and you can inspect what happened instead of trusting a black
+box.
 
-Veetbot is in active implementation under the canonical
-[engineering plan](docs/plan/engineering-plan.md). Milestones 0 through 12 are
-complete, as are the independently delivered Milestone 16 memory-evaluation
-and lifecycle workstream and Milestone 17 memory read API and native browser.
-The verified sequential ceiling remains Milestone 12, backed by 247 cumulative
-gates.
+### What it can do
 
-Milestone 13's core subagent and delegation path is implemented with all
-twenty-one gates passing locally; its activation evidence, hosted CI, and final
-review remain. Milestone 19's focused one-time conversational scheduling tool
-is implemented locally, with full repository verification and hosted review
-still outstanding. Milestones 14 (inbound surfaces and pairing), 15
-(operational hardening), and 18 (email integration) are authorized and fully
-specified but have not started.
-Model-routing changes and the rest of the longer-term roadmap remain deferred.
+- **Carry work through to completion.** Runs, tool calls, checkpoints, and
+  results survive crashes and can be resumed safely.
+- **Use the model you prefer.** OpenAI, Anthropic, and OpenAI-compatible local
+  models share one provider-neutral interface.
+- **Work with tools and the web.** Built-in tools, MCP servers, skills, public
+  web search, page extraction, and browser automation use the same governed
+  execution path.
+- **Remember with context.** Long-term memory records where information came
+  from, supports corrections and deletion, and makes retrieval decisions
+  inspectable.
+- **Keep you in control.** Deterministic policy rules, scoped credentials,
+  isolated execution, and approval prompts guard consequential actions.
+- **Handle work while you are away.** Durable schedules, offline results, and
+  notifications let useful work continue beyond an open chat window.
+- **Meet you where you work.** Use the command line, the versioned HTTP API and
+  event stream, the downloadable terminal client, or the native Apple client.
+- **Make behavior testable.** Reproducible evaluations and named release gates
+  turn agent quality, safety, and recovery into things a team can verify.
 
-## Features
+Veetbot is under active development. The durable agent core and the workflows
+through Milestone 12 are complete, along with the memory evaluation and memory
+browser workstreams; newer capabilities continue to move through explicit
+release gates. See the
+[current project state](docs/status/project-state.yaml) for the exact status of
+each milestone.
 
-### Available now
+## Developer guide
 
-- **Durable, resumable runs** — an append-only PostgreSQL event log, leased
-  queue workers, checkpoints, idempotent submission, and crash recovery across
-  processes.
-- **Real model providers** — OpenAI Responses, Anthropic Messages, and
-  OpenAI-compatible local endpoints behind declared model policies, with
-  normalized streaming and durably pinned models, capabilities, and pricing.
-- **Policy and approvals** — a deterministic policy gate with non-overridable
-  hardline rules; approvals resolve through the CLI, the API, and the clients.
-- **A complete tool lifecycle** — builtin tools with validation,
-  classification, recovery boundaries, and durable invocation records.
-- **HTTP API with SSE** — versioned `/v1` routes, scoped bearer authentication,
-  idempotent submission, and reconnectable, replayable event streams.
-- **Isolated execution and artifacts** — sandboxed tool execution behind
-  Docker/gVisor with default-deny egress, resource limits, and a checksummed
-  artifact store.
-- **Context engineering** — budgeted assembly with a stable prefix,
-  deterministic compaction, and typed, durable working state.
-- **Skills and MCP** — versioned, immutable skill packages pinned at session
-  open, plus MCP servers over the official SDK.
-- **Long-term memory and knowledge** — governed formation with provenance and
-  corrections, hybrid recall with an auditable trace, configurable lifecycle
-  policies, reproducible evaluation, and cited knowledge-document retrieval.
-- **Memory API and native browser** — a default-off, read-only,
-  principal-isolated HTTP surface with explicit sensitivity ceilings, plus a
-  SwiftUI browser for the complete governed belief view.
-- **Provider-neutral web access** — independently selectable Tavily and
-  Firecrawl adapters behind stable `web.search` and `web.fetch` tools, with a
-  recommended Tavily-search/Firecrawl-fetch deployment.
-- **Scheduled work and notifications** — default-off one-time, daily, and
-  weekly schedules with durable offline results, plus a device registry,
-  transactional notification outbox, APNs delivery, and Apple deep links.
-- **Governed trajectory export** — consent-gated, redacted, and verified
-  before any artifact is committed.
-- **Evaluation harness** — deterministic evaluation cases, a 353-entry gate
-  registry spanning every authorized milestone, and credential- and cost-gated
-  live capability lanes.
-- **Clients** — a dependency-free downloadable terminal client and a native
-  SwiftUI client for iOS and macOS.
-- **Production deployment** — CircleCI-driven atomic releases to
-  `api.veetbot.com` with systemd, Nginx, gVisor, and production validation,
-  plus the release-matched static documentation site at
-  [`docs.veetbot.com`](https://docs.veetbot.com/).
+The quickest way to understand Veetbot is to run its deterministic local demo.
+It exercises PostgreSQL persistence, the worker queue, a real built-in tool, and
+the event log without requiring a model API key.
 
-### In progress and authorized next
-
-- **Subagents and delegation (Milestone 13)** — bounded `delegate.run` child
-  runs now have separate sessions, leases, budgets, traces, durable suspension
-  and join behavior, and downward cancellation. All registered gates pass
-  locally; activation evidence, hosted CI, and final review remain.
-
-- **Conversational scheduling (Milestone 19)** — a focused one-time schedule
-  creation tool and its gate suite are implemented locally; full repository
-  verification and hosted review are pending.
-- **Inbound surfaces and pairing (Milestone 14)** — a default-off Telegram
-  surface, secure pairing ceremony, and shared run-submission path are specified.
-- **Operational hardening (Milestone 15)** — encrypted off-host backups,
-  restore rehearsal, health alerts, firewall hardening, and rollback are
-  specified.
-- **Email integration (Milestone 18)** — a parallel, default-off Gmail MCP
-  workstream is specified with read/triage tools, drafts, approval-gated send,
-  and broker-held credentials.
-
-All of these capabilities remain subject to their milestone gates. Richer model
-routing and everything else on the long-term roadmap are not yet authorized.
-
-## Prerequisites
+### Prerequisites
 
 - Python 3.12 or newer
 - [uv](https://docs.astral.sh/uv/)
-- Docker with the Compose plugin for the development PostgreSQL service
-- [Pandoc](https://pandoc.org/) for the single-file documentation build
+- Docker with the Compose plugin
+- `make`
+- [Pandoc](https://pandoc.org/) only if you plan to build the standalone
+  documentation
 
-## Install
+The commands below assume a macOS or Linux shell and start from the repository
+root.
+
+### 1. Install the project
+
+Create your local environment file, then install the locked development
+dependencies:
 
 ```bash
 cp .env.example .env
 make install
 ```
 
-`make install` runs `uv sync --all-groups`. The committed `uv.lock` is the
-only dependency resolution used by development and CI.
+The default `.env` uses development authentication and a scripted fake model,
+so the first run is local, deterministic, and free.
 
-## PostgreSQL and migrations
+### 2. Start PostgreSQL
 
-Start the pinned PostgreSQL 16 service, wait for its healthcheck, and apply the
-linear Alembic graph as separate operations:
+Start the pinned PostgreSQL 16 container and apply the migrations:
 
 ```bash
 make db-up
 make migrate
 ```
 
-The database, user, and development-only password are all `agent`; PostgreSQL
-is exposed on `localhost:5432`. The composition root will never migrate on
-startup. The first migration is intentionally empty because Milestone 0 adds no
-application schema.
+The development database listens on `127.0.0.1:5432`. Veetbot never applies
+migrations during application startup, so run `make migrate` whenever you pull
+new migrations.
 
-Port 5432 must be free before startup. Stop any separately installed PostgreSQL
-service using that port; otherwise `make migrate` may connect to that server
-instead of the Compose database.
+### 3. Start a worker
 
-To reset the development database, remove the compose service and its named
-volume, then recreate it. This permanently deletes local development data:
-
-```bash
-docker compose down -v
-make db-up
-make migrate
-```
-
-## Checks
-
-The pull-request gate is:
-
-```bash
-make check
-```
-
-It runs formatting validation, linting, strict type checking, the static and
-contract partitions, isolated deployment-script tests, citation validation, the
-353-entry gate-registry reconciliation, and strict documentation builds. It
-requires neither a database nor a provider credential.
-
-Additional targets are explicit about their requirements:
-
-| Command | Purpose |
-| --- | --- |
-| `make format` | Apply Ruff formatting and safe lint fixes |
-| `make test` | Run every non-live test; integration tests need PostgreSQL once present |
-| `make test-static` | Run unit tests and structural/property gates without I/O |
-| `make test-contract` | Run shared port contracts against in-memory/fake adapters |
-| `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
-| `make test-live` | Explicitly enable credentialed provider tests |
-| `make test-apple` | Run the Apple client's Swift Testing suite (requires full Xcode) |
-| `make test-apple-ui` | Run the macOS window-restart test and conversation-navigation tests on available iPhone and iPad simulators |
-| `make test-deploy` | Exercise release and Nginx installers against isolated command stubs |
-| `make production-check` | Validate release identity, model credential, gVisor, sandbox image, storage, and migration head |
-| `make docs` | Build the MkDocs site and standalone HTML publication |
-| `make docs-check` | Validate citations, registry structure, and strict docs output |
-
-Static and contract tests deny network egress. Integration tests may use Unix
-sockets and loopback only. Live tests are the sole category that lifts the
-socket block.
-
-## Run the durable agent
-
-After copying `.env.example` to `.env` and applying migrations, start a worker
-in one terminal:
+Keep this command running in its own terminal:
 
 ```bash
 uv run agent worker --role worker
 ```
 
-Then submit the calculator flow from another terminal:
+The worker leases queued runs, executes model and tool steps, and writes their
+events back to PostgreSQL.
+
+### 4. Submit your first run
+
+In a second terminal, run the built-in calculator demo:
 
 ```bash
 uv run agent run "What is 17 multiplied by 23?"
 ```
 
-Progress is written to stderr and the final answer (`391`) to stdout. Run the
-checked-in deterministic cases with:
+You should see progress on stderr and `391` on stdout. That result travels
+through the same durable run and tool lifecycle used by real model providers.
 
-```bash
-uv run agent eval run
+### 5. Connect a real model (optional)
+
+Add the credential for the provider you want to use to `.env`:
+
+```dotenv
+VEETBOT_OPENAI_KEY=...
+ANTHROPIC_API_KEY=...
 ```
 
-To see which named problems are actually isolated, execute the canonical gate
-registry. Active checks run; later-milestone checks remain visible as pending;
-and an active skip is reported as a failure rather than a pass:
+Restart the worker after changing `.env`, then create a run with a declared
+model policy:
 
 ```bash
-uv run agent eval gates
-uv run agent eval gates --area policy
+uv run agent run --model-policy balanced "Summarize this repository"
+uv run agent run --model-policy flagship "Review the architecture"
 ```
 
-The live capability lane is credential- and cost-gated. It accepts only
-scenarios linked to a checked-in redacted failed trajectory, repeats each
-scenario, uses a version-pinned independent judge, enforces scenario/suite/day
-ceilings, and persists the score distribution in PostgreSQL:
+`balanced` uses OpenAI and `flagship` uses Anthropic. For a credential-free
+local model, start Ollama with the configured `qwen3:8b` model and use:
 
 ```bash
-RUN_LIVE_MODEL_TESTS=1 uv run agent eval capability --suite research
+uv run agent run --model-policy local "Explain the event-driven run loop"
 ```
 
-No publishable scenario is checked in yet because the repository has no actual
-failed redacted trajectory. The command refuses to invent one; admission and
-fixture details are in [`evals/capability/README.md`](evals/capability/README.md).
+Model policies, provider profiles, pricing snapshots, and capability limits
+live in reviewed YAML under `src/agent_core/models/`.
 
-Choose a declared model policy when creating a new session:
+### Run the API and terminal client
+
+With the database and worker already running, start the local API in another
+terminal:
 
 ```bash
-uv run agent run --model-policy balanced "Summarize this request"
-uv run agent run --model-policy flagship "Solve this difficult problem"
-uv run agent run --model-policy local "Answer without a hosted provider"
+uv run agent api
 ```
 
-`balanced` uses the OpenAI Responses adapter, `flagship` uses Anthropic
-Messages, and `local` uses the OpenAI-compatible endpoint declared by the
-Ollama profile. The corresponding worker resolves and durably pins the provider,
-model, capability set, profile hash, and pricing snapshot before its first
-model call. Remote policies fail closed at use when their credential is absent;
-fake and local workflows remain available without remote credentials.
-
-`agent session create`, `agent run get`, and `agent run events` read the same
-PostgreSQL state across processes. Run periodic lease reclamation separately
-with `uv run agent worker --role maintenance` in deployments that do not use a
-process supervisor to start that role.
-
-Inspect and correct the governed memory store through the same PostgreSQL
-composition:
-
-```bash
-uv run agent memory list --session <session-id> --include-inactive
-uv run agent memory get <belief-id>
-uv run agent memory formations --session <session-id>
-uv run agent memory diagnose --session <session-id>
-uv run agent memory replay --session <session-id> --confirm
-uv run agent memory trace <trace-id>
-uv run agent memory edit <belief-id> --statement "Corrected statement"
-uv run agent memory delete <belief-id>
-```
-
-The commands emit JSON to stdout. Belief records carry their source session,
-source event ids, formation-run id, policy version, lifecycle, authority, and
-sensitivity. Formation records show extraction watermarks and candidate outcome
-counts. Diagnosis joins formation flags, watermarks, provider attempts, audits,
-and beliefs for one session; confirmed replay reprocesses the original evidence
-through the governed path. Trace records show the retrieval query, ranking scores
-and arms, safety blocks, and budget drops. Trace ids appear in `memory.recalled`
-events.
-
-Hosted checks use [CircleCI](https://circleci.com/) via
-`.circleci/config.yml`. Connect the repository as a CircleCI project for the
-static, contract, integration, and sandbox workflow. A successful `main`
-pipeline packages the tested commit and deploys it to `api.veetbot.com`; the
-versioned proxy site is reconciled after the application release. Create a
-restricted context named
-`live-model` for provider credentials; nightly runs and manually triggered
-pipelines with `run_live: true` are the only workflows that use it.
-
-## Clients
-
-Two clients speak the public `/v1` API. The shared core remains authoritative
-for sessions, runs, approvals, events, and artifacts in both.
-
-### Downloadable terminal client
-
-Build the dependency-free terminal client with:
+It listens on `http://127.0.0.1:8000`. Build and open the dependency-free
+terminal client with:
 
 ```bash
 make client-build
-```
-
-The resulting `build/veetbot-client.pyz` needs Python 3.12 or newer but does
-not need the server package or its dependencies. It defaults to the loopback
-API; the API and worker must be started separately as described in
-[Run the durable agent](#run-the-durable-agent) and the [client guide](docs/client.md).
-For a deployment, export the URL and let the client request the bearer token
-through its interactive no-echo prompt:
-
-```bash
-export VEETBOT_API_URL=https://agent.example.com
 python build/veetbot-client.pyz
 ```
 
-The client creates or resumes sessions, submits idempotently, reconnects and
-replays SSE, handles approvals and user questions, and reconciles transient
-output against the durable final message. See the
-[client guide](docs/client.md) for its commands and security boundary.
+The [client guide](docs/client.md) covers remote URLs, authentication, session
+resume, approvals, and reconnect behavior. The native iOS and macOS client has
+its own [setup guide](clients/apple/README.md).
 
-### Native Apple client
+### Everyday development commands
 
-`clients/apple` holds a SwiftUI client for iOS 15+ and macOS 12+ with no
-third-party dependencies. It restores complete durable transcripts, replays the
-active run over SSE, keeps a reconciled local session history, and stores its
-bearer token only in Keychain. It also registers devices for APNs, reconciles
-the offline notification inbox, and restores notification deep links. The
-Milestone 17 read-only memory browser is complete, with local and hosted Apple
-verification and a clean final review. See its
-[README](clients/apple/README.md) for signing, settings, and test instructions.
+| Command | What it does |
+| --- | --- |
+| `make check` | Run formatting checks, linting, strict types, fast tests, deployment-script tests, and documentation checks |
+| `make format` | Apply Ruff formatting and safe lint fixes |
+| `make test` | Run every non-live Python test |
+| `make test-static` | Run unit and structural tests without I/O |
+| `make test-contract` | Run shared contracts against in-memory and fake adapters |
+| `make test-integration` | Run tests that need PostgreSQL or another local service |
+| `make docs` | Build the MkDocs site and standalone HTML documentation |
+| `make docs-serve` | Serve the documentation locally with live reload |
 
-## Configuration
+`make check` does not require a database or provider credential. Static and
+contract tests block network access; only explicitly enabled live tests may
+contact model providers and incur cost. The provider-assisted memory evaluator
+currently makes 25 bounded provider calls (at most USD 1.25 under its per-call
+ceiling).
 
-Environment values are limited to deployment identity, addresses, and secrets.
-Tuning values live in reviewed YAML beside the package that owns them. An
-optional `AGENT_CONFIG_DIR` overlays shipped YAML by top-level key; it cannot
-replace `policy/hardline.yaml`. Environment values are interpolated only where
-a YAML file explicitly names `${VAR}`.
+### Configuration and project conventions
 
-Production validation refuses development authentication and the `docker` or
-`fake` sandbox mechanisms. Provider credentials are represented as Pydantic
-secret values and structured-log processors redact sensitive keys, provider-key
-prefixes, prompts, messages, reasoning, tool results, and large content.
+Secrets, addresses, and deployment identity belong in `.env`; reviewed tuning
+values belong in the YAML file owned by the relevant package. Optional web,
+browser, scheduling, notification, email, and trajectory-export features are
+disabled by default. Their available environment switches are documented in
+[`.env.example`](.env.example).
 
-Set `VEETBOT_OPENAI_KEY` or `ANTHROPIC_API_KEY` only for the remote profiles you
-intend to use. `OPENAI_API_KEY` remains a compatibility fallback, but the
-Veetbot-specific name wins when both are present. Governed trajectory export is
-disabled by default. To opt a local deployment in, set
-`AGENT_TRAJECTORY_EXPORT_ENABLED=1` and choose an `AGENT_ARTIFACT_ROOT` outside
-the source tree. A principal grant is still required and is prospective:
+Before changing the codebase, read [AGENTS.md](AGENTS.md). It explains the
+authorized milestone, required reading lane, test-driven workflow, and
+completion-report requirements. The main technical references are:
 
-```bash
-uv run agent session export-consent grant
-uv run agent run "A run that may later be exported"
-uv run agent run export <run-id> --json
-uv run agent session export-consent withdraw
-```
+- [Engineering plan](docs/plan/engineering-plan.md) — normative requirements
+- [Current milestone](docs/plan/current-milestone.md) — authorized work
+- [Architecture decisions](docs/adr/) — decisions and tradeoffs
+- [Security model](docs/security.md) — trust boundaries and controls
+- [Deployment runbook](docs/deployment.md) — production installation,
+  validation, rollback, and recovery
 
-Withdrawal expires all prior exports for that principal. Run the maintenance
-worker to remove expired metadata and bytes. Exported JSON excludes reasoning,
-provider metadata, usage, prices, precise timestamps, and internal execution
-identifiers; mandatory secret rules are applied and then verified before any
-artifact is committed.
-
-Provider-assisted memory formation uses safe automatic selection by default.
-`AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` activates matching operator or
-release-bundled evidence and otherwise records the reason and stays on
-deterministic `formation@7`. The bundled artifact is reviewed provider-assisted
-`formation@8` evidence for the balanced OpenAI `gpt-5.6-sol` and default-profile
-tuple, so that tuple activates and every other one falls back. `off` does not
-even resolve a formation model; `required` refuses startup without an exact
-extractor, model, profile, and compiled-policy-version match. An operator
-artifact can be supplied with `AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
-
-Release engineers can generate that artifact instead of authoring JSON:
-
-```bash
-RUN_LIVE_MODEL_TESTS=1 uv run agent eval memory-formation \
-  --model-policy balanced --policy-profile default \
-  --build-ref <immutable-build-ref> \
-  --output .agent/evals/provider-memory-evidence.json
-```
-
-The checked-in corpus currently makes 25 bounded provider calls (at most USD
-1.25 under the extractor's per-call ceiling). The command compares isolated
-provider and deterministic arms, derives the corpus hash and resolved model,
-and writes a new file only after the no-fabrication, no-policy-regression, and
-positive-lift gate passes. Provider extraction itself runs only during memory
-maintenance, has no tools, and falls back deterministically on call failure.
-
-Public-web access is also disabled by default. The recommended provider split
-is enabled with:
-
-```bash
-WEB_SEARCH_PROVIDER=tavily
-WEB_FETCH_PROVIDER=firecrawl
-TAVILY_API_KEY=...
-FIRECRAWL_API_KEY=...
-```
-
-Either selector may instead name `firecrawl`, `tavily`, or `disabled`. Provider
-keys are resolved by the credential broker at call time and are never exposed
-to the model.
-
-Rendered browser navigation is separately disabled by default. To enable the
-ephemeral read-only Playwright provider, install its Chromium artifact and bind
-an explicit set of exact HTTPS origins:
-
-```bash
-uv run playwright install chromium
-BROWSER_PROVIDER=playwright
-BROWSER_ALLOWED_ORIGINS=https://example.org,https://static.example.org
-```
-
-Origins cannot contain paths, wildcards, nonstandard ports, or private-network
-hosts. The provider creates a non-persistent context and retains no login state
-after shutdown. It exposes `browser.navigate`, `browser.observe`, and
-approval-gated `browser.act`. Actions are bound to the exact observed page
-revision, are never parallelized or blindly retried, and ambiguous dispatches
-are recorded as uncertain.
-
-Authenticated operation uses the separately deployed hosted profile service.
-The public profile/authentication/grant API first creates a dedicated profile
-and completes a five-minute direct user login ceremony. Trusted runtime
-configuration can then bind that profile, and optionally one exact standing
-grant, without exposing either identifier to model tool arguments:
-
-```bash
-BROWSER_PROVIDER=hosted
-BROWSER_ALLOWED_ORIGINS=https://example.org
-BROWSER_PROFILE_SERVICE_URL=https://browser.example.org
-BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.org
-BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=/run/secrets/browser-control-plane
-BROWSER_PROFILE_ID=00000000-0000-0000-0000-000000000000
-BROWSER_GRANT_ID=
-BROWSER_RUN_PURPOSE=
-```
-
-Hosted profile state is encrypted in the isolated service, session leases are
-run-attempt scoped, and every mutation still needs an ordinary approval unless
-an unexpired policy-revalidated grant matches a provider-classified routine
-action. Scheduling those runs belongs to Milestone 11.
-
-## Workflow availability
-
-Every workflow the engineering plan reserved through Milestone 12 is
-implemented, together with the independently completed Milestone 16 memory
-evaluation and lifecycle work: durable submission and workers, model providers,
-policy and approvals, isolated tools, long-term memory, skills, web and browser
-access, schedules, notifications, clients, and named gate status by milestone
-or area. These boundaries keep availability distinct from authorization and
-local implementation:
-
-- The live capability harness is implemented but has no publishable scenario;
-  admission requires a real checked-in redacted failed trajectory.
-- Optional authoring, web, browser, scheduling, and notification capabilities
-  retain their documented default-off controls.
-- Milestones 13 and 17 have locally passing implementations but are not complete
-  until their remaining evidence and hosted review conditions pass. Milestone
-  19's focused implementation also awaits full repository verification and
-  hosted review.
-- Milestones 14, 15, and 18 are authorized and specified, but not yet
-  implemented.
-- Model-routing changes and the remaining roadmap are deferred and have no
-  commands yet.
-
-`agent run`, `agent run export`, `agent session create`, `agent session
-export-consent`, `agent worker`, `agent api`, and `agent eval run` are available
-now. The separately downloadable client and the native Apple client provide
-interactive remote chat; `agent chat` itself remains unavailable.
-
-## Documentation and governance
-
-Start with [AGENTS.md](AGENTS.md). Markdown and YAML are canonical. Files under
-`site/` and `dist/` are generated and must not be edited. Architectural changes
-require ADRs, milestone status changes require evidence, and work beyond the
-authorized milestone must not begin speculatively.
-
-Canonical references are the [engineering plan](docs/plan/engineering-plan.md),
-the [current-milestone pointer](docs/plan/current-milestone.md), the
-[machine-readable project state](docs/status/project-state.yaml), and the
-[architecture decision records](docs/adr/). The original Word document under
-`archive/` is archival only.
-
-Security boundaries and the controls established so far are documented in
-[docs/security.md](docs/security.md).
-
-Production operators should follow the evidence-based
-[DigitalOcean deployment runbook](docs/deployment.md). It covers the checked-in
-atomic release script, systemd, Nginx, production environment, gVisor,
-CircleCI context, rollback procedure, and remaining host bootstrap work.
+Markdown and YAML are canonical. Do not edit generated files under `site/` or
+`dist/`.
