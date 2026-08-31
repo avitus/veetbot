@@ -8,6 +8,8 @@ import pytest
 
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
+from agent_core.adapters.web.keenable import KeenableWebProvider
+from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
@@ -81,6 +83,37 @@ async def test_one_provider_can_serve_both_web_capabilities(
         assert isinstance(fetch, WebFetchTool)
         assert isinstance(search._provider, provider_type)
         assert fetch._provider is search._provider
+
+
+async def test_weighted_composition_routes_half_of_each_capability_to_keenable() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "WEB_SEARCH_PROVIDERS": "tavily:50,keenable:50",
+            "WEB_FETCH_PROVIDERS": "firecrawl:50,keenable:50",
+            "TAVILY_API_KEY": "synthetic-tavily-credential",
+            "FIRECRAWL_API_KEY": "synthetic-firecrawl-credential",
+            "KEENABLE_API_KEY": "synthetic-keenable-credential",
+        }
+    )
+
+    async with build(settings=settings, enabled_tools=["web.search", "web.fetch"]) as composition:
+        registry = composition.tool_pipeline._registry
+        search = cast(RegisteredTool, registry.get("web.search")).implementation
+        fetch = cast(RegisteredTool, registry.get("web.fetch")).implementation
+        assert isinstance(search, WebSearchTool)
+        assert isinstance(fetch, WebFetchTool)
+        assert isinstance(search._router, WeightedWebProviderRouter)
+        assert isinstance(fetch._router, WeightedWebProviderRouter)
+        assert [
+            (type(allocation.provider), allocation.weight)
+            for allocation in search._router.allocations
+        ] == [(TavilyWebProvider, 50), (KeenableWebProvider, 50)]
+        assert [
+            (type(allocation.provider), allocation.weight)
+            for allocation in fetch._router.allocations
+        ] == [(FirecrawlWebProvider, 50), (KeenableWebProvider, 50)]
 
 
 async def test_disabled_web_capabilities_are_not_registered() -> None:

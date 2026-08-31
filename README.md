@@ -189,6 +189,22 @@ browser, scheduling, notification, email, and trajectory-export features are
 disabled by default. Their available environment switches are documented in
 [`.env.example`](.env.example).
 
+The initial public-web comparison keeps the incumbent provider for half of each
+capability and routes the other half to Keenable:
+
+```bash
+WEB_SEARCH_PROVIDERS=tavily:50,keenable:50
+WEB_FETCH_PROVIDERS=firecrawl:50,keenable:50
+TAVILY_API_KEY=...
+FIRECRAWL_API_KEY=...
+KEENABLE_API_KEY=...
+```
+
+Weighted entries must be unique positive integer percentages summing to 100.
+The backward-compatible singular selectors may instead name `firecrawl`,
+`tavily`, `keenable`, or `disabled`. Provider keys are resolved by the
+credential broker at call time and are never exposed to the model.
+
 Before changing the codebase, read [AGENTS.md](AGENTS.md). It explains the
 authorized milestone, required reading lane, test-driven workflow, and
 completion-report requirements. The main technical references are:

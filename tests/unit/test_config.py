@@ -407,6 +407,55 @@ def test_web_provider_selection_is_per_capability() -> None:
     assert settings.web_fetch_provider is WebProviderKind.FIRECRAWL
 
 
+def test_weighted_web_provider_selection_is_per_capability() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "WEB_SEARCH_PROVIDERS": "tavily:50,keenable:50",
+            "WEB_FETCH_PROVIDERS": "firecrawl:50,keenable:50",
+        }
+    )
+
+    assert [(entry.provider, entry.weight) for entry in settings.web_search_providers] == [
+        (WebProviderKind.TAVILY, 50),
+        (WebProviderKind.KEENABLE, 50),
+    ]
+    assert [(entry.provider, entry.weight) for entry in settings.web_fetch_providers] == [
+        (WebProviderKind.FIRECRAWL, 50),
+        (WebProviderKind.KEENABLE, 50),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("WEB_SEARCH_PROVIDERS", "tavily:60,keenable:30"),
+        ("WEB_SEARCH_PROVIDERS", "tavily:50,tavily:50"),
+        ("WEB_SEARCH_PROVIDERS", "disabled:50,keenable:50"),
+        ("WEB_SEARCH_PROVIDERS", "tavily:zero,keenable:100"),
+        ("WEB_FETCH_PROVIDERS", "firecrawl:0,keenable:100"),
+        ("WEB_FETCH_PROVIDERS", "surprise:50,keenable:50"),
+    ],
+)
+def test_invalid_weighted_web_provider_selection_is_refused(
+    variable: str,
+    value: str,
+) -> None:
+    with pytest.raises(ConfigurationError, match=variable):
+        load_settings({**base_environment(), variable: value})
+
+
+def test_plural_and_enabled_legacy_web_provider_selection_are_ambiguous() -> None:
+    with pytest.raises(ConfigurationError, match="WEB_SEARCH_PROVIDERS"):
+        load_settings(
+            {
+                **base_environment(),
+                "WEB_SEARCH_PROVIDER": "tavily",
+                "WEB_SEARCH_PROVIDERS": "tavily:50,keenable:50",
+            }
+        )
+
+
 def test_unknown_web_provider_is_refused() -> None:
     with pytest.raises(ConfigurationError, match="WEB_SEARCH_PROVIDER"):
         load_settings({**base_environment(), "WEB_SEARCH_PROVIDER": "surprise"})

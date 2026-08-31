@@ -187,6 +187,8 @@ from agent_core.adapters.skills.stores import (
     InMemorySkillPackageStore,
 )
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
+from agent_core.adapters.web.keenable import KeenableWebProvider
+from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
@@ -261,6 +263,7 @@ from agent_core.config import (
     MemoryProviderExtractionMode,
     PushProviderKind,
     Settings,
+    WebProviderAllocation,
     WebProviderKind,
     load_config_document,
     load_notification_worker_settings,
@@ -365,7 +368,7 @@ from agent_core.ports.persistence import (
     UnitOfWorkFactory,
 )
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
-from agent_core.ports.web import WebProvider
+from agent_core.ports.web import WebProvider, WebProviderRouter
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
@@ -1267,8 +1270,8 @@ async def _compose(
     mcp_scripts: Mapping[str, ScriptedMCPServer] | None,
     credential_resolver: CredentialResolver,
     mcp_server_configs: tuple[MCPServerConfig, ...],
-    web_search_provider: WebProvider | None,
-    web_fetch_provider: WebProvider | None,
+    web_search_provider: WebProvider | WebProviderRouter | None,
+    web_fetch_provider: WebProvider | WebProviderRouter | None,
     memory_provider_evaluation_mode: bool,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
@@ -2288,7 +2291,30 @@ def _web_provider(
         return TavilyWebProvider(credentials=credentials)
     if kind is WebProviderKind.FIRECRAWL:
         return FirecrawlWebProvider(credentials=credentials)
+    if kind is WebProviderKind.KEENABLE:
+        return KeenableWebProvider(credentials=credentials)
     raise ConfigurationError(f"unsupported web provider {kind.value!r}")
+
+
+def _configured_web_provider_route(
+    allocations: tuple[WebProviderAllocation, ...],
+    credentials: CredentialResolver,
+    cache: dict[WebProviderKind, WebProvider],
+) -> WebProvider | WebProviderRouter | None:
+    if not allocations:
+        return None
+    weighted: list[tuple[WebProvider, int]] = []
+    for allocation in allocations:
+        provider = cache.get(allocation.provider)
+        if provider is None:
+            provider = _web_provider(allocation.provider, credentials)
+            if provider is None:
+                raise ConfigurationError("disabled web provider cannot receive traffic")
+            cache[allocation.provider] = provider
+        weighted.append((provider, allocation.weight))
+    if len(weighted) == 1:
+        return weighted[0][0]
+    return WeightedWebProviderRouter(weighted)
 
 
 def _browser_provider(
@@ -2568,13 +2594,11 @@ async def build(
         effective_settings.deployment_mode,
         model_policy,
     )
-    web_search_enabled = (
-        web_search_provider_override is not None
-        or effective_settings.web_search_provider is not WebProviderKind.DISABLED
+    web_search_enabled = web_search_provider_override is not None or bool(
+        effective_settings.web_search_providers
     )
-    web_fetch_enabled = (
-        web_fetch_provider_override is not None
-        or effective_settings.web_fetch_provider is not WebProviderKind.DISABLED
+    web_fetch_enabled = web_fetch_provider_override is not None or bool(
+        effective_settings.web_fetch_providers
     )
     browser_enabled = (
         browser_provider_override is not None
@@ -2639,6 +2663,7 @@ async def build(
     engine = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
+    web_provider_cache: dict[WebProviderKind, WebProvider] = {}
     browser_provider: BrowserProvider | None = None
     browser_profile_http_client: httpx.AsyncClient | None = None
     browser_sessions: BrowserSessionControlPlane | None = None
@@ -2752,29 +2777,33 @@ async def build(
         web_search_provider = (
             web_search_provider_override
             if web_search_provider_override is not None
-            else _web_provider(
-                effective_settings.web_search_provider,
+            else _configured_web_provider_route(
+                effective_settings.web_search_providers,
                 effective_credential_resolver,
+                web_provider_cache,
             )
         )
-        if web_search_provider is not None:
-            web_providers.append(web_search_provider)
+        if web_search_provider_override is not None:
+            web_providers.append(web_search_provider_override)
         web_fetch_provider = (
             web_fetch_provider_override
             if web_fetch_provider_override is not None
-            else (
-                web_search_provider
-                if web_search_provider_override is None
-                and web_search_provider is not None
-                and effective_settings.web_fetch_provider is effective_settings.web_search_provider
-                else _web_provider(
-                    effective_settings.web_fetch_provider,
-                    effective_credential_resolver,
-                )
+            else _configured_web_provider_route(
+                effective_settings.web_fetch_providers,
+                effective_credential_resolver,
+                web_provider_cache,
             )
         )
-        if web_fetch_provider is not None and web_fetch_provider is not web_search_provider:
-            web_providers.append(web_fetch_provider)
+        if (
+            web_fetch_provider_override is not None
+            and web_fetch_provider is not web_search_provider
+        ):
+            web_providers.append(web_fetch_provider_override)
+        web_providers.extend(
+            provider
+            for provider in web_provider_cache.values()
+            if all(provider is not tracked for tracked in web_providers)
+        )
         browser_provider = (
             browser_provider_override
             if browser_provider_override is not None

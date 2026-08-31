@@ -19,7 +19,7 @@ architectural decisions; ADR-0061 records the authorization.
 The deployment page states the risk plainly: the single-server failure domain
 has "no required cloud firewall, off-host database, backup, restore rehearsal,
 monitoring, load balancer, rolling deployment, or high availability. Loss of
-the Droplet may mean unrecoverable data loss" (deployment.md:721-728). ADR-0046
+the Droplet may mean unrecoverable data loss" (deployment.md:724-731). ADR-0046
 accepted that at launch as an explicit decision, not a claim that the controls
 lack value. Milestone 15 converts "unrecoverable" into "recoverable within the
 backup window" and makes the owner aware when production degrades, and it

@@ -50,6 +50,13 @@ class WebProviderKind(StrEnum):
     DISABLED = "disabled"
     TAVILY = "tavily"
     FIRECRAWL = "firecrawl"
+    KEENABLE = "keenable"
+
+
+@dataclass(frozen=True, slots=True)
+class WebProviderAllocation:
+    provider: WebProviderKind
+    weight: int
 
 
 class MemoryProviderExtractionMode(StrEnum):
@@ -109,14 +116,22 @@ class Settings:
     sandbox_passthrough: tuple[str, ...] = ()
     execution_service_socket: Path | None = None
     release_id: str | None = None
-    web_search_provider: WebProviderKind = WebProviderKind.DISABLED
-    web_fetch_provider: WebProviderKind = WebProviderKind.DISABLED
+    web_search_providers: tuple[WebProviderAllocation, ...] = ()
+    web_fetch_providers: tuple[WebProviderAllocation, ...] = ()
     browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
     browser_allowed_origins: tuple[str, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
     browser_grant_id: UUID | None = None
     browser_run_purpose: str | None = None
+
+    @property
+    def web_search_provider(self) -> WebProviderKind:
+        return _legacy_web_provider(self.web_search_providers)
+
+    @property
+    def web_fetch_provider(self) -> WebProviderKind:
+        return _legacy_web_provider(self.web_fetch_providers)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -397,6 +412,57 @@ def _parse_enum[T: StrEnum](enum_type: type[T], value: str, name: str) -> T:
     except ValueError as exc:
         choices = ", ".join(member.value for member in enum_type)
         raise ConfigurationError(f"{name} must be one of: {choices}") from exc
+
+
+def _legacy_web_provider(
+    allocations: tuple[WebProviderAllocation, ...],
+) -> WebProviderKind:
+    if not allocations:
+        return WebProviderKind.DISABLED
+    if len(allocations) == 1 and allocations[0].weight == 100:
+        return allocations[0].provider
+    raise ConfigurationError("weighted web-provider selection has no singular provider")
+
+
+def _parse_web_provider_allocations(
+    values: Mapping[str, str],
+    *,
+    singular_name: str,
+    plural_name: str,
+) -> tuple[WebProviderAllocation, ...]:
+    plural = values.get(plural_name, "").strip()
+    singular = values.get(singular_name, "disabled").strip()
+    if not plural:
+        provider = _parse_enum(WebProviderKind, singular, singular_name)
+        return (
+            () if provider is WebProviderKind.DISABLED else (WebProviderAllocation(provider, 100),)
+        )
+    if singular not in {"", WebProviderKind.DISABLED.value}:
+        raise ConfigurationError(f"{plural_name} cannot be combined with enabled {singular_name}")
+    if plural == WebProviderKind.DISABLED.value:
+        return ()
+
+    allocations: list[WebProviderAllocation] = []
+    for entry in plural.split(","):
+        provider_name, separator, raw_weight = entry.strip().partition(":")
+        if not separator or not provider_name or not raw_weight:
+            raise ConfigurationError(f"{plural_name} entries must use provider:percentage")
+        provider = _parse_enum(WebProviderKind, provider_name, plural_name)
+        if provider is WebProviderKind.DISABLED:
+            raise ConfigurationError(f"{plural_name} cannot weight the disabled provider")
+        try:
+            weight = int(raw_weight)
+        except ValueError as exc:
+            raise ConfigurationError(f"{plural_name} percentages must be integers") from exc
+        if weight <= 0:
+            raise ConfigurationError(f"{plural_name} percentages must be positive")
+        allocations.append(WebProviderAllocation(provider=provider, weight=weight))
+    provider_kinds = [allocation.provider for allocation in allocations]
+    if len(set(provider_kinds)) != len(provider_kinds):
+        raise ConfigurationError(f"{plural_name} cannot contain duplicate providers")
+    if sum(allocation.weight for allocation in allocations) != 100:
+        raise ConfigurationError(f"{plural_name} percentages must sum to 100")
+    return tuple(allocations)
 
 
 def _parse_flag(values: Mapping[str, str], name: str) -> bool:
@@ -1061,15 +1127,15 @@ def _load_settings(
     if execution_service_socket is not None and not execution_service_socket.is_absolute():
         raise ConfigurationError("AGENT_EXECUTION_SERVICE_SOCKET must be an absolute path")
     release_id = values.get("VEETBOT_RELEASE_ID", "").strip() or None
-    web_search_provider = _parse_enum(
-        WebProviderKind,
-        values.get("WEB_SEARCH_PROVIDER", "disabled").strip(),
-        "WEB_SEARCH_PROVIDER",
+    web_search_providers = _parse_web_provider_allocations(
+        values,
+        singular_name="WEB_SEARCH_PROVIDER",
+        plural_name="WEB_SEARCH_PROVIDERS",
     )
-    web_fetch_provider = _parse_enum(
-        WebProviderKind,
-        values.get("WEB_FETCH_PROVIDER", "disabled").strip(),
-        "WEB_FETCH_PROVIDER",
+    web_fetch_providers = _parse_web_provider_allocations(
+        values,
+        singular_name="WEB_FETCH_PROVIDER",
+        plural_name="WEB_FETCH_PROVIDERS",
     )
     browser_provider = _parse_enum(
         BrowserProviderKind,
@@ -1156,8 +1222,8 @@ def _load_settings(
         sandbox_passthrough=sandbox_passthrough,
         execution_service_socket=execution_service_socket,
         release_id=release_id,
-        web_search_provider=web_search_provider,
-        web_fetch_provider=web_fetch_provider,
+        web_search_providers=web_search_providers,
+        web_fetch_providers=web_fetch_providers,
         browser_provider=browser_provider,
         browser_allowed_origins=browser_allowed_origins,
         browser_profile_service_url=browser_profile_service_url,

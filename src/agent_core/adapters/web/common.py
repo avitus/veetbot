@@ -25,21 +25,47 @@ async def post_json(
 ) -> dict[str, Any]:
     """POST one bounded JSON request without exposing upstream response text."""
 
+    return await request_json(
+        client,
+        credentials,
+        credential_name=credential_name,
+        method="POST",
+        url=url,
+        payload=payload,
+    )
+
+
+async def request_json(
+    client: httpx.AsyncClient,
+    credentials: CredentialResolver,
+    *,
+    credential_name: str,
+    method: str,
+    url: str,
+    payload: Mapping[str, object] | None = None,
+    params: Mapping[str, str | int | float | bool | None] | None = None,
+    credential_header: str = "Authorization",
+    credential_prefix: str = "Bearer ",
+    auth_failure_statuses: frozenset[int] = frozenset({401, 403}),
+) -> dict[str, Any]:
+    """Send one bounded fixed-endpoint request with provider-specific authentication."""
+
     try:
         secret = await credentials.resolve(CredentialRef(credential_name))
     except PermissionError as exc:
         raise WebProviderError("tool.web.auth_failed", retryable=False) from exc
+    headers = {credential_header: credential_prefix + secret.reveal()}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
     try:
         async with client.stream(
-            "POST",
+            method,
             url,
-            headers={
-                "Authorization": "Bearer " + secret.reveal(),
-                "Content-Type": "application/json",
-            },
-            json=dict(payload),
+            headers=headers,
+            params=params,
+            json=None if payload is None else dict(payload),
         ) as response:
-            if response.status_code in {401, 403}:
+            if response.status_code in auth_failure_statuses:
                 raise WebProviderError("tool.web.auth_failed", retryable=False)
             quota_exceeded = response.status_code == 402 or (
                 credential_name == "tavily" and response.status_code in {432, 433}
