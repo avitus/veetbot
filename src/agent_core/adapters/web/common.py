@@ -47,6 +47,7 @@ async def request_json(
     credential_header: str = "Authorization",
     credential_prefix: str = "Bearer ",
     auth_failure_statuses: frozenset[int] = frozenset({401, 403}),
+    maximum_response_bytes: int = MAXIMUM_RESPONSE_BYTES,
 ) -> dict[str, Any]:
     """Send one bounded fixed-endpoint request with provider-specific authentication."""
 
@@ -79,7 +80,7 @@ async def request_json(
             body = bytearray()
             async for chunk in response.aiter_bytes():
                 body.extend(chunk)
-                if len(body) > MAXIMUM_RESPONSE_BYTES:
+                if len(body) > maximum_response_bytes:
                     raise WebProviderError("tool.web.output_invalid", retryable=False)
     except WebProviderError:
         raise

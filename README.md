@@ -60,8 +60,8 @@ the event log without requiring a model API key.
 - [uv](https://docs.astral.sh/uv/)
 - Docker with the Compose plugin
 - `make`
-- [Pandoc](https://pandoc.org/) only if you plan to build the standalone
-  documentation
+- [Pandoc](https://pandoc.org/), required by `make docs` and by the
+  documentation gate that `make check` runs
 
 The commands below assume a macOS or Linux shell and start from the repository
 root.

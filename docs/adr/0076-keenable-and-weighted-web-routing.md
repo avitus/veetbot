@@ -47,9 +47,13 @@ the platform's include/exclude lists.
 7. **Adapt Keenable at the existing boundary.** The adapter fixes egress to
    `https://api.keenable.ai/v1/search` and `/v1/fetch`, resolves the `keenable`
    credential at call time, and sends it only as `X-API-Key`. Multiple include
-   domains fan out to bounded site-filtered searches. Excludes use at most
-   fifty upstream rows followed by local suffix-aware hostname filtering.
-   Fetch uses bounded live Markdown without a provider-generated prompt.
+   domains fan out to bounded site-filtered searches. Because the port makes
+   include and exclude filters mutually exclusive, an excluding search is a
+   single unfiltered request that over-fetches at most fifty upstream rows
+   before local suffix-aware hostname filtering. Fetch uses bounded live
+   Markdown without a provider-generated prompt. Each request budgets its
+   response reader from the characters it asked for, so a page of multi-byte
+   text is truncated locally instead of being refused as oversize.
 8. **Retain default-off registration.** Credentials and allocation syntax do
    not register another agent-visible tool. A capability is present only when
    its resolved allocation is non-empty.

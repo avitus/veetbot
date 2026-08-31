@@ -754,3 +754,41 @@ async def test_keenable_malformed_key_status_is_a_stable_auth_failure() -> None:
     assert raised.value.reason_code == "tool.web.auth_failed"
     assert raised.value.retryable is False
     assert "malformed key diagnostic" not in str(raised.value)
+
+
+async def test_keenable_reads_a_full_length_multi_byte_page() -> None:
+    """The requested character budget must fit inside the response byte reader."""
+
+    content = "\U0001f600" * 524_288
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        body = json.dumps(
+            {"url": "https://example.org/ada", "title": "Ada", "content": content},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        assert len(body) > MAXIMUM_RESPONSE_BYTES
+        return httpx.Response(200, content=body, headers={"Content-Type": "application/json"})
+
+    factory = dict(provider_factories())["keenable"]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        page = await factory(client).fetch("https://example.org/ada")
+
+    assert page.content == content
+
+
+async def test_keenable_fetch_still_refuses_a_response_beyond_its_own_budget() -> None:
+    """Widening the reader for requested characters must not unbound it."""
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        padding = b"a" * (4 * 524_288 + 64 * 1024 + 1)
+        return httpx.Response(200, content=b'{"padding":"' + padding + b'"}')
+
+    factory = dict(provider_factories())["keenable"]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(WebProviderError) as raised:
+            await factory(client).fetch("https://example.org/ada")
+
+    assert raised.value.reason_code == "tool.web.output_invalid"
+    assert raised.value.retryable is False

@@ -98,9 +98,15 @@ The Keenable adapter calls the fixed endpoints
 `https://api.keenable.ai/v1/fetch`. Search requests bounded snippets and maps
 recency to Keenable relative `published_after` deltas. Because Keenable accepts
 one `site` rather than the port's include/exclude lists, multiple include
-domains fan out to one bounded request per domain, while excludes over-fetch at
-most fifty rows and are applied locally before returning at most the requested
-ten. Fetch requests bounded Markdown with `live=true` and no extraction prompt.
+domains fan out to one bounded request per domain. Include and exclude filters
+are mutually exclusive, so an excluding search is a single unfiltered request
+that over-fetches at most fifty rows and applies the exclusions locally before
+returning at most the requested number of results. Fetch requests bounded
+Markdown with `live=true` and no extraction prompt. Because Keenable bounds
+`snippet_max_length` and `max_chars` in characters while the shared reader
+bounds a response in bytes, each Keenable request raises its own reader budget
+to cover the characters it asked for at four bytes each. A response beyond that
+budget is still refused as oversize.
 These fields follow the official
 [Keenable Search](https://docs.keenable.ai/api-reference/search) and
 [Keenable Fetch](https://docs.keenable.ai/api-reference/fetch) contracts. The
