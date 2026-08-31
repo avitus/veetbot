@@ -783,7 +783,10 @@ async def test_keenable_fetch_still_refuses_a_response_beyond_its_own_budget() -
     async def wire(request: httpx.Request) -> httpx.Response:
         del request
         padding = b"a" * (4 * 524_288 + 64 * 1024 + 1)
-        return httpx.Response(200, content=b'{"padding":"' + padding + b'"}')
+        return httpx.Response(
+            200,
+            content=b'{"url":"https://example.org/ada","content":"' + padding + b'"}',
+        )
 
     factory = dict(provider_factories())["keenable"]
     async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
