@@ -138,7 +138,7 @@ class PersonaNomination(BaseModel):
     consolidation_run_id: UUID | None = None
     nominated_at: datetime
     resolved_at: datetime | None = None
-    affirmed_version: int | None = None
+    affirmed_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def resolution_is_consistent(self) -> PersonaNomination:

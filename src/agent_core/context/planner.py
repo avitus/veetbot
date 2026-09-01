@@ -123,7 +123,12 @@ class EventContextPlanner:
         model: ResolvedModel,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
-            persona_text, persona_version, persona_affirmed = await self._active_persona(principal)
+            (
+                persona_text,
+                persona_version,
+                persona_affirmed,
+                persona_items,
+            ) = await self._active_persona(principal)
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
@@ -145,6 +150,7 @@ class EventContextPlanner:
                     and current.builder_version == BUILDER_VERSION
                     and current.prefix_sha256 == current_prefix_sha256
                     and current.persona_text == persona_text
+                    and current.persona_version == persona_version
                 ):
                     return current
                 return await self._create(
@@ -163,11 +169,13 @@ class EventContextPlanner:
                         if current.builder_version != BUILDER_VERSION
                         else "persona_changed"
                         if current.persona_text != persona_text
+                        or current.persona_version != persona_version
                         else "agent_prefix_changed"
                     ),
                     persona_text=persona_text,
                     persona_version=persona_version,
                     persona_affirmed=persona_affirmed,
+                    persona_items=persona_items,
                 )
             return await self._create(
                 session,
@@ -180,6 +188,7 @@ class EventContextPlanner:
                 persona_text=persona_text,
                 persona_version=persona_version,
                 persona_affirmed=persona_affirmed,
+                persona_items=persona_items,
             )
 
     async def rotate(self, session_id: UUID, reason: str) -> ContextPlan:
@@ -193,7 +202,7 @@ class EventContextPlanner:
             )
             return await self._append(rotated, "context.epoch.rotated", reason)
 
-    async def _active_persona(self, principal: Principal) -> tuple[str, int, tuple[UUID, ...]]:
+    async def _active_persona(self, principal: Principal) -> tuple[str, int, tuple[UUID, ...], int]:
         """The rendered persona row and its pinned version for this principal.
 
         Rendering filters entries above the session surface's sensitivity
@@ -205,7 +214,7 @@ class EventContextPlanner:
         async with self._uow_factory() as uow:
             document = await uow.personas.active(principal)
         if document is None:
-            return "", 0, ()
+            return "", 0, (), 0
         # The load-time injection scan is the guarantee (the write surfaces
         # scan too, but only this pass covers text stored before a pattern
         # existed). A poisoned entry renders as a placeholder, never as
@@ -220,10 +229,12 @@ class EventContextPlanner:
                 )
             }
         )
+        rendered = render_persona(screened, ceiling=Sensitivity.RESTRICTED)
         return (
-            render_persona(screened, ceiling=Sensitivity.RESTRICTED),
+            rendered,
             document.version,
             document.affirmed_belief_ids,
+            len(rendered.splitlines()) if rendered else 0,
         )
 
     async def _create(
@@ -239,6 +250,7 @@ class EventContextPlanner:
         persona_text: str = "",
         persona_version: int = 0,
         persona_affirmed: tuple[UUID, ...] = (),
+        persona_items: int = 0,
     ) -> ContextPlan:
         classes = self._config.get("classes")
         if not isinstance(classes, dict):
@@ -306,10 +318,10 @@ class EventContextPlanner:
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
         # The persona row sits at index 2 of the full prefix when present;
         # base_prefix never carries it, so the tool slice below is unshifted.
-        persona_items = len(persona_prefix) - len(base_prefix)
+        persona_prefix_items = len(persona_prefix) - len(base_prefix)
         persona_tokens = (
-            self._estimator.estimate(prefix[2 : 2 + persona_items], model_id)
-            if persona_items
+            self._estimator.estimate(prefix[2 : 2 + persona_prefix_items], model_id)
+            if persona_prefix_items
             else 0
         )
         tool_tokens = self._estimator.estimate(
@@ -327,6 +339,11 @@ class EventContextPlanner:
             persona_config = classes.get("persona")
             if not isinstance(persona_config, dict):
                 raise ValueError("persona context configuration must be a mapping")
+            maximum_entries = int(persona_config["max_items"])
+            if maximum_entries < 1:
+                raise ValueError("persona max_items must be at least 1")
+            if persona_items > maximum_entries:
+                raise ContextOverflow("context prefix class persona exceeds its cap")
             if persona_tokens > int(persona_config["max_tokens"]):
                 raise ContextOverflow("context prefix class persona exceeds its cap")
         if tool_tokens > int(tool_config["max_tokens"]):

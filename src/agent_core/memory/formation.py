@@ -1678,7 +1678,7 @@ class GovernedMemoryService:
                                     if candidate.derivation is MemoryDerivation.HYPOTHESIS
                                     else "committed_direct"
                                 ] += 1
-                if not should_retry and beliefs:
+                if not should_retry:
                     await self._nominate_persona_candidates(uow, beliefs, consolidation_id)
                 watermark_after = watermark if should_retry else after
                 if should_retry:
@@ -1794,9 +1794,16 @@ class GovernedMemoryService:
 
         profile = self._profile.persona_nomination
         now = self._clock.now()
-        open_rows = await uow.personas.list_nominations(
-            self._principal, state=PersonaNominationState.NOMINATED
-        )
+        all_rows = await uow.personas.list_nominations(self._principal)
+        open_rows = [row for row in all_rows if row.state is PersonaNominationState.NOMINATED]
+        # Decline is content-keyed as well as id-keyed: re-derivation mints
+        # new belief identifiers, and a statement the owner has already
+        # judged must not come back under one (persona-surface.md).
+        resolved_statements = {
+            row.statement.casefold()
+            for row in all_rows
+            if row.state in (PersonaNominationState.DECLINED, PersonaNominationState.AFFIRMED)
+        }
         open_count = 0
         open_belief_ids: set[UUID] = set()
         for row in open_rows:
@@ -1824,6 +1831,8 @@ class GovernedMemoryService:
             if open_count >= profile.max_open:
                 return
             if belief.id in open_belief_ids or belief.id in already_affirmed:
+                continue
+            if belief.statement.casefold() in resolved_statements:
                 continue
             if not self._persona_eligible(belief, profile):
                 continue

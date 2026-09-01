@@ -364,3 +364,121 @@ async def test_context_planner_excludes_affirmed_beliefs_from_the_snapshot() -> 
     await planner.plan(session(), agent(), principal(), model)
     assert len(spy.queries) == 1
     assert spy.queries[0].exclude_ids == (promoted,)
+
+
+async def test_context_planner_enforces_the_persona_item_cap() -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    config["classes"]["persona"]["max_items"] = 1
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    async with factory() as uow:
+        await uow.personas.append_version(
+            PersonaDocument(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                version=1,
+                entries=(
+                    PersonaEntry(text="First truth.", source=PersonaEntrySource.USER_EDIT),
+                    PersonaEntry(text="Second truth.", source=PersonaEntrySource.USER_EDIT),
+                ),
+                source=PersonaEntrySource.USER_EDIT,
+                created_at=NOW,
+            ),
+            expected_version=0,
+        )
+
+    with pytest.raises(ContextOverflow, match="context prefix class persona exceeds its cap"):
+        await planner.plan(session(), agent(), principal(), model)
+
+
+async def test_context_planner_rotates_when_provenance_changes_under_identical_text() -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    spy = _SpyRetriever()
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        memory_retriever=spy,
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    promoted = UUID("00000000-0000-0000-0000-000000000501")
+    text = "User prefers concise answers."
+
+    async with factory() as uow:
+        await uow.personas.append_version(
+            PersonaDocument(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                version=1,
+                entries=(PersonaEntry(text=text, source=PersonaEntrySource.USER_EDIT),),
+                source=PersonaEntrySource.USER_EDIT,
+                created_at=NOW,
+            ),
+            expected_version=0,
+        )
+    created = await planner.plan(session(), agent(), principal(), model)
+    assert created.epoch == 1
+    assert spy.queries[-1].exclude_ids == ()
+
+    # Same rendered text, new provenance: the exclusion set must follow.
+    async with factory() as uow:
+        await uow.personas.append_version(
+            PersonaDocument(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                version=2,
+                entries=(
+                    PersonaEntry(
+                        text=text,
+                        source=PersonaEntrySource.AFFIRMATION,
+                        source_belief_id=promoted,
+                    ),
+                ),
+                source=PersonaEntrySource.AFFIRMATION,
+                created_at=NOW,
+            ),
+            expected_version=1,
+        )
+    rotated = await planner.plan(session(), agent(), principal(), model)
+    assert rotated.epoch == 2
+    assert rotated.persona_version == 2
+    latest_query = spy.queries[-1]
+    assert latest_query.exclude_ids == (promoted,)

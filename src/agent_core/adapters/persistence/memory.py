@@ -1610,8 +1610,11 @@ class InMemoryPersonaStore:
                 raise ConflictError(
                     f"persona nomination {nomination_id} is already {nomination.state}"
                 )
-            resolved = nomination.model_copy(
-                update={
+            # Validated construction rather than model_copy: the resolution
+            # boundary is where an out-of-range affirmed version must die.
+            resolved = PersonaNomination.model_validate(
+                {
+                    **nomination.model_dump(),
                     "state": state,
                     "resolved_at": resolved_at,
                     "affirmed_version": affirmed_version,

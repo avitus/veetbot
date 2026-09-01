@@ -188,15 +188,27 @@ work, or it will not happen and the surface rots.
 plus one `affirmation` entry carrying the statement and the belief id, marks
 the source belief promoted with a link back to the entry, and resolves the
 nomination with the version it created — one unit of work, the nomination
-resolved last. Affirming an already-affirmed nomination is idempotent.
+resolved last, under a guarded state transition only a still-open row can
+take. Affirmation carries no client-supplied `expected_version`: the head it
+extends is read inside the same transaction, the version primary key makes a
+concurrent append a `conflict` rather than a lost write, and a rolled-back
+affirmation leaves document, belief link, nomination, and audit event
+untouched together — the retry simply affirms onto the new head. Affirming an
+already-affirmed nomination is idempotent.
 Promotion never supersedes or deletes the belief; removing the persona entry
 later clears the promoted marker and nothing else.
 
-**Decline is durable.** A declined nomination's belief is never nominated
-again — not by reinforcement, not by re-derivation, not by a policy upgrade —
-the same standard the formation design applies to corrections. **Withdrawal**
+**Decline is durable, and content-keyed.** A declined nomination's belief is
+never nominated again — not by reinforcement, not by re-derivation, not by a
+policy upgrade — the same standard the formation design applies to
+corrections. Because re-derivation mints new belief identifiers, the id alone
+cannot carry that promise: the nomination pass also refuses any candidate
+whose case-folded statement matches a declined or affirmed nomination's, so
+the owner's verdict follows the statement across identities. **Withdrawal**
 happens when the source belief supersedes, retires, or is deleted before
-review; a withdrawn nomination frees its slot and records why.
+review; a withdrawn nomination frees its slot, and the withdrawn state is
+itself the record — withdrawal has exactly one cause, the source belief dying
+before review, so no separate reason field exists until a second cause does.
 
 **Staleness flows toward the owner, never past them.** When a promoted
 belief's source is later superseded or corrected, the persona entry is
@@ -248,9 +260,11 @@ POST   /v1/persona/nominations/{nomination_id}/decline   persona.write
   untouched.
 - `GET /v1/persona/history` pages versions newest-first by keyset.
 - The nomination routes list, affirm, and decline. Affirm replays
-  idempotently; affirm or decline on a foreign or unknown id is a 404
-  indistinguishable from absence; decline of a resolved nomination is a
-  `conflict`.
+  idempotently and takes no `expected_version` — it extends whatever head it
+  reads atomically in its own transaction, and loses cleanly as a `conflict`
+  when a concurrent write gets there first; affirm or decline on a foreign
+  or unknown id is a 404 indistinguishable from absence; decline of a
+  resolved nomination is a `conflict`.
 
 The views are explicit allow-lists in the `MemoryView` style: no tenant or
 principal identifiers, no store internals.

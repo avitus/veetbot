@@ -28,6 +28,10 @@ from agent_core.domain.persona import (
 )
 
 
+def _rowcount(result: Any) -> int:
+    return int(result.rowcount or 0)
+
+
 def _entry_to_json(entry: PersonaEntry) -> dict[str, Any]:
     return {
         "text": entry.text,
@@ -244,18 +248,25 @@ class PostgresPersonaStore:
         resolved_at: datetime,
         affirmed_version: int | None = None,
     ) -> PersonaNomination:
-        row = await self._owned_row(nomination_id, principal)
-        if PersonaNominationState(row.state) is not PersonaNominationState.NOMINATED:
-            raise ConflictError(f"persona nomination {nomination_id} is already {row.state}")
-        await self._session.execute(
+        # The guarded update is the atomicity: only a still-open row moves,
+        # so two racing resolutions cannot both write a terminal state.
+        result = await self._session.execute(
             update(PersonaNominationRow)
-            .where(PersonaNominationRow.id == nomination_id)
+            .where(
+                PersonaNominationRow.id == nomination_id,
+                PersonaNominationRow.tenant_id == principal.tenant_id,
+                PersonaNominationRow.principal_id == principal.principal_id,
+                PersonaNominationRow.state == PersonaNominationState.NOMINATED.value,
+            )
             .values(
                 state=state.value,
                 resolved_at=resolved_at,
                 affirmed_version=affirmed_version,
             )
         )
+        if _rowcount(result) != 1:
+            row = await self._owned_row(nomination_id, principal)
+            raise ConflictError(f"persona nomination {nomination_id} is already {row.state}")
         resolved = await self._owned_row(nomination_id, principal)
         return _nomination_from_row(resolved)
 
