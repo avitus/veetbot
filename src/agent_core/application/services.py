@@ -18,6 +18,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.devices import DeviceRegistration
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
+from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.schedules import (
     ScheduleDefinition,
     ScheduleOccurrence,
@@ -35,6 +36,8 @@ from agent_core.domain.views import (
     MemoryView,
     NotificationInboxItem,
     Page,
+    PersonaNominationView,
+    PersonaView,
     RunView,
     SessionMessageView,
     SessionView,
@@ -302,3 +305,28 @@ class MemoryReadService(Protocol):
     async def get(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
     ) -> MemoryView: ...
+
+
+class PersonaService(Protocol):
+    async def get(self, principal: Principal) -> PersonaView: ...
+
+    async def history(self, principal: Principal, *, limit: int) -> Page[PersonaView]: ...
+
+    async def update(
+        self,
+        principal: Principal,
+        *,
+        expected_version: int,
+        entries: builtins.list[PersonaEntryDraft],
+    ) -> PersonaView: ...
+
+    async def nominations(
+        self,
+        principal: Principal,
+        *,
+        state: PersonaNominationState | None,
+    ) -> Page[PersonaNominationView]: ...
+
+    async def affirm(self, principal: Principal, nomination_id: UUID) -> PersonaView: ...
+
+    async def decline(self, principal: Principal, nomination_id: UUID) -> PersonaNominationView: ...

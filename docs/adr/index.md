@@ -87,3 +87,4 @@ implementation without one.
 - [ADR-0076 — Keenable and deterministic weighted web routing (Proposed)](0076-keenable-and-weighted-web-routing.md)
 - [ADR-0077 — Milestone 21 adaptive memory distillation (Proposed)](0077-milestone-21-adaptive-memory-distillation.md)
 - [ADR-0078 — Run-limit synthesis reserves](0078-run-limit-synthesis-reserves.md)
+- [ADR-0079 — Milestone 22 persona surface and curated belief promotion (Proposed)](0079-milestone-22-persona-surface.md)

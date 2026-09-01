@@ -48,7 +48,9 @@ sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) first
 declared twenty-three Milestone 11 gates in a seventeenth area, then five at
 Milestone 19 and six at Milestone 20.
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) adds
-twenty-four Milestone 21 gates in the existing memory area. The current counts
+twenty-four Milestone 21 gates in the existing memory area.
+[persona-surface.md](persona-surface.md) adds fourteen Milestone 22 gates in
+a new `persona` area. The current counts
 are reconciled in the gate table and census below.
 
 ## What this document is responsible for
@@ -325,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 25 subject specifications declare 377 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 386
-declarations, 383 registry entries once the 3 aliases are subtracted.
+The 26 subject specifications declare 391 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 400
+declarations, 397 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1339,6 +1341,40 @@ schemas, migrations, and the checked-in corpus. The remaining sixteen are
 boundary cases over provider orchestration, formation, lifecycle, retrieval,
 and evidence publication.
 
+### Persona surface, fourteen gates
+
+Fourteen gates open a new `persona` area at Milestone 22. Four cover the
+prefix row — stability, the cap, trust labeling, and revision pinning — two
+cover content safety at write and load, five cover curated promotion —
+human-only writes, closed eligibility, durable decline, linkage, and snapshot
+de-duplication — and three cover the surfaces: exact scopes with the memory
+router still read-only, the revision precondition, and principal scoping.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.persona.prefix_row_stable                  case         22
+2   gate.persona.budget_capped                      case         22
+3   gate.persona.trust_labeled                      case         22
+4   gate.persona.revision_pinned                    case         22
+5   gate.persona.secret_refused                     case         22
+6   gate.persona.injection_scanned                  case         22
+7   gate.persona.promotion_requires_affirmation     case         22
+8   gate.persona.nomination_eligibility             case         22
+9   gate.persona.decline_durable                    case         22
+10  gate.persona.affirmed_linked                    case         22
+11  gate.persona.snapshot_dedup                     case         22
+12  gate.persona.routes_exact_scope                 structural   22
+13  gate.persona.revision_precondition              case         22
+14  gate.persona.principal_scoped                   case         22
+```
+
+Gate 12 is structural because it inspects the mounted routers rather than a
+behavior: the exact scope on every persona route and the continued
+GET-only shape of the memory router are properties of the application object.
+The remaining thirteen are boundary cases over the prefix, the write
+surfaces, and the promotion lifecycle.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1436,6 +1472,9 @@ milestone  new gates  cumulative  the earliest of them
 21                24         383  integrated episodes, causal anticipation,
                                   high-recall direct and hypothesis formation,
                                   evidence-based forgetting and activation
+22                14         397  the persona row, its cap and pinning,
+                                  human-only promotion, durable decline,
+                                  snapshot de-duplication, exact scopes
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1463,8 +1502,8 @@ leaving for someone to notice.
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and eighty-three, which is every
-registry entry, at Milestone 21. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and ninety-seven, which is every
+registry entry, at Milestone 22. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1473,8 +1512,9 @@ Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
 those specs already shared, Milestone 18's thirteen are `gate.email.*` in
 an area of their own, Milestone 19's five return to the existing
-`gate.schedule.*` area, Milestone 20 adds six more there, and Milestone 21
-adds twenty-four more to `gate.memory.*`. Every authorized milestone now has a specification
+`gate.schedule.*` area, Milestone 20 adds six more there, Milestone 21
+adds twenty-four more to `gate.memory.*`, and Milestone 22's fourteen are
+`gate.persona.*` in an area of their own. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

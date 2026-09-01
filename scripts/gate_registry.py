@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email)"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona)"
     r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
@@ -24,11 +24,11 @@ MAP_ROW = re.compile(
 # The highest milestone the corpus authorizes; Milestones 12 through 15 were
 # authorized on 2026-08-20 (ADR-0061), Milestone 16 on 2026-08-22 (ADR-0069),
 # Milestone 17 on 2026-08-23 (ADR-0070), Milestones 18 and 19 on 2026-08-24
-# (ADR-0071 and ADR-0072), Milestone 20 on 2026-08-27 (ADR-0073), and Milestone
-# 21 on 2026-08-31 (ADR-0077). The census
+# (ADR-0071 and ADR-0072), Milestone 20 on 2026-08-27 (ADR-0073), Milestone
+# 21 on 2026-08-31 (ADR-0077), and Milestone 22 on 2026-09-01 (ADR-0079). The census
 # reports a zero row for each authorized milestone whose specification has not
 # yet declared gates.
-MAX_MILESTONE = 21
+MAX_MILESTONE = 22
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -57,6 +57,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "memory-evaluation-and-lifecycle.md": (20, 0),
     "memory-read-api-and-browser.md": (10, 0),
     "adaptive-memory-distillation.md": (24, 0),
+    "persona-surface.md": (14, 0),
     "email-integration.md": (13, 0),
     "milestone-map.md": (7, 0),
 }

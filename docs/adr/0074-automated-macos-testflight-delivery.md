@@ -45,8 +45,10 @@ shared with an Apple publication job.
    before external publication.
 4. CircleCI's managed signing facility owns the `Apple Distribution` identity
    and macOS App Store provisioning profile in a signing bundle named
-   `veetbot-app-store`. The job invokes `install_signing_bundle`; certificate and
-   profile bytes never become repository variables or workspace artifacts.
+   `veetbot-app-store`, plus the `Mac Installer Distribution` identity required
+   for App Store package export in `veetbot-mac-installer`. The job invokes
+   `install_signing_bundle` for both; certificate and profile bytes never become
+   repository variables or workspace artifacts.
 5. The non-secret Apple team ID remains authoritative in the checked-in Xcode
    project. The archive uses that Release build setting, and export defaults to
    the team recorded in the archive. A separate restricted context,

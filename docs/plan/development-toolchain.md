@@ -318,10 +318,11 @@ credential. Release packaging depends on both additional gates.
 
 Job 7 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
-CircleCI-managed `veetbot-app-store` signing bundle, archives the generic macOS
-destination with `pipeline.number` as `CFBundleVersion`, verifies that number,
-the bundle identifier, and the signature, and uploads through Xcode with the
-restricted `veetbot-apple-testflight` context. Xcode's independent
+CircleCI-managed `veetbot-app-store` and `veetbot-mac-installer` signing
+bundles, archives the generic macOS destination with `pipeline.number` as
+`CFBundleVersion`, verifies that number, the bundle identifier, and the
+signature, and uploads through Xcode with the restricted
+`veetbot-apple-testflight` context. Xcode's independent
 build-number management is disabled so the value the job inspects is the value
 Apple receives. The archive uses the checked-in Xcode project's Apple team and
 export defaults to the team recorded in that archive, avoiding a duplicate

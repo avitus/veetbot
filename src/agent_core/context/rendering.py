@@ -36,6 +36,8 @@ def build_prefix(
     tools: Sequence[ToolSpec],
     skill_catalog: Sequence[CatalogMetadata] = (),
     memory_snapshot: str = "",
+    *,
+    persona: str = "",
 ) -> list[ConversationItem]:
     tool_names = ", ".join(spec.name for spec in tools) or "none"
     base: list[ConversationItem] = [
@@ -43,6 +45,19 @@ def build_prefix(
         SystemMessage(
             content=[TextPart(text=agent.instructions)],
             trust=TrustLevel.TRUSTED_CONFIGURATION,
+        ),
+        # The persona row: owner-authored instruction text, rendered beside the
+        # agent instructions. An empty persona inserts nothing at all, so a
+        # session without one reproduces the three-row prefix byte-for-byte.
+        *(
+            [
+                SystemMessage(
+                    content=[TextPart(text=persona)],
+                    trust=TrustLevel.TRUSTED_CONFIGURATION,
+                )
+            ]
+            if persona
+            else []
         ),
         SystemMessage(
             content=[TextPart(text=f"Declared tools (advertisement only): {tool_names}")],

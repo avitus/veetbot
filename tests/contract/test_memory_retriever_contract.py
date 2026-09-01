@@ -87,3 +87,29 @@ async def test_corrections_cover_closed_snapshot_members_and_nothing_else() -> N
         await retriever.corrections(snapshot_id=snapshot.trace_id, watermark=retired.store_position)
         == []
     )
+
+
+async def test_recall_excludes_persona_promoted_beliefs() -> None:
+    _clock, factory, _service, retriever = await formation_stack()
+    kept = memory()
+    promoted = memory(belief_id=502, statement="User prefers direct feedback")
+    async with factory() as uow:
+        await uow.memories.upsert_belief(kept)
+        await uow.memories.upsert_belief(
+            promoted.model_copy(update={"subject": "feedback style", "store_position": 2})
+        )
+
+    plain = await retriever.recall(
+        recall_query(text="prefers"), session_id=SESSION_ID, moment="in_turn"
+    )
+    assert {belief.belief_id for belief in plain.items} == {kept.id, promoted.id}
+
+    excluded = await retriever.recall(
+        recall_query(text="prefers", exclude_ids=(promoted.id,)),
+        session_id=SESSION_ID,
+        moment="in_turn",
+    )
+    excluded_ids = {belief.belief_id for belief in excluded.items}
+    assert kept.id in excluded_ids
+    assert promoted.id not in excluded_ids
+    assert "direct feedback" not in excluded.rendered

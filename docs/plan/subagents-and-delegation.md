@@ -35,11 +35,11 @@ post-terminal hook that is genuinely part of the run lifecycle
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:970-976); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
-(context-engine.md:291-294, memory-retrieval-and-ranking.md:87); and the
+(context-engine.md:313-316, memory-retrieval-and-ranking.md:90); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:987): the
+The readiness review measured what was left (readiness.md:998): the
 objective had a carrier and no schema, the child budget was additive with no
 rule deriving a child's own limits, the separate trace and the artifact
 references were picked up by no specification, and a child run could not be
@@ -125,7 +125,7 @@ The plan's "explicit objective" requirement had a carrier and no schema. One
 because independent parallel work — the first of the gate's five reasons — is
 exactly fan-out from one invocation, and a parent that suspends on the call
 cannot fan out any other way. Each brief is structured, because the child
-seeds from its brief and from nothing else (context-engine.md:291-294), so
+seeds from its brief and from nothing else (context-engine.md:313-316), so
 everything the child needs to stop correctly has to be in it:
 
 ```python
@@ -372,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1005). The resolution is the one the review log recorded as
+(readiness.md:1008). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation

@@ -318,3 +318,35 @@ def test_delegation_table_encodes_trust_boundaries() -> None:
     assert "ALTER TABLE delegations ENABLE ROW LEVEL SECURITY" in migration_sql
     assert "ALTER TABLE delegations FORCE ROW LEVEL SECURITY" in migration_sql
     assert "delegations_tenant_isolation" in migration_sql
+
+
+def test_persona_tables_encode_versioning_and_open_nomination_uniqueness() -> None:
+    documents = Base.metadata.tables["persona_documents"]
+    assert {column.name for column in documents.primary_key.columns} == {
+        "tenant_id",
+        "principal_id",
+        "version",
+    }
+    assert set(documents.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "version",
+        "entries",
+        "source",
+        "source_nomination_id",
+        "created_at",
+    }
+
+    nominations = Base.metadata.tables["persona_nominations"]
+    open_unique = next(
+        index for index in nominations.indexes if index.name == "ix_persona_nominations_open"
+    )
+    assert open_unique.unique
+    assert [column.name for column in open_unique.columns] == [
+        "tenant_id",
+        "principal_id",
+        "belief_id",
+    ]
+    assert "state = 'nominated'" in str(open_unique.dialect_options["postgresql"]["where"]).replace(
+        '"', ""
+    )

@@ -9,8 +9,9 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 21 are independently authorized parallel
-  # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, and 0077; their gates do not
+  # Milestones 16 through 22 are independently authorized parallel
+  # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, and 0079; their
+  # gates do not
   # advance the verified ceiling past the sequential work through 15.
   authorized_milestones:
     - 0
@@ -35,6 +36,7 @@ project:
     - 19
     - 20
     - 21
+    - 22
 
 milestones:
   "0":
@@ -630,6 +632,64 @@ milestones:
           and formation@9 over the same sixty cases and refuses to overwrite or
           publish below threshold. RUN_LIVE_MODEL_TESTS was not enabled and no
           production-tuple activation artifact has been published.
+  "22":
+    title: Persona surface and curated belief promotion
+    status: in_progress
+    authorized_on: 2026-09-01
+    design: docs/plan/persona-surface.md
+    adr: docs/adr/0079-milestone-22-persona-surface.md
+    gates_registered: 14
+    authorized_scope:
+      - owner-edited persona document rendered as a Region A prefix row
+      - revision pinning per context plan and persona_changed epoch rotation
+      - governed nomination, explicit affirmation, durable decline
+      - snapshot de-duplication of promoted beliefs with baseline re-record
+      - persona routes, persona.read/persona.write, AGENT_PERSONA_API_ENABLED
+      - agent persona CLI and the native Apple persona editor
+    deferred_scope:
+      - automatic promotion at any threshold
+      - belief edit, retraction, or deletion over HTTP (per ADR-0070)
+      - per-agent or per-surface persona variants
+      - any change to AgentSpec.instructions
+    open_items:
+      - Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
+    evidence:
+      - check: local Milestone 22 behavior and contracts
+        outcome: passed_locally
+        detail: >-
+          All fourteen gate.persona.* checks are live and pass: the fifty-turn
+          plan drive with a mid-session edit yields exactly two prefix hashes
+          and one persona_changed rotation, an empty persona renders zero
+          bytes, the over-cap persona fails session open naming its class,
+          nominated-but-unaffirmed text never renders, secrets and injection
+          patterns are refused at every write surface, consolidation
+          nominates only closed-eligibility beliefs with durable declines,
+          affirmation links without consuming, the snapshot excludes promoted
+          beliefs and releases them on removal, the persona routes carry
+          exact scopes with /v1/memories still GET-only, writes are
+          revision-guarded, and both stores pass one principal-scoped
+          contract. The deterministic benchmark gates pass unchanged, so the
+          checked-in baseline stands re-verified under ADR-0069 decision 2.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issues,
+          the static and contract partitions pass with the persona suites
+          included, deployment-script tests pass, and the strict
+          documentation build reconciles 397 gates.
+      - check: Apple package test lane
+        outcome: passed_locally
+        detail: >-
+          make test-apple passes 175 Swift Testing cases in 20 suites,
+          including the persona view model's guarded save, conflict
+          retention, affirm refresh, and unavailable degradation, plus the
+          editor's structure pins and wire-model decoding.
+      - check: PostgreSQL Milestone 22 lane
+        outcome: passed_locally
+        detail: >-
+          A local PostgreSQL migrated from c2e0f4a6b831 through head
+          e3a1c5d7f9b2; the persona store parity test and all 159 selected
+          integration and resilience tests pass.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -694,14 +754,20 @@ readiness:
     accepting some provisional false positives in exchange for materially
     higher useful recall and evidence-based forgetting; adaptive-memory-
     distillation.md declares its twenty-four `gate.memory.*` entries.
+    On 2026-09-01 the owner authorized Milestone 22, the persona surface and
+    curated belief promotion, as a seventh parallel workstream (ADR-0079),
+    resolving the readiness review's last memory partial: a formed belief
+    reaches the agent's instruction text only through the owner's explicit
+    affirmation; persona-surface.md declares its fourteen `gate.persona.*`
+    entries in a new persona area.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-01T16:55:05Z
+last_updated: 2026-09-01T23:45:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

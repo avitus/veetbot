@@ -711,7 +711,10 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple" in commands["apple"]
     assert "make test-apple-ui" in commands["apple"]
     testflight_job = jobs["apple-testflight"]
-    assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
+    assert testflight_job["macos"]["code_signing"] == [
+        "veetbot-app-store",
+        "veetbot-mac-installer",
+    ]
     assert "install_signing_bundle" in testflight_job["steps"]
     xcode_project = (
         ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj"
@@ -1416,13 +1419,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 21 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 22 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(22)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(23)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1445,7 +1448,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 21):
+    for milestone in range(12, 23):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

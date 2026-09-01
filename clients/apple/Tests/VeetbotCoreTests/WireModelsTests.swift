@@ -212,4 +212,36 @@ import Testing
         #expect(role == .unknown("system"))
         #expect(try JSONDecoder.server.decode(SessionMessageRole.self, from: encoded) == role)
     }
+
+    @Test
+    func testPersonaViewDecodesTheServerShapeWithProvenance() throws {
+        let data = Data(
+            #"{"version":2,"entries":[{"text":"User values direct answers.","source":"user_edit","source_belief_id":null,"sensitivity":"internal"},{"text":"User prefers concise answers.","source":"affirmation","source_belief_id":"00000000-0000-0000-0000-000000000501","sensitivity":"internal"}],"source":"affirmation","created_at":"2026-09-01T12:00:00Z"}"#
+                .utf8
+        )
+
+        let persona = try JSONDecoder.server.decode(PersonaView.self, from: data)
+
+        #expect(persona.version == 2)
+        #expect(persona.entries.count == 2)
+        #expect(persona.entries[0].sourceBeliefID == nil)
+        #expect(
+            persona.entries[1].sourceBeliefID
+                == UUID(uuidString: "00000000-0000-0000-0000-000000000501"))
+    }
+
+    @Test
+    func testPersonaNominationDecodesOpenAndResolvedShapes() throws {
+        let open = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000601","belief_id":"00000000-0000-0000-0000-000000000501","statement":"User prefers concise answers.","belief_type":"preference","authority":"affirmed","confidence":0.9,"corroboration_count":3,"sensitivity":"internal","state":"nominated","nominated_at":"2026-09-01T11:00:00Z","resolved_at":null,"affirmed_version":null}"#
+                .utf8
+        )
+
+        let nomination = try JSONDecoder.server.decode(PersonaNominationView.self, from: open)
+
+        #expect(nomination.state == "nominated")
+        #expect(nomination.resolvedAt == nil)
+        #expect(nomination.affirmedVersion == nil)
+        #expect(nomination.corroborationCount == 3)
+    }
 }

@@ -186,7 +186,12 @@ class HybridMemoryRetriever:
         now = effective_query.as_of or self._clock.now()
         recalled: list[RecalledBelief] = []
         durable_ids: set[UUID] = set()
+        excluded = set(effective_query.exclude_ids)
         for record in records:
+            # A hard predicate, not a score: the persona row already carries
+            # these beliefs at higher trust (persona-surface.md).
+            if record.id in excluded:
+                continue
             candidate = _score(record, effective_query, now=now, profile=self._profile)
             if candidate is None:
                 continue

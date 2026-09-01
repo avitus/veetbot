@@ -37,8 +37,10 @@ from agent_core.domain.errors import (
     ConflictError,
     InvalidStateTransition,
     NotFoundError,
+    PersonaContentError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent, conversation_items
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent, conversation_items
+from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     SENSITIVITY_ORDER,
@@ -58,6 +60,13 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.persistence import IdempotencyRecord
+from agent_core.domain.persona import (
+    PersonaDocument,
+    PersonaEntry,
+    PersonaEntryDraft,
+    PersonaEntrySource,
+    PersonaNominationState,
+)
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.sessions import (
@@ -81,6 +90,8 @@ from agent_core.domain.views import (
     MemoryView,
     Page,
     PersistedStreamFrame,
+    PersonaNominationView,
+    PersonaView,
     RunFailureView,
     RunLimitsView,
     RunUsageView,
@@ -1373,3 +1384,231 @@ class PublicMemoryService:
             # oracle over which beliefs are merely too sensitive to show.
             raise NotFoundError("memory not found")
         return MemoryView.from_record(record)
+
+
+class PublicPersonaService:
+    """The persona document's write and review surface (Milestone 22).
+
+    Every method takes the principal as an argument, requires the exact
+    scope, and refuses hazardous text before persistence: the persona is
+    system prompt, and the system prompt must not contain secrets. The one
+    memory-store touch - the affirmation linkage - flows through the
+    nomination row, never through the memory API.
+    """
+
+    def __init__(self, *, uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory) -> None:
+        self._uow_factory = uow_factory
+        self._clock = clock
+        self._ids = ids
+
+    async def get(self, principal: Principal) -> PersonaView:
+        require_scope(principal, "persona.read")
+        async with self._uow_factory() as uow:
+            document = await uow.personas.active(principal)
+        return PersonaView.from_document(document or self._empty(principal))
+
+    async def history(self, principal: Principal, *, limit: int) -> Page[PersonaView]:
+        require_scope(principal, "persona.read")
+        effective_limit = min(max(limit, 1), 200)
+        async with self._uow_factory() as uow:
+            rows = await uow.personas.history(principal, limit=effective_limit)
+        return Page[PersonaView](
+            items=[PersonaView.from_document(row) for row in rows],
+            next_cursor=None,
+        )
+
+    async def update(
+        self,
+        principal: Principal,
+        *,
+        expected_version: int,
+        entries: list[PersonaEntryDraft],
+    ) -> PersonaView:
+        require_scope(principal, "persona.write")
+        async with self._uow_factory() as uow:
+            head = await uow.personas.active(principal)
+            affirmed_now = set(head.affirmed_belief_ids) if head is not None else set()
+            kept_sources: dict[UUID, PersonaEntry] = {
+                entry.source_belief_id: entry
+                for entry in (head.entries if head is not None else ())
+                if entry.source_belief_id is not None
+            }
+            built: list[PersonaEntry] = []
+            for draft in entries:
+                self._refuse_hazards(draft.text)
+                if draft.source_belief_id is None:
+                    built.append(
+                        PersonaEntry(
+                            text=draft.text,
+                            source=PersonaEntrySource.USER_EDIT,
+                            sensitivity=draft.sensitivity,
+                        )
+                    )
+                    continue
+                if draft.source_belief_id not in affirmed_now:
+                    raise PersonaContentError(
+                        "persona provenance can only be kept, never minted: "
+                        "affirm a nomination instead"
+                    )
+                built.append(
+                    kept_sources[draft.source_belief_id].model_copy(
+                        update={"text": draft.text, "sensitivity": draft.sensitivity}
+                    )
+                )
+            document = self._next_version(
+                principal,
+                head,
+                entries=tuple(built),
+                source=PersonaEntrySource.USER_EDIT,
+                source_nomination_id=None,
+            )
+            stored = await uow.personas.append_version(document, expected_version=expected_version)
+            dropped = affirmed_now - set(stored.affirmed_belief_ids)
+            await self._record(
+                uow,
+                "persona.updated",
+                principal,
+                {
+                    "version": stored.version,
+                    "entries": len(stored.entries),
+                    "cleared_markers": len(dropped),
+                },
+            )
+        return PersonaView.from_document(stored)
+
+    async def nominations(
+        self,
+        principal: Principal,
+        *,
+        state: PersonaNominationState | None,
+    ) -> Page[PersonaNominationView]:
+        require_scope(principal, "persona.read")
+        async with self._uow_factory() as uow:
+            rows = await uow.personas.list_nominations(principal, state=state)
+        return Page[PersonaNominationView](
+            items=[PersonaNominationView.from_nomination(row) for row in rows],
+            next_cursor=None,
+        )
+
+    async def affirm(self, principal: Principal, nomination_id: UUID) -> PersonaView:
+        require_scope(principal, "persona.write")
+        async with self._uow_factory() as uow:
+            nomination = await uow.personas.get_nomination(nomination_id, principal)
+            if nomination.state is PersonaNominationState.AFFIRMED:
+                # Idempotent replay: the entry already stands.
+                head = await uow.personas.active(principal)
+                return PersonaView.from_document(head or self._empty(principal))
+            if nomination.state is not PersonaNominationState.NOMINATED:
+                raise ConflictError(
+                    f"persona nomination {nomination_id} is already {nomination.state}"
+                )
+            self._refuse_hazards(nomination.statement)
+            head = await uow.personas.active(principal)
+            document = self._next_version(
+                principal,
+                head,
+                entries=(
+                    *(head.entries if head is not None else ()),
+                    PersonaEntry(
+                        text=nomination.statement,
+                        source=PersonaEntrySource.AFFIRMATION,
+                        source_belief_id=nomination.belief_id,
+                        sensitivity=nomination.sensitivity,
+                    ),
+                ),
+                source=PersonaEntrySource.AFFIRMATION,
+                source_nomination_id=nomination.id,
+            )
+            stored = await uow.personas.append_version(
+                document, expected_version=head.version if head is not None else 0
+            )
+            # The nomination resolves last so a partial in-memory application
+            # can never leave an affirmed row without its document version.
+            await uow.personas.resolve_nomination(
+                nomination.id,
+                principal,
+                state=PersonaNominationState.AFFIRMED,
+                resolved_at=self._clock.now(),
+                affirmed_version=stored.version,
+            )
+            await self._record(
+                uow,
+                "persona.affirmed",
+                principal,
+                {"version": stored.version, "nomination_id": str(nomination.id)},
+            )
+        return PersonaView.from_document(stored)
+
+    async def decline(self, principal: Principal, nomination_id: UUID) -> PersonaNominationView:
+        require_scope(principal, "persona.write")
+        async with self._uow_factory() as uow:
+            resolved = await uow.personas.resolve_nomination(
+                nomination_id,
+                principal,
+                state=PersonaNominationState.DECLINED,
+                resolved_at=self._clock.now(),
+            )
+            await self._record(
+                uow,
+                "persona.declined",
+                principal,
+                {"nomination_id": str(nomination_id)},
+            )
+        return PersonaNominationView.from_nomination(resolved)
+
+    def _empty(self, principal: Principal) -> PersonaDocument:
+        return PersonaDocument.empty(principal.tenant_id, principal.principal_id, self._clock.now())
+
+    def _next_version(
+        self,
+        principal: Principal,
+        head: PersonaDocument | None,
+        *,
+        entries: tuple[PersonaEntry, ...],
+        source: PersonaEntrySource,
+        source_nomination_id: UUID | None,
+    ) -> PersonaDocument:
+        try:
+            return PersonaDocument(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                version=(head.version if head is not None else 0) + 1,
+                entries=entries,
+                source=source,
+                source_nomination_id=source_nomination_id,
+                created_at=self._clock.now(),
+            )
+        except ValueError as exc:
+            raise PersonaContentError(f"persona document rejected: {exc}") from exc
+
+    @staticmethod
+    def _refuse_hazards(text: str) -> None:
+        if contains_secret_material(text):
+            raise PersonaContentError("persona entries must not contain credential material")
+        if contains_injection_pattern(text):
+            raise PersonaContentError(
+                "persona entries must not contain instruction-injection patterns"
+            )
+
+    async def _record(
+        self,
+        uow: RepositoryUnitOfWork,
+        event_type: str,
+        principal: Principal,
+        payload: dict[str, object],
+    ) -> None:
+        await uow.process_events.append(
+            ProcessEvent(
+                id=self._ids.new_id(),
+                event_type=event_type,
+                actor_type="principal",
+                actor_id=principal.principal_id,
+                payload={
+                    "tenant_id": principal.tenant_id,
+                    "principal_id": principal.principal_id,
+                    **payload,
+                },
+                derivation_key=f"{event_type}:{principal.tenant_id}:{principal.principal_id}:{self._ids.new_id()}",
+                created_at=self._clock.now(),
+            )
+        )

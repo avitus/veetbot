@@ -811,3 +811,106 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         }
     }
 }
+
+/// One persona entry as the server renders it: text, provenance, and tier
+/// (persona-surface.md). `sourceBeliefID` is set exactly when the entry was
+/// affirmed from a nomination rather than typed by the owner.
+public struct PersonaEntryView: Codable, Equatable, Sendable {
+    public let text: String
+    public let source: String
+    public let sourceBeliefID: UUID?
+    public let sensitivity: String
+
+    enum CodingKeys: String, CodingKey {
+        case text, source, sensitivity
+        case sourceBeliefID = "source_belief_id"
+    }
+
+    public init(text: String, source: String, sourceBeliefID: UUID?, sensitivity: String) {
+        self.text = text
+        self.source = source
+        self.sourceBeliefID = sourceBeliefID
+        self.sensitivity = sensitivity
+    }
+}
+
+/// The persona document head, mirroring the server's `PersonaView` exposure
+/// list; version 0 with no entries is the real, unwritten starting state.
+public struct PersonaView: Codable, Equatable, Sendable {
+    public let version: Int
+    public let entries: [PersonaEntryView]
+    public let source: String
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case version, entries, source
+        case createdAt = "created_at"
+    }
+
+    public init(version: Int, entries: [PersonaEntryView], source: String, createdAt: Date) {
+        self.version = version
+        self.entries = entries
+        self.source = source
+        self.createdAt = createdAt
+    }
+}
+
+/// A consolidation-raised persona candidate awaiting the owner's verdict.
+public struct PersonaNominationView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let beliefID: UUID
+    public let statement: String
+    public let beliefType: String
+    public let authority: String
+    public let confidence: Double
+    public let corroborationCount: Int
+    public let sensitivity: String
+    public let state: String
+    public let nominatedAt: Date
+    public let resolvedAt: Date?
+    public let affirmedVersion: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, statement, authority, confidence, sensitivity, state
+        case beliefID = "belief_id"
+        case beliefType = "belief_type"
+        case corroborationCount = "corroboration_count"
+        case nominatedAt = "nominated_at"
+        case resolvedAt = "resolved_at"
+        case affirmedVersion = "affirmed_version"
+    }
+}
+
+/// One entry of a guarded persona replacement (`PUT /v1/persona`).
+public struct UpdatePersonaEntryBody: Codable, Equatable, Sendable {
+    public let text: String
+    public let sensitivity: String
+    public let sourceBeliefID: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case text, sensitivity
+        case sourceBeliefID = "source_belief_id"
+    }
+
+    public init(text: String, sensitivity: String = "internal", sourceBeliefID: UUID? = nil) {
+        self.text = text
+        self.sensitivity = sensitivity
+        self.sourceBeliefID = sourceBeliefID
+    }
+}
+
+/// The guarded persona replacement request body.
+public struct UpdatePersonaBody: Codable, Equatable, Sendable {
+    public let expectedVersion: Int
+    public let entries: [UpdatePersonaEntryBody]
+
+    enum CodingKeys: String, CodingKey {
+        case expectedVersion = "expected_version"
+        case entries
+    }
+
+    public init(expectedVersion: Int, entries: [UpdatePersonaEntryBody]) {
+        self.expectedVersion = expectedVersion
+        self.entries = entries
+    }
+}

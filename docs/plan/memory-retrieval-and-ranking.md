@@ -53,7 +53,10 @@ These are fixed by earlier decisions and are not re-litigated here.
   (Section 11.2) and can never redefine policy, grant permission, or change
   approval requirements. Memory is the one *stored and replayed* injection vector,
   so it is scanned at load and poisoned entries are replaced with `[BLOCKED]`
-  placeholders (ADR-0014).
+  placeholders (ADR-0014). Milestone 22's persona row sits above the snapshot at
+  trusted-configuration trust, but nothing crosses into it except by the owner's
+  explicit affirmation — see [persona-surface.md](persona-surface.md); retrieval
+  itself never promotes.
 - **Isolation boundaries are hard filters. Relevance boundaries are not.** Tenant,
   principal, and the surface sensitivity ceiling are query predicates with no score
   high enough to cross them. **Project is a relevance boundary, not an isolation
@@ -167,6 +170,18 @@ The number is then set empirically, against two signals already present in the t
 
 The two pull in opposite directions, which is the point: tune until neither is firing.
 Both derive from `RecallTrace`, so retuning is a query rather than an experiment.
+
+One class of belief is excluded from the snapshot outright: a belief whose
+persona entry stands. The owner has affirmed it into the persona row
+([persona-surface.md](persona-surface.md)), so the model already reads it at
+higher trust on every request, and a forty-item core cannot afford to carry
+anything twice. The snapshot query excludes those identifiers as a hard
+predicate; eligibility returns the moment the persona entry is removed.
+In-turn recall and explicit search are deliberately unfiltered — the belief is
+still ordinary memory, and hiding it from a direct question would be
+dishonest. Because this exclusion changes snapshot membership, the change that
+implements it re-records the deterministic benchmark baseline in the same
+commit (ADR-0069 decision 2).
 
 ## Beliefs and episodes are different queries
 

@@ -103,6 +103,7 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    persona_api_enabled: bool = False
     delegation_enabled: bool = False
     email_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
@@ -153,7 +154,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 156 operator-reviewable knobs. Metadata such as
+# The design corpus declares 161 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -193,6 +194,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "prefix.ceiling_tokens",
             "classes.platform_policy.max_tokens",
             "classes.agent_instructions.max_tokens",
+            "classes.persona.max_items",
+            "classes.persona.max_tokens",
             "classes.tool_definitions.max_items",
             "classes.tool_definitions.max_tokens",
             "classes.skill_catalog.max_items",
@@ -298,6 +301,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "formation.decay.floor_confidence",
             "formation.decay.step",
             "formation.decay.max_per_sweep",
+            "formation.persona_nomination.min_confidence",
+            "formation.persona_nomination.min_corroboration",
+            "formation.persona_nomination.max_open",
             "retrieval.semantic_enabled",
             "retrieval.reciprocal_rank_fusion_k",
             "retrieval.durable_item_share",
@@ -1085,6 +1091,7 @@ def _load_settings(
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
+    persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     configured_gmail_files = {
@@ -1224,6 +1231,7 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        persona_api_enabled=persona_api_enabled,
         delegation_enabled=delegation_enabled,
         email_enabled=email_enabled,
         push_provider=push_provider,

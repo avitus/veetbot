@@ -35,6 +35,8 @@ PLATFORM_SCOPES = frozenset(
         "device.write",
         "notification.read",
         "memory.read",
+        "persona.read",
+        "persona.write",
     }
 )
 _SCOPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")

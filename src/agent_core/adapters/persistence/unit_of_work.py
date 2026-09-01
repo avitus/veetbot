@@ -27,6 +27,7 @@ from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
+from agent_core.ports.personas import PersonaStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -98,6 +99,7 @@ class UnitOfWorkRepositories:
     memories: MemoryStore
     episodes: IntegratedEpisodeStore
     traces: TraceStore
+    personas: PersonaStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
@@ -154,6 +156,7 @@ class MemoryUnitOfWork:
         self.memories = repositories.memories
         self.episodes = repositories.episodes
         self.traces = repositories.traces
+        self.personas = repositories.personas
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules
@@ -266,6 +269,7 @@ class PostgresUnitOfWork:
         self.memories = repositories.memories
         self.episodes = repositories.episodes
         self.traces = repositories.traces
+        self.personas = repositories.personas
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules

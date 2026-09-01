@@ -43,6 +43,12 @@ class ContextBudgetAllocator:
 
         platform = self._integer(class_config("platform_policy"), "max_tokens")
         agent = self._integer(class_config("agent_instructions"), "max_tokens")
+        raw_persona = classes.get("persona")
+        persona = (
+            0
+            if raw_persona is None
+            else self._integer(self._mapping(raw_persona, "classes.persona"), "max_tokens")
+        )
         tools = self._integer(class_config("tool_definitions"), "max_tokens")
         skill_catalog = self._integer(class_config("skill_catalog"), "max_tokens")
         skill_body = self._integer(class_config("skill_bodies"), "max_tokens")
@@ -90,6 +96,7 @@ class ContextBudgetAllocator:
             reserve_output_tokens=reserve,
             platform_tokens=platform,
             agent_tokens=agent,
+            persona_tokens=persona,
             tool_tokens=tools,
             skill_catalog_tokens=skill_catalog,
             skill_body_tokens=skill_body,

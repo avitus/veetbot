@@ -20,19 +20,19 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:758), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:687).
+scenarios (memory-retrieval-and-ranking.md:773), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:714).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:284), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:800-803),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:815-818),
 the recall delta and its correction lines over a frozen snapshot
-(memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:795), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:714) are
+(memory-retrieval-and-ranking.md:96), conflicts surfaced rather than silently
+resolved at read time (memory-retrieval-and-ranking.md:810), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:741) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -71,6 +71,10 @@ former; session history or artifacts as retrieval sources; vendored copies of
 the public datasets; or a model judge anywhere in scoring. Each of those is
 roadmap item B6's residue or an exclusion the memory specifications already
 carry, and each is unlocked by benchmark evidence rather than by argument.
+Two have since entered on their own terms: the read half of the HTTP surface
+as Milestone 17 (ADR-0070), and the persona surface as Milestone 22
+(ADR-0079), whose entry-condition adjustment is recorded in that ADR rather
+than silently assumed here.
 
 ## The boundary: the yardstick is built before the thing it measures moves
 
@@ -812,7 +816,7 @@ moves to now; `last_evidence_at` and the compatibility-only
 `last_reinforced_at` do not move. A returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:800-803): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:815-818): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -826,7 +830,7 @@ units of work with no external call inside a transaction.
 The snapshot is frozen at session open, so a belief formed or corrected later
 is invisible to it and a belief inside it that has since been superseded goes
 on being rendered until the next session. The retrieval specification already
-describes the fix (memory-retrieval-and-ranking.md:93) and names its two parts.
+describes the fix (memory-retrieval-and-ranking.md:96) and names its two parts.
 
 `MemoryStore` gains `head_position(principal)`, the newest store position that
 principal has written whatever its status — a retirement moves the head, or the
@@ -851,7 +855,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:221): the delta is issued for what the
+context engine caps (context-engine.md:241): the delta is issued for what the
 base block left of that budget and is not issued at all when the base block
 spent it, so a session with a frozen snapshot cannot carry twice the recall a
 session without one may. Only the base and delta blocks are droppable under
@@ -932,7 +936,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:714), so it is a command and it demands
+(memory-formation-and-consolidation.md:741), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

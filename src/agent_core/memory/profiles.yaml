@@ -8,6 +8,10 @@ formation:
     floor_confidence: 0.2
     step: 0.05
     max_per_sweep: 200
+  persona_nomination:
+    min_confidence: 0.75
+    min_corroboration: 3
+    max_open: 5
 retrieval:
   semantic_enabled: false
   reciprocal_rank_fusion_k: 60
