@@ -95,6 +95,17 @@ package tests, and fresh PostgreSQL 16 integration lane pass. Remaining:
 - [ ] Complete per-stage cost telemetry required by the comparative gate
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 
+### Milestone 22 — Persona surface and curated belief promotion
+
+A seventh parallel workstream: an owner-edited persona document rendered as a
+trusted Region A prefix row, with curated promotion — a formed belief reaches
+instruction text only through the owner's explicit affirmation of a governed
+nomination. All fourteen `gate.persona.*` checks, the full local repository
+check, the Apple package lane, and a fresh PostgreSQL lane pass locally.
+Remaining:
+
+- [ ] Run hosted CI and the CodeRabbit review loop on the dev to main pull request
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -104,11 +115,6 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 22 — Persona surface and curated belief promotion** — fourteen
-  gates in a new `persona` area; a seventh parallel workstream. An
-  owner-edited persona document renders as a trusted Region A prefix row, and
-  a formed belief reaches it only through the owner's explicit affirmation of
-  a governed nomination.
 ## Deferred
 
 Nothing on the engineering plan's

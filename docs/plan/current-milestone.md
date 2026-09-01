@@ -144,7 +144,12 @@ title: Current Milestone
   the fifth parallel workstream, is in progress with six registered gates for
   monthly and yearly recurrence and recurring conversational creation; its six
   gates, complete non-live suite, and fresh PostgreSQL lane pass locally, with
-  only hosted CI and the final CodeRabbit review outstanding. Each in-progress
+  only hosted CI and the final CodeRabbit review outstanding. Milestone 22,
+  the seventh parallel workstream, is in progress with all fourteen
+  registered gates passing locally: the persona document, its trusted
+  prefix row, curated promotion, the routes, the CLI, and the native editor
+  are implemented, with only hosted CI and the final CodeRabbit review
+  outstanding. Each in-progress
   milestone's remaining work is itemized on the
   [milestones page](../status/milestones.md), which `make docs-check`
   reconciles against the project state.

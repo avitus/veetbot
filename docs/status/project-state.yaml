@@ -634,7 +634,7 @@ milestones:
           production-tuple activation artifact has been published.
   "22":
     title: Persona surface and curated belief promotion
-    status: authorized
+    status: in_progress
     authorized_on: 2026-09-01
     design: docs/plan/persona-surface.md
     adr: docs/adr/0079-milestone-22-persona-surface.md
@@ -651,6 +651,45 @@ milestones:
       - belief edit, retraction, or deletion over HTTP (per ADR-0070)
       - per-agent or per-surface persona variants
       - any change to AgentSpec.instructions
+    open_items:
+      - Run hosted CI and the CodeRabbit review loop on the dev to main pull request
+    evidence:
+      - check: local Milestone 22 behavior and contracts
+        outcome: passed_locally
+        detail: >-
+          All fourteen gate.persona.* checks are live and pass: the fifty-turn
+          plan drive with a mid-session edit yields exactly two prefix hashes
+          and one persona_changed rotation, an empty persona renders zero
+          bytes, the over-cap persona fails session open naming its class,
+          nominated-but-unaffirmed text never renders, secrets and injection
+          patterns are refused at every write surface, consolidation
+          nominates only closed-eligibility beliefs with durable declines,
+          affirmation links without consuming, the snapshot excludes promoted
+          beliefs and releases them on removal, the persona routes carry
+          exact scopes with /v1/memories still GET-only, writes are
+          revision-guarded, and both stores pass one principal-scoped
+          contract. The deterministic benchmark gates pass unchanged, so the
+          checked-in baseline stands re-verified under ADR-0069 decision 2.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issues,
+          the static and contract partitions pass with the persona suites
+          included, deployment-script tests pass, and the strict
+          documentation build reconciles 397 gates.
+      - check: Apple package test lane
+        outcome: passed_locally
+        detail: >-
+          make test-apple passes 175 Swift Testing cases in 20 suites,
+          including the persona view model's guarded save, conflict
+          retention, affirm refresh, and unavailable degradation, plus the
+          editor's structure pins and wire-model decoding.
+      - check: PostgreSQL Milestone 22 lane
+        outcome: passed_locally
+        detail: >-
+          A local PostgreSQL migrated from c2e0f4a6b831 through head
+          e3a1c5d7f9b2; the persona store parity test and all 159 selected
+          integration and resilience tests pass.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -730,5 +769,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-01T21:30:00Z
+last_updated: 2026-09-01T23:45:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round
