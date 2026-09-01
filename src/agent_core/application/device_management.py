@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import hashlib
 import json
 from datetime import timedelta
@@ -13,6 +14,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
     Device,
     DeviceCursor,
+    DeviceInvocationStatus,
     DeviceRegistration,
     DeviceRegistrationIdempotencyRecord,
     DeviceStatus,
@@ -31,6 +33,8 @@ from agent_core.domain.notifications import (
     device_test_key,
 )
 from agent_core.domain.views import (
+    DeviceInvocationResultView,
+    DeviceInvocationView,
     DeviceRegistrationResult,
     DeviceView,
     NotificationInboxItem,
@@ -49,13 +53,17 @@ class DeviceManagementService:
         clock: Clock,
         ids: IdFactory,
         notification_expiry_seconds: float,
+        invocation_timeout_seconds: int,
     ) -> None:
         if notification_expiry_seconds <= 0:
             raise ValueError("test notification expiry must be positive")
+        if invocation_timeout_seconds <= 0:
+            raise ValueError("device invocation timeout must be positive")
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
         self._notification_expiry = notification_expiry_seconds
+        self._invocation_timeout_seconds = invocation_timeout_seconds
 
     async def register(
         self,
@@ -226,6 +234,77 @@ class DeviceManagementService:
                 derivation_key=f"device.deleted:{device_id}",
                 token_fingerprint=fingerprint,
             )
+
+    async def list_pending_invocations(
+        self,
+        principal: Principal,
+        device_id: UUID,
+    ) -> builtins.list[DeviceInvocationView]:
+        """List what this device still owes an answer for, oldest first.
+
+        The invocation store resolves a row by identifier alone, so presence is
+        revalidated here — the device exists, is this principal's, and is not
+        revoked — before any invocation is read.
+        """
+
+        require_scope(principal, "device.read")
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            await self._present_device(uow, principal, device_id)
+            pending = await uow.device_invocations.list_pending_for_device(device_id, now=now)
+        return [
+            DeviceInvocationView(
+                id=invocation.id,
+                tool_name=invocation.tool_name,
+                arguments=dict(invocation.arguments),
+                created_at=invocation.created_at,
+                expires_at=invocation.created_at
+                + timedelta(seconds=self._invocation_timeout_seconds),
+            )
+            for invocation in pending
+        ]
+
+    async def record_invocation_result(
+        self,
+        principal: Principal,
+        device_id: UUID,
+        invocation_id: UUID,
+        status: DeviceInvocationStatus,
+    ) -> DeviceInvocationResultView:
+        """Record the one terminal result a device may post for an invocation."""
+
+        require_scope(principal, "device.write")
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            await self._present_device(uow, principal, device_id)
+            recorded = await uow.device_invocations.record_result(
+                invocation_id,
+                device_id=device_id,
+                status=status,
+                at=now,
+            )
+        return DeviceInvocationResultView(
+            id=recorded.id,
+            status=recorded.status,
+            resolved_at=recorded.resolved_at,
+        )
+
+    async def _present_device(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        device_id: UUID,
+    ) -> Device:
+        """Refuse an unknown or foreign device as absent, and a revoked one as stale."""
+
+        device = await uow.devices.get(device_id, principal)
+        if device.status is not DeviceStatus.ACTIVE:
+            raise ConflictError(
+                "the named device is revoked",
+                reason="device_revoked",
+                details={"device_id": str(device_id)},
+            )
+        return device
 
     async def enqueue_test_notification(
         self,

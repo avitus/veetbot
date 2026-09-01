@@ -44,6 +44,10 @@ notifications:
   fallback_poll_seconds: 30
   retry_delays_seconds: [30, 120, 600, 3600]
   terminal_expiry_seconds: 86400
+device:
+  invocation_timeout_seconds: 300
+  ingest_daily_cap: 500
+  invocation_poll_seconds: 2
 delegation:
   max_children_per_call: 3
   max_live_children_per_parent: 8

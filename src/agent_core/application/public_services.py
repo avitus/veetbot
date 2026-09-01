@@ -910,6 +910,37 @@ class PublicRunService:
                         data=dict(notification.data or {}),
                     )
 
+    async def deliver_device_message(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        run: Run,
+        content: list[ContentBlock],
+        *,
+        digest: str,
+        origin: dict[str, object],
+    ) -> SubmitResult:
+        """Answer a waiting triage run with device-captured, untrusted content.
+
+        The delivery is the owner-authored path's bookkeeping exactly, with one
+        difference that is the whole point: the message and the tool result it
+        completes carry `EXTERNAL_UNTRUSTED`, so the resumed turn cannot reach a
+        plain allow.
+        """
+
+        return await self._deliver_input_in(
+            uow,
+            principal,
+            run,
+            content,
+            None,
+            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            actor_type="device",
+            payload_extra={"trust": TrustLevel.EXTERNAL_UNTRUSTED.value, "origin": origin},
+            derivation_namespace="device.ingest",
+            derivation_suffix=digest,
+        )
+
     async def _deliver_input_in(
         self,
         uow: RepositoryUnitOfWork,
@@ -917,6 +948,12 @@ class PublicRunService:
         run: Run,
         content: list[ContentBlock],
         question_id: UUID | None,
+        *,
+        trust: TrustLevel = TrustLevel.USER,
+        actor_type: str = "principal",
+        payload_extra: dict[str, object] | None = None,
+        derivation_namespace: str = "run.input",
+        derivation_suffix: str | None = None,
     ) -> SubmitResult:
         """Complete one suspended question and atomically queue its run to resume."""
 
@@ -954,18 +991,20 @@ class PublicRunService:
         if effective_question != outstanding_id:
             raise ConflictError("the question was already resolved")
         parts = _domain_content(content)
+        suffix = derivation_suffix or f"{run.id}:{effective_question}"
         await uow.events.append(
             NewEvent(
                 session_id=run.session_id,
                 run_id=run.id,
                 event_type="user.message.created",
-                actor_type="principal",
+                actor_type=actor_type,
                 actor_id=principal.principal_id,
                 payload={
                     "content": [part.model_dump(mode="json") for part in parts],
                     "question_id": str(effective_question),
+                    **(payload_extra or {}),
                 },
-                derivation_key=f"run.input:{run.id}:{effective_question}",
+                derivation_key=f"{derivation_namespace}:{suffix}",
             )
         )
         outcome = ToolOutcome(
@@ -979,7 +1018,7 @@ class PublicRunService:
         result_item = ToolResultItem(
             call_id=invocation.call_id,
             content=parts,
-            trust=TrustLevel.USER,
+            trust=trust,
         )
         completed = invocation.model_copy(
             update={
@@ -1014,7 +1053,7 @@ class PublicRunService:
                     "reason_code": outcome.reason_code,
                     "result_item": result_item.model_dump(mode="json"),
                 },
-                derivation_key=f"run.input.completed:{run.id}:{effective_question}",
+                derivation_key=f"{derivation_namespace}.completed:{suffix}",
             )
         )
         checkpoint.version += 1
@@ -1054,7 +1093,7 @@ class PublicRunService:
                     "working_state": state.model_dump(mode="json"),
                     "source": "user_answer",
                 },
-                derivation_key=f"run.input.state:{run.id}:{effective_question}",
+                derivation_key=f"{derivation_namespace}.state:{suffix}",
             )
         )
         checkpoint.last_event_sequence = max(completed_event.sequence, state_event.sequence)

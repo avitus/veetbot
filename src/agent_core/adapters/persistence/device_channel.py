@@ -130,6 +130,15 @@ class InMemoryDeviceIngestStore:
         self._receipts[key] = receipt.model_copy(deep=True)
         return receipt.model_copy(deep=True)
 
+    async def get(
+        self,
+        device_id: UUID,
+        channel: str,
+        digest: str,
+    ) -> DeviceIngestReceipt | None:
+        stored = self._receipts.get((device_id, channel, digest))
+        return None if stored is None else stored.model_copy(deep=True)
+
     async def attach_routing(
         self,
         *,
@@ -277,6 +286,23 @@ class PostgresDeviceIngestStore:
             )
         ).one_or_none()
         return None if inserted is None else device_ingest_receipt_to_domain(inserted)
+
+    async def get(
+        self,
+        device_id: UUID,
+        channel: str,
+        digest: str,
+    ) -> DeviceIngestReceipt | None:
+        row = (
+            await self._session.scalars(
+                select(DeviceIngestReceiptRow).where(
+                    DeviceIngestReceiptRow.device_id == device_id,
+                    DeviceIngestReceiptRow.channel == channel,
+                    DeviceIngestReceiptRow.digest == digest,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else device_ingest_receipt_to_domain(row)
 
     async def attach_routing(
         self,

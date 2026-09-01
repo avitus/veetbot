@@ -53,10 +53,7 @@ from agent_core.adapters.determinism import (
     SystemClock,
     UUID7RequestIdFactory,
 )
-from agent_core.adapters.device_channel import (
-    DEVICE_INVOCATION_TIMEOUT_SECONDS,
-    PushWakeDeviceChannel,
-)
+from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
 from agent_core.adapters.execution.docker import (
@@ -207,6 +204,7 @@ from agent_core.application.browser_management import (
     BrowserUnitOfWorkFactory,
 )
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
+from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
     DeviceManagementService,
     NotificationInboxService,
@@ -237,6 +235,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     BrowserProfileService as PublicBrowserProfileServiceContract,
+)
+from agent_core.application.services import (
+    DeviceIngestService as PublicDeviceIngestServiceContract,
 )
 from agent_core.application.services import (
     DeviceService as PublicDeviceServiceContract,
@@ -429,6 +430,7 @@ class ApplicationServices:
     browser_grants: PublicBrowserGrantServiceContract
     schedules: PublicScheduleServiceContract
     devices: PublicDeviceServiceContract
+    device_ingest: PublicDeviceIngestServiceContract
     notifications: PublicNotificationServiceContract
     memory: PublicMemoryReadServiceContract
 
@@ -1288,6 +1290,9 @@ async def _compose(
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
     device_channel: DeviceChannel | None,
+    device_invocation_timeout_seconds: int,
+    device_invocation_poll_seconds: float,
+    device_ingest_daily_cap: int,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -1736,7 +1741,8 @@ async def _compose(
                 uow_factory=uow_factory,
                 notification_producer=cast(NotificationProducer, notification_producer),
                 clock=clock,
-                invocation_timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
+                invocation_timeout_seconds=device_invocation_timeout_seconds,
+                poll_seconds=device_invocation_poll_seconds,
             )
             device_tool_runtime = DeviceToolRuntime(
                 uow_factory,
@@ -1744,7 +1750,7 @@ async def _compose(
                 effective_device_channel,
                 clock,
                 ids,
-                invocation_timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
+                invocation_timeout_seconds=device_invocation_timeout_seconds,
             )
 
         async def attach_device_tools(session_id: UUID, session_principal: Principal) -> None:
@@ -2109,7 +2115,7 @@ async def _compose(
             async with uow_factory() as uow:
                 return await uow.device_invocations.expire_overdue(
                     now=clock.now(),
-                    timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
+                    timeout_seconds=device_invocation_timeout_seconds,
                 )
 
         browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
@@ -2133,23 +2139,36 @@ async def _compose(
             clock=clock,
             ids=ids,
             notification_expiry_seconds=notification_expiry_seconds,
+            invocation_timeout_seconds=device_invocation_timeout_seconds,
         )
         notification_inbox = NotificationInboxService(uow_factory=uow_factory)
+        public_run_service = PublicRunService(
+            uow_factory=uow_factory,
+            dispatcher=dispatcher,
+            clock=clock,
+            ids=ids,
+            seed_checkpoint=checkpoint_seeder,
+            cancel_active=token_slot.cancel,
+            cancel_parked_run=executor.cancel_parked_run,
+            resume_waiting_run=executor.requeue_after_input,
+            resolve_open_question=working_state.resolve_question,
+            trajectory_export_enabled=trajectory_export_enabled,
+            live_events=live_events,
+        )
+        device_ingest_service = DeviceMessageIngestService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            seed_checkpoint=checkpoint_seeder,
+            dispatcher=dispatcher,
+            deliver_device_message=public_run_service.deliver_device_message,
+            default_agent=agent,
+            sms_enabled=settings.device_sms_enabled,
+            ingest_daily_cap=device_ingest_daily_cap,
+        )
         public_services = ApplicationServices(
             sessions=public_session_service,
-            runs=PublicRunService(
-                uow_factory=uow_factory,
-                dispatcher=dispatcher,
-                clock=clock,
-                ids=ids,
-                seed_checkpoint=checkpoint_seeder,
-                cancel_active=token_slot.cancel,
-                cancel_parked_run=executor.cancel_parked_run,
-                resume_waiting_run=executor.requeue_after_input,
-                resolve_open_question=working_state.resolve_question,
-                trajectory_export_enabled=trajectory_export_enabled,
-                live_events=live_events,
-            ),
+            runs=public_run_service,
             approvals=PublicApprovalService(
                 uow_factory=uow_factory,
                 dispatcher=dispatcher,
@@ -2166,6 +2185,7 @@ async def _compose(
             browser_grants=browser_grant_service,
             schedules=schedule_service,
             devices=device_service,
+            device_ingest=device_ingest_service,
             notifications=notification_inbox,
             memory=PublicMemoryService(uow_factory=uow_factory),
         )
@@ -2569,6 +2589,7 @@ async def build(
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
+    device_config = runtime_config["device"]
     delegation_config = runtime_config["delegation"]
     delegation_defaults = DelegationDefaults(
         max_steps=int(delegation_config["child_max_steps"]),
@@ -2900,6 +2921,9 @@ async def build(
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,
             device_channel=device_channel_override,
+            device_invocation_timeout_seconds=int(device_config["invocation_timeout_seconds"]),
+            device_invocation_poll_seconds=float(device_config["invocation_poll_seconds"]),
+            device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
         )
         yield composition
     finally:

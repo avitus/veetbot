@@ -163,8 +163,12 @@ Two flags, default off, changing together at release validation:
 `AGENT_DEVICE_CHANNEL_ENABLED` (the port, the routes, the invocation
 push) and `AGENT_DEVICE_SMS_ENABLED` (the `device.sms.send` capability
 and the ingest route). With either unset, no route mounts, no
-capability-derived tool registers, and no push is sent. Limits block:
-`invocation_timeout` (300 s), `ingest_daily_cap` (500).
+capability-derived tool registers, and no push is sent. The two flags are
+paired at load: a deployment that sets exactly one is refused, because a
+channel without its capability and a capability without its channel are both
+half-built. Limits block: `invocation_timeout_seconds` (300),
+`ingest_daily_cap` (500), and `invocation_poll_seconds` (2), the interval the
+push-wake adapter waits between reads of the row it is blocked on.
 
 The routes take the existing `device.read` and `device.write` scopes; the
 scope vocabulary does not grow.

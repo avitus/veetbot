@@ -16,6 +16,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
+from agent_core.domain.policies import TrustLevel
 
 CONVERSATION_ADAPTER: TypeAdapter[ConversationItem] = TypeAdapter(ConversationItem)
 CONTENT_ADAPTER: TypeAdapter[list[ContentPart]] = TypeAdapter(list[ContentPart])
@@ -78,9 +79,18 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
             parts = CONTENT_ADAPTER.validate_python(content)
         else:
             raise ValueError(f"user.message.created payload has no content: {event.id}")
+        # A device-ingested message is third-party content the owner did not
+        # write. Only that one marker lowers the message's trust; every other
+        # value, and its absence, keeps the owner-authored default.
+        trust = (
+            TrustLevel.EXTERNAL_UNTRUSTED
+            if payload.get("trust") == TrustLevel.EXTERNAL_UNTRUSTED.value
+            else TrustLevel.USER
+        )
         return [
             UserMessage(
                 content=parts,
+                trust=trust,
                 principal_id=event.actor_id,
                 source_event_sequence=event.sequence,
             )

@@ -27,8 +27,6 @@ from agent_core.domain.errors import DeviceChannelUnavailable, NotFoundError
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-DEVICE_INVOCATION_TIMEOUT_SECONDS = 300
-
 
 class DeviceInvocationNotifier(Protocol):
     """The notification production this channel needs inside its transaction."""
@@ -55,8 +53,8 @@ class PushWakeDeviceChannel:
         uow_factory: UnitOfWorkFactory,
         notification_producer: DeviceInvocationNotifier,
         clock: Clock,
-        invocation_timeout_seconds: int = DEVICE_INVOCATION_TIMEOUT_SECONDS,
-        poll_seconds: float = 1.0,
+        invocation_timeout_seconds: int,
+        poll_seconds: float,
     ) -> None:
         if invocation_timeout_seconds <= 0:
             raise ValueError("device invocation timeout must be positive")

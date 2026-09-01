@@ -510,6 +510,36 @@ document's error envelope and its closed code vocabulary unchanged, and the
 cross-principal not-found rule extends to the ceiling: a belief above it is
 indistinguishable from one that does not exist.
 
+### The Milestone 20 device-channel extension
+
+[device-channel-and-sms.md](device-channel-and-sms.md) adds three routes and no
+scopes: the phone fetches and answers its own invocations under the existing
+`device.read` and `device.write`, and posts captured messages under
+`device.write`. The router is mounted only when `AGENT_DEVICE_CHANNEL_ENABLED`
+is set, and configuration refuses a deployment that sets exactly one of the two
+device flags.
+
+```text
+GET    /v1/devices/{device_id}/invocations                          device.read
+POST   /v1/devices/{device_id}/invocations/{invocation_id}/result   device.write
+POST   /v1/devices/{device_id}/messages                             device.write
+```
+
+Every one of the three revalidates the device before it reads or writes
+anything: unknown or another principal's device is `404`, a revoked one is
+`409` with reason `device_revoked`. The invocation store resolves a row by
+identifier alone, so ownership is checked here rather than inferred there. A
+posted result is first-wins — a replay or a disagreeing second post returns the
+recorded row — and an invocation the server already expired refuses every post
+with `409` and reason `device_invocation_expired`.
+
+Ingest adds one code to the taxonomy, `device_ingest_error`, whose closed
+reason decides its status: `ingest_daily_cap` is `429`, `channel_disabled` is
+`409`, and the remaining validation reasons are `422`. Its `details` carry the
+reason and nothing else — never the message. The response to an accepted
+message is `202` with the routing (`duplicate`, `session_id`, `run_id`); the
+body the device captured appears in no response, no error, and no log line.
+
 ### Tenancy is a repository argument, never a filter applied afterwards
 
 Every repository method that reads a tenant-scoped resource takes the

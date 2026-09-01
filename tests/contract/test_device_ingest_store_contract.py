@@ -79,6 +79,15 @@ async def assert_receipts_are_stored_once_and_routed_after_the_fact(
     )
     assert await store.record(receipt()) is None
     assert await store.count_for_utc_day(DEVICE_ID, CHANNEL, day=DAY) == 1
+    # A replayed digest returns nothing, so the routing of the run the first
+    # copy seeded is readable only through the stored receipt.
+    assert await store.get(DEVICE_ID, CHANNEL, DIGEST_A) == receipt(
+        session_id=SESSION_ID,
+        run_id=RUN_ID,
+    )
+    assert await store.get(DEVICE_ID, CHANNEL, UNKNOWN_DIGEST) is None
+    assert await store.get(OTHER_DEVICE_ID, CHANNEL, DIGEST_A) is None
+    assert await store.get(DEVICE_ID, OTHER_CHANNEL, DIGEST_A) is None
 
 
 async def assert_receipt_counting_is_per_device_channel_and_utc_day(

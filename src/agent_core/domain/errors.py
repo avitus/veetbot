@@ -56,6 +56,14 @@ class DeviceChannelUnavailable(AgentCoreError):  # noqa: N818 - normative taxono
         self.reason = reason
 
 
+class DeviceIngestError(AgentCoreError):
+    """An ingested device message failed one stable boundary rule."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class DelegationValidationError(AgentCoreError):
     """A delegation request failed one stable boundary rule."""
 

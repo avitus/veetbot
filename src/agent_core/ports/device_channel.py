@@ -68,6 +68,19 @@ class DeviceIngestStore(Protocol):
         """
         ...
 
+    async def get(
+        self,
+        device_id: UUID,
+        channel: str,
+        digest: str,
+    ) -> DeviceIngestReceipt | None:
+        """Read one stored receipt, returning ``None`` when this channel never took it.
+
+        A replayed digest stores nothing, so the routing the first copy seeded
+        is legible only here.
+        """
+        ...
+
     async def attach_routing(
         self,
         *,

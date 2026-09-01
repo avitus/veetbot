@@ -15,13 +15,10 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
-from agent_core.adapters.device_channel import (
-    DEVICE_INVOCATION_TIMEOUT_SECONDS,
-    FakeDeviceChannel,
-)
+from agent_core.adapters.device_channel import FakeDeviceChannel
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.bootstrap import Composition, build
-from agent_core.config import Settings
+from agent_core.config import ConfigurationError, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.devices import DeviceCapability, DeviceInvocation, DeviceInvocationStatus
 from agent_core.domain.errors import (
@@ -67,6 +64,7 @@ from tests.contract.support import (
     NOW,
     RUN_ID,
     SESSION_ID,
+    SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     agent,
     memory_uow_factory,
     principal,
@@ -112,6 +110,7 @@ async def _runtime_stack(
         channel or FakeDeviceChannel(clock=clock, capabilities={DEVICE_ID: capabilities}),
         clock,
         SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     )
     return factory, registry, runtime
 
@@ -140,7 +139,7 @@ async def test_a_declared_capability_registers_the_device_tool_for_the_session()
     assert spec.device_id == str(DEVICE_ID)
     assert spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
     assert spec.required_scopes == {"device.write"}
-    assert spec.timeout_seconds == DEVICE_INVOCATION_TIMEOUT_SECONDS + 15
+    assert spec.timeout_seconds == SHIPPED_INVOCATION_TIMEOUT_SECONDS + 15
 
 
 async def test_revoking_the_declaring_device_withdraws_the_tool_at_the_next_attach() -> None:
@@ -224,6 +223,7 @@ async def test_device_discovery_may_register_dynamically_but_other_sources_may_n
         FakeDeviceChannel(clock=_clock(), capabilities={DEVICE_ID: frozenset({TOOL_NAME})}),
         DEVICE_ID,
         SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     )
 
     registry.register_dynamic(tool, tenant_id=principal().tenant_id)
@@ -234,7 +234,10 @@ async def test_device_discovery_may_register_dynamically_but_other_sources_may_n
 
 
 async def test_a_device_tool_requires_a_device_target_and_a_device_identifier() -> None:
-    spec = device_sms_send_spec(DEVICE_ID)
+    spec = device_sms_send_spec(
+        DEVICE_ID,
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+    )
 
     with pytest.raises(ToolValidationError):
         validate_registration(spec.model_copy(update={"device_id": None}))
@@ -263,7 +266,15 @@ def _tool(*, status: DeviceInvocationStatus) -> tuple[DeviceSmsSendTool, FakeDev
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
         default_status=status,
     )
-    return DeviceSmsSendTool(channel, DEVICE_ID, SequenceIdFactory()), channel
+    return (
+        DeviceSmsSendTool(
+            channel,
+            DEVICE_ID,
+            SequenceIdFactory(),
+            invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+        ),
+        channel,
+    )
 
 
 async def test_a_sent_message_returns_a_content_free_confirmation() -> None:
@@ -327,6 +338,7 @@ async def test_every_unavailable_reason_reports_the_device_offline(reason: str) 
         _RaisingChannel(DeviceChannelUnavailable(reason, "unavailable")),
         DEVICE_ID,
         SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     )
 
     result = await tool.execute(dict(ARGUMENTS), tool_context())
@@ -342,6 +354,7 @@ async def test_an_invocation_row_that_vanishes_reports_the_device_offline() -> N
         _RaisingChannel(NotFoundError("device invocation not found")),
         DEVICE_ID,
         SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     )
 
     result = await tool.execute(dict(ARGUMENTS), tool_context())
@@ -474,26 +487,37 @@ async def test_a_credential_shaped_body_is_denied_before_the_tool_rule_is_consul
 
 
 async def test_the_device_tool_is_absent_while_either_flag_is_unset() -> None:
-    for settings in (
-        memory_settings(),
+    # Milestone 20 pairs the two flags at configuration time, so a half-enabled
+    # deployment never composes at all; the tool cannot exist in a graph that
+    # was refused before it was built.
+    for half_enabled in (
         replace(memory_settings(), device_channel_enabled=True),
         replace(memory_settings(), device_sms_enabled=True),
     ):
-        async with build(
-            settings=settings,
-            script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
-            fixed_clock_at=NOW,
-            sequential_ids=True,
-        ) as composition:
-            await _seed_device(composition)
-            run_id = await composition.runs.submit("ready?")
-            await composition.runs.wait_terminal(run_id)
+        with pytest.raises(ConfigurationError, match="device channel and SMS"):
+            async with build(
+                settings=half_enabled,
+                script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
+                fixed_clock_at=NOW,
+                sequential_ids=True,
+            ):
+                pass
 
-            with pytest.raises(NotFoundError):
-                composition.tool_pipeline._registry.get(
-                    DEVICE_SMS_SEND_TOOL_NAME,
-                    tenant_id=composition.principal.tenant_id,
-                )
+    async with build(
+        settings=memory_settings(),
+        script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+    ) as composition:
+        await _seed_device(composition)
+        run_id = await composition.runs.submit("ready?")
+        await composition.runs.wait_terminal(run_id)
+
+        with pytest.raises(NotFoundError):
+            composition.tool_pipeline._registry.get(
+                DEVICE_SMS_SEND_TOOL_NAME,
+                tenant_id=composition.principal.tenant_id,
+            )
 
 
 async def test_an_unreachable_device_surfaces_the_offline_outcome_to_the_model() -> None:

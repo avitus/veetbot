@@ -393,7 +393,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 150. Schema versions, profile names, rule identifiers,
+and asserts the total is 153. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -403,9 +403,9 @@ or invariants rather than knobs and are not counted.
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 26 |
 | `tools/limits.yaml` | 20 |
-| `runtime/limits.yaml` | 49 |
+| `runtime/limits.yaml` | 52 |
 | `memory/profiles.yaml` | 28 |
-| **Total** | **150** |
+| **Total** | **153** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -417,6 +417,13 @@ for an overlay. The session idle boundary is deliberately not a knob:
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
 keeps it a constant so that two beliefs formed under the same recorded
 formation policy stay comparable.
+
+Milestone 20 adds the three `device` knobs
+[device-channel-and-sms.md](device-channel-and-sms.md) fixes values for: the
+invocation timeout the push-wake channel waits out, the per-device daily ingest
+cap, and the interval between poll-backs. They are knobs rather than constants
+because the timeout and the cap are the two numbers an operator retunes when a
+phone answers slowly or a chatty channel floods triage.
 
 Five required operational defaults had no numeric value in the corpus. ADR-0036
 sets the initial values: a 4 MiB global tool-output ceiling, a 30-second worker

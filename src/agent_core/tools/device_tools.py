@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from agent_core.adapters.device_channel import DEVICE_INVOCATION_TIMEOUT_SECONDS
 from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
     Device,
@@ -93,7 +92,7 @@ _SMS_SEND_OUTPUT_SCHEMA: dict[str, Any] = {
 def device_sms_send_spec(
     device_id: UUID,
     *,
-    invocation_timeout_seconds: int = DEVICE_INVOCATION_TIMEOUT_SECONDS,
+    invocation_timeout_seconds: int,
 ) -> ToolSpec:
     """Declare the device send, targeted at the one device that granted it.
 
@@ -153,7 +152,7 @@ class DeviceSmsSendTool:
         device_id: UUID,
         ids: IdFactory,
         *,
-        invocation_timeout_seconds: int = DEVICE_INVOCATION_TIMEOUT_SECONDS,
+        invocation_timeout_seconds: int,
     ) -> None:
         self._channel = channel
         self._device_id = device_id
@@ -240,7 +239,7 @@ class DeviceToolRuntime:
         clock: Clock,
         ids: IdFactory,
         *,
-        invocation_timeout_seconds: int = DEVICE_INVOCATION_TIMEOUT_SECONDS,
+        invocation_timeout_seconds: int,
         page_size: int = DEVICE_PAGE_SIZE,
     ) -> None:
         if page_size <= 0:

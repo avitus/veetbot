@@ -239,6 +239,8 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "concurrency_conflict",
         "schedule_validation_error",
         "device_validation_error",
+        "device_ingest_error",
+        "device_channel_unavailable",
         "malformed_request",
         "unsupported_media_type",
         "payload_too_large",

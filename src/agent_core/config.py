@@ -136,7 +136,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 150 operator-reviewable knobs. Metadata such as
+# The design corpus declares 153 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -272,6 +272,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "delegation.synthesis_reserve_model_calls",
             "delegation.synthesis_reserve_cost",
             "delegation.summary_max_bytes",
+            "device.invocation_timeout_seconds",
+            "device.ingest_daily_cap",
+            "device.invocation_poll_seconds",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -711,6 +714,10 @@ def validate_settings(
     if settings.notification_api_enabled != settings.notification_dispatch_enabled:
         raise ConfigurationError(
             "notification API and dispatch flags must be enabled or disabled together"
+        )
+    if settings.device_channel_enabled != settings.device_sms_enabled:
+        raise ConfigurationError(
+            "device channel and SMS flags must be enabled or disabled together"
         )
     apns_values = {
         "APNS_KEY_FILE": settings.apns_key_file,

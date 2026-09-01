@@ -18,10 +18,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
-from agent_core.adapters.device_channel import (
-    DEVICE_INVOCATION_TIMEOUT_SECONDS,
-    PushWakeDeviceChannel,
-)
+from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWork, MemoryUnitOfWorkFactory
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
@@ -31,7 +28,12 @@ from agent_core.domain.notifications import NotificationKind, device_invocation_
 from agent_core.ports.device_channel import DeviceInvocationStore
 from agent_core.runtime.worker import MaintenanceWorker
 from agent_core.tools.messages import TOOL_MESSAGES
-from tests.contract.support import NOW, RUN_ID, principal
+from tests.contract.support import (
+    NOW,
+    RUN_ID,
+    SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+    principal,
+)
 from tests.contract.test_device_channel_contract import (
     DEVICE_ID,
     INVOCATION_ID,
@@ -308,7 +310,7 @@ async def test_the_maintenance_pass_expires_overdue_invocations(tmp_path: Path) 
                     created_at=_START,
                 )
             )
-        clock.advance(timedelta(seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS + 1))
+        clock.advance(timedelta(seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS + 1))
         async with app.uow_factory() as uow:
             await uow.device_invocations.create(
                 _pending(
@@ -342,7 +344,7 @@ async def test_the_invocation_sweep_stays_unwired_while_the_device_flags_are_off
                     created_at=_START,
                 )
             )
-        clock.advance(timedelta(seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS + 1))
+        clock.advance(timedelta(seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS + 1))
 
         maintenance = cast(MaintenanceWorker, app.maintenance_factory())
         await maintenance.run_once()
