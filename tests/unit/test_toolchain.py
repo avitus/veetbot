@@ -867,6 +867,13 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
     assert 'CODE_SIGN_IDENTITY="Apple Distribution"' in archive_command
     assert 'PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"' in archive_command
     assert 'plutil -insert signingStyle -string manual "$export_options"' in archive_command
+    assert (
+        'plutil -insert signingCertificate -string "Apple Distribution" "$export_options"'
+    ) in archive_command
+    assert (
+        "plutil -insert installerSigningCertificate -string "
+        '"Mac Installer Distribution" "$export_options"'
+    ) in archive_command
     assert "plutil -insert provisioningProfiles -xml" in archive_command
     assert "com.veetbot.apple" in archive_command
     assert "Veetbot Mac App Store" in archive_command
