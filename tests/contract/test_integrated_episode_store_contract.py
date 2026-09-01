@@ -68,3 +68,20 @@ async def test_integrated_episode_repository_contract_is_registered() -> None:
     assert await store.delete_for_principal(principal()) == 1
     with pytest.raises(NotFoundError):
         await store.get(owned.id, principal())
+
+
+async def test_in_memory_episode_derivation_keys_are_owner_scoped() -> None:
+    store = InMemoryIntegratedEpisodeStore()
+    first = integrated_episode()
+    other_principal = principal().model_copy(update={"principal_id": "other"})
+    second = first.model_copy(
+        update={
+            "id": UUID(int=712),
+            "principal_id": other_principal.principal_id,
+        }
+    )
+
+    assert await store.put(first) == first
+    assert await store.put(second) == second
+    assert await store.get(first.id, principal()) == first
+    assert await store.get(second.id, other_principal) == second

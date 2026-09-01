@@ -34,6 +34,8 @@ class MemoryStatus(StrEnum):
 # rather than belief; a caller that wants history names the statuses it wants.
 LIVE_MEMORY_STATUSES: tuple[MemoryStatus, ...] = (MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL)
 LIFECYCLE_POLICY_VERSION = "lifecycle@2"
+INTEGRATED_EPISODE_MAX_SUBJECTS = 64
+MEMORY_SUBJECT_MAX_LENGTH = 512
 
 
 class BeliefType(StrEnum):
@@ -150,7 +152,7 @@ class IntegratedEpisode(BaseModel):
     source_started_at: datetime
     source_ended_at: datetime
     narrative: str = Field(min_length=1, max_length=32768)
-    subjects: list[str] = Field(default_factory=list, max_length=64)
+    subjects: list[str] = Field(default_factory=list, max_length=INTEGRATED_EPISODE_MAX_SUBJECTS)
     integration_policy_version: Literal["episode-integration@1"] = "episode-integration@1"
     derivation_key: str = Field(pattern=r"^[0-9a-f]{64}$")
     created_at: datetime
@@ -166,7 +168,7 @@ class IntegratedEpisode(BaseModel):
     @classmethod
     def subjects_are_ordered_unique_and_bounded(cls, value: list[str]) -> list[str]:
         normalized = [subject.strip() for subject in value]
-        if any(not subject or len(subject) > 512 for subject in normalized):
+        if any(not subject or len(subject) > MEMORY_SUBJECT_MAX_LENGTH for subject in normalized):
             raise ValueError("episode subjects must be non-empty and bounded")
         if len({subject.casefold() for subject in normalized}) != len(normalized):
             raise ValueError("episode subjects must be unique")
@@ -188,7 +190,7 @@ class MemoryCandidate(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     belief_type: BeliefType
-    subject: str = Field(min_length=1, max_length=512)
+    subject: str = Field(min_length=1, max_length=MEMORY_SUBJECT_MAX_LENGTH)
     statement: str = Field(min_length=1, max_length=8192)
     polarity: Polarity = Polarity.ASSERT
     source_event_ids: list[PositiveInt] = Field(min_length=1)

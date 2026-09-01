@@ -50,12 +50,17 @@ class InMemoryIntegratedEpisodeStore:
 
     def __init__(self) -> None:
         self._records: dict[UUID, IntegratedEpisode] = {}
-        self._by_derivation: dict[str, UUID] = {}
+        self._by_derivation: dict[tuple[str, str, str], UUID] = {}
         self._lock = asyncio.Lock()
 
     async def put(self, episode: IntegratedEpisode) -> IntegratedEpisode:
         async with self._lock:
-            existing_id = self._by_derivation.get(episode.derivation_key)
+            derivation = (
+                episode.tenant_id,
+                episode.principal_id,
+                episode.derivation_key,
+            )
+            existing_id = self._by_derivation.get(derivation)
             if existing_id is not None:
                 existing = self._records[existing_id]
                 if existing.model_dump(exclude={"id", "created_at"}) != episode.model_dump(
@@ -66,7 +71,7 @@ class InMemoryIntegratedEpisodeStore:
             if episode.id in self._records:
                 raise ConflictError("episode id identifies different content")
             self._records[episode.id] = episode.model_copy(deep=True)
-            self._by_derivation[episode.derivation_key] = episode.id
+            self._by_derivation[derivation] = episode.id
             return episode.model_copy(deep=True)
 
     async def get(self, episode_id: UUID, principal: Principal) -> IntegratedEpisode:
@@ -110,7 +115,10 @@ class InMemoryIntegratedEpisodeStore:
             ]
             for episode_id in ids:
                 episode = self._records.pop(episode_id)
-                self._by_derivation.pop(episode.derivation_key, None)
+                self._by_derivation.pop(
+                    (episode.tenant_id, episode.principal_id, episode.derivation_key),
+                    None,
+                )
             return len(ids)
 
     async def delete_for_principal(self, principal: Principal) -> int:
@@ -123,7 +131,10 @@ class InMemoryIntegratedEpisodeStore:
             ]
             for episode_id in ids:
                 episode = self._records.pop(episode_id)
-                self._by_derivation.pop(episode.derivation_key, None)
+                self._by_derivation.pop(
+                    (episode.tenant_id, episode.principal_id, episode.derivation_key),
+                    None,
+                )
             return len(ids)
 
 

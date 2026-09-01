@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
+    INTEGRATED_EPISODE_MAX_SUBJECTS,
+    MEMORY_SUBJECT_MAX_LENGTH,
     SENSITIVITY_ORDER,
     BeliefType,
     IntegratedEpisode,
@@ -74,11 +76,15 @@ _BELIEF_TYPE_BY_CLAIM_KIND: dict[MemoryClaimKind, BeliefType] = {
 _DIRECT_LONGEVITY_BY_CLAIM_KIND: dict[MemoryClaimKind, MemoryLongevity] = {
     MemoryClaimKind.ONGOING_PROJECT: MemoryLongevity.ONGOING,
     MemoryClaimKind.GOAL: MemoryLongevity.ONGOING,
+    MemoryClaimKind.ROLE: MemoryLongevity.DURABLE,
     MemoryClaimKind.SKILL: MemoryLongevity.DURABLE,
     MemoryClaimKind.INTEREST: MemoryLongevity.DURABLE,
     MemoryClaimKind.HABIT: MemoryLongevity.ONGOING,
+    MemoryClaimKind.CONSTRAINT: MemoryLongevity.DURABLE,
+    MemoryClaimKind.RECURRING_STATE: MemoryLongevity.ONGOING,
     MemoryClaimKind.RELATIONSHIP: MemoryLongevity.DURABLE,
     MemoryClaimKind.PREFERENCE: MemoryLongevity.DURABLE,
+    MemoryClaimKind.RESOURCE: MemoryLongevity.DURABLE,
     MemoryClaimKind.PROJECT_FACT: MemoryLongevity.ONGOING,
 }
 _SENSITIVITY_FLOOR_BY_CLAIM_KIND: dict[MemoryClaimKind, Sensitivity] = dict.fromkeys(
@@ -188,13 +194,35 @@ def _owned_user_events(
 
 
 def _episode_derivation_key(events: Sequence[EventEnvelope], principal: Principal) -> str:
-    session_id = events[0].session_id
+    session_id = _shared_episode_session_id(events)
     source_ids = ",".join(str(event.sequence) for event in events)
     value = (
         f"{EPISODE_INTEGRATION_POLICY_VERSION}:{principal.tenant_id}:"
         f"{principal.principal_id}:{session_id}:{source_ids}"
     )
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _shared_episode_session_id(events: Sequence[EventEnvelope]) -> UUID:
+    session_id = events[0].session_id
+    if any(event.session_id != session_id for event in events):
+        raise ValueError("integrated episode events must share the same session")
+    return session_id
+
+
+def _normalized_episode_subjects(subjects: Sequence[str]) -> list[str]:
+    normalized_subjects: list[str] = []
+    seen: set[str] = set()
+    for subject in subjects:
+        normalized = " ".join(subject.split())
+        key = normalized.casefold()
+        if not normalized or len(normalized) > MEMORY_SUBJECT_MAX_LENGTH or key in seen:
+            continue
+        seen.add(key)
+        normalized_subjects.append(normalized)
+        if len(normalized_subjects) == INTEGRATED_EPISODE_MAX_SUBJECTS:
+            break
+    return normalized_subjects
 
 
 def deterministic_integrated_episode(
@@ -211,19 +239,17 @@ def deterministic_integrated_episode(
     if not selected:
         raise ValueError("episode integration requires an owned user event")
     selected.sort(key=lambda event: event.sequence)
-    unique_subjects = list(
-        dict.fromkeys(subject.strip() for subject in subjects if subject.strip())
-    )
+    session_id = _shared_episode_session_id(selected)
     return IntegratedEpisode(
         id=episode_id,
         tenant_id=principal.tenant_id,
         principal_id=principal.principal_id,
-        session_id=selected[0].session_id,
+        session_id=session_id,
         source_event_ids=[event.sequence for event in selected],
         source_started_at=selected[0].created_at,
         source_ended_at=selected[-1].created_at,
         narrative="\n".join(f"[e:{event.sequence}] {_event_text(event)}" for event in selected),
-        subjects=unique_subjects,
+        subjects=_normalized_episode_subjects(subjects),
         integration_policy_version=EPISODE_INTEGRATION_POLICY_VERSION,
         derivation_key=_episode_derivation_key(selected, principal),
         created_at=created_at,
@@ -240,6 +266,8 @@ def validate_integrated_episode(
 
     selected = _owned_user_events(events, principal)
     selected.sort(key=lambda event: event.sequence)
+    if selected:
+        _shared_episode_session_id(selected)
     by_sequence = {event.sequence: event for event in selected}
     expected_ids = [event.sequence for event in selected]
     if (
@@ -311,7 +339,7 @@ def _normalize_provider_candidate(
         if uses_uncertainty:
             raise ValueError("direct statement uses hypothesis language")
         confidence = 0.65
-        longevity = _DIRECT_LONGEVITY_BY_CLAIM_KIND.get(candidate.claim_kind, candidate.longevity)
+        longevity = _DIRECT_LONGEVITY_BY_CLAIM_KIND[candidate.claim_kind]
 
     belief_type = _BELIEF_TYPE_BY_CLAIM_KIND[candidate.claim_kind]
     sensitivity = _higher_sensitivity(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -821,6 +822,30 @@ def test_provider_cannot_render_a_hypothesis_as_an_unqualified_fact() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("claim_kind", "expected"),
+    [
+        (MemoryClaimKind.ROLE, MemoryLongevity.DURABLE),
+        (MemoryClaimKind.CONSTRAINT, MemoryLongevity.DURABLE),
+        (MemoryClaimKind.RECURRING_STATE, MemoryLongevity.ONGOING),
+        (MemoryClaimKind.RESOURCE, MemoryLongevity.DURABLE),
+    ],
+)
+def test_direct_claim_longevity_is_owned_by_local_policy(
+    claim_kind: MemoryClaimKind,
+    expected: MemoryLongevity,
+) -> None:
+    candidate = _candidate(claim_kind=claim_kind, longevity="tentative")
+
+    normalized = _normalize_provider_candidate(
+        candidate,
+        by_sequence={7: _personal_agent_event()},
+        scope="general",
+    )
+
+    assert normalized.longevity is expected
+
+
 async def test_anticipation_is_causally_blinded() -> None:
     extractor, provider, factory = await _distillation_extractor([])
     source_id = await user_event(
@@ -982,6 +1007,56 @@ async def test_integrated_episodes_are_coherent_and_grounded() -> None:
             events,
             principal=principal(),
         )
+
+
+def test_fallback_episode_normalizes_and_bounds_subjects() -> None:
+    episode = deterministic_integrated_episode(
+        [_personal_agent_event()],
+        principal=principal(),
+        episode_id=UUID(int=902),
+        created_at=NOW,
+        subjects=[
+            " MacBook ",
+            "macbook",
+            "  web \t tools  ",
+            "x" * 513,
+            *(f"subject-{index}" for index in range(70)),
+        ],
+    )
+
+    assert episode.subjects[:2] == ["MacBook", "web tools"]
+    assert episode.subjects[-1] == "subject-61"
+    assert len(episode.subjects) == 64
+    assert len({subject.casefold() for subject in episode.subjects}) == 64
+
+
+def test_integrated_episode_batches_require_one_session() -> None:
+    first = _personal_agent_event()
+    second = first.model_copy(
+        update={
+            "id": 8,
+            "sequence": 8,
+            "session_id": UUID(int=SESSION_ID.int + 1),
+            "payload": {"content": "I am comparing web tools."},
+        }
+    )
+
+    with pytest.raises(ValueError, match="same session"):
+        deterministic_integrated_episode(
+            [first, second],
+            principal=principal(),
+            episode_id=UUID(int=903),
+            created_at=NOW,
+        )
+
+    episode = deterministic_integrated_episode(
+        [first, second.model_copy(update={"session_id": SESSION_ID})],
+        principal=principal(),
+        episode_id=UUID(int=904),
+        created_at=NOW,
+    )
+    with pytest.raises(ValueError, match="same session"):
+        validate_integrated_episode(episode, [first, second], principal=principal())
 
 
 async def test_decision_telemetry_accounts_for_every_proposal() -> None:
