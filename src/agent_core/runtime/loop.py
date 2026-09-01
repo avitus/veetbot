@@ -46,7 +46,6 @@ from agent_core.domain.runs import (
     Run,
     RunCheckpoint,
     RunFailure,
-    RunKind,
     RunOutcome,
     Step,
 )
@@ -304,11 +303,15 @@ def _synthesis_reserve_dimension(
     *,
     step_in_progress: bool = False,
 ) -> str | None:
-    """Name the first delegated research budget whose synthesis reserve began."""
+    """Name the first run budget whose final-synthesis reserve began."""
 
-    if run.kind is not RunKind.DELEGATED:
-        return None
     limits = run.limits
+    if not (
+        limits.synthesis_reserve_steps
+        or limits.synthesis_reserve_model_calls
+        or limits.synthesis_reserve_cost
+    ):
+        return None
     remaining_steps = limits.max_steps - run.step_count + int(step_in_progress)
     if remaining_steps <= limits.synthesis_reserve_steps:
         return "steps"
@@ -322,14 +325,14 @@ def _synthesis_reserve_dimension(
 
 
 def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelRequest:
-    """Add a volatile platform control that forbids more delegated research."""
+    """Add a volatile platform control that protects final-synthesis headroom."""
 
     control = UserMessage(
         content=[
             TextPart(
                 text=(
-                    "Runtime control: the delegated final-synthesis reserve is active "
-                    f"because the research {dimension} budget is exhausted. Do not call "
+                    "Runtime control: the final-synthesis reserve is active "
+                    f"because the run {dimension} budget is exhausted. Do not call "
                     "tools. Synthesize the best-supported final answer from evidence "
                     "already in the conversation and state any remaining gap."
                 )
@@ -694,7 +697,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 context,
                 FailureReason.BUDGET_EXCEEDED,
                 "SynthesisReserveViolation",
-                "a delegated child requested another tool inside its final synthesis reserve",
+                "the model requested another tool inside its final synthesis reserve",
                 step,
                 {"synthesis_reserve": synthesis_reserve},
             )

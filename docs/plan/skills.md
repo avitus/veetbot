@@ -264,7 +264,7 @@ References are strings, and the grammar is two forms.
 ```
 
 `AgentSpec.enabled_skills` is a list of these, which is why that field
-could already exist at `engineering-plan.md:523` with no design behind
+could already exist at `engineering-plan.md:539` with no design behind
 it and still be right. A floating reference is what an operator wants
 for a skill they maintain; a pinned reference is what an operator
 wants after a bad revision, and it is also the whole of the rollback
@@ -915,7 +915,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:4122` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:4202` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
@@ -1278,7 +1278,7 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:391` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:739-744` cites `engineering-plan.md:2818`, the
+`readiness.md:738-744` cites `engineering-plan.md:2834`, the
 version-pinning acceptance criterion; its earlier target was an MCP
 trust-labelling bullet. The ADR and the questions file are
 historical records and are not edited. The two live statements are.

@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:758), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:687).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,17 +28,17 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:284), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:800-803),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:795), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:714) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
 lifecycle second, so that every lifecycle change is a measured change and the
 plan's standing rule that a capability enters on evaluation evidence rather
-than on argument (engineering-plan.md:2867) has something to read.
+than on argument (engineering-plan.md:2883) has something to read.
 
 Milestone 16 is authorized as a parallel workstream alongside Milestones 12
 through 15. Its gates may become green independently, but the verified gate
@@ -738,7 +738,7 @@ fix that lets the benchmark's harness path retire.
 
 Decay is a sweep, not a read-time discount. `GovernedMemoryService.decay()`
 selects live beliefs that are `PROVISIONAL` or below the maximum inferred
-confidence, whose `last_reinforced_at` is at least `decay_tau_days` for their
+confidence, whose `last_evidence_at` is at least `decay_tau_days` for their
 belief type in the past, and whose `updated_at` is older than one sweep
 interval, which is the guard against decaying the same belief twice in a
 window. Each selected belief loses `decay.step` of confidence; a belief that
@@ -752,8 +752,8 @@ next turn would report a change nobody made — while a retirement is exactly th
 change the correction lines below select on. Explicit user statements are
 `ACTIVE` at high confidence and are never eligible.
 
-`MemoryStore` gains `list_idle(principal, reinforced_before, limit)` — live
-beliefs last reinforced at or before an instant, least recently reinforced
+`MemoryStore` gains `list_idle(principal, evidence_before, limit)` — live
+beliefs last evidenced at or before an instant, least recently evidenced
 first — and the sweep reads its window through it, cut at the shortest time
 constant any belief type carries and bounded by `decay.max_per_sweep`. The
 ordering is the point: a window ordered newest-first would refill with the rows
@@ -767,8 +767,9 @@ Ranking gains the time term the decay design implies. The reinforcement
 contribution becomes
 
 ```text
-reinforce = min(1, log1p(citations) / log(11)) * exp(-age_days / tau[type])
-age_days  = max(0, (now - last_reinforced_at).days)
+C_max     = 10
+reinforce = min(1, log1p(evidence_count) / log1p(C_max)) * exp(-age_days / tau[type])
+age_days  = max(0, (now - last_evidence_at).days)
 ```
 
 with `now` taken once per recall from the query's `as_of` or the clock, and
@@ -788,9 +789,11 @@ and noise must not rise across that re-record.
 
 ## Usage feedback
 
-A belief that gets cited should resist decay; a belief that keeps winning the
-ranking and never matters should stop winning it. Both are one hook on run
-completion.
+A belief that gets cited has demonstrated utility, not renewed truth; a belief
+that keeps winning the ranking and never matters should stop winning it. Both
+are one hook on run completion. Milestone 21 supersedes the older reinforcement
+clock here with the evidence and usage clocks defined by
+[adaptive memory distillation](adaptive-memory-distillation.md).
 
 `TraceStore` gains `mark_cited(trace_id, principal, cited)`, which unions the
 cited set into the trace under a row lock, is principal-scoped, and is
@@ -804,11 +807,12 @@ and is counted as ambiguous, because the deterministic identifiers the
 evaluation harness issues render every belief the same way and a citing live
 arm would otherwise credit whatever it recalled. A cited belief's `utility`
 rises by
-`usage.cited_utility_delta` to a ceiling of 1 and its `last_reinforced_at`
-moves to now; a returned-but-uncited belief's `utility` falls by
+`usage.cited_utility_delta` to a ceiling of 1 and its `last_used_at`
+moves to now; `last_evidence_at` and the compatibility-only
+`last_reinforced_at` do not move. A returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:797): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:800-803): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -1013,8 +1017,9 @@ Metrics carry no belief statement, no secret, and no local dataset path.
    query-former paths. **M16.**
 8. Time-decayed reinforcement, the stale and near-duplicate penalties, and the
    decay sweep, at `retrieval@2`. **M16.**
-9. Usage feedback: the cited-trace mark, utility movement, and the completion
-   hook. **M16.**
+9. Usage feedback: the cited-trace mark, utility movement, separate usage
+   clock, and the completion hook; citations do not refresh evidence. **M16,
+   superseded in clock semantics by M21.**
 10. The recall delta and the correction lines, including the head-position
     watermark and the minimum-position query. **M16.**
 11. Established facts into formation at `AFFIRMED`, at `formation@7` and

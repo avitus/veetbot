@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections import Counter
 from contextlib import suppress
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -21,16 +22,21 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
+    LIFECYCLE_POLICY_VERSION,
     BeliefRejection,
     BeliefType,
     ConsolidationResult,
     ConsolidationRun,
     DecayResult,
+    EvidenceSpan,
     MemoryAuthority,
     MemoryCandidate,
+    MemoryClaimKind,
+    MemoryDerivation,
     MemoryDiagnosis,
     MemoryEdit,
     MemoryExtractionResult,
+    MemoryLongevity,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -54,7 +60,11 @@ from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 FORMATION_POLICY_VERSION = "formation@7"
+NEMORI_FORMATION_POLICY_VERSION = "formation@9"
+HIGH_RECALL_EXTRACTOR_VERSION = "nemori-deterministic-fallback-v1"
 MAX_AUTOMATIC_CANDIDATES = 12
+MAX_NEMORI_AUTOMATIC_CANDIDATES = 32
+MAX_NEMORI_CANDIDATES_PER_SOURCE = 6
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
 SESSION_IDLE_SECONDS = 30
@@ -69,6 +79,21 @@ _AUTHORITY_RANK = {
     MemoryAuthority.INFERRED: 0,
     MemoryAuthority.AFFIRMED: 1,
     MemoryAuthority.USER: 2,
+}
+
+_FUTURE_USEFULNESS = {
+    MemoryClaimKind.ONGOING_PROJECT: 1.0,
+    MemoryClaimKind.GOAL: 0.95,
+    MemoryClaimKind.CONSTRAINT: 0.92,
+    MemoryClaimKind.ROLE: 0.9,
+    MemoryClaimKind.RELATIONSHIP: 0.88,
+    MemoryClaimKind.PREFERENCE: 0.86,
+    MemoryClaimKind.SKILL: 0.84,
+    MemoryClaimKind.HABIT: 0.8,
+    MemoryClaimKind.RECURRING_STATE: 0.78,
+    MemoryClaimKind.INTEREST: 0.72,
+    MemoryClaimKind.RESOURCE: 0.62,
+    MemoryClaimKind.PROJECT_FACT: 0.55,
 }
 
 logger = logging.getLogger(__name__)
@@ -225,6 +250,99 @@ def _event_text(event: EventEnvelope) -> str:
     return "\n".join(texts).strip()
 
 
+def _select_nemori_candidates(
+    proposals: list[tuple[MemoryCandidate, MemoryAuthority]],
+) -> list[tuple[MemoryCandidate, MemoryAuthority]]:
+    """Choose a broad, useful formation@9 batch without silent truncation."""
+
+    ranked = sorted(
+        enumerate(proposals),
+        key=lambda indexed: (
+            indexed[1][0].derivation is MemoryDerivation.HYPOTHESIS,
+            -_FUTURE_USEFULNESS[indexed[1][0].claim_kind],
+            min(indexed[1][0].source_event_ids),
+            indexed[1][0].subject.casefold(),
+            indexed[1][0].claim_kind.value,
+            indexed[1][0].statement.casefold(),
+            indexed[0],
+        ),
+    )
+    chosen: list[tuple[MemoryCandidate, MemoryAuthority]] = []
+    chosen_indices: set[int] = set()
+    source_counts: dict[int, int] = {}
+    subjects: set[str] = set()
+    kinds: set[MemoryClaimKind] = set()
+
+    def take(index: int, proposal: tuple[MemoryCandidate, MemoryAuthority]) -> bool:
+        candidate, _authority = proposal
+        if len(chosen) >= MAX_NEMORI_AUTOMATIC_CANDIDATES or any(
+            source_counts.get(source_id, 0) >= MAX_NEMORI_CANDIDATES_PER_SOURCE
+            for source_id in candidate.source_event_ids
+        ):
+            return False
+        chosen.append(proposal)
+        chosen_indices.add(index)
+        subjects.add(candidate.subject.casefold())
+        kinds.add(candidate.claim_kind)
+        for source_id in candidate.source_event_ids:
+            source_counts[source_id] = source_counts.get(source_id, 0) + 1
+        return True
+
+    # Diversity pass: a novel subject or category earns one slot before the
+    # rank-ordered fill. The rank still keeps direct observations ahead of
+    # hypotheses and useful durable/ongoing claims ahead of incidental facts.
+    for index, proposal in ranked:
+        candidate, _authority = proposal
+        if candidate.subject.casefold() not in subjects or candidate.claim_kind not in kinds:
+            take(index, proposal)
+    for index, proposal in ranked:
+        if index not in chosen_indices:
+            take(index, proposal)
+    return chosen
+
+
+def _nemori_displacement_counts(
+    proposals: list[tuple[MemoryCandidate, MemoryAuthority]],
+    selected: list[tuple[MemoryCandidate, MemoryAuthority]],
+) -> Counter[str]:
+    """Classify each capacity displacement by the limit that excluded it."""
+
+    remaining = list(selected)
+    displaced: list[tuple[MemoryCandidate, MemoryAuthority]] = []
+    for proposal in proposals:
+        selected_index = next(
+            (
+                index
+                for index, current in enumerate(remaining)
+                if current[0] is proposal[0] and current[1] is proposal[1]
+            ),
+            None,
+        )
+        if selected_index is None:
+            displaced.append(proposal)
+        else:
+            remaining.pop(selected_index)
+    if not displaced:
+        return Counter()
+    if len(selected) >= MAX_NEMORI_AUTOMATIC_CANDIDATES:
+        return Counter({"displaced_global": len(displaced)})
+    source_counts: Counter[int] = Counter(
+        source_id for candidate, _authority in selected for source_id in candidate.source_event_ids
+    )
+    reasons: Counter[str] = Counter()
+    for candidate, _authority in displaced:
+        reason = (
+            "displaced_per_source"
+            if any(
+                source_counts[source_id] >= MAX_NEMORI_CANDIDATES_PER_SOURCE
+                for source_id in candidate.source_event_ids
+            )
+            else "displaced_global"
+        )
+        reasons[reason] += 1
+    return reasons
+
+
 def _clean_object(value: str) -> tuple[str, str] | None:
     clean = value.strip(" \t\n\r,.:;!?")
     if not clean or re.match(r"^(?:it|this|that|something|anything)$", clean, re.I):
@@ -368,6 +486,7 @@ class DeterministicCandidateExtractor:
                     proposed_scope=scope,
                     proposed_portability=portability or portability_ceiling(belief_type),
                     sensitivity_guess=sensitivity,
+                    evidence_spans=[EvidenceSpan(source_event_id=sequence, text=statement)],
                 )
             )
 
@@ -634,6 +753,122 @@ class DeterministicCandidateExtractor:
         return proposed
 
 
+_ONGOING_BUILD = re.compile(
+    r"\b(?:i\s+am|i['\u2019]m|we\s+are|we['\u2019]re)\s+"
+    r"(?P<activity>building|creating|developing|working\s+on)\s+"
+    r"(?P<object>.+?)"
+    r"(?=\s+(?:and|but|because|while)\s+(?:i|we)\b|[.!?]|$)",
+    re.IGNORECASE,
+)
+_SOFTWARE_PROJECT_CUE = re.compile(
+    r"\b(?:ai\s+agent|agent|api|app|application|code|library|platform|service|software|website)\b",
+    re.IGNORECASE,
+)
+
+
+class HighRecallCandidateExtractor:
+    """Deterministic formation@9 fallback with broad ongoing-activity recall.
+
+    The completed deterministic extractor remains untouched and runs first.
+    This additive fallback recognizes high-value project cues and emits useful
+    inferences as short-lived hypotheses rather than silently upgrading them to
+    direct facts.
+    """
+
+    name = HIGH_RECALL_EXTRACTOR_VERSION
+
+    def __init__(self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS) -> None:
+        if maximum_candidates < 1 or maximum_candidates > MAX_EXTRACTOR_PROPOSALS:
+            raise ValueError(
+                f"maximum memory candidates must be between 1 and {MAX_EXTRACTOR_PROPOSALS}"
+            )
+        self._maximum_candidates = maximum_candidates
+        self._legacy = DeterministicCandidateExtractor(maximum_candidates=maximum_candidates)
+
+    async def extract(
+        self,
+        events: list[EventEnvelope],
+        *,
+        principal: Principal,
+        scope: str,
+    ) -> list[MemoryCandidate]:
+        proposed = list(await self._legacy.extract(events, principal=principal, scope=scope))
+        seen = {
+            (
+                candidate.subject.casefold(),
+                candidate.statement.casefold(),
+                tuple(candidate.source_event_ids),
+            )
+            for candidate in proposed
+        }
+        for event in events:
+            if (
+                event.event_type != "user.message.created"
+                or event.actor_type != "principal"
+                or event.actor_id != principal.principal_id
+            ):
+                continue
+            text = _event_text(event)
+            for match in _ONGOING_BUILD.finditer(text):
+                activity = " ".join(match.group("activity").casefold().split())
+                raw_object = match.group("object").strip(" ,.:;!?")
+                if not raw_object:
+                    continue
+                evidence = text[match.start("activity") : match.end("object")].strip(" ,.:;!?")
+                subject = re.sub(r"^(?:a|an|the)\s+", "", raw_object, flags=re.IGNORECASE)
+                rendered_activity = "building" if activity == "working on" else activity
+                candidates = [
+                    MemoryCandidate(
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                        subject=subject,
+                        statement=f"User is {rendered_activity} {raw_object}.",
+                        source_event_ids=[event.sequence],
+                        model_confidence=0.65,
+                        proposed_scope=scope,
+                        proposed_portability=Portability.PORTABLE,
+                        sensitivity_guess=Sensitivity.INTERNAL,
+                        claim_kind=MemoryClaimKind.ONGOING_PROJECT,
+                        derivation=MemoryDerivation.DIRECT,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            EvidenceSpan(source_event_id=event.sequence, text=evidence)
+                        ],
+                    )
+                ]
+                if _SOFTWARE_PROJECT_CUE.search(raw_object) is not None:
+                    candidates.append(
+                        MemoryCandidate(
+                            belief_type=BeliefType.USER_MODEL_ATTR,
+                            subject="software-development experience",
+                            statement="User likely has software-development experience.",
+                            source_event_ids=[event.sequence],
+                            model_confidence=0.35,
+                            proposed_scope=scope,
+                            proposed_portability=Portability.PORTABLE,
+                            sensitivity_guess=Sensitivity.INTERNAL,
+                            claim_kind=MemoryClaimKind.SKILL,
+                            derivation=MemoryDerivation.HYPOTHESIS,
+                            longevity=MemoryLongevity.TENTATIVE,
+                            evidence_spans=[
+                                EvidenceSpan(source_event_id=event.sequence, text=evidence)
+                            ],
+                        )
+                    )
+                for candidate in candidates:
+                    key = (
+                        candidate.subject.casefold(),
+                        candidate.statement.casefold(),
+                        tuple(candidate.source_event_ids),
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    proposed.append(candidate)
+                    if len(proposed) >= self._maximum_candidates:
+                        return proposed
+        return proposed
+
+
 class DeterministicSalience:
     def eligible(self, statement: str, *, explicit: bool) -> bool:
         value = statement.strip()
@@ -796,6 +1031,9 @@ class GovernedMemoryService:
         polarity: Polarity = Polarity.ASSERT,
         confidence: float | None = None,
         trigger: str = "explicit",
+        claim_kind: MemoryClaimKind | None = None,
+        derivation: MemoryDerivation = MemoryDerivation.DIRECT,
+        longevity: MemoryLongevity = MemoryLongevity.DURABLE,
     ) -> MemoryRecord:
         record, _action = await self._remember(
             session_id=session_id,
@@ -816,6 +1054,9 @@ class GovernedMemoryService:
             expires_at=None,
             trigger=trigger,
             record_audit=True,
+            claim_kind=claim_kind,
+            derivation=derivation,
+            longevity=longevity,
         )
         return record
 
@@ -840,6 +1081,9 @@ class GovernedMemoryService:
         expires_at: datetime | None,
         trigger: str,
         record_audit: bool,
+        claim_kind: MemoryClaimKind | None = None,
+        derivation: MemoryDerivation = MemoryDerivation.DIRECT,
+        longevity: MemoryLongevity = MemoryLongevity.DURABLE,
         evidence_at: datetime | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
@@ -853,6 +1097,11 @@ class GovernedMemoryService:
         if not clean_subject or not self._salience.eligible(clean_statement, explicit=explicit):
             raise ToolValidationError("memory candidate failed eligibility and safety gates")
         effective_portability = portability or portability_ceiling(belief_type)
+        effective_claim_kind = claim_kind or {
+            BeliefType.PREFERENCE: MemoryClaimKind.PREFERENCE,
+            BeliefType.RELATIONSHIP: MemoryClaimKind.RELATIONSHIP,
+            BeliefType.PROCEDURE_POINTER: MemoryClaimKind.RESOURCE,
+        }.get(belief_type, MemoryClaimKind.PROJECT_FACT)
         if not _portability_allowed(effective_portability, portability_ceiling(belief_type)):
             raise ToolValidationError("memory portability exceeds the belief type ceiling")
 
@@ -916,21 +1165,98 @@ class GovernedMemoryService:
             )
             if replay is not None:
                 return replay, "unchanged"
+            promotable = next(
+                (
+                    current
+                    for current in sorted(
+                        related, key=lambda item: item.store_position, reverse=True
+                    )
+                    if current.derivation is MemoryDerivation.HYPOTHESIS
+                    and derivation is MemoryDerivation.DIRECT
+                    and current.polarity is Polarity.ASSERT
+                    and polarity is Polarity.ASSERT
+                    and _AUTHORITY_RANK[authority] >= _AUTHORITY_RANK[current.authority]
+                ),
+                None,
+            )
+            if promotable is not None:
+                evidence_instant = evidence_at or self._clock.now()
+                all_sources = sorted(set(promotable.source_event_ids).union(sources))
+                promoted_expiry = expires_at
+                if not explicit and promoted_expiry is None:
+                    if longevity is MemoryLongevity.TENTATIVE:
+                        promoted_expiry = evidence_instant + timedelta(days=30)
+                    elif longevity is MemoryLongevity.ONGOING:
+                        promoted_expiry = evidence_instant + timedelta(days=90)
+                position = await uow.memories.next_position()
+                promoted = promotable.model_copy(
+                    update={
+                        "statement": clean_statement,
+                        "source_event_ids": all_sources,
+                        "corroboration_count": promotable.corroboration_count + 1,
+                        "claim_kind": effective_claim_kind,
+                        "derivation": MemoryDerivation.DIRECT,
+                        "longevity": longevity,
+                        "last_evidence_at": max(promotable.last_evidence_at, evidence_instant),
+                        "evidence_count": len(all_sources),
+                        "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
+                        "confidence": min(
+                            1.0,
+                            max(
+                                promotable.confidence + 0.2,
+                                confidence or promotable.confidence,
+                            ),
+                        ),
+                        "status": MemoryStatus.ACTIVE,
+                        "expires_at": promoted_expiry,
+                        "authority": authority,
+                        "last_reinforced_at": self._clock.now(),
+                        "store_position": position,
+                        "updated_at": self._clock.now(),
+                    },
+                    deep=True,
+                )
+                stored = await uow.memories.reinforce(promoted)
+                await self._append_event(uow, session_id, run_id, "memory.promoted", stored)
+                if record_audit:
+                    await uow.memories.record_consolidation(
+                        formation_run.model_copy(
+                            update={"reinforced": 1, "finished_at": self._clock.now()}
+                        )
+                    )
+                return stored, "promoted"
             for current, relation in classified:
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
-                    promoted = (
+                    portable_scope_promoted = (
                         current.portability is not Portability.LOCAL and len(origin_scopes) >= 2
                     )
                     reinforced = current.model_copy(
                         update={
-                            "scope": "user" if promoted else current.scope,
+                            "scope": "user" if portable_scope_promoted else current.scope,
                             "origin_scopes": origin_scopes,
                             "source_event_ids": sorted(
                                 set(current.source_event_ids).union(sources)
                             ),
                             "corroboration_count": current.corroboration_count + 1,
+                            "claim_kind": effective_claim_kind,
+                            "derivation": (
+                                MemoryDerivation.DIRECT
+                                if derivation is MemoryDerivation.DIRECT
+                                else current.derivation
+                            ),
+                            "longevity": (
+                                longevity
+                                if derivation is MemoryDerivation.DIRECT
+                                else current.longevity
+                            ),
+                            "last_evidence_at": max(
+                                current.last_evidence_at,
+                                evidence_at or self._clock.now(),
+                            ),
+                            "evidence_count": len(set(current.source_event_ids).union(sources)),
+                            "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
                             "confidence": min(1.0, current.confidence + 0.1),
                             "status": MemoryStatus.ACTIVE,
                             "last_reinforced_at": self._clock.now(),
@@ -944,7 +1270,7 @@ class GovernedMemoryService:
                         uow,
                         session_id,
                         run_id,
-                        "memory.promoted" if promoted else "memory.reinforced",
+                        ("memory.promoted" if portable_scope_promoted else "memory.reinforced"),
                         stored,
                     )
                     if record_audit:
@@ -978,6 +1304,10 @@ class GovernedMemoryService:
                         confidence,
                         valid_from,
                         expires_at,
+                        effective_claim_kind,
+                        derivation,
+                        longevity,
+                        evidence_at,
                     )
                     replacement = proposed.model_copy(
                         update={"flagged_for_review": True, "conflicts_with": [current.id]},
@@ -1029,6 +1359,10 @@ class GovernedMemoryService:
                         confidence,
                         valid_from,
                         expires_at,
+                        effective_claim_kind,
+                        derivation,
+                        longevity,
+                        evidence_at,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -1071,6 +1405,10 @@ class GovernedMemoryService:
                 confidence,
                 valid_from,
                 expires_at,
+                effective_claim_kind,
+                derivation,
+                longevity,
+                evidence_at,
             )
             stored = await uow.memories.upsert_belief(record)
             await self._append_event(uow, session_id, run_id, "memory.formed", stored)
@@ -1148,7 +1486,15 @@ class GovernedMemoryService:
             for candidate in self._established_fact_candidates(events, scope, trusted_user_sources)
         ]
         proposals.extend((candidate, MemoryAuthority.INFERRED) for candidate in extracted)
-        candidates = proposals[:MAX_AUTOMATIC_CANDIDATES]
+        if self._policy_version == NEMORI_FORMATION_POLICY_VERSION:
+            candidates = _select_nemori_candidates(proposals)
+            displacement_counts = _nemori_displacement_counts(proposals, candidates)
+        else:
+            candidates = proposals[:MAX_AUTOMATIC_CANDIDATES]
+            displaced_count = len(proposals) - len(candidates)
+            displacement_counts = (
+                Counter({"displaced_global": displaced_count}) if displaced_count else Counter()
+            )
         by_sequence = {event.sequence: event for event in events}
         after = max((event.sequence for event in events), default=watermark)
         formation_requests = [
@@ -1167,7 +1513,8 @@ class GovernedMemoryService:
             effective_trigger = "provider_retry"
             current_attempt = max(retry_attempts)
         should_retry = (
-            since_watermark is None
+            self._policy_version != NEMORI_FORMATION_POLICY_VERSION
+            and since_watermark is None
             and provider_failure is not None
             and provider_failure.retryable
             and current_attempt < PROVIDER_MAX_ATTEMPTS
@@ -1208,7 +1555,9 @@ class GovernedMemoryService:
                     return no_work(current_watermark)
                 consolidation_id = self._ids.new_id()
                 beliefs: list[MemoryRecord] = []
-                rejected = len(proposals) - len(candidates)
+                displaced = len(proposals) - len(candidates)
+                rejected = displaced
+                decisions: Counter[str] = displacement_counts.copy()
                 committed = 0
                 reinforced = 0
                 superseded = 0
@@ -1219,6 +1568,18 @@ class GovernedMemoryService:
                         or not set(candidate.source_event_ids) <= trusted_user_sources
                     ):
                         rejected += 1
+                        decisions["rejected_provenance"] += 1
+                        continue
+                    if (
+                        self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                        and authority is MemoryAuthority.INFERRED
+                        and any(
+                            span.text not in _event_text(by_sequence[span.source_event_id])
+                            for span in candidate.evidence_spans
+                        )
+                    ):
+                        rejected += 1
+                        decisions["rejected_provenance"] += 1
                         continue
                     source_text = "\n".join(
                         _event_text(by_sequence[sequence])
@@ -1226,6 +1587,11 @@ class GovernedMemoryService:
                     )
                     if contains_automatic_memory_hazard(source_text):
                         rejected += 1
+                        decisions[
+                            "rejected_credential"
+                            if _SECRET.search(source_text) is not None
+                            else "rejected_injection"
+                        ] += 1
                         continue
                     source_events = [
                         event
@@ -1253,6 +1619,9 @@ class GovernedMemoryService:
                             expires_at=candidate.expires_hint,
                             trigger=effective_trigger,
                             record_audit=False,
+                            claim_kind=candidate.claim_kind,
+                            derivation=candidate.derivation,
+                            longevity=candidate.longevity,
                             # A consolidation may run at any distance from the
                             # evidence it reads - a replay re-reads a session
                             # from watermark zero long afterwards - so recency
@@ -1265,21 +1634,38 @@ class GovernedMemoryService:
                             existing_uow=uow,
                             audit_id=consolidation_id,
                         )
-                    except (ConflictError, ToolValidationError):
+                    except ConflictError:
                         rejected += 1
+                        decisions["rejected_correction"] += 1
+                    except ToolValidationError:
+                        rejected += 1
+                        decisions["rejected_provenance"] += 1
                     else:
                         if action == "unchanged":
                             rejected += 1
+                            decisions["redundant_attributed"] += 1
                             continue
                         beliefs.append(belief)
-                        if action == "reinforced":
+                        if action == "promoted":
                             reinforced += 1
+                            decisions["promoted"] += 1
+                        elif action == "reinforced":
+                            reinforced += 1
+                            decisions["reinforced"] += 1
                         else:
                             committed += 1
                             if action == "superseded":
                                 superseded += 1
+                                decisions["superseded"] += 1
                             elif action == "conflicted":
                                 conflicted += 1
+                                decisions["conflicted"] += 1
+                            else:
+                                decisions[
+                                    "committed_hypothesis"
+                                    if candidate.derivation is MemoryDerivation.HYPOTHESIS
+                                    else "committed_direct"
+                                ] += 1
                 watermark_after = watermark if should_retry else after
                 if should_retry:
                     assert provider_failure is not None
@@ -1349,6 +1735,7 @@ class GovernedMemoryService:
                                 created_at=self._clock.now(),
                             )
                         )
+                extractor_audit = getattr(self._extractor, "last_audit", None)
                 audit = ConsolidationRun(
                     id=consolidation_id,
                     tenant_id=self._principal.tenant_id,
@@ -1365,6 +1752,10 @@ class GovernedMemoryService:
                     reinforced=reinforced,
                     superseded=superseded,
                     rejected=rejected,
+                    decision_counts=dict(decisions),
+                    episode_count=int(getattr(extractor_audit, "episode_count", 0)),
+                    provider_call_count=int(getattr(extractor_audit, "provider_calls", 0)),
+                    fallback_stages=list(getattr(extractor_audit, "fallback_stages", [])),
                     started_at=started_at,
                     finished_at=self._clock.now(),
                 )
@@ -1423,6 +1814,12 @@ class GovernedMemoryService:
                     proposed_scope=scope,
                     proposed_portability=portability_ceiling(BeliefType.FACT),
                     sensitivity_guess=Sensitivity.INTERNAL,
+                    evidence_spans=[
+                        EvidenceSpan(
+                            source_event_id=fact.source_event_ids[0],
+                            text=fact.statement,
+                        )
+                    ],
                 )
             )
         return candidates
@@ -1553,10 +1950,16 @@ class GovernedMemoryService:
                     "portability": edit.portability or current.portability,
                     "scope": edit.scope or current.scope,
                     "authority": MemoryAuthority.USER,
+                    "derivation": MemoryDerivation.DIRECT,
+                    "longevity": MemoryLongevity.DURABLE,
+                    "status": MemoryStatus.ACTIVE,
+                    "expires_at": None,
                     "source_event_ids": current.source_event_ids,
                     "store_position": position,
                     "updated_at": self._clock.now(),
+                    "last_evidence_at": self._clock.now(),
                     "last_reinforced_at": self._clock.now(),
+                    "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
                 },
                 deep=True,
             )
@@ -1693,7 +2096,7 @@ class GovernedMemoryService:
         async with self._uow_factory() as uow:
             candidates = await uow.memories.list_idle(
                 self._principal,
-                reinforced_before=instant - timedelta(days=horizon),
+                evidence_before=instant - timedelta(days=horizon),
                 decay_confidence_ceiling=MAX_INFERRED_CONFIDENCE,
                 limit=decay.max_per_sweep,
             )
@@ -1735,7 +2138,7 @@ class GovernedMemoryService:
         ):
             return False
         tau = timedelta(days=self._decay_tau_days.for_belief_type(record.belief_type))
-        if instant - record.last_reinforced_at < tau:
+        if instant - record.last_evidence_at < tau:
             return False
         return record.updated_at < instant - interval
 
@@ -1755,9 +2158,9 @@ class GovernedMemoryService:
         what the run's traces actually returned: an identifier the recall never
         offered is an invention and moves nothing, and one that fits two of the
         returned beliefs is evidence about neither. A cited belief gains utility
-        and a fresh reinforcement instant, which is what makes it resist decay;
-        a belief returned and never used loses utility, so it stops winning the
-        ranking it kept winning for nothing.
+        and a fresh usage instant without refreshing evidence; a belief returned
+        and never used loses utility, so it stops winning the ranking it kept
+        winning for nothing.
 
         Confidence is never touched in either direction
         (memory-retrieval-and-ranking.md:793): a wrong belief that happens to
@@ -1867,9 +2270,10 @@ class GovernedMemoryService:
     ) -> int:
         """Add one signed usage delta to each belief, bounded by [-1, 1].
 
-        A citation also moves `last_reinforced_at`, which is the whole point of
-        the mark: decay measures idleness from it. The unused side deliberately
-        leaves it alone, so ignoring a belief can never postpone its decay.
+        A citation moves `last_used_at`, never `last_evidence_at` or the legacy
+        `last_reinforced_at`. Retrieval is evidence that a belief was useful,
+        not evidence that it remains true, so a belief cannot perpetuate itself
+        by winning recall.
 
         Neither side takes a fresh store position. The recall delta reads a
         position above the session's snapshot watermark as a belief formed or
@@ -1887,7 +2291,7 @@ class GovernedMemoryService:
                 continue
             update: dict[str, object] = {"utility": min(1.0, max(-1.0, record.utility + delta))}
             if cited:
-                update.update({"last_reinforced_at": instant, "updated_at": instant})
+                update.update({"last_used_at": instant, "updated_at": instant})
             updated = record.model_copy(update=update, deep=True)
             if updated == record:
                 continue
@@ -1926,11 +2330,31 @@ class GovernedMemoryService:
         confidence: float | None,
         valid_from: datetime | None,
         expires_at: datetime | None,
+        claim_kind: MemoryClaimKind,
+        derivation: MemoryDerivation,
+        longevity: MemoryLongevity,
+        evidence_at: datetime | None,
     ) -> MemoryRecord:
         now = self._clock.now()
         effective_confidence = confidence if confidence is not None else 0.9
         if not explicit:
-            effective_confidence = min(effective_confidence, MAX_INFERRED_CONFIDENCE)
+            ceiling = (
+                0.4
+                if derivation is MemoryDerivation.HYPOTHESIS
+                else (
+                    0.65
+                    if self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                    else MAX_INFERRED_CONFIDENCE
+                )
+            )
+            effective_confidence = min(effective_confidence, ceiling)
+        evidence_instant = evidence_at or valid_from or now
+        effective_expiry = expires_at
+        if not explicit and effective_expiry is None:
+            if longevity is MemoryLongevity.TENTATIVE:
+                effective_expiry = evidence_instant + timedelta(days=30)
+            elif longevity is MemoryLongevity.ONGOING:
+                effective_expiry = evidence_instant + timedelta(days=90)
         return MemoryRecord(
             id=self._ids.new_id(),
             tenant_id=self._principal.tenant_id,
@@ -1943,12 +2367,18 @@ class GovernedMemoryService:
             confidence=effective_confidence,
             sensitivity=sensitivity,
             valid_from=valid_from or now,
-            expires_at=expires_at,
+            expires_at=effective_expiry,
             status=MemoryStatus.ACTIVE if explicit else MemoryStatus.PROVISIONAL,
             belief_type=belief_type,
             polarity=polarity,
             portability=portability,
             origin_scopes=[scope],
+            claim_kind=claim_kind,
+            derivation=derivation,
+            longevity=longevity,
+            last_evidence_at=evidence_instant,
+            evidence_count=len(set(source_event_ids)),
+            lifecycle_policy_version=LIFECYCLE_POLICY_VERSION,
             last_reinforced_at=now,
             flagged_for_review=(
                 not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}

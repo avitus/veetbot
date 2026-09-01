@@ -152,7 +152,8 @@ jobs:
             plutil -create xml1 "$export_options"
             plutil -insert destination -string upload "$export_options"
             plutil -insert method -string app-store-connect "$export_options"
-            plutil -insert signingStyle -string automatic "$export_options"
+            plutil -insert signingStyle -string manual "$export_options"
+            plutil -insert provisioningProfiles -xml '<dict><key>com.veetbot.apple</key><string>Veetbot Mac App Store</string></dict>' "$export_options"
             plutil -insert manageAppVersionAndBuildNumber -bool false "$export_options"
 
             xcodebuild archive \
@@ -161,7 +162,10 @@ jobs:
               -configuration Release \
               -destination "generic/platform=macOS" \
               -archivePath "$archive_path" \
-              CURRENT_PROJECT_VERSION="$apple_build_number"
+              CURRENT_PROJECT_VERSION="$apple_build_number" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="Apple Distribution" \
+              PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"
 
             app_path="$archive_path/Products/Applications/Veetbot.app"
             app_info="$app_path/Contents/Info.plist"

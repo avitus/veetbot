@@ -73,6 +73,7 @@ validates the floor, and no trailer means lane A.
 | Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
 | Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
 | Memory evaluation, the benchmark, and lifecycle maintenance | `memory-evaluation-and-lifecycle.md` |
+| Integrated episodes, high-recall formation, and evidence-based forgetting | `adaptive-memory-distillation.md` |
 | The memory read API and the native memory browser | `memory-read-api-and-browser.md` |
 | The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
@@ -80,7 +81,6 @@ validates the floor, and no trailer means lane A.
 | What the corpus does and does not cover | `readiness.md` |
 
 ## Authority and conflicts
-
 - The **engineering plan** holds the normative requirements and acceptance criteria; **project state** (`docs/status/project-state.yaml`) determines what work is authorized; **code and tests** describe actual behavior.
 - Do **not** silently modify requirements to match an implementation; propose
   divergence explicitly. An architectural conflict with the plan requires a
@@ -92,10 +92,11 @@ validates the floor, and no trailer means lane A.
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 —
   subagents and delegation, inbound surfaces and pairing, operational
-  hardening — proceed in that order (ADR-0061); 18 and 19 are parallel
-  workstreams (ADRs 0071–0072). Model routing and the plan's remaining roadmap
-  items are not authorized. The grouped summary with each in-progress
-  milestone's open items is `docs/status/milestones.md`.
+  hardening — proceed in that order (ADR-0061); 18 through 21 are parallel
+  workstreams (ADRs 0071–0073 and 0077). Milestone 21 is limited to adaptive
+  memory distillation and evidence-based forgetting. Model routing and the
+  plan's remaining roadmap items are not authorized. The grouped summary with
+  each in-progress milestone's open items is `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

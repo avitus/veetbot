@@ -46,8 +46,10 @@ declares seven more in a fifteenth area, all at Milestone 10.
 [browser-automation.md](browser-automation.md) adds ten more in a
 sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) first
 declared twenty-three Milestone 11 gates in a seventeenth area, then five at
-Milestone 19 and six at Milestone 20. The current counts are reconciled in the
-gate table and census below.
+Milestone 19 and six at Milestone 20.
+[adaptive-memory-distillation.md](adaptive-memory-distillation.md) adds
+twenty-four Milestone 21 gates in the existing memory area. The current counts
+are reconciled in the gate table and census below.
 
 ## What this document is responsible for
 
@@ -323,9 +325,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 24 subject specifications declare 353 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 362
-declarations, 359 registry entries once the 3 aliases are subtracted.
+The 25 subject specifications declare 377 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 386
+declarations, 383 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1292,6 +1294,51 @@ resolution range over generated selectors, dates, and zones. The remaining
 four are boundary cases over materialization, HTTP, and the ordinary tool
 pipeline.
 
+### Adaptive memory distillation, twenty-four gates
+
+Twenty-four gates extend the existing `memory` area at Milestone 21. Six cover
+the three-stage provider pipeline and its persisted episode input, seven cover
+high-recall grounded formation and accounting, seven cover the separation of
+evidence, use, forgetting, promotion, and rendered uncertainty, and four cover
+corrections, migration, corpus coverage, comparative evidence, and activation.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.memory.distill_versions_frozen             structural   21
+2   gate.memory.episode_integration                 case         21
+3   gate.memory.episode_repository_parity           structural   21
+4   gate.memory.anticipation_blinded                property     21
+5   gate.memory.prediction_error_calls              case         21
+6   gate.memory.distill_fallback                    case         21
+7   gate.memory.direct_high_recall                  case         21
+8   gate.memory.hypothesis_high_recall              case         21
+9   gate.memory.compound_recall                     case         21
+10  gate.memory.candidate_schema                    structural   21
+11  gate.memory.predictability_attributed           case         21
+12  gate.memory.source_grounding                    property     21
+13  gate.memory.formation_reason_telemetry          case         21
+14  gate.memory.evidence_clock                      case         21
+15  gate.memory.usage_clock                         case         21
+16  gate.memory.hypothesis_retirement               case         21
+17  gate.memory.ongoing_retirement                  case         21
+18  gate.memory.evidence_promotion                  case         21
+19  gate.memory.uncertainty_rendered                case         21
+20  gate.memory.correction_durable_v3               case         21
+21  gate.memory.schema_backfill                     structural   21
+22  gate.memory.formation_corpus_v3                 structural   21
+23  gate.memory.comparative_evidence                case         21
+24  gate.memory.distill_activation_bound            property     21
+```
+
+Gates 4, 12, and 24 are properties because causal blinding, source ownership,
+and exact tuple activation quantify over generated prefixes, event identities,
+and tuple differences. Gates 1, 3, 10, 21, and 22 are structural because they
+inspect frozen controls, both repositories against one contract, closed
+schemas, migrations, and the checked-in corpus. The remaining sixteen are
+boundary cases over provider orchestration, formation, lifecycle, retrieval,
+and evidence publication.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1386,6 +1433,9 @@ milestone  new gates  cumulative  the earliest of them
 20                 6         359  monthly and yearly calendar rules,
                                   bounded catch-up, HTTP union parity,
                                   recurring conversational creation
+21                24         383  integrated episodes, causal anticipation,
+                                  high-recall direct and hypothesis formation,
+                                  evidence-based forgetting and activation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1406,15 +1456,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and fifty-nine gates are green before
+2.  **Forty-one of three hundred and eighty-three gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and fifty-nine, which is every
-registry entry, at Milestone 20. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and eighty-three, which is every
+registry entry, at Milestone 21. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1423,7 +1473,8 @@ Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
 those specs already shared, Milestone 18's thirteen are `gate.email.*` in
 an area of their own, Milestone 19's five return to the existing
-`gate.schedule.*` area, and Milestone 20 adds six more there. Every authorized milestone now has a specification
+`gate.schedule.*` area, Milestone 20 adds six more there, and Milestone 21
+adds twenty-four more to `gate.memory.*`. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

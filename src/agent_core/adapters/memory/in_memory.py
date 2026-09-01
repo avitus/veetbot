@@ -19,10 +19,12 @@ from agent_core.domain.knowledge import (
     RetrievedPassage,
 )
 from agent_core.domain.memory import (
+    LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
+    IntegratedEpisode,
     MemoryBrowseQuery,
     MemoryEdit,
     MemoryRecord,
@@ -41,6 +43,99 @@ from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
 
 _LIVE_MEMORY = frozenset({MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL})
+
+
+class InMemoryIntegratedEpisodeStore:
+    """Owner-scoped deterministic store for rebuildable integrated episodes."""
+
+    def __init__(self) -> None:
+        self._records: dict[UUID, IntegratedEpisode] = {}
+        self._by_derivation: dict[tuple[str, str, str], UUID] = {}
+        self._lock = asyncio.Lock()
+
+    async def put(self, episode: IntegratedEpisode) -> IntegratedEpisode:
+        async with self._lock:
+            derivation = (
+                episode.tenant_id,
+                episode.principal_id,
+                episode.derivation_key,
+            )
+            existing_id = self._by_derivation.get(derivation)
+            if existing_id is not None:
+                existing = self._records[existing_id]
+                if existing.model_dump(exclude={"id", "created_at"}) != episode.model_dump(
+                    exclude={"id", "created_at"}
+                ):
+                    raise ConflictError("episode derivation identifies different content")
+                return existing.model_copy(deep=True)
+            if episode.id in self._records:
+                raise ConflictError("episode id identifies different content")
+            self._records[episode.id] = episode.model_copy(deep=True)
+            self._by_derivation[derivation] = episode.id
+            return episode.model_copy(deep=True)
+
+    async def get(self, episode_id: UUID, principal: Principal) -> IntegratedEpisode:
+        async with self._lock:
+            episode = self._records.get(episode_id)
+            if episode is None or (
+                episode.tenant_id != principal.tenant_id
+                or episode.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("integrated episode not found")
+            return episode.model_copy(deep=True)
+
+    async def for_session(
+        self,
+        session_id: UUID,
+        principal: Principal,
+        *,
+        limit: int = 100,
+    ) -> list[IntegratedEpisode]:
+        if limit < 1:
+            raise ValueError("episode page limit must be positive")
+        async with self._lock:
+            episodes = [
+                episode
+                for episode in self._records.values()
+                if episode.tenant_id == principal.tenant_id
+                and episode.principal_id == principal.principal_id
+                and episode.session_id == session_id
+            ]
+            episodes.sort(key=lambda item: (item.source_started_at, str(item.id)))
+            return [episode.model_copy(deep=True) for episode in episodes[:limit]]
+
+    async def delete_for_session(self, session_id: UUID, principal: Principal) -> int:
+        async with self._lock:
+            ids = [
+                episode.id
+                for episode in self._records.values()
+                if episode.tenant_id == principal.tenant_id
+                and episode.principal_id == principal.principal_id
+                and episode.session_id == session_id
+            ]
+            for episode_id in ids:
+                episode = self._records.pop(episode_id)
+                self._by_derivation.pop(
+                    (episode.tenant_id, episode.principal_id, episode.derivation_key),
+                    None,
+                )
+            return len(ids)
+
+    async def delete_for_principal(self, principal: Principal) -> int:
+        async with self._lock:
+            ids = [
+                episode.id
+                for episode in self._records.values()
+                if episode.tenant_id == principal.tenant_id
+                and episode.principal_id == principal.principal_id
+            ]
+            for episode_id in ids:
+                episode = self._records.pop(episode_id)
+                self._by_derivation.pop(
+                    (episode.tenant_id, episode.principal_id, episode.derivation_key),
+                    None,
+                )
+            return len(ids)
 
 
 class InMemoryMemoryStore:
@@ -236,7 +331,7 @@ class InMemoryMemoryStore:
         self,
         principal: Principal,
         *,
-        reinforced_before: datetime,
+        evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
@@ -247,14 +342,14 @@ class InMemoryMemoryStore:
                 if record.tenant_id == principal.tenant_id
                 and record.principal_id == principal.principal_id
                 and record.status in _LIVE_MEMORY
-                and record.last_reinforced_at <= reinforced_before
+                and record.last_evidence_at <= evidence_before
                 and (
                     decay_confidence_ceiling is None
                     or record.status is MemoryStatus.PROVISIONAL
                     or record.confidence < decay_confidence_ceiling
                 )
             ]
-            records.sort(key=lambda item: (item.last_reinforced_at, str(item.id)))
+            records.sort(key=lambda item: (item.last_evidence_at, str(item.id)))
             return [item.model_copy(deep=True) for item in records[:limit]]
 
     async def edit(
@@ -356,7 +451,11 @@ class InMemoryMemoryStore:
                 self._position += 1
                 updated = record.model_copy(
                     update={
-                        "status": MemoryStatus.EXPIRED,
+                        "status": (
+                            MemoryStatus.RETIRED
+                            if record.lifecycle_policy_version == LIFECYCLE_POLICY_VERSION
+                            else MemoryStatus.EXPIRED
+                        ),
                         "valid_to": now,
                         "store_position": self._position,
                         "updated_at": now,

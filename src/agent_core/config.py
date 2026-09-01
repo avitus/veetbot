@@ -21,7 +21,10 @@ from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
 from agent_core.domain.browser import normalize_browser_origin
-from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+from agent_core.domain.memory import (
+    MemoryDistillationEvidence,
+    ProviderExtractionEvaluationEvidence,
+)
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 
@@ -785,6 +788,18 @@ def load_provider_extraction_evidence(
         ) from exc
 
 
+def load_memory_distillation_evidence(path: Path) -> MemoryDistillationEvidence:
+    """Load a passing formation@9 comparative-evaluation artifact."""
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return MemoryDistillationEvidence.model_validate(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        raise ConfigurationError(
+            "adaptive memory distillation evaluation evidence did not pass"
+        ) from exc
+
+
 def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     """Return operator evidence first, followed by immutable release-bundled evidence."""
 
@@ -800,7 +815,10 @@ def _provider_extraction_evidence_is_valid(path: Path) -> bool:
     try:
         load_provider_extraction_evidence(path)
     except ConfigurationError:
-        return False
+        try:
+            load_memory_distillation_evidence(path)
+        except ConfigurationError:
+            return False
     return True
 
 

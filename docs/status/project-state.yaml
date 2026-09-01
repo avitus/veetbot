@@ -9,8 +9,8 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 20 are independently authorized parallel
-  # workstreams under ADRs 0069, 0070, 0071, 0072, and 0073; their gates do not
+  # Milestones 16 through 21 are independently authorized parallel
+  # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, and 0077; their gates do not
   # advance the verified ceiling past the sequential work through 15.
   authorized_milestones:
     - 0
@@ -34,6 +34,7 @@ project:
     - 18
     - 19
     - 20
+    - 21
 
 milestones:
   "0":
@@ -567,6 +568,68 @@ milestones:
           passed, and make test-integration passed all 156 selected tests. The
           new PostgreSQL gate round-trips monthly and yearly definitions
           through the existing JSONB schedule revision without a migration.
+  "21":
+    title: Adaptive memory distillation
+    status: in_progress
+    authorized_on: 2026-08-31
+    design: docs/plan/adaptive-memory-distillation.md
+    adr: docs/adr/0077-milestone-21-adaptive-memory-distillation.md
+    gates_registered: 24
+    authorized_scope:
+      - persisted provenance-complete integrated episodes
+      - three-call Nemori-style formation at formation@9
+      - direct and hypothesis memories across the expanded claim vocabulary
+      - bounded high-recall candidate ranking and decision telemetry
+      - evidence-based lifecycle@2 and uncertainty-aware retrieval@3
+      - comparative formation corpus and exact-tuple activation evidence
+    deferred_scope:
+      - reinforcement learning, fine-tuning, or a learned memory policy
+      - embeddings, pgvector, an external memory provider, or new retrieval arms
+      - temporal entity graphs, persona editing, and global consolidation
+      - a public memory-write API
+    open_items:
+      - Run the three-arm live corpus and publish passing evidence for the production tuple
+      - Complete per-stage cost telemetry required by the comparative gate
+      - Run hosted CI and the CodeRabbit review loop on the final head
+    evidence:
+      - check: local Milestone 21 behavior and contracts
+        outcome: passed_locally
+        detail: >-
+          The formation@9 gate module, integrated-episode store contract,
+          cumulative gate registry, existing memory regressions, corpus schema,
+          comparative scorer, activation binding, deterministic fallback, and
+          authoritative-edit lifecycle cases pass locally. The personal-agent
+          statement forms User is building a personal AI agent as a direct
+          ongoing project and forms software-development experience only as a
+          tentative hypothesis.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issues in
+          558 source files, the static partition passes 1410 tests, the contract
+          partition passes 404 tests, deployment-script tests pass, and the
+          strict documentation build reconciles 383 gates and 187 citations.
+      - check: Apple package test lane
+        outcome: passed_locally
+        detail: >-
+          make test-apple builds the updated memory wire model and detail view,
+          then passes all 165 Swift Testing cases across 18 suites.
+      - check: PostgreSQL Milestone 21 lane
+        outcome: passed_locally
+        detail: >-
+          A fresh isolated PostgreSQL 16 database migrated from base through
+          head c2e0f4a6b831. The lifecycle backfill, history preservation,
+          integrated-episode persistence and erasure gate passed, followed by
+          all 157 integration and resilience tests. The hosted failure's stale
+          citation assertion was reproduced and corrected to require that
+          usage advances last_used_at without advancing last_reinforced_at.
+      - check: comparative live-model evidence
+        outcome: not_run
+        detail: >-
+          agent eval memory-distillation now executes formation@7, formation@8,
+          and formation@9 over the same sixty cases and refuses to overwrite or
+          publish below threshold. RUN_LIVE_MODEL_TESTS was not enabled and no
+          production-tuple activation artifact has been published.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -626,14 +689,19 @@ readiness:
     conversational schedules, as a fifth parallel workstream (ADR-0073),
     promoting the monthly-rule portion of roadmap item B5 and adding yearly
     recurrence; scheduling.md declares its six `gate.schedule.*` entries.
+    On 2026-08-31 the owner authorized Milestone 21, adaptive memory
+    distillation, as a sixth parallel workstream (ADR-0077), explicitly
+    accepting some provisional false positives in exchange for materially
+    higher useful recall and evidence-based forgetting; adaptive-memory-
+    distillation.md declares its twenty-four `gate.memory.*` entries.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-28T02:54:24Z
+last_updated: 2026-09-01T16:55:05Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

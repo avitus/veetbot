@@ -76,6 +76,9 @@ public struct MemoryDetailView: View {
             }
 
             Section("Lifecycle") {
+                KeyValueRow(key: "Claim kind", value: memory.claimKind)
+                KeyValueRow(key: "Derivation", value: memory.derivation)
+                KeyValueRow(key: "Longevity", value: memory.longevity)
                 KeyValueRow(key: "Valid from", value: memory.validFrom.formatted())
                 if let validTo = memory.validTo {
                     KeyValueRow(key: "Valid to", value: validTo.formatted())
@@ -83,7 +86,14 @@ public struct MemoryDetailView: View {
                 if let expiresAt = memory.expiresAt {
                     KeyValueRow(key: "Expires", value: expiresAt.formatted())
                 }
-                KeyValueRow(key: "Last reinforced", value: memory.lastReinforcedAt.formatted())
+                KeyValueRow(key: "Last evidence", value: memory.lastEvidenceAt.formatted())
+                if let lastUsedAt = memory.lastUsedAt {
+                    KeyValueRow(key: "Last used", value: lastUsedAt.formatted())
+                }
+                KeyValueRow(
+                    key: "Legacy reinforcement",
+                    value: memory.lastReinforcedAt.formatted()
+                )
                 KeyValueRow(key: "Created", value: memory.createdAt.formatted())
                 KeyValueRow(key: "Updated", value: memory.updatedAt.formatted())
             }

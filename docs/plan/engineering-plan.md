@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.9"
+version: "3.0"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -115,6 +115,22 @@ Version 2.9 (native schedule inspection pass, 2026-08-29):
 - Unknown schedule states and cadence kinds degrade to generic text, an older
   server degrades at the list boundary, and schedule creation and lifecycle
   mutation remain outside the native surface.
+
+Version 3.0 (adaptive memory distillation pass, 2026-08-31):
+
+- Section 21 gains Milestone 21 — adaptive memory distillation — explicitly
+  authorized by the repository owner as a parallel workstream and specified by
+  a detailed design with twenty-four gates (ADR-0077).
+- Memory formation becomes recall-first: integrated episodes, causally blinded
+  anticipation, prediction-error distillation, direct observations, and
+  explicitly tentative hypotheses expand useful project, goal, skill, role,
+  habit, constraint, and recurring-state coverage.
+- Evidence freshness separates from model use. Supporting user events refresh
+  evidence; citation updates utility and `last_used_at` only. Unsupported
+  hypotheses retire after thirty days and ongoing observations after ninety.
+- The completed `formation@7` and `formation@8` policies remain frozen controls.
+  The new `formation@9`, `retrieval@3`, and `lifecycle@2` policies activate only
+  on comparative evidence from a corpus of at least sixty cases.
 
 ## 1. Mission
 
@@ -3578,6 +3594,70 @@ update, pause, resume, and cancel; continuous-session recurrence; dependency
 graphs; workflow DAGs; delegated scopes; and content-bearing notifications
 remain later extensions.
 
+### Milestone 21: Adaptive memory distillation
+
+The owner authorized this milestone on 2026-08-31 after observing that memory
+formation remained dramatically too timid for a personal agent. It is a
+parallel workstream and does not advance the verified sequential ceiling past
+unfinished Milestones 13 through 15. The detailed design is
+[adaptive-memory-distillation.md](adaptive-memory-distillation.md) and
+ADR-0077; it declares twenty-four gates before implementation begins.
+
+Implement:
+
+- Persisted, provenance-complete integrated episodes derived from ordered
+  trusted user events and deleted with their session or principal.
+- `nemori-assisted-v1` at `formation@9`, making exactly three batched provider
+  calls per eligible consolidation: episode integration, causally blinded
+  anticipation from the prefix and existing memory, and prediction-error
+  distillation with exact source spans.
+- Direct observations and tentative hypotheses across ongoing projects, goals,
+  roles, skills, interests, habits, constraints, recurring states,
+  relationships, preferences, resources, and project facts.
+- A ranked ceiling of thirty-two automatic candidates per consolidation and
+  six per source event, with direct claims, future usefulness, and subject and
+  category diversity ahead of lower-value hypotheses and every displacement
+  audited.
+- `lifecycle@2`, separating `last_evidence_at` from `last_used_at`: later
+  supporting user events refresh evidence, while citation changes utility and
+  use time only. Unsupported tentative hypotheses retire after thirty days and
+  ongoing observations after ninety.
+- `retrieval@3`, rendering derivation and longevity on governed context, trace,
+  CLI, and HTTP inspection surfaces and ranking freshness from evidence rather
+  than self-citation.
+- A formation corpus of at least sixty cases and an offline three-policy
+  comparison against the frozen `formation@7` and `formation@8` controls, with
+  version-bound activation evidence.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The statement "I am building a personal AI agent" forms the direct ongoing
+  memory "User is building a personal AI agent" and may form likely software-
+  development experience only as a tentative hypothesis.
+- Direct must-form recall is at least 95 percent, hypothesis must-form recall is
+  at least 80 percent, benign precision is at least 90 percent, and useful
+  recall improves at least fifteen percentage points over `formation@8`.
+- Invalid provenance, assistant-as-user attribution, promoted injection,
+  credential storage, PII storage beyond explicit policy, and cross-principal
+  or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
+  state, or sensitivity permitted by policy alone is not a rejection reason.
+- Every eligible provider consolidation makes exactly three batched calls and
+  every failed or invalid stage falls back deterministically with content-free
+  audit metadata.
+- Repeated recall or citation cannot extend evidence lifetime; later supporting
+  user evidence refreshes and may promote a hypothesis without duplicating the
+  live belief.
+- Corrections, edits, retractions, and deletions remain durable through
+  integration, retry, replay, and policy upgrades.
+- `formation@9` activates only for the exact comparative-evidence tuple; until
+  then automatic composition retains the evidenced `formation@8` behavior.
+
+The milestone does not include reinforcement learning, fine-tuning, embeddings,
+`pgvector`, a temporal entity graph, a persona editor, an external memory
+service, global cross-principal consolidation, new retrieval arms, or a public
+memory-write API.
+
 ### Native schedule browser
 
 The owner authorized the native schedule browser on 2026-08-29 (ADR-0075) as
@@ -3629,7 +3709,7 @@ owner's current ranking, not a schedule.
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
-| B6 | Memory residue after Milestone 16: the semantic arm and `pgvector`, an external memory provider, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 benchmark evidence per item, per Milestone 9's entry gate |
+| B6 | Memory residue after Milestone 21: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |

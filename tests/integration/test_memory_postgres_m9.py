@@ -1003,9 +1003,12 @@ async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
         beliefs = {belief.id: belief for belief in await composition.memory.list_memories()}
         assert beliefs[cited.id].utility > 0
         assert beliefs[cited.id].confidence == cited.confidence
-        assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
+        assert beliefs[cited.id].last_used_at is not None
+        assert beliefs[cited.id].last_reinforced_at == cited.last_reinforced_at
         assert beliefs[uncited.id].utility < 0
         assert beliefs[uncited.id].confidence == uncited.confidence
+        assert beliefs[uncited.id].last_used_at is None
+        assert beliefs[uncited.id].last_reinforced_at == uncited.last_reinforced_at
         # The unique store position survives the in-place update, and neither
         # belief is republished to the recall delta for having been read.
         assert beliefs[cited.id].store_position == cited.store_position
@@ -1078,15 +1081,15 @@ async def test_postgres_trace_round_trip_user_view_and_conflict_detection(
                 await uow.traces.record(drifted)
 
 
-async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
+async def test_list_idle_returns_the_least_recently_evidenced_live_beliefs(
     tmp_path: Path,
 ) -> None:
-    """The decay window is the least recently reinforced live beliefs.
+    """The decay window is the least recently evidenced live beliefs.
 
     The shared database carries rows from other cases, so the ordering is
     asserted over whatever the window returns and membership over this case's
     own beliefs: written newest-first, only the three past the cutoff come back,
-    oldest first, and neither the freshly reinforced nor the retired one does.
+    oldest first, and neither the freshly evidenced nor the retired one does.
     """
 
     async with build(settings=_settings(tmp_path), storage="postgres") as composition:
@@ -1101,7 +1104,7 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
             *,
             confidence: float = 0.5,
         ) -> MemoryRecord:
-            reinforced_at = now - timedelta(days=idle_days)
+            evidenced_at = now - timedelta(days=idle_days)
             async with composition.uow_factory() as uow:
                 record = MemoryRecord.model_validate(
                     {
@@ -1122,13 +1125,14 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
                         "polarity": Polarity.ASSERT,
                         "portability": Portability.CONTEXTUAL,
                         "origin_scopes": ["integration"],
-                        "last_reinforced_at": reinforced_at,
+                        "last_evidence_at": evidenced_at,
+                        "last_reinforced_at": evidenced_at,
                         "formation_run_id": uuid4(),
                         "consolidation_policy_version": "formation@1",
                         "authority": MemoryAuthority.INFERRED,
                         "store_position": await uow.memories.next_position(),
-                        "created_at": reinforced_at,
-                        "updated_at": reinforced_at,
+                        "created_at": evidenced_at,
+                        "updated_at": evidenced_at,
                     }
                 )
                 return await uow.memories.upsert_belief(record)
@@ -1147,22 +1151,22 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
         async with composition.uow_factory() as uow:
             window = await uow.memories.list_idle(
                 composition.principal,
-                reinforced_before=now - timedelta(days=50),
+                evidence_before=now - timedelta(days=50),
                 limit=500,
             )
             bounded = await uow.memories.list_idle(
                 composition.principal,
-                reinforced_before=now - timedelta(days=50),
+                evidence_before=now - timedelta(days=50),
                 limit=1,
             )
             decay_window = await uow.memories.list_idle(
                 composition.principal,
-                reinforced_before=now - timedelta(days=50),
+                evidence_before=now - timedelta(days=50),
                 decay_confidence_ceiling=0.55,
                 limit=500,
             )
 
-        stamps = [(record.last_reinforced_at, str(record.id)) for record in window]
+        stamps = [(record.last_evidence_at, str(record.id)) for record in window]
         mine = [record.id for record in window if marker in record.subject]
         assert stamps == sorted(stamps)
         assert mine == [oldest_idle.id, high_confidence_idle.id, newer_idle.id]

@@ -82,6 +82,19 @@ fresh PostgreSQL integration lane pass locally. Remaining:
 
 - [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
 
+### Milestone 21 — Adaptive memory distillation
+
+A sixth parallel workstream making memory formation materially less timid.
+Its twenty-four gates cover integrated episodes, the fixed three-call
+prediction-error pipeline, direct and hypothesis recall, evidence-based
+forgetting, persistence, and comparative activation evidence. The local
+implementation, static and contract suites, strict documentation build, Apple
+package tests, and fresh PostgreSQL 16 integration lane pass. Remaining:
+
+- [ ] Run the three-arm live corpus and publish passing evidence for the production tuple
+- [ ] Complete per-stage cost telemetry required by the comparative gate
+- [ ] Run hosted CI and the CodeRabbit review loop on the final head
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -100,8 +113,8 @@ for it. That roadmap holds, among its items: tenant activation of
 self-authored skills (B1), dynamic model routing and a second provider
 adapter (B2), Slack and email inbound surfaces (B3), email and webhook
 notification transports (B4), scheduling residue such as cron, interval
-multipliers, and dependency graphs (B5), the memory residue after Milestone 16 — the semantic arm,
-`pgvector`, an external memory provider (B6) — device-scoped tools and
+multipliers, and dependency graphs (B5), the memory residue after Milestone 21 — the semantic arm,
+`pgvector`, an external memory provider, and a learned memory policy (B6) — device-scoped tools and
 presence routing (B7), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and

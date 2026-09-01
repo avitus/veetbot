@@ -26,7 +26,7 @@ platform through the native client.
 
 The retrieval design already drew the line this milestone builds on. A recall
 trace explains one answer; browsing everything the agent believes is *a
-different surface* (memory-retrieval-and-ranking.md:656-657), and that surface
+different surface* (memory-retrieval-and-ranking.md:659-660), and that surface
 has never existed anywhere but the command line. Milestone 17 builds it: two
 GET routes, one exact scope, one default-off flag, and a browser in the Apple
 client.
@@ -64,7 +64,7 @@ find it here should find the reason here.
    not safe behind a route at any ceiling. That predicate must be added, and
    the trace store's contract suite must observe it, before a trace route is
    designed. Beyond the defect, a trace view owes the minimum-of-two-ceilings
-   rule (memory-retrieval-and-ranking.md:661-667), which is a second ceiling
+   rule (memory-retrieval-and-ranking.md:664-670), which is a second ceiling
    mechanism in a milestone whose whole ceiling story is one parameter.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
@@ -163,7 +163,7 @@ extends the existing cross-tenant-404 rule
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
-(memory-retrieval-and-ranking.md:661-667).
+(memory-retrieval-and-ranking.md:664-670).
 
 ### Errors
 
@@ -233,23 +233,27 @@ to the record.
 
 ```text
 exposed   id, subject, statement, belief_type, status, polarity, scope,
-          portability, authority, sensitivity, confidence,
+          claim_kind, derivation, longevity, portability, authority,
+          sensitivity, confidence,
           corroboration_count, flagged_for_review, conflicts_with,
           superseded_by, source_session_id, source_event_ids,
           formation_run_id, consolidation_policy_version, origin_scopes,
-          valid_from, valid_to, expires_at, last_reinforced_at, created_at,
-          updated_at
+          valid_from, valid_to, expires_at, last_evidence_at, last_used_at,
+          last_reinforced_at, created_at, updated_at
 
 withheld  tenant_id, principal_id      the API never returns tenant identity
           utility                      retriever-internal ranking state
           store_position               cursor internals
+          evidence_count               lifecycle-internal evidence accounting
+          lifecycle_policy_version     lifecycle migration and policy internals
 ```
 
-These four fields are withheld outright and settled. Tenant identity is never
+These six fields are withheld outright and settled. Tenant identity is never
 a field of a response anywhere in this API; `utility` is a number the ranker
 moves and a number a reader would misread as a judgment about the belief; and
 `store_position` is the cursor's internals, which stay inside the cursor for
-the same reason the cursor is opaque.
+the same reason the cursor is opaque. Evidence time is inspectable, while its
+internal counter and lifecycle migration version remain implementation state.
 
 `formation_run_id`, `consolidation_policy_version`, and `origin_scopes` were
 initially withheld here as a recommendation flagged for owner sign-off,

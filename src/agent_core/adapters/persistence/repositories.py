@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import cast as sql_cast
 
 from agent_core.adapters.live_events import event_channel
+from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import (
     agent_to_domain,
     agent_values,
@@ -138,21 +139,6 @@ def _rowcount(result: Any) -> int:
     return int(result.rowcount or 0)
 
 
-def _constraint_name(exc: IntegrityError) -> str | None:
-    candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        name = getattr(candidate, "constraint_name", None)
-        if isinstance(name, str):
-            return name
-        diagnostic = getattr(candidate, "diag", None)
-        name = getattr(diagnostic, "constraint_name", None)
-        if isinstance(name, str):
-            return name
-    return None
-
-
 def _sqlstate(exc: DBAPIError) -> str | None:
     candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
     for candidate in candidates:
@@ -171,7 +157,7 @@ async def execute_run_insert(session: AsyncSession, statement: Any) -> int:
         async with session.begin_nested():
             return _rowcount(await session.execute(statement))
     except IntegrityError as exc:
-        constraint = _constraint_name(exc)
+        constraint = constraint_name(exc)
         if constraint == ACTIVE_RUN_CONSTRAINT:
             raise ConflictError("session already has a non-terminal run") from exc
         if constraint == PARENT_SKILL_REVIEW_CONSTRAINT:
@@ -1622,7 +1608,7 @@ class PostgresBrowserProfileRepository:
             async with self._session.begin_nested():
                 row = (await self._session.scalars(statement)).one_or_none()
         except IntegrityError as exc:
-            if _constraint_name(exc) == "uq_browser_profiles_provider_ref":
+            if constraint_name(exc) == "uq_browser_profiles_provider_ref":
                 raise ConflictError("browser provider reference is already bound") from exc
             raise
         if row is not None:

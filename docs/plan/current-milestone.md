@@ -31,7 +31,12 @@ title: Current Milestone
   Milestone 20 — calendar recurrence and conversational schedules — is
   specified by [scheduling.md](scheduling.md) with six gates and is a fifth
   parallel workstream, adding monthly and yearly rules and conversational
-  creation for all four recurring calendar kinds.
+  creation for all four recurring calendar kinds. Milestone 21 — adaptive
+  memory distillation — is specified by
+  [adaptive-memory-distillation.md](adaptive-memory-distillation.md) with
+  twenty-four gates and is a sixth parallel workstream, adding integrated
+  episodes, high-recall direct and hypothesis formation, and evidence-based
+  forgetting.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -46,10 +51,13 @@ title: Current Milestone
   conversational schedule creation, was authorized on 2026-08-24 as a fourth
   (ADR-0072), and Milestone 20, calendar recurrence and conversational
   schedules, was authorized on 2026-08-27 as a fifth (ADR-0073), each without
-  advancing the verified ceiling.
-- **Deferred:** New model-routing behavior and everything listed in the
-  engineering plan's roadmap subsection. Nothing on the roadmap is authorized
-  until the owner says so and a specification with gates exists for it.
+  advancing the verified ceiling. Milestone 21, adaptive memory distillation,
+  was authorized on 2026-08-31 as a sixth (ADR-0077) on the same terms.
+- **Deferred:** New model-routing behavior and everything still listed in the
+  engineering plan's roadmap subsection. Milestone 21 removes only adaptive
+  memory distillation from that residue; learned memory policies, semantic
+  retrieval, external memory providers, and the remaining roadmap items stay
+  unauthorized.
 - **Project status:** Milestones 0 through 12 are complete: all 247 cumulative
   gates, the full local and PostgreSQL lanes, Apple package and simulator lanes,
   hosted CI passed on the candidate head, and the completed integration was
@@ -185,6 +193,10 @@ their own. Milestone 19 reuses [scheduling.md](scheduling.md) and the existing
 one-time creation bridge.
 Milestone 20 reuses the same design and gate area under ADR-0073, adding six
 gates for calendar recurrence and recurring conversational creation.
+Milestone 21's
+[adaptive-memory-distillation.md](adaptive-memory-distillation.md) and ADR-0077
+add twenty-four `gate.memory.*` entries for integrated episodes, high-recall
+formation, evidence-based forgetting, comparative evidence, and activation.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -232,6 +244,7 @@ substitute.
 - [Milestone 18 — first-class email integration](engineering-plan.md#milestone-18-first-class-email-integration)
 - [Milestone 19 — conversational schedule creation](engineering-plan.md#milestone-19-conversational-schedule-creation)
 - [Milestone 20 — calendar recurrence and conversational schedules](engineering-plan.md#milestone-20-calendar-recurrence-and-conversational-schedules)
+- [Milestone 21 — adaptive memory distillation](engineering-plan.md#milestone-21-adaptive-memory-distillation)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -275,6 +288,9 @@ its five new `gate.schedule.*` entries plus the plan's acceptance criteria and
 the [scheduling design](scheduling.md#model-callable-creation). Milestone 20's
 contract is its six new `gate.schedule.*` entries plus the plan's acceptance
 criteria and the same scheduling design.
+Milestone 21's contract is its twenty-four new `gate.memory.*` entries plus the
+plan's acceptance criteria and the
+[adaptive-memory-distillation design](adaptive-memory-distillation.md).
 
 ## Completion rule
 
@@ -336,3 +352,10 @@ all relevant local and PostgreSQL lanes pass, hosted CI passes on the final
 head, and the final CodeRabbit review is clean. Because it is a parallel
 workstream, completion does not advance the verified gate ceiling past the
 sequential milestones.
+
+Milestone 21 completes when its twenty-four gates and the cumulative registry
+pass, comparative `formation@7`/`formation@8`/`formation@9` evidence for the
+intended production tuple is published, all relevant local, PostgreSQL, and
+hosted lanes pass on the final head, and the final CodeRabbit review is clean.
+Because it is a parallel workstream, completion does not advance the verified
+gate ceiling past the sequential milestones.

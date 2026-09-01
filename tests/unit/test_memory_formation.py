@@ -1052,7 +1052,9 @@ async def test_record_usage_marks_cited_raises_utility_and_reinforcement_not_con
     assert (feedback.cited, feedback.uncited, feedback.traces) == (1, 1, 1)
     used = await service.get_memory(cited.id)
     assert used.utility == pytest.approx(0.1)
-    assert used.last_reinforced_at == clock.now()
+    assert used.last_used_at == clock.now()
+    assert used.last_evidence_at == cited.last_evidence_at
+    assert used.last_reinforced_at == cited.last_reinforced_at
     assert used.store_position == cited.store_position
     assert used.confidence == cited.confidence
     assert used.status is cited.status
@@ -1290,7 +1292,9 @@ async def test_record_usage_leaves_store_positions_where_it_found_them() -> None
     moved = await service.get_memory(cited.id)
     fallen = await service.get_memory(uncited.id)
     assert moved.utility == pytest.approx(0.1)
-    assert moved.last_reinforced_at == clock.now()
+    assert moved.last_used_at == clock.now()
+    assert moved.last_evidence_at == cited.last_evidence_at
+    assert moved.last_reinforced_at == cited.last_reinforced_at
     assert moved.store_position == cited.store_position
     assert fallen.utility == pytest.approx(-0.05)
     assert fallen.store_position == uncited.store_position
