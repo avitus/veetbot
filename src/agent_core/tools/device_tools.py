@@ -52,7 +52,7 @@ DEVICE_OFFLINE_REASON_CODE = "tool.device_offline"
 DEVICE_SEND_FAILED_REASON_CODE = "tool.device_send_failed"
 DEVICE_PAGE_SIZE = 50
 
-type _RegistrationKey = tuple[str, str, str]
+type _RegistrationKey = tuple[str, str, str, str]
 
 
 @dataclass(slots=True)
@@ -64,7 +64,19 @@ class _Registration:
 
 
 def _registration_key(principal: Principal) -> _RegistrationKey:
-    return (principal.tenant_id, DEVICE_SMS_SEND_TOOL_NAME, DEVICE_SMS_SEND_TOOL_VERSION)
+    """Key reconciliation by principal, because the device read is principal-scoped.
+
+    A tenant-scoped key would let a co-tenant's attach — whose device read
+    legitimately returns nothing — reconcile the owner's tool out of the
+    registry for every session holding it.
+    """
+
+    return (
+        principal.tenant_id,
+        principal.principal_id,
+        DEVICE_SMS_SEND_TOOL_NAME,
+        DEVICE_SMS_SEND_TOOL_VERSION,
+    )
 
 
 _SMS_SEND_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -373,6 +385,6 @@ class DeviceToolRuntime:
         self._unregister(key)
 
     def _unregister(self, key: _RegistrationKey) -> None:
-        tenant_id, name, version = key
+        tenant_id, _principal_id, name, version = key
         self._registry.unregister_dynamic(name, version, tenant_id=tenant_id)
         self._registrations.pop(key, None)

@@ -20,6 +20,16 @@ from agent_core.policy.hardline import hardline_matches
 
 _WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch"})
 _BROWSER_PROVIDER_TOOLS = frozenset({"browser.navigate", "browser.observe"})
+# The "May authorize" column of the trust table in policy-and-approvals.md.
+# Content can inform a decision; only platform configuration and the
+# principal's own scopes can authorize one.
+AUTHORIZING_ORIGINS = frozenset(
+    {
+        TrustLevel.PLATFORM,
+        TrustLevel.TRUSTED_CONFIGURATION,
+        TrustLevel.USER,
+    }
+)
 
 _RANK = {
     PolicyDecisionType.ALLOW: PolicyDecisionRank.ALLOW,
@@ -107,9 +117,9 @@ def evaluate_deterministic(
                 explanation=f"Hardline rule {hardline_rule.id} denied the action.",
                 policy_version=ruleset.policy_version,
             )
-    # A tool-name-keyed entry replaces the side-effect row for exactly the tools
-    # a profile names; the row itself is never relaxed, and the trust overlay
-    # below still applies to whatever the entry decided.
+    # A tool-name-keyed entry decides for exactly the tool it names; every other
+    # tool in the side-effect class keeps the class's decision. The trust
+    # overlay below still applies to whatever the entry decided.
     tool_rules = tuple(rule for rule in ruleset.tool_rules if rule.tool_name == action.name)
     matching = tuple(rule for rule in ruleset.rules if rule.side_effect is action.side_effect)
     if len(tool_rules) > 1 or len(matching) != 1:
@@ -122,13 +132,25 @@ def evaluate_deterministic(
     rule = tool_rules[0] if tool_rules else matching[0]
     allowed = _condition_holds(rule.condition, action)
     decision = rule.decision if allowed else (rule.otherwise or ruleset.default_effect)
-    # A tool-name-keyed entry states that this exact tool's own mechanism shows
-    # the arguments to the human who completes the action, so the argument half
-    # of the overlay does not re-escalate what that mechanism already confirms.
-    # The turn-origin half still does: untrusted input never drives one of these
-    # to a plain allow.
-    untrusted_input = action.origin_trust is TrustLevel.EXTERNAL_UNTRUSTED or (
-        not tool_rules and TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
+    # The argument half of the overlay is suppressed only for a rule that
+    # explicitly declares its human confirmation: that tool shows the arguments
+    # to the person who completes the action, so re-escalating on model-authored
+    # arguments would refuse what that person is already looking at.
+    #
+    # The origin half then follows the trust table's "May authorize" column
+    # rather than one label's identity, so MEMORY and KNOWLEDGE escalate exactly
+    # as EXTERNAL_UNTRUSTED does. This is defense in depth, not containment:
+    # origin trust is scoped to the active turn and resets at the next user
+    # message, so a prior-turn injection followed by an owner message is not
+    # caught here. The tool's own human confirmation is the control that holds.
+    confirmed_by_human = bool(tool_rules) and tool_rules[0].human_confirms_arguments
+    origin_untrusted = (
+        action.origin_trust not in AUTHORIZING_ORIGINS
+        if tool_rules
+        else action.origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
+    )
+    untrusted_input = origin_untrusted or (
+        not confirmed_by_human and TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
     )
     if (
         decision

@@ -614,29 +614,48 @@ They resolve as follows, without changing any outcome the plan states.
 
 **Tool-name-keyed entries.** A profile may carry an optional `tool_rules`
 section, a mapping from an exact tool name to a row of the same shape as a
-side-effect row. When an action's name matches, that row replaces — never
-relaxes — the side-effect row for that one tool; every other tool in the class
-still gets the class's decision. The section exists for a tool whose own
-mechanism already carries the control the class demands, and it is the seam a
-milestone uses instead of editing a matrix row. Milestone 20's
-`device.sms.send` is the first and only entry: iOS presents the composed
-message and the owner's Send tap performs the send, so the class's approval
-would duplicate a confirmation the platform already enforces (ADR-0073, and
+side-effect row, plus the boolean `human_confirms_arguments`. When an action's
+name matches, that row decides for that one tool; every other tool in the class
+still gets the class's decision, so the matrix stays total and nothing about the
+class changes. The section exists for a tool whose own mechanism already carries
+the control the class demands, and it is the seam a milestone uses instead of
+editing a matrix row. Milestone 20's `device.sms.send` is the first and only
+entry: iOS presents the composed message and the owner's Send tap performs the
+send, so the class's approval would duplicate a confirmation the platform
+already enforces (ADR-0073 and ADR-0075, and
 [device-channel-and-sms.md](device-channel-and-sms.md)). Hardline rules run
 first and are unaffected, so a credential-shaped body is still refused before
-anything reaches the device.
+anything reaches the device. Two entries for one tool name, like a missing
+side-effect row, are unclassifiable and deny.
 
 **Trust overlay.** One rule applies across the table: if any argument's trust
 label is `EXTERNAL_UNTRUSTED`, or the proposing turn's origin trust is
 `EXTERNAL_UNTRUSTED`, a decision of `ALLOW` for a class other than
 `NONE`, `WORKSPACE_READ`, or `NETWORK_READ` is raised to `REQUIRE_APPROVAL`.
-This is a `max` combination like any other, so it can only tighten. A
-tool-name-keyed entry narrows the argument half of that overlay and only for
-the tool it names: the mechanism the entry stands on shows the arguments to the
-human who completes the action, so re-escalating on model-authored arguments
-would make the entry unreachable. The origin half is untouched — a turn whose
-origin trust is `EXTERNAL_UNTRUSTED` still raises to `REQUIRE_APPROVAL`, so
-untrusted input can never drive one of these entries to a plain allow.
+This is a `max` combination like any other, so it can only tighten.
+
+A tool-name-keyed entry adjusts both halves, and only for the tool it names.
+The argument half is suppressed only when the entry declares
+`human_confirms_arguments: true` — that tool shows the arguments to the human
+who completes the action, so re-escalating on model-authored arguments would
+refuse what that person is already looking at. An entry without the flag gets
+no suppression. The origin half is *tightened*: instead of testing one label,
+it admits only the origins the trust table below marks as able to authorize
+(`PLATFORM`, `TRUSTED_CONFIGURATION`, `USER`), so `MEMORY` and `KNOWLEDGE`
+escalate exactly as `EXTERNAL_UNTRUSTED` does.
+
+**What the origin half does and does not guarantee.** It is defense in depth,
+not a containment boundary. Origin trust is scoped to the *active turn*: the
+runtime walks back only to the most recent `USER`-trust user message, so a turn
+that ingests untrusted content taints that turn and no later one. An injection
+delivered in one turn, followed by the owner typing anything at all, produces a
+`USER` origin on the next turn. Policy does not catch that, and a profile must
+not claim it does. The control that holds across turns is the tool's own
+mechanism: the entry is legitimate only for a tool that shows the human what it
+is about to do — for `device.sms.send`, the recipient and the body in the
+compose sheet, which the owner can decline. That is the property
+`human_confirms_arguments` asserts, and it is why the flag is explicit rather
+than implied by the entry's existence.
 
 **Unclassifiable actions.** Section 9.2's "Unknown tool → Deny" row looks
 unreachable, because Section 8.3 resolves the tool before policy runs and an

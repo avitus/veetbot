@@ -78,6 +78,7 @@ from tests.contract.test_device_registry_contract import device
 from tests.integration.m2_support import memory_settings
 
 SECOND_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002b0")
+OTHER_SESSION_ID = UUID("00000000-0000-0000-0000-0000000002b2")
 INVOCATION_ID = UUID("00000000-0000-0000-0000-0000000002b1")
 TOOL_NAME = DeviceCapability.SMS_SEND.value
 ARGUMENTS: dict[str, Any] = {"recipient": "+15555550123", "body": "Feeding Marzipan at six."}
@@ -169,6 +170,27 @@ async def test_closing_the_last_owning_session_unregisters_the_device_tool() -> 
     await runtime.close_session(SESSION_ID)
 
     assert _advertised(registry) == []
+
+
+async def test_another_principals_attach_leaves_the_owners_registration_standing() -> None:
+    """Registrations are principal-scoped: a co-tenant's empty read withdraws nothing.
+
+    The device read is scoped to one principal, so a tenant-scoped registration
+    key would let any other principal in the tenant reconcile the owner's tool
+    out of the registry.
+    """
+
+    _factory, registry, runtime = await _runtime_stack()
+    await runtime.prepare(SESSION_ID, _device_principal())
+    other = _device_principal().model_copy(update={"principal_id": "principal-b"}, deep=True)
+
+    await runtime.prepare(OTHER_SESSION_ID, other)
+
+    assert [spec.device_id for spec in _advertised(registry)] == [str(DEVICE_ID)]
+    assert registry.get(
+        DEVICE_SMS_SEND_TOOL_NAME,
+        tenant_id=_device_principal().tenant_id,
+    ).spec.device_id == str(DEVICE_ID)
 
 
 async def test_a_second_declaring_device_is_refused_with_a_process_event() -> None:
@@ -596,6 +618,25 @@ async def test_another_external_message_tool_still_requires_approval() -> None:
 def test_only_the_device_send_carries_an_owner_confirmed_tool_rule() -> None:
     assert [rule.tool_name for rule in DEFAULT_RULESET.tool_rules] == [DEVICE_SMS_SEND_TOOL_NAME]
     assert DEFAULT_RULESET.tool_rules[0].decision is PolicyDecisionType.ALLOW
+    assert DEFAULT_RULESET.tool_rules[0].human_confirms_arguments is True
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [TrustLevel.EXTERNAL_UNTRUSTED, TrustLevel.MEMORY, TrustLevel.KNOWLEDGE],
+)
+async def test_a_non_authorizing_origin_still_requires_approval_for_the_device_send(
+    origin: TrustLevel,
+) -> None:
+    """Follow the trust table's May-authorize column, not one label's identity."""
+
+    decision = await DeterministicPolicyEngine(DEFAULT_RULESET).evaluate(
+        _device_action(body=str(ARGUMENTS["body"]), origin_trust=origin),
+        principal(),
+        contract_run(),
+    )
+
+    assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
 async def test_an_untrusted_turn_still_requires_approval_for_the_device_send() -> None:

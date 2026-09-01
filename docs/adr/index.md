@@ -83,3 +83,4 @@ implementation without one.
 - [ADR-0072 — Milestone 19 conversational schedule creation (Proposed)](0072-milestone-19-conversational-schedule-creation.md)
 - [ADR-0073 — Milestone 20 SMS through the owner's iPhone (Proposed)](0073-milestone-20-sms-device-channel.md)
 - [ADR-0074 — Milestone 21 WhatsApp business surface (Proposed)](0074-milestone-21-whatsapp-surface.md)
+- [ADR-0075 — Tool-name-keyed policy rules and declared human confirmation](0075-tool-name-keyed-policy-rules.md)

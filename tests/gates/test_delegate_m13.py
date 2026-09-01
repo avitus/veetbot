@@ -464,6 +464,35 @@ async def test_briefs_are_validated_before_anything_exists() -> None:
         assert await uow.checkpoints.latest(parent.id) is None
 
 
+async def test_forbidden_tools_are_withheld_from_children_the_parent_itself_holds() -> None:
+    """A child never inherits delegation, skill authoring, or the owner's device send.
+
+    The parent's pinned set is the subset test's upper bound, so a forbidden
+    tool is only truly forbidden when the parent holds it and the child still
+    cannot ask for it. `device.sms.send` composes a text on the owner's phone;
+    drafting a reply is a triage-session behavior, never a child-run behavior.
+    """
+
+    materializer, _factory, parent, invocation = await _materializer_stack()
+    forbidden = ("delegate.run", "skill.manage", "device.sms.send")
+    pinned = {
+        **PINNED,
+        **{name: _capability_spec(name) for name in forbidden},
+    }
+
+    for name in forbidden:
+        with pytest.raises(DelegationValidationError) as raised:
+            await materializer.materialize(
+                request=_request(_materializer_brief(allowed_tools=[name])),
+                run=parent,
+                agent=support.agent(),
+                principal=principal(),
+                invocation=invocation,
+                pinned_tools=pinned,
+            )
+        assert raised.value.reason == "delegation.tools_not_subset"
+
+
 async def test_every_child_gets_a_dedicated_session() -> None:
     """Materialize one dedicated session per brief, behind gate.delegate.dedicated_session."""
 

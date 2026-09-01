@@ -34,6 +34,7 @@ _PROFILE_KEYS = {
 }
 _HARDLINE_KEYS = {"schema_version", "rules"}
 _RULE_KEYS = {"decision", "condition", "otherwise"}
+_TOOL_RULE_KEYS = _RULE_KEYS | {"human_confirms_arguments"}
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 
 
@@ -70,9 +71,14 @@ def _tool_rules(value: Any) -> tuple[ToolPolicyRule, ...]:
         row = value[tool_name]
         if not isinstance(row, dict):
             raise ValueError(f"policy tool rule {tool_name} must be a mapping")
-        _require_exact_keys(row, _RULE_KEYS, f"policy tool rule {tool_name}")
+        _require_exact_keys(row, _TOOL_RULE_KEYS, f"policy tool rule {tool_name}")
         if "decision" not in row:
             raise ValueError(f"policy tool rule {tool_name} requires a decision")
+        confirms = row.get("human_confirms_arguments", False)
+        if not isinstance(confirms, bool):
+            raise ValueError(
+                f"policy tool rule {tool_name}.human_confirms_arguments must be boolean"
+            )
         rules.append(
             ToolPolicyRule(
                 tool_name=tool_name,
@@ -81,6 +87,7 @@ def _tool_rules(value: Any) -> tuple[ToolPolicyRule, ...]:
                     PolicyCondition(row["condition"]) if row.get("condition") is not None else None
                 ),
                 otherwise=(PolicyDecisionType(row["otherwise"]) if row.get("otherwise") else None),
+                human_confirms_arguments=confirms,
             )
         )
     return tuple(rules)
