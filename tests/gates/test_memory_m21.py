@@ -171,6 +171,22 @@ async def test_personal_agent_project_forms_as_direct_ongoing_memory() -> None:
     assert project.evidence_spans[0].text == "building a personal AI agent"
 
 
+async def test_ongoing_project_evidence_preserves_exact_source_whitespace() -> None:
+    event = _personal_agent_event().model_copy(
+        update={"payload": {"content": "I am building  a personal AI agent."}}
+    )
+
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        [event], principal=principal(), scope="general"
+    )
+    project = next(
+        candidate for candidate in candidates if candidate.claim_kind == "ongoing_project"
+    )
+
+    assert project.evidence_spans[0].text == "building  a personal AI agent"
+    assert project.evidence_spans[0].text in event.payload["content"]
+
+
 async def test_software_development_cue_forms_only_as_tentative_hypothesis() -> None:
     candidates = await _personal_agent_candidates()
     skill = next(
@@ -864,6 +880,31 @@ async def test_every_provider_stage_has_an_audited_deterministic_fallback() -> N
     assert any(
         candidate.statement == "User is building a personal AI agent." for candidate in candidates
     )
+
+
+async def test_invalid_provider_episode_subjects_use_the_validated_fallback() -> None:
+    extractor, provider, factory = await _distillation_extractor([])
+    source_id = await user_event(factory, "I am building a personal AI agent.")
+    provider._script.turns = [
+        ScriptedTurn(
+            text=json.dumps(
+                {
+                    "narrative": f"[e:{source_id}] I am building a personal AI agent.",
+                    "subjects": ["personal AI agent", "PERSONAL AI AGENT"],
+                    "source_event_ids": [source_id],
+                }
+            )
+        ),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(text='{"candidates":[]}'),
+    ]
+
+    await extractor.extract(await session_events(factory), principal=principal(), scope="general")
+
+    assert "episode_integration" in extractor.last_audit.fallback_stages
+    async with factory() as uow:
+        [episode] = await uow.episodes.for_session(SESSION_ID, principal())
+    assert episode.subjects == ["personal AI agent", "software-development experience"]
 
 
 async def test_provider_fallback_completes_without_scheduling_legacy_retries() -> None:

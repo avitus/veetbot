@@ -152,7 +152,8 @@ jobs:
             plutil -create xml1 "$export_options"
             plutil -insert destination -string upload "$export_options"
             plutil -insert method -string app-store-connect "$export_options"
-            plutil -insert signingStyle -string automatic "$export_options"
+            plutil -insert signingStyle -string manual "$export_options"
+            plutil -insert provisioningProfiles -xml '<dict><key>com.veetbot.apple</key><string>Veetbot Mac App Store</string></dict>' "$export_options"
             plutil -insert manageAppVersionAndBuildNumber -bool false "$export_options"
 
             xcodebuild archive \

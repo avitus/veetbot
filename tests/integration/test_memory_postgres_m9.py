@@ -1081,15 +1081,15 @@ async def test_postgres_trace_round_trip_user_view_and_conflict_detection(
                 await uow.traces.record(drifted)
 
 
-async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
+async def test_list_idle_returns_the_least_recently_evidenced_live_beliefs(
     tmp_path: Path,
 ) -> None:
-    """The decay window is the least recently reinforced live beliefs.
+    """The decay window is the least recently evidenced live beliefs.
 
     The shared database carries rows from other cases, so the ordering is
     asserted over whatever the window returns and membership over this case's
     own beliefs: written newest-first, only the three past the cutoff come back,
-    oldest first, and neither the freshly reinforced nor the retired one does.
+    oldest first, and neither the freshly evidenced nor the retired one does.
     """
 
     async with build(settings=_settings(tmp_path), storage="postgres") as composition:
@@ -1104,7 +1104,7 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
             *,
             confidence: float = 0.5,
         ) -> MemoryRecord:
-            reinforced_at = now - timedelta(days=idle_days)
+            evidenced_at = now - timedelta(days=idle_days)
             async with composition.uow_factory() as uow:
                 record = MemoryRecord.model_validate(
                     {
@@ -1125,14 +1125,14 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
                         "polarity": Polarity.ASSERT,
                         "portability": Portability.CONTEXTUAL,
                         "origin_scopes": ["integration"],
-                        "last_evidence_at": reinforced_at,
-                        "last_reinforced_at": reinforced_at,
+                        "last_evidence_at": evidenced_at,
+                        "last_reinforced_at": evidenced_at,
                         "formation_run_id": uuid4(),
                         "consolidation_policy_version": "formation@1",
                         "authority": MemoryAuthority.INFERRED,
                         "store_position": await uow.memories.next_position(),
-                        "created_at": reinforced_at,
-                        "updated_at": reinforced_at,
+                        "created_at": evidenced_at,
+                        "updated_at": evidenced_at,
                     }
                 )
                 return await uow.memories.upsert_belief(record)

@@ -332,7 +332,7 @@ def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelReque
             TextPart(
                 text=(
                     "Runtime control: the final-synthesis reserve is active "
-                    f"because the research {dimension} budget is exhausted. Do not call "
+                    f"because the run {dimension} budget is exhausted. Do not call "
                     "tools. Synthesize the best-supported final answer from evidence "
                     "already in the conversation and state any remaining gap."
                 )

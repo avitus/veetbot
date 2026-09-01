@@ -33,6 +33,7 @@ class MemoryStatus(StrEnum):
 # A browse that opened onto superseded and retired rows would show history
 # rather than belief; a caller that wants history names the statuses it wants.
 LIVE_MEMORY_STATUSES: tuple[MemoryStatus, ...] = (MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL)
+LIFECYCLE_POLICY_VERSION = "lifecycle@2"
 
 
 class BeliefType(StrEnum):

@@ -863,6 +863,10 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
     assert "CODE_SIGN_STYLE=Manual" in archive_command
     assert 'CODE_SIGN_IDENTITY="Apple Distribution"' in archive_command
     assert 'PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"' in archive_command
+    assert 'plutil -insert signingStyle -string manual "$export_options"' in archive_command
+    assert "plutil -insert provisioningProfiles -xml" in archive_command
+    assert "com.veetbot.apple" in archive_command
+    assert "Veetbot Mac App Store" in archive_command
 
 
 def test_mkdocs_site_has_its_public_origin() -> None:

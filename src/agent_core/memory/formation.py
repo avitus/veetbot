@@ -22,6 +22,7 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
+    LIFECYCLE_POLICY_VERSION,
     BeliefRejection,
     BeliefType,
     ConsolidationResult,
@@ -61,7 +62,6 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 FORMATION_POLICY_VERSION = "formation@7"
 NEMORI_FORMATION_POLICY_VERSION = "formation@9"
 HIGH_RECALL_EXTRACTOR_VERSION = "nemori-deterministic-fallback-v1"
-LIFECYCLE_POLICY_VERSION = "lifecycle@2"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_NEMORI_AUTOMATIC_CANDIDATES = 32
 MAX_NEMORI_CANDIDATES_PER_SOURCE = 6
@@ -814,7 +814,7 @@ class HighRecallCandidateExtractor:
                 raw_object = match.group("object").strip(" ,.:;!?")
                 if not raw_object:
                     continue
-                evidence = f"{match.group('activity')} {match.group('object')}".strip(" ,.:;!?")
+                evidence = text[match.start("activity") : match.end("object")].strip(" ,.:;!?")
                 subject = re.sub(r"^(?:a|an|the)\s+", "", raw_object, flags=re.IGNORECASE)
                 rendered_activity = "building" if activity == "working on" else activity
                 candidates = [

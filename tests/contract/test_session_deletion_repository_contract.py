@@ -42,6 +42,7 @@ from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 from tests.contract.test_delegation_repository_contract import delegation
+from tests.contract.test_integrated_episode_store_contract import integrated_episode
 from tests.contract.test_schedule_repository_contract import revision, schedule
 
 
@@ -62,6 +63,7 @@ async def _repository() -> tuple[
     InMemoryTrajectoryExportRepository,
     InMemoryScheduleRepository,
     InMemoryDelegationRepository,
+    InMemoryIntegratedEpisodeStore,
 ]:
     clock, sessions, runs, events = await memory_stack()
     artifacts = InMemoryArtifactRepository()
@@ -70,6 +72,7 @@ async def _repository() -> tuple[
     schedules = InMemoryScheduleRepository()
     delegations = InMemoryDelegationRepository()
     notification_outbox = InMemoryNotificationOutbox(clock, InMemoryDeviceRegistry())
+    episodes = InMemoryIntegratedEpisodeStore()
     repository = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -82,7 +85,7 @@ async def _repository() -> tuple[
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
         memories=InMemoryMemoryStore(clock),
-        episodes=InMemoryIntegratedEpisodeStore(),
+        episodes=episodes,
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),
         schedules=schedules,
@@ -98,6 +101,7 @@ async def _repository() -> tuple[
         trajectory_exports,
         schedules,
         delegations,
+        episodes,
     )
 
 
@@ -111,6 +115,7 @@ async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() ->
         trajectory_exports,
         _schedules,
         _delegations,
+        episodes,
     ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     artifact = ArtifactRef(
@@ -160,6 +165,7 @@ async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() ->
             created_at=NOW,
         )
     )
+    await episodes.put(integrated_episode())
 
     assert await repository.delete(SESSION_ID, principal(), NOW) is True
     assert await repository.delete(SESSION_ID, principal(), NOW) is False
@@ -169,6 +175,7 @@ async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() ->
         await runs.get(RUN_ID, principal())
     assert await invocations.find_by_idempotency_key(RUN_ID, "delete-contract-key") is None
     assert await trajectory_exports.get_for_run(RUN_ID) is None
+    assert await episodes.for_session(SESSION_ID, principal()) == []
 
     pending = await repository.pending_artifacts(SESSION_ID, principal(), limit=10)
     assert len(pending) == 1
@@ -208,6 +215,7 @@ async def test_in_memory_deletion_erases_materialized_occurrence_links() -> None
         _exports,
         schedules,
         _delegations,
+        _episodes,
     ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     scheduled = schedule()
@@ -287,6 +295,7 @@ async def test_in_memory_deletion_of_a_child_session_alone_stamps_the_ledger() -
         _exports,
         _schedules,
         delegations,
+        _episodes,
     ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     await _delegated_child_graph(sessions, runs, delegations)
@@ -314,6 +323,7 @@ async def test_in_memory_deletion_of_the_parent_session_erases_child_sessions() 
         _exports,
         _schedules,
         delegations,
+        _episodes,
     ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     await _delegated_child_graph(sessions, runs, delegations)

@@ -70,10 +70,10 @@ training loop, reinforcement learning, or a new dependency into this milestone.
     ranks against evidence age and visibly renders derivation and longevity on
     governed context, trace, CLI, and API surfaces.
 12. **Trust exclusions stay narrow.** Invalid or foreign provenance,
-    assistant-as-user attribution, credentials, promoted untrusted
-    instructions, tenant/principal crossing, and durable human corrections are
-    refused. Inference, ambiguity, ongoing state, or sensitivity alone is not a
-    refusal reason.
+    assistant-as-user attribution, credentials, PII beyond explicit policy,
+    promoted untrusted instructions, tenant/principal crossing, and durable
+    human corrections are refused. Inference, ambiguity, ongoing state, or
+    sensitivity permitted by policy alone is not a refusal reason.
 13. **Activation requires comparative evidence.** A corpus of at least sixty
     cases compares `formation@7`, `formation@8`, and `formation@9` and must show
     the declared direct, hypothesis, precision, useful-lift, lifecycle, and

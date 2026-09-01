@@ -22,9 +22,11 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
@@ -49,6 +51,7 @@ from agent_core.domain.knowledge import (
     RetrievedPassage,
 )
 from agent_core.domain.memory import (
+    LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
     BeliefRejection,
     BeliefType,
@@ -172,7 +175,13 @@ class PostgresIntegratedEpisodeStore:
             )
             .returning(IntegratedEpisodeRow)
         )
-        inserted = (await self._session.scalars(statement)).one_or_none()
+        try:
+            async with self._session.begin_nested():
+                inserted = (await self._session.scalars(statement)).one_or_none()
+        except IntegrityError as exc:
+            if constraint_name(exc) == "pk_integrated_episodes":
+                raise ConflictError("episode id identifies different content") from exc
+            raise
         if inserted is not None:
             return _episode(inserted)
         existing = (
@@ -737,7 +746,7 @@ class PostgresMemoryStore:
                 update={
                     "status": (
                         MemoryStatus.RETIRED
-                        if row.lifecycle_policy_version == "lifecycle@2"
+                        if row.lifecycle_policy_version == LIFECYCLE_POLICY_VERSION
                         else MemoryStatus.EXPIRED
                     ),
                     "valid_to": now,

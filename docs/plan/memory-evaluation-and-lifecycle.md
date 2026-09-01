@@ -767,7 +767,8 @@ Ranking gains the time term the decay design implies. The reinforcement
 contribution becomes
 
 ```text
-reinforce = min(1, log1p(evidence_count) / log(11)) * exp(-age_days / tau[type])
+C_max     = 10
+reinforce = min(1, log1p(evidence_count) / log1p(C_max)) * exp(-age_days / tau[type])
 age_days  = max(0, (now - last_evidence_at).days)
 ```
 

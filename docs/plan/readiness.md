@@ -1202,8 +1202,9 @@ lifecycle the two Milestone 9 memory specifications describe and the code never
 grew: the profile document as validated configuration, operator-tier trace
 expiry, lexical parity between the two store adapters, episode paging, project
 scope on the consolidation and query-former paths, time-decayed reinforcement
-with a bounded forgetting sweep, usage feedback that resets decay and never
-raises confidence, the recall delta and its correction lines, established
+with a bounded forgetting sweep, usage feedback that Milestone 21 supersedes
+to change utility and `last_used_at` without resetting evidence decay or
+raising confidence, the recall delta and its correction lines, established
 working-state facts entering formation at affirmed authority, conflicts
 committed flagged and surfaced instead of silently resolved, and re-derivation
 as an explicit operator action. Nineteen hard gates in the `memory` area;
@@ -1388,11 +1389,12 @@ The completed `formation@7` and `formation@8` policies remain frozen controls;
 `formation@9`, `retrieval@3`, and `lifecycle@2` are new versioned behavior.
 
 The trust boundary is narrow rather than a general suppression rule. Invalid or
-foreign provenance, assistant-as-user attribution, credentials, promoted
-untrusted instructions, isolation failures, and durable corrections still form
-nothing. Ambiguity, inference, ongoing state, and sensitivity instead affect
-derivation, confidence, longevity, expiry, and viewing ceilings. This is the
-specific distinction the prior designs did not make strongly enough.
+foreign provenance, assistant-as-user attribution, credentials, PII beyond
+explicit policy, promoted untrusted instructions, isolation failures, and
+durable corrections still form nothing. Ambiguity, inference, ongoing state,
+and sensitivity permitted by policy instead affect derivation, confidence,
+longevity, expiry, and viewing ceilings. This is the specific distinction the
+prior designs did not make strongly enough.
 
 The readiness verdict is **Authorized**: ADR-0077, twenty-four new
 `gate.memory.*` entries, the Milestone 21 census row, a nine-step build

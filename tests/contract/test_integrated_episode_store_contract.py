@@ -11,7 +11,7 @@ from agent_core.adapters.memory.in_memory import InMemoryIntegratedEpisodeStore
 from agent_core.adapters.persistence.memory_repositories import (
     PostgresIntegratedEpisodeStore,
 )
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import IntegratedEpisode
 from tests.contract.support import NOW, SESSION_ID, principal
 
@@ -48,6 +48,9 @@ async def test_integrated_episode_repository_contract_is_registered() -> None:
     episode = integrated_episode()
     assert await store.put(episode) == episode
     assert await store.put(episode) == episode
+    conflicting = episode.model_copy(update={"derivation_key": "f" * 64})
+    with pytest.raises(ConflictError, match="episode id identifies different content"):
+        await store.put(conflicting)
     assert await store.get(episode.id, principal()) == episode
     assert await store.for_session(SESSION_ID, principal()) == [episode]
 
@@ -57,4 +60,11 @@ async def test_integrated_episode_repository_contract_is_registered() -> None:
     assert await store.for_session(SESSION_ID, foreign) == []
     assert await store.delete_for_session(SESSION_ID, foreign) == 0
     assert await store.delete_for_session(SESSION_ID, principal()) == 1
-    assert await store.delete_for_principal(principal()) == 0
+    with pytest.raises(NotFoundError):
+        await store.get(episode.id, principal())
+
+    owned = integrated_episode(episode_id=711)
+    assert await store.put(owned) == owned
+    assert await store.delete_for_principal(principal()) == 1
+    with pytest.raises(NotFoundError):
+        await store.get(owned.id, principal())

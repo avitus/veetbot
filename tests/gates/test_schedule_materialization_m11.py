@@ -283,6 +283,8 @@ async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve() -> Non
         if isinstance(part, TextPart)
     ]
     assert any("the final-synthesis reserve is active" in text for text in controls)
+    assert any("because the run steps budget is exhausted" in text for text in controls)
+    assert all("research steps budget" not in text for text in controls)
 
 
 async def test_firing_revalidates_current_authority() -> None:

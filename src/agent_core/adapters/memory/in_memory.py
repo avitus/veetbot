@@ -19,6 +19,7 @@ from agent_core.domain.knowledge import (
     RetrievedPassage,
 )
 from agent_core.domain.memory import (
+    LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
     BeliefRejection,
     BeliefType,
@@ -441,7 +442,7 @@ class InMemoryMemoryStore:
                     update={
                         "status": (
                             MemoryStatus.RETIRED
-                            if record.lifecycle_policy_version == "lifecycle@2"
+                            if record.lifecycle_policy_version == LIFECYCLE_POLICY_VERSION
                             else MemoryStatus.EXPIRED
                         ),
                         "valid_to": now,

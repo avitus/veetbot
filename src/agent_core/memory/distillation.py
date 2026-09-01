@@ -435,13 +435,13 @@ class NemoriAssistedCandidateExtractor:
         episode = fallback_episode
         try:
             response = _EpisodeResponse.model_validate_json(integration_raw or "")
-            proposed_episode = fallback_episode.model_copy(
-                update={
+            proposed_episode = IntegratedEpisode.model_validate(
+                {
+                    **fallback_episode.model_dump(mode="python"),
                     "narrative": response.narrative,
                     "subjects": response.subjects,
                     "source_event_ids": response.source_event_ids,
-                },
-                deep=True,
+                }
             )
             validate_integrated_episode(proposed_episode, selected, principal=principal)
             episode = proposed_episode

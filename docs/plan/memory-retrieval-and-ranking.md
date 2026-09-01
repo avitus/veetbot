@@ -349,9 +349,9 @@ with:
 
 - `conf(b) = confidence × {active: 1.0, provisional: 0.4}` — provisional beliefs are
   retrievable but never dominant, and never enter the snapshot core;
-- `reinforce(b) = log1p(evidence_count) / log1p(C_max) × exp(-Δt / τ)`, where
-  `Δt` is time since `last_evidence_at` and `τ` varies by `belief_type` — stable
-  preferences decay slowly, situational facts quickly;
+- `reinforce(b) = min(1, log1p(evidence_count) / log1p(C_max)) × exp(-Δt / τ)`,
+  where `C_max = 10`, `Δt` is time since `last_evidence_at`, and `τ` varies by
+  `belief_type` — stable preferences decay slowly, situational facts quickly;
 - `authority(b)` from the belief's provenance: direct user statement, agent-affirmed
   conclusion, or inference;
 - `scope_affinity(b, q)` combines origin match with portability. A belief learned in
@@ -708,7 +708,7 @@ write-path handling is specified in
 | False transfer — project A's facts asserted about project B | portability classes, origin attribution on every carried belief, reduced confidence band until corroborated locally, explicit local overrides outrank carried beliefs |
 | High-value item buried mid-block | small blocks, highest score first, task recall adjacent to the goal |
 | Retrieval latency on the critical path | concurrent arms with a shared deadline, partial-result degradation, precomputed snapshot |
-| Wrong belief entrenched by being useful | usage resets decay but never raises confidence |
+| Wrong belief entrenched by being useful | usage changes utility and `last_used_at` but never resets evidence decay or raises confidence |
 | Trace disagrees with what the model actually saw | traces are recorded in the render pass, never reconstructed; `rendered_sha256` binds the trace to the exact bytes |
 | Trace becomes a disclosure path | the view is filtered by the minimum of the recall surface's ceiling and the viewing surface's; blocked items are counted, never shown |
 | A rejected belief returns after re-derivation | rejections are durable events that re-derivation replays, not a delete applied to a projection |

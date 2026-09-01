@@ -321,19 +321,20 @@ Formation rejects only the following trust-boundary failures before ranking:
   principal, or is not a trusted user source;
 - assistant, model, tool, or externally untrusted text is presented as a user
   observation;
-- the authoritative source span is a credential or secret;
+- the authoritative source span is a credential, secret, or PII beyond explicit policy;
 - untrusted instruction text is being promoted as an instruction rather than
   remembered as the fact that the user encountered it;
 - a write or read would cross tenant or principal scope;
 - a durable rejection, deletion, correction, or newer higher-authority belief
   forbids the candidate.
 
-Sensitivity is not itself a reason to reject a useful memory. It is classified
-and governed by the existing surface ceilings. Inference is not itself a reason
+Sensitivity permitted by explicit policy is not itself a reason to reject a
+useful memory. It is classified and governed by the existing surface ceilings.
+Inference is not itself a reason
 to reject; it is stored as a hypothesis. Ambiguity is not itself a reason to
 reject; it lowers confidence or longevity. Ordinary professional, health,
 relationship, location, and activity context may form autonomously when it has
-valid user provenance.
+valid user provenance and explicit policy permits it.
 
 ## Formation decision telemetry
 

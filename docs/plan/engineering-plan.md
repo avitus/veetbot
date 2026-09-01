@@ -3639,9 +3639,9 @@ Acceptance criteria:
   at least 80 percent, benign precision is at least 90 percent, and useful
   recall improves at least fifteen percentage points over `formation@8`.
 - Invalid provenance, assistant-as-user attribution, promoted injection,
-  credential storage, and cross-principal or cross-tenant formation remain at
-  zero. Inference, ambiguity, ongoing state, or sensitivity alone is not a
-  rejection reason.
+  credential storage, PII storage beyond explicit policy, and cross-principal
+  or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
+  state, or sensitivity permitted by policy alone is not a rejection reason.
 - Every eligible provider consolidation makes exactly three batched calls and
   every failed or invalid stage falls back deterministically with content-free
   audit metadata.

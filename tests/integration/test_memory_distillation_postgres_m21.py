@@ -9,11 +9,12 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from sqlalchemy import text
 
 from agent_core.adapters.persistence.database import create_engine
 from agent_core.bootstrap import build
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.memory.distillation import deterministic_integrated_episode
 from tests.integration.m2_support import database_settings
@@ -22,13 +23,30 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _alembic(*arguments: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *arguments],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "alembic", *arguments],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"Alembic command failed: {exc.stderr}") from exc
+
+
+def test_alembic_failure_reports_captured_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(
+            1,
+            [sys.executable, "-m", "alembic"],
+            stderr="migration exploded",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fail)
+
+    with pytest.raises(RuntimeError, match="migration exploded"):
+        _alembic("upgrade", "head")
 
 
 async def _seed_legacy_row(tmp_path: Path) -> tuple[UUID, UUID, str]:
@@ -100,6 +118,10 @@ async def _verify_backfill_and_erasure(tmp_path: Path, session_id: UUID, belief_
                 created_at=composition.clock.now(),
             )
             await uow.episodes.put(episode)
+            conflicting = episode.model_copy(update={"derivation_key": "f" * 64})
+            with pytest.raises(ConflictError, match="episode id identifies different content"):
+                await uow.episodes.put(conflicting)
+            assert await uow.episodes.get(episode.id, composition.principal) == episode
         async with composition.uow_factory() as uow:
             assert await uow.session_deletions.delete(
                 session_id, composition.principal, composition.clock.now()

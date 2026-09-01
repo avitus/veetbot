@@ -127,7 +127,7 @@ citations:
   - cite: "docs/plan/memory-evaluation-and-lifecycle.md#docs/plan/memory-retrieval-and-ranking.md:93"
     excerpt: "### The recall delta"
     digest: "536519dd747fa19e"
-  - cite: "docs/plan/memory-formation-and-consolidation.md#docs/plan/memory-evaluation-and-lifecycle.md:898-923"
+  - cite: "docs/plan/memory-formation-and-consolidation.md#docs/plan/memory-evaluation-and-lifecycle.md:899-924"
     excerpt: "Formation's resolver has three outcomes today — same source,"
     digest: "4800b45cc4b570cc"
   - cite: "docs/plan/memory-read-api-and-browser.md#docs/plan/http-api-and-streaming.md:111"
