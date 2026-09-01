@@ -8,11 +8,20 @@ from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.messages import ToolCallItem
-from agent_core.domain.policies import PolicyProfileRecord
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    StopReason,
+    TextPart,
+    ToolCallItem,
+    UserMessage,
+)
+from agent_core.domain.policies import PolicyProfileRecord, TrustLevel
 from agent_core.domain.runs import RunLimits, RunStatus, Step
 from agent_core.domain.schedules import (
     DailyCadence,
@@ -188,6 +197,92 @@ async def test_due_schedule_materializes_one_complete_ordinary_run() -> None:
             events = await uow.events.list_after(run.session_id, 0, _principal())
         assert events[-1].event_type == "tool.call.denied"
         assert events[-1].payload["reason_code"] == "policy.scope.missing"
+
+
+async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve() -> None:
+    limits = RunLimits(
+        max_steps=2,
+        max_model_calls=4,
+        max_tool_calls=2,
+        max_cost=Decimal("2"),
+        synthesis_reserve_steps=1,
+        synthesis_reserve_model_calls=1,
+        synthesis_reserve_cost=Decimal("0.25"),
+    )
+    agent = _agent().model_copy(
+        update={
+            "enabled_tools": ["math.calculate"],
+            "limits": limits,
+            "model_policy": "fake-balanced",
+        },
+        deep=True,
+    )
+    revision = _revision().model_copy(
+        update={
+            "requested_scopes": frozenset(),
+            "limits": limits,
+        },
+        deep=True,
+    )
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "2 + 2"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                text="The bounded result is 4.",
+                context_contains="Runtime control: the final-synthesis reserve is active",
+            ),
+        ]
+    )
+    principal = _principal(scopes=set())
+
+    async with build(
+        settings=memory_settings(),
+        storage="memory",
+        script=script,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(agent)
+            await uow.policy_profiles.record(_profile())
+            await uow.schedules.create(_schedule(), revision)
+        materializer = ScheduleMaterializer(
+            uow_factory=composition.uow_factory,
+            principals=StaticSchedulePrincipalDirectory(principal),
+            admission=AllowScheduleAdmissionController(),
+            clock=composition.clock,
+            ids=composition.ids,
+            seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+        )
+        occurrence = await materializer.materialize(SCHEDULE_ID)
+        assert occurrence is not None and occurrence.run_id is not None
+
+        await composition.executor.execute(occurrence.run_id)
+        completed = await composition.runs.get(occurrence.run_id)
+        model_provider = composition.executor._model_provider
+        assert isinstance(model_provider, FakeModelProvider)
+        requests = [request.model_copy(deep=True) for request in model_provider.requests]
+
+    assert completed.status is RunStatus.COMPLETED, completed.failure
+    assert completed.final_message == "The bounded result is 4."
+    assert len(requests) == 2
+    controls = [
+        part.text
+        for item in requests[1].conversation
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.PLATFORM
+        for part in item.content
+        if isinstance(part, TextPart)
+    ]
+    assert any("the final-synthesis reserve is active" in text for text in controls)
 
 
 async def test_firing_revalidates_current_authority() -> None:

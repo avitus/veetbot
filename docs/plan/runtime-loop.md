@@ -756,6 +756,16 @@ state, which means a parent can fail on budget while suspended and is one of
 the two cases where a waiting run transitions to `FAILED` without ever
 becoming `RUNNING` again.
 
+`RunLimits.synthesis_reserve_steps`, `synthesis_reserve_model_calls`, and
+`synthesis_reserve_cost` apply to every run kind when positive (ADR-0078). At
+the first reached dimension, the loop adds a volatile platform instruction to
+the next request requiring final synthesis from evidence already in context.
+The instruction is not checkpointed. A tool call returned while that control is
+active fails closed with `SynthesisReserveViolation`; all-zero reserve fields
+preserve the ordinary loop. This is separate from hard-limit accounting: the
+reserve protects a pre-call opportunity to synthesize, while `record_*` remains
+the authoritative post-call budget check.
+
 ## The heartbeat is a supervisor, not a statement in the loop
 
 Section 14.1 step 3 says *"refresh the lease periodically"*. The event log

@@ -186,4 +186,5 @@ nav:
       - ADR-0075 Native schedule browser: adr/0075-native-schedule-browser.md
       - ADR-0076 Keenable and weighted web routing: adr/0076-keenable-and-weighted-web-routing.md
       - ADR-0077 Milestone 21 adaptive memory distillation: adr/0077-milestone-21-adaptive-memory-distillation.md
+      - ADR-0078 Run-limit synthesis reserves: adr/0078-run-limit-synthesis-reserves.md
   - Changelog: changelog.md

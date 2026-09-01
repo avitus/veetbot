@@ -365,6 +365,14 @@ Cross-occurrence continuity comes from the principal's governed long-term
 memory and knowledge stores, not from reusing a conversation session. Provider
 opaque continuation state never crosses occurrences.
 
+A revision may pin positive final-synthesis reserves within its finite
+`RunLimits`. The ordinary runtime applies those reserve fields to the
+materialized run regardless of run kind (ADR-0078): once research reaches a
+reserved step, model-call, or cost boundary, the next request must synthesize
+from evidence already in context and cannot call another tool. All-zero reserve
+fields retain the existing unreserved behavior. The reserve does not change the
+revision's hard total or the schedule admission reservation.
+
 `GET /v1/schedules/{id}/occurrences` is the durable offline inbox. A
 materialized row embeds the existing run view or links to `GET /v1/runs/{id}`.
 Clients need not have been online when the occurrence fired. Push, email, and
