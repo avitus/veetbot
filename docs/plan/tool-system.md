@@ -215,6 +215,7 @@ class ToolSpec(BaseModel):
     output_trust: TrustLevel
     source: ToolSource = ToolSource.BUILTIN
     server_id: str | None = None      # set when source is MCP
+    device_id: str | None = None      # set when source is DEVICE
     deprecated: bool = False
 ```
 

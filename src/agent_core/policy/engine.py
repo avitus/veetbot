@@ -107,17 +107,29 @@ def evaluate_deterministic(
                 explanation=f"Hardline rule {hardline_rule.id} denied the action.",
                 policy_version=ruleset.policy_version,
             )
+    # A tool-name-keyed entry replaces the side-effect row for exactly the tools
+    # a profile names; the row itself is never relaxed, and the trust overlay
+    # below still applies to whatever the entry decided.
+    tool_rules = tuple(rule for rule in ruleset.tool_rules if rule.tool_name == action.name)
     matching = tuple(rule for rule in ruleset.rules if rule.side_effect is action.side_effect)
-    if len(matching) != 1:
+    if len(tool_rules) > 1 or len(matching) != 1:
         return PolicyDecision(
             decision=ruleset.unknown_tool_decision,
             reason_code="policy.unclassifiable_action",
             explanation="The action could not be classified by the loaded policy profile.",
             policy_version=ruleset.policy_version,
         )
-    rule = matching[0]
+    rule = tool_rules[0] if tool_rules else matching[0]
     allowed = _condition_holds(rule.condition, action)
     decision = rule.decision if allowed else (rule.otherwise or ruleset.default_effect)
+    # A tool-name-keyed entry states that this exact tool's own mechanism shows
+    # the arguments to the human who completes the action, so the argument half
+    # of the overlay does not re-escalate what that mechanism already confirms.
+    # The turn-origin half still does: untrusted input never drives one of these
+    # to a plain allow.
+    untrusted_input = action.origin_trust is TrustLevel.EXTERNAL_UNTRUSTED or (
+        not tool_rules and TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
+    )
     if (
         decision
         in {
@@ -125,10 +137,7 @@ def evaluate_deterministic(
             PolicyDecisionType.ALLOW_WITH_MODIFICATIONS,
         }
         and ruleset.external_untrusted_requires_approval
-        and (
-            action.origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
-            or TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
-        )
+        and untrusted_input
         and action.side_effect
         not in {
             SideEffectClass.NONE,
@@ -137,7 +146,9 @@ def evaluate_deterministic(
         }
     ):
         decision = PolicyDecisionType.REQUIRE_APPROVAL
-    reason = f"policy.matrix.{action.side_effect.value}"
+    reason = (
+        f"policy.tool.{action.name}" if tool_rules else f"policy.matrix.{action.side_effect.value}"
+    )
     return PolicyDecision(
         decision=decision,
         reason_code=reason,

@@ -919,7 +919,7 @@ Section 30.2 at `engineering-plan.md:4090` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
-`tool-system.md:240` requires every control tool to be `READ_ONLY` or
+`tool-system.md:241` requires every control tool to be `READ_ONLY` or
 `IDEMPOTENT` and to carry `side_effect: NONE`. As written,
 `skill_manage` would have been rejected at registration by the spec
 that declared it.
@@ -930,7 +930,7 @@ tool acts on the run. `skill_manage` acts on durable tenant state
 that outlives the run.** It is a capability tool, and it was never in
 `tool-system.md`'s control-tool table — that table has four entries
 and `skill_manage` is not one of them. The table was right and the
-sentence was wrong, and `tool-system.md:1350` carries the corrected
+sentence was wrong, and `tool-system.md:1351` carries the corrected
 sentence now.
 
 ```text
@@ -943,7 +943,7 @@ skill.manage
   scope         skill.write
 ```
 
-The registry name carries the dot the grammar at `tool-system.md:340`
+The registry name carries the dot the grammar at `tool-system.md:341`
 requires of every registry entry; `skill_manage` is Section 30.2's
 spelling and is not a name the registry can hold. Nothing else about the
 tool changes with it, and the rest of this document keeps the plan's
@@ -1013,7 +1013,7 @@ It retries by reading the new current revision and deciding again.
 ### The scope is `skill.write`
 
 An earlier draft used the `skills:write` scope. The current contract at
-`tool-system.md:1354` requires `skill.write`. The earlier string was wrong in
+`tool-system.md:1355` requires `skill.write`. The earlier string was wrong in
 two ways against
 [http-api-and-streaming.md](http-api-and-streaming.md), which
 enumerates the scope vocabulary as dotted `resource.action` strings
@@ -1247,7 +1247,7 @@ something.
 1  skill_manage called a control tool a capability tool
 2  skill_manage NON_IDEMPOTENT        CONDITIONALLY_IDEMPOTENT
 3  the scope spelled skills:write     skill.write, enumerated
-4  "skills have no design at all"     tool-system.md:1308-1356
+4  "skills have no design at all"     tool-system.md:1309-1357
 5  Milestone 8 had zero gates         ten, a new `skill` area
 6  Milestone 10 had zero gates        six, in the same area
 7  no harness case names a skill      case 27, Milestone 8
@@ -1266,7 +1266,7 @@ above, under the heading that calls `skill_manage`
 Row 4 is a correction to a verdict rather than to a design.
 `readiness.md` says skills have no specification at all and that no
 document outside the plan and ADR-0013 mentions `SKILL.md`. The
-second half is true. The first is not: `tool-system.md:1308-1356` is
+second half is true. The first is not: `tool-system.md:1309-1357` is
 forty-nine lines of real design that settles four questions, and
 this document had to be written to fit inside it rather than on top
 of it. The verdict is corrected where it is stated.

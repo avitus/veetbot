@@ -347,7 +347,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1221` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1222` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -612,11 +612,31 @@ They resolve as follows, without changing any outcome the plan states.
   loaded, not about a fifth decision type — which is precisely what profiles
   are for.
 
+**Tool-name-keyed entries.** A profile may carry an optional `tool_rules`
+section, a mapping from an exact tool name to a row of the same shape as a
+side-effect row. When an action's name matches, that row replaces — never
+relaxes — the side-effect row for that one tool; every other tool in the class
+still gets the class's decision. The section exists for a tool whose own
+mechanism already carries the control the class demands, and it is the seam a
+milestone uses instead of editing a matrix row. Milestone 20's
+`device.sms.send` is the first and only entry: iOS presents the composed
+message and the owner's Send tap performs the send, so the class's approval
+would duplicate a confirmation the platform already enforces (ADR-0073, and
+[device-channel-and-sms.md](device-channel-and-sms.md)). Hardline rules run
+first and are unaffected, so a credential-shaped body is still refused before
+anything reaches the device.
+
 **Trust overlay.** One rule applies across the table: if any argument's trust
 label is `EXTERNAL_UNTRUSTED`, or the proposing turn's origin trust is
 `EXTERNAL_UNTRUSTED`, a decision of `ALLOW` for a class other than
 `NONE`, `WORKSPACE_READ`, or `NETWORK_READ` is raised to `REQUIRE_APPROVAL`.
-This is a `max` combination like any other, so it can only tighten.
+This is a `max` combination like any other, so it can only tighten. A
+tool-name-keyed entry narrows the argument half of that overlay and only for
+the tool it names: the mechanism the entry stands on shows the arguments to the
+human who completes the action, so re-escalating on model-authored arguments
+would make the entry unreachable. The origin half is untouched — a turn whose
+origin trust is `EXTERNAL_UNTRUSTED` still raises to `REQUIRE_APPROVAL`, so
+untrusted input can never drive one of these entries to a plain allow.
 
 **Unclassifiable actions.** Section 9.2's "Unknown tool → Deny" row looks
 unreachable, because Section 8.3 resolves the tool before policy runs and an

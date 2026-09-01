@@ -53,7 +53,10 @@ from agent_core.adapters.determinism import (
     SystemClock,
     UUID7RequestIdFactory,
 )
-from agent_core.adapters.device_channel import DEVICE_INVOCATION_TIMEOUT_SECONDS
+from agent_core.adapters.device_channel import (
+    DEVICE_INVOCATION_TIMEOUT_SECONDS,
+    PushWakeDeviceChannel,
+)
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
 from agent_core.adapters.execution.docker import (
@@ -368,6 +371,7 @@ from agent_core.ports.persistence import (
     UnitOfWorkFactory,
 )
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
+from agent_core.ports.tools import DeviceChannel
 from agent_core.ports.web import WebProvider
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
@@ -389,6 +393,7 @@ from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorki
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
+from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolRuntime
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
@@ -1282,6 +1287,7 @@ async def _compose(
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
+    device_channel: DeviceChannel | None,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -1711,6 +1717,45 @@ async def _compose(
             policy_name=agent.model_policy,
             resolved_at=clock.now(),
         )
+        notification_producer = (
+            NotificationProducer(clock=clock, ids=ids)
+            if settings.notification_dispatch_enabled
+            else None
+        )
+        # Both flags, exactly as the schedule tool pairs its two. Without the
+        # notification producer there is no wake, so the channel stays dark.
+        device_flags_enabled = settings.device_channel_enabled and settings.device_sms_enabled
+        device_channel_ready = device_flags_enabled and (
+            device_channel is not None or notification_producer is not None
+        )
+        device_tool_runtime: DeviceToolRuntime | None = None
+        if device_flags_enabled and not device_channel_ready:
+            logger.warning("device_channel_disabled_without_notification_dispatch")
+        if device_channel_ready:
+            effective_device_channel = device_channel or PushWakeDeviceChannel(
+                uow_factory=uow_factory,
+                notification_producer=cast(NotificationProducer, notification_producer),
+                clock=clock,
+                invocation_timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
+            )
+            device_tool_runtime = DeviceToolRuntime(
+                uow_factory,
+                registry,
+                effective_device_channel,
+                clock,
+                ids,
+                invocation_timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
+            )
+
+        async def attach_device_tools(session_id: UUID, session_principal: Principal) -> None:
+            if device_tool_runtime is not None:
+                await device_tool_runtime.prepare(session_id, session_principal)
+
+        async def close_session(session_id: UUID) -> None:
+            await mcp_runtime.close_session(session_id)
+            if device_tool_runtime is not None:
+                await device_tool_runtime.close_session(session_id)
+
         context_planner = EventContextPlanner(
             uow_factory,
             registry,
@@ -1722,6 +1767,7 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
             session_tool_filter=_session_tool_filter(browser_provider),
+            attach_device_tools=attach_device_tools,
         )
 
         async def session_project_scope(session_id: UUID) -> str:
@@ -1862,11 +1908,6 @@ async def _compose(
             delegations=delegation_materializer,
         )
         token_slot = _ActiveToken()
-        notification_producer = (
-            NotificationProducer(clock=clock, ids=ids)
-            if settings.notification_dispatch_enabled
-            else None
-        )
         schedule_accountant = ScheduleOutcomeAccountant(
             uow_factory=uow_factory,
             clock=clock,
@@ -2005,7 +2046,7 @@ async def _compose(
             agent,
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
-            close_session=mcp_runtime.close_session,
+            close_session=close_session,
         )
         trajectory_service = TrajectoryExportService(
             uow_factory=uow_factory,
@@ -2055,7 +2096,7 @@ async def _compose(
             agent,
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
-            close_session=mcp_runtime.close_session,
+            close_session=close_session,
             on_session_closed=consolidate_closed_session,
             trajectory_artifacts=trajectory_artifact_store,
             general_artifacts=general_artifact_store,
@@ -2070,8 +2111,6 @@ async def _compose(
                     now=clock.now(),
                     timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
                 )
-
-        device_channel_ready = settings.device_channel_enabled and settings.device_sms_enabled
 
         browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
         browser_profile_service = BrowserProfileManagementService(
@@ -2228,7 +2267,7 @@ async def _compose(
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
                     sweep_device_invocations=(
-                        sweep_device_invocations if device_channel_ready else None
+                        sweep_device_invocations if device_flags_enabled else None
                     ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
@@ -2405,6 +2444,7 @@ async def build(
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
     browser_provider_override: BrowserProvider | None = None,
+    device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
@@ -2610,6 +2650,11 @@ async def build(
         ),
         *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
+        *(
+            [DEVICE_SMS_SEND_TOOL_NAME]
+            if effective_settings.device_channel_enabled and effective_settings.device_sms_enabled
+            else []
+        ),
     ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
@@ -2854,6 +2899,7 @@ async def build(
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,
+            device_channel=device_channel_override,
         )
         yield composition
     finally:

@@ -149,6 +149,24 @@ class PolicyRule(BaseModel):
     otherwise: PolicyDecisionType | None = None
 
 
+class ToolPolicyRule(BaseModel):
+    """A matrix entry keyed on one tool name instead of a side-effect class.
+
+    The side-effect matrix stays total and unrelaxed; a profile names the exact
+    tools whose own mechanism already carries the control the row demands, and
+    shows the arguments to the human who completes the action. The turn-origin
+    half of the trust overlay still applies, so untrusted input never drives one
+    of these entries to a plain allow.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool_name: str = Field(min_length=1, max_length=96)
+    decision: PolicyDecisionType
+    condition: PolicyCondition | None = None
+    otherwise: PolicyDecisionType | None = None
+
+
 class HardlineRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -171,6 +189,7 @@ class LoadedRuleset(BaseModel):
     profile_sha256: str
     hardline_sha256: str
     rules: tuple[PolicyRule, ...]
+    tool_rules: tuple[ToolPolicyRule, ...] = ()
     hardline: tuple[HardlineRule, ...]
     default_effect: PolicyDecisionType
     unknown_tool_decision: PolicyDecisionType

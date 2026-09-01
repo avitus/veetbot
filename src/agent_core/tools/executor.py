@@ -1048,6 +1048,7 @@ class ToolPipeline:
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
                 network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
+                device_id=tool.spec.device_id,
             ),
             workspace=(
                 None
@@ -1363,6 +1364,7 @@ class ToolPipeline:
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
                 network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
+                device_id=tool.spec.device_id,
                 server_id=tool.spec.server_id,
             ),
             evaluated_at=self._clock.now(),

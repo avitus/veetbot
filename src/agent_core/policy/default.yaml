@@ -40,6 +40,13 @@ rules:
     decision: deny
   privileged:
     decision: deny
+tool_rules:
+  # The iOS compose sheet makes the owner's Send tap non-bypassable, so a
+  # second in-app approval would duplicate rather than add control (ADR-0073).
+  # The external_message row above is unchanged for every other tool, and the
+  # trust overlay still escalates an untrusted turn to an approval.
+  device.sms.send:
+    decision: allow
 unknown_tool:
   decision: deny
 trust_overlay:

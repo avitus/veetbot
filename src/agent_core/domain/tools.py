@@ -55,6 +55,7 @@ class ToolSpec(BaseModel):
     output_trust: TrustLevel
     source: ToolSource = ToolSource.BUILTIN
     server_id: str | None = None
+    device_id: str | None = None
     deprecated: bool = False
 
 

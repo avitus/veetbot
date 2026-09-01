@@ -33,7 +33,7 @@ eighth run state (runtime-loop.md:284-292); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
 (runtime-loop.md:1136-1147); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
-principal (tool-system.md:970-976); the child seeds from the parent's concise
+principal (tool-system.md:971-977); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
 (context-engine.md:291-294, memory-retrieval-and-ranking.md:87); and the
 background-review child run of Milestone 10A already materializes a dedicated
@@ -207,7 +207,7 @@ In one unit of work, `DelegationMaterializer` does the following:
 7. Inserts one `delegations` row carrying every child and marks the parent's
    `tool_invocations` row `RUNNING` with `suspended_kind = child_run` and
    `suspended_ref` equal to the delegation identifier (the nullable columns
-   tool-system.md:962-965 already declares). Steps 3 through 6 repeat per
+   tool-system.md:963-966 already declares). Steps 3 through 6 repeat per
    brief inside the one transaction.
 8. Commits, then dispatches the child through the existing run dispatcher.
 
@@ -337,7 +337,7 @@ Trust is already decided: the brief goes down as enveloped data in a `USER`
 message the child's own instruction frames; the result comes up labelled
 `EXTERNAL_UNTRUSTED`, exactly as the model gateway labels any model output; the
 child cannot raise its trust and the parent cannot inherit the child's
-authorizations (tool-system.md:970-976). A child result that instructs the
+authorizations (tool-system.md:971-977). A child result that instructs the
 parent is therefore in the same position as web content — it can be read and
 it cannot authorize. The result enters the parent's working conversation as a
 tool result, not its stable prefix, so the prefix-stability invariant is
@@ -354,7 +354,7 @@ Cancelling a suspended parent cascades: `cancel_parked_run` requests
 cancellation of every non-terminal `DELEGATED` child (a queued child through
 the same parked path, a running child through the lazy cancellation token) and
 completes the suspended invocation as `failed` with `tool.run_cancelled`, the
-rule tool-system.md:965-969 already states for a suspended invocation whose run
+rule tool-system.md:966-970 already states for a suspended invocation whose run
 is cancelled. A child's deadline is never later than its parent's, so the
 deadline sweep ends children first and the parent's own sweep handles the
 parent. A child's cancellation or failure never cancels its siblings.

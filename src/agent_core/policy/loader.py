@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from agent_core.domain.policies import (
     PolicyRule,
     RiskLevel,
     SideEffectClass,
+    ToolPolicyRule,
 )
 
 _PROFILE_KEYS = {
@@ -23,6 +25,7 @@ _PROFILE_KEYS = {
     "name",
     "default_effect",
     "rules",
+    "tool_rules",
     "unknown_tool",
     "trust_overlay",
     "approval_expiry_seconds",
@@ -31,6 +34,7 @@ _PROFILE_KEYS = {
 }
 _HARDLINE_KEYS = {"schema_version", "rules"}
 _RULE_KEYS = {"decision", "condition", "otherwise"}
+_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 
 
 def _read_yaml(path: Path) -> tuple[dict[str, Any], str]:
@@ -50,6 +54,36 @@ def _require_exact_keys(value: dict[str, Any], expected: set[str], location: str
     unknown = sorted(set(value) - expected)
     if unknown:
         raise ValueError(f"{location} contains unknown fields: {unknown}")
+
+
+def _tool_rules(value: Any) -> tuple[ToolPolicyRule, ...]:
+    """Validate the optional tool-name-keyed entries, ordered by tool name."""
+
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise ValueError("policy tool rules must be a mapping keyed on tool name")
+    rules: list[ToolPolicyRule] = []
+    for tool_name in sorted(value):
+        if not isinstance(tool_name, str) or _TOOL_NAME.fullmatch(tool_name) is None:
+            raise ValueError(f"policy tool rule {tool_name!r} is not a valid tool name")
+        row = value[tool_name]
+        if not isinstance(row, dict):
+            raise ValueError(f"policy tool rule {tool_name} must be a mapping")
+        _require_exact_keys(row, _RULE_KEYS, f"policy tool rule {tool_name}")
+        if "decision" not in row:
+            raise ValueError(f"policy tool rule {tool_name} requires a decision")
+        rules.append(
+            ToolPolicyRule(
+                tool_name=tool_name,
+                decision=PolicyDecisionType(row["decision"]),
+                condition=(
+                    PolicyCondition(row["condition"]) if row.get("condition") is not None else None
+                ),
+                otherwise=(PolicyDecisionType(row["otherwise"]) if row.get("otherwise") else None),
+            )
+        )
+    return tuple(rules)
 
 
 def _build_ruleset(
@@ -90,6 +124,7 @@ def _build_ruleset(
                 otherwise=(PolicyDecisionType(row["otherwise"]) if row.get("otherwise") else None),
             )
         )
+    tool_rules = _tool_rules(profile.get("tool_rules"))
     hardline_rows = hardline.get("rules")
     if not isinstance(hardline_rows, list):
         raise ValueError("hardline rules must be a list")
@@ -138,6 +173,7 @@ def _build_ruleset(
         profile_sha256=profile_sha,
         hardline_sha256=hardline_sha,
         rules=tuple(rules),
+        tool_rules=tool_rules,
         hardline=hardline_rules,
         default_effect=PolicyDecisionType(profile.get("default_effect", "deny")),
         unknown_tool_decision=unknown_tool_decision,

@@ -93,6 +93,12 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
             raise ToolValidationError("MCP tool name does not match its server id")
     if spec.source is ToolSource.DEVICE and domain != "device":
         raise ToolValidationError("device tools must use the device namespace")
+    if spec.source is ToolSource.DEVICE and (
+        spec.device_id is None or spec.target_kind != "device"
+    ):
+        raise ToolValidationError("device tools require a device target and a device identifier")
+    if spec.source is not ToolSource.DEVICE and spec.device_id is not None:
+        raise ToolValidationError("only device tools carry a device identifier")
     validate_required_scopes(
         spec.required_scopes,
         mcp_server_id=spec.server_id if spec.source is ToolSource.MCP else None,
@@ -169,8 +175,10 @@ class StaticToolRegistry:
 
     def register_dynamic(self, tool: Tool, *, tenant_id: str) -> None:
         spec = validate_registration(tool.spec)
-        if spec.source is not ToolSource.MCP:
-            raise ToolValidationError("only MCP discovery may dynamically register tools")
+        if spec.source not in {ToolSource.MCP, ToolSource.DEVICE}:
+            raise ToolValidationError(
+                "only MCP discovery and device capabilities may dynamically register tools"
+            )
         if not tenant_id:
             raise ToolValidationError("dynamic tool registration requires a tenant")
         if spec.name in self._latest:

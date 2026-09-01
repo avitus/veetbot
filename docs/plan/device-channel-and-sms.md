@@ -78,10 +78,15 @@ phone; the owner taps the notification; the app presents a prefilled
 compose sheet; the owner's Send tap performs the send; the app posts the
 result. The platform enforces the tap — no code path sends without it.
 
-Policy classifies the tool `ALLOW`. The compose-sheet tap is a
+Policy classifies the tool `ALLOW` through the profile's tool-name-keyed
+entry ([policy-and-approvals.md](policy-and-approvals.md)), which replaces
+the `EXTERNAL_MESSAGE` row for this one tool and leaves it intact for every
+other. The compose-sheet tap is a
 non-bypassable human confirmation, stronger than an in-app approval, so a
 second approval would be duplicate ceremony rather than added safety;
-ADR-0073 records the argument. Hardline rules still apply to the
+ADR-0073 records the argument. A turn whose origin is untrusted still
+raises the send to an approval, so an ingested message cannot drive one.
+Hardline rules still apply to the
 arguments: the outbound body passes the secret-exfiltration scan before
 any invocation row is written, so a text carrying a credential is blocked
 before it reaches the phone. The tool's result is `EXTERNAL_UNTRUSTED`
