@@ -884,6 +884,19 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
     assert "Veetbot Mac App Store" in archive_command
 
 
+def test_testflight_upload_allows_for_app_store_connect_processing() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    upload_step = next(
+        step["run"]
+        for step in config["jobs"]["apple-testflight"]["steps"]
+        if isinstance(step, dict)
+        and "run" in step
+        and "xcodebuild -exportArchive" in step["run"]["command"]
+    )
+
+    assert upload_step["no_output_timeout"] == "30m"
+
+
 def test_mkdocs_site_has_its_public_origin() -> None:
     config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
 
