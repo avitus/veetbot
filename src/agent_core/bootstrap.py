@@ -53,6 +53,7 @@ from agent_core.adapters.determinism import (
     SystemClock,
     UUID7RequestIdFactory,
 )
+from agent_core.adapters.device_channel import DEVICE_INVOCATION_TIMEOUT_SECONDS
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
 from agent_core.adapters.execution.docker import (
@@ -2063,6 +2064,15 @@ async def _compose(
         async def sweep_session_deletions() -> int:
             return await public_session_service.purge_pending_artifacts(principal)
 
+        async def sweep_device_invocations() -> int:
+            async with uow_factory() as uow:
+                return await uow.device_invocations.expire_overdue(
+                    now=clock.now(),
+                    timeout_seconds=DEVICE_INVOCATION_TIMEOUT_SECONDS,
+                )
+
+        device_channel_ready = settings.device_channel_enabled and settings.device_sms_enabled
+
         browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
         browser_profile_service = BrowserProfileManagementService(
             uow_factory=browser_uow_factory,
@@ -2217,6 +2227,9 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    sweep_device_invocations=(
+                        sweep_device_invocations if device_channel_ready else None
+                    ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
                     ),

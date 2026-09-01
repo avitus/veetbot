@@ -82,6 +82,9 @@ TOOL_MESSAGES: dict[str, str] = {
     "delegation.child_failed": (
         "A delegated child run failed or was cancelled; its reason is in the result."
     ),
+    "tool.device_offline": (
+        "The target device is offline or unreachable; the action was not performed."
+    ),
     "tool.unavailable": "The tool is unavailable in this deployment.",
     "tool.run_cancelled": "Not performed. The run was cancelled.",
 }

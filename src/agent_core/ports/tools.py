@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import Any, Protocol
+from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.devices import DeviceInvocation
 from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSource, ToolSpec
 
 
@@ -44,3 +46,24 @@ class ToolRegistry(Protocol):
         profile: object,
         environment: object,
     ) -> list[ToolSpec]: ...
+
+
+class DeviceChannel(Protocol):
+    """Invoke a device-scoped tool on a specific device and return its result."""
+
+    async def invoke(
+        self,
+        *,
+        device_id: UUID,
+        run_id: UUID,
+        invocation_id: UUID,
+        tool_name: str,
+        arguments: dict[str, Any],
+        principal: Principal,
+    ) -> DeviceInvocation:
+        """Return the terminal invocation, or its expired row when the device stays silent.
+
+        Raises ``DeviceChannelUnavailable`` when the named device is not
+        present for this principal or does not grant the named capability.
+        """
+        ...
