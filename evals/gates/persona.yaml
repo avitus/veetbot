@@ -4,25 +4,25 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**The persona row is pinned and stable.** A scripted fifty-turn session with a mid-session persona edit yields exactly two distinct `prefix_sha256` values and one `context.epoch.rotated` event with reason `persona_changed`; within each epoch the hash is constant, and an empty persona renders no bytes, reproducing the pre-Milestone-22 prefix exactly."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_m22.py::test_prefix_row_stable
 - id: gate.persona.budget_capped
   milestone: 22
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**The persona class is capped.** The row holds at most thirty entries and 2,000 tokens and never yields; an over-cap persona fails session open with the class named, and the 17,000-token prefix ceiling holds."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_m22.py::test_budget_capped
 - id: gate.persona.trust_labeled
   milestone: 22
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Trust and provenance are labeled.** Persona content renders in Region A at `TRUSTED_CONFIGURATION` with per-entry provenance, and nominated-but-unaffirmed text never renders in the row."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_m22.py::test_trust_labeled
 - id: gate.persona.revision_pinned
   milestone: 22
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**The revision is pinned per plan.** A session reads one persona revision for the life of an epoch; a concurrent edit changes no open plan's prefix, and two builds of one plan are byte-identical."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_m22.py::test_revision_pinned
 - id: gate.persona.secret_refused
   milestone: 22
   kind: case
@@ -34,7 +34,7 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Persona text is injection-scanned at load.** A poisoned entry renders as a `[BLOCKED]` placeholder and never as instruction text."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_m22.py::test_injection_scanned
 - id: gate.persona.promotion_requires_affirmation
   milestone: 22
   kind: case

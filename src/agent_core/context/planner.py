@@ -18,8 +18,10 @@ from agent_core.domain.errors import ConflictError, ContextOverflow
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
+from agent_core.domain.persona import render_persona
 from agent_core.domain.sessions import Session, project_scope
 from agent_core.domain.tools import ToolSpec
+from agent_core.memory.formation import contains_memory_injection
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryRetriever
@@ -121,6 +123,7 @@ class EventContextPlanner:
         model: ResolvedModel,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
+            persona_text, persona_version = await self._active_persona(principal)
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
@@ -131,6 +134,7 @@ class EventContextPlanner:
                     current.tool_specs,
                     current.skill_catalog,
                     current.memory_snapshot,
+                    persona=current.persona_text,
                 )
                 current_prefix_sha256 = hashlib.sha256(
                     prefix_bytes(current_prefix, current.tool_specs)
@@ -140,6 +144,7 @@ class EventContextPlanner:
                     and current.policy_version == self._policy_version
                     and current.builder_version == BUILDER_VERSION
                     and current.prefix_sha256 == current_prefix_sha256
+                    and current.persona_text == persona_text
                 ):
                     return current
                 return await self._create(
@@ -156,8 +161,12 @@ class EventContextPlanner:
                         if current.policy_version != self._policy_version
                         else "builder_version_changed"
                         if current.builder_version != BUILDER_VERSION
+                        else "persona_changed"
+                        if current.persona_text != persona_text
                         else "agent_prefix_changed"
                     ),
+                    persona_text=persona_text,
+                    persona_version=persona_version,
                 )
             return await self._create(
                 session,
@@ -167,6 +176,8 @@ class EventContextPlanner:
                 epoch=1,
                 event_type="context.plan.created",
                 reason="session_first_model_request",
+                persona_text=persona_text,
+                persona_version=persona_version,
             )
 
     async def rotate(self, session_id: UUID, reason: str) -> ContextPlan:
@@ -180,6 +191,38 @@ class EventContextPlanner:
             )
             return await self._append(rotated, "context.epoch.rotated", reason)
 
+    async def _active_persona(self, principal: Principal) -> tuple[str, int]:
+        """The rendered persona row and its pinned version for this principal.
+
+        Rendering filters entries above the session surface's sensitivity
+        ceiling exactly once, here, so the row is byte-stable for the life of
+        the epoch. Rotation compares rendered text rather than versions: a
+        version bump that changes no visible byte changes no prefix.
+        """
+
+        async with self._uow_factory() as uow:
+            document = await uow.personas.active(principal)
+        if document is None:
+            return "", 0
+        # The load-time injection scan is the guarantee (the write surfaces
+        # scan too, but only this pass covers text stored before a pattern
+        # existed). A poisoned entry renders as a placeholder, never as
+        # instruction text.
+        screened = document.model_copy(
+            update={
+                "entries": tuple(
+                    entry.model_copy(update={"text": "[BLOCKED]"})
+                    if contains_memory_injection(entry.text)
+                    else entry
+                    for entry in document.entries
+                )
+            }
+        )
+        return (
+            render_persona(screened, ceiling=Sensitivity.RESTRICTED),
+            document.version,
+        )
+
     async def _create(
         self,
         session: Session,
@@ -190,6 +233,8 @@ class EventContextPlanner:
         epoch: int,
         event_type: str,
         reason: str,
+        persona_text: str = "",
+        persona_version: int = 0,
     ) -> ContextPlan:
         classes = self._config.get("classes")
         if not isinstance(classes, dict):
@@ -245,23 +290,38 @@ class EventContextPlanner:
                 moment=RecallMoment.SNAPSHOT.value,
             )
         memory_snapshot = "" if snapshot is None or not snapshot.items else snapshot.rendered
-        prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot)
+        prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot, persona=persona_text)
         base_prefix = build_prefix(agent, tools)
-        catalog_prefix = build_prefix(agent, tools, catalog_metadata)
+        persona_prefix = build_prefix(agent, tools, persona=persona_text)
+        catalog_prefix = build_prefix(agent, tools, catalog_metadata, persona=persona_text)
         model_id = f"{model.provider}:{model.model}"
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
+        # The persona row sits at index 2 of the full prefix when present;
+        # base_prefix never carries it, so the tool slice below is unshifted.
+        persona_items = len(persona_prefix) - len(base_prefix)
+        persona_tokens = (
+            self._estimator.estimate(prefix[2 : 2 + persona_items], model_id)
+            if persona_items
+            else 0
+        )
         tool_tokens = self._estimator.estimate(
             base_prefix[2:], model_id
         ) + self._estimator.estimate_tools(tools, model_id)
         skill_catalog_tokens = self._estimator.estimate(
-            catalog_prefix[len(base_prefix) :], model_id
+            catalog_prefix[len(persona_prefix) :], model_id
         )
         memory_tokens = self._estimator.estimate(prefix[len(catalog_prefix) :], model_id)
         if framing_tokens > int(classes["platform_policy"]["max_tokens"]):
             raise ContextOverflow("context prefix class platform_policy exceeds its cap")
         if agent_tokens > int(classes["agent_instructions"]["max_tokens"]):
             raise ContextOverflow("context prefix class agent_instructions exceeds its cap")
+        if persona_tokens:
+            persona_config = classes.get("persona")
+            if not isinstance(persona_config, dict):
+                raise ValueError("persona context configuration must be a mapping")
+            if persona_tokens > int(persona_config["max_tokens"]):
+                raise ContextOverflow("context prefix class persona exceeds its cap")
         if tool_tokens > int(tool_config["max_tokens"]):
             raise ContextOverflow("context prefix class tool_definitions exceeds its cap")
         skill_config = classes.get("skill_catalog")
@@ -273,7 +333,12 @@ class EventContextPlanner:
             raise ContextOverflow("context prefix class memory_snapshot exceeds its cap")
         encoded_prefix = prefix_bytes(prefix, tools)
         prefix_tokens = (
-            framing_tokens + agent_tokens + tool_tokens + skill_catalog_tokens + memory_tokens
+            framing_tokens
+            + agent_tokens
+            + persona_tokens
+            + tool_tokens
+            + skill_catalog_tokens
+            + memory_tokens
         )
         prefix_config = self._config.get("prefix")
         if not isinstance(prefix_config, dict):
@@ -294,6 +359,8 @@ class EventContextPlanner:
             snapshot_id=None if snapshot is None else snapshot.trace_id,
             snapshot_watermark=0 if snapshot is None else snapshot.watermark,
             memory_snapshot=memory_snapshot,
+            persona_text=persona_text,
+            persona_version=persona_version,
             skill_pins=() if catalog is None else catalog.pins,
             skill_catalog=catalog_metadata,
             cache_breakpoints=(

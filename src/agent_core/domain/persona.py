@@ -15,7 +15,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent_core.domain.memory import BeliefType, MemoryAuthority, Sensitivity
+from agent_core.domain.memory import (
+    SENSITIVITY_ORDER,
+    BeliefType,
+    MemoryAuthority,
+    Sensitivity,
+)
 
 PERSONA_MAX_ENTRIES = 30
 PERSONA_ENTRY_MAX_CHARS = 500
@@ -131,3 +136,18 @@ class PersonaNomination(BaseModel):
         if self.state is PersonaNominationState.AFFIRMED and self.affirmed_version is None:
             raise ValueError("an affirmed nomination names the document version it created")
         return self
+
+
+def render_persona(document: PersonaDocument, *, ceiling: Sensitivity) -> str:
+    """Render the persona row's text: one entry per line, in document order.
+
+    Entries above the sensitivity ceiling are filtered here, once, when a
+    context plan is created — never mid-session — so the rendered text is
+    byte-stable for the life of the prefix epoch. An empty result means the
+    prefix carries no persona row at all.
+    """
+
+    limit = SENSITIVITY_ORDER[ceiling]
+    return "\n".join(
+        entry.text for entry in document.entries if SENSITIVITY_ORDER[entry.sensitivity] <= limit
+    )

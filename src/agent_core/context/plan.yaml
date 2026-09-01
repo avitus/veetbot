@@ -1,6 +1,6 @@
 schema_version: 1
 prefix:
-  ceiling_tokens: 15000
+  ceiling_tokens: 17000
 classes:
   platform_policy:
     region: A
@@ -8,6 +8,10 @@ classes:
   agent_instructions:
     region: A
     max_tokens: 4000
+  persona:
+    region: A
+    max_items: 30
+    max_tokens: 2000
   tool_definitions:
     region: A
     max_items: 30

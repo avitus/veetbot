@@ -893,13 +893,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_156_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_158_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 156
+    assert len(qualified_paths) == 158
     assert {
         "runtime/limits.yaml:delegation.max_children_per_call",
         "runtime/limits.yaml:delegation.max_live_children_per_parent",

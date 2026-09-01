@@ -287,6 +287,7 @@ class BudgetedContextBuilder:
             plan.tool_specs,
             plan.skill_catalog,
             plan.memory_snapshot,
+            persona=plan.persona_text,
         )
         actual_prefix_hash = hashlib.sha256(prefix_bytes(prefix, plan.tool_specs)).hexdigest()
         if actual_prefix_hash != plan.prefix_sha256:
