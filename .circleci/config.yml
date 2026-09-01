@@ -161,7 +161,10 @@ jobs:
               -configuration Release \
               -destination "generic/platform=macOS" \
               -archivePath "$archive_path" \
-              CURRENT_PROJECT_VERSION="$apple_build_number"
+              CURRENT_PROJECT_VERSION="$apple_build_number" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="Apple Distribution" \
+              PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"
 
             app_path="$archive_path/Products/Applications/Veetbot.app"
             app_info="$app_path/Contents/Info.plist"

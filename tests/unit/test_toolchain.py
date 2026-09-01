@@ -850,6 +850,21 @@ def test_ci_has_the_required_partitions() -> None:
     )
 
 
+def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    archive_command = next(
+        step["run"]["command"]
+        for step in config["jobs"]["apple-testflight"]["steps"]
+        if isinstance(step, dict)
+        and "run" in step
+        and "xcodebuild archive" in step["run"]["command"]
+    )
+
+    assert "CODE_SIGN_STYLE=Manual" in archive_command
+    assert 'CODE_SIGN_IDENTITY="Apple Distribution"' in archive_command
+    assert 'PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"' in archive_command
+
+
 def test_mkdocs_site_has_its_public_origin() -> None:
     config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
 
