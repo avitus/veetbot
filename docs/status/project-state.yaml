@@ -588,7 +588,6 @@ milestones:
       - temporal entity graphs, persona editing, and global consolidation
       - a public memory-write API
     open_items:
-      - Run the PostgreSQL migration, backfill, and erasure gate with a configured database
       - Run the three-arm live corpus and publish passing evidence for the production tuple
       - Complete per-stage cost telemetry required by the comparative gate
       - Run hosted CI and the CodeRabbit review loop on the final head
@@ -616,12 +615,14 @@ milestones:
           make test-apple builds the updated memory wire model and detail view,
           then passes all 165 Swift Testing cases across 18 suites.
       - check: PostgreSQL Milestone 21 lane
-        outcome: not_run
+        outcome: passed_locally
         detail: >-
-          The structural and bounded data migrations and their backfill,
-          history-preservation, integrated-episode, and erasure gate are
-          implemented. DATABASE_URL is not configured in this workspace, so
-          the focused integration test skipped and is not recorded as passing.
+          A fresh isolated PostgreSQL 16 database migrated from base through
+          head c2e0f4a6b831. The lifecycle backfill, history preservation,
+          integrated-episode persistence and erasure gate passed, followed by
+          all 157 integration and resilience tests. The hosted failure's stale
+          citation assertion was reproduced and corrected to require that
+          usage advances last_used_at without advancing last_reinforced_at.
       - check: comparative live-model evidence
         outcome: not_run
         detail: >-
@@ -702,5 +703,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-01T16:42:21Z
+last_updated: 2026-09-01T16:55:05Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

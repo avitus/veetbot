@@ -88,10 +88,9 @@ A sixth parallel workstream making memory formation materially less timid.
 Its twenty-four gates cover integrated episodes, the fixed three-call
 prediction-error pipeline, direct and hypothesis recall, evidence-based
 forgetting, persistence, and comparative activation evidence. The local
-implementation, static and contract suites, strict documentation build, and
-Apple package tests pass. Remaining:
+implementation, static and contract suites, strict documentation build, Apple
+package tests, and fresh PostgreSQL 16 integration lane pass. Remaining:
 
-- [ ] Run the PostgreSQL migration, backfill, and erasure gate with a configured database
 - [ ] Run the three-arm live corpus and publish passing evidence for the production tuple
 - [ ] Complete per-stage cost telemetry required by the comparative gate
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head

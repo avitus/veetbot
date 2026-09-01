@@ -1003,9 +1003,12 @@ async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
         beliefs = {belief.id: belief for belief in await composition.memory.list_memories()}
         assert beliefs[cited.id].utility > 0
         assert beliefs[cited.id].confidence == cited.confidence
-        assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
+        assert beliefs[cited.id].last_used_at is not None
+        assert beliefs[cited.id].last_reinforced_at == cited.last_reinforced_at
         assert beliefs[uncited.id].utility < 0
         assert beliefs[uncited.id].confidence == uncited.confidence
+        assert beliefs[uncited.id].last_used_at is None
+        assert beliefs[uncited.id].last_reinforced_at == uncited.last_reinforced_at
         # The unique store position survives the in-place update, and neither
         # belief is republished to the recall delta for having been read.
         assert beliefs[cited.id].store_position == cited.store_position
