@@ -115,10 +115,11 @@ and code signature, and uploads directly to App Store Connect. Xcode's automatic
 build-number management is disabled during export so Apple receives the value
 the job inspected. The signed archive is not retained as a CircleCI artifact.
 
-The job installs the CircleCI-managed `veetbot-app-store` signing bundle and
-uses only the restricted `veetbot-apple-testflight` context for App Store
-Connect authentication. The setup procedure and exact context variables are in
-the [production deployment guide](deployment.md#macos-testflight-delivery).
+The job installs the CircleCI-managed `veetbot-app-store` application-signing
+bundle and `veetbot-mac-installer` installer-signing bundle, and uses only the
+restricted `veetbot-apple-testflight` context for App Store Connect
+authentication. The setup procedure and exact context variables are in the
+[production deployment guide](deployment.md#macos-testflight-delivery).
 The first pipeline number used this way must be greater than the latest macOS
 build already accepted by App Store Connect.
 

@@ -114,6 +114,7 @@ jobs:
       xcode: "26.6.0"
       code_signing:
         - veetbot-app-store
+        - veetbot-mac-installer
     resource_class: m4pro.medium
     steps:
       - install_signing_bundle

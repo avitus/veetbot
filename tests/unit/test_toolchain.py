@@ -711,7 +711,10 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple" in commands["apple"]
     assert "make test-apple-ui" in commands["apple"]
     testflight_job = jobs["apple-testflight"]
-    assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
+    assert testflight_job["macos"]["code_signing"] == [
+        "veetbot-app-store",
+        "veetbot-mac-installer",
+    ]
     assert "install_signing_bundle" in testflight_job["steps"]
     xcode_project = (
         ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj"

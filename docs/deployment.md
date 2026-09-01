@@ -421,12 +421,18 @@ deliberately separate from `veetbot-production`.
 
 First, upload an active Apple distribution signing identity and the macOS App
 Store provisioning profile for `com.veetbot.apple` to CircleCI's code-signing
-store, then create a signing bundle named `veetbot-app-store`. The profile must
-carry the production entitlements used by the Release target, including APNs.
-CircleCI's supported setup flow accepts the password-protected `.p12` identity
-and `.provisionprofile` once, installs both into a temporary keychain for the
-job, and removes them afterward. Do not place either binary in the repository,
-a context variable, a cache, a workspace, or an artifact.
+store, then create a signing bundle named `veetbot-app-store`. Upload an active
+Mac Installer Distribution identity separately and create
+`veetbot-mac-installer`; Xcode requires that second identity when exporting the
+signed archive as an App Store installer package. The profile must carry the
+production entitlements used by the Release target, including APNs. CircleCI's
+supported setup flow accepts each password-protected `.p12` identity and the
+`.provisionprofile` once, installs them into a temporary keychain for the job,
+and removes them afterward. Only `veetbot-app-store` carries the provisioning
+profile; `veetbot-mac-installer` contains the installer identity with no
+profile, because CircleCI rejects profiles for that certificate type. Do not
+place any of those binaries in the repository, a context variable, a cache, a
+workspace, or an artifact.
 
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
