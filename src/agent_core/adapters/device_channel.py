@@ -98,10 +98,35 @@ class PushWakeDeviceChannel:
             stored = await uow.device_invocations.create(candidate)
             if stored is None:
                 # A replayed invocation id already carries its own wake.
-                stored = await uow.device_invocations.get(invocation_id)
+                stored = self._owned(
+                    await uow.device_invocations.get(invocation_id),
+                    device_id=device_id,
+                    principal=principal,
+                )
             else:
                 await self._producer.for_device_invocation(uow, invocation=stored, device=device)
-        return await self._await_result(stored)
+        return await self._await_result(stored, device_id=device_id, principal=principal)
+
+    def _owned(
+        self,
+        invocation: DeviceInvocation,
+        *,
+        device_id: UUID,
+        principal: Principal,
+    ) -> DeviceInvocation:
+        """Refuse a row the invocation id resolved to that this call does not own.
+
+        The store resolves an invocation by id alone, so every row the adapter
+        reads back rather than wrote itself is checked against the device and
+        tenant this call names.
+        """
+
+        if invocation.device_id != device_id or invocation.tenant_id != principal.tenant_id:
+            raise _unavailable(
+                "device.invocation_not_owned",
+                "the invocation identifier belongs to another device",
+            )
+        return invocation
 
     async def _present_device(
         self,
@@ -127,18 +152,38 @@ class PushWakeDeviceChannel:
             )
         return device
 
-    async def _await_result(self, invocation: DeviceInvocation) -> DeviceInvocation:
+    async def _await_result(
+        self,
+        invocation: DeviceInvocation,
+        *,
+        device_id: UUID,
+        principal: Principal,
+    ) -> DeviceInvocation:
         deadline = invocation.created_at + timedelta(seconds=self._timeout_seconds)
         current = invocation
         while current.status is DeviceInvocationStatus.PENDING:
             if self._clock.now() >= deadline:
-                return await self._expire(invocation.id)
+                return await self._expire(
+                    invocation.id,
+                    device_id=device_id,
+                    principal=principal,
+                )
             await self._clock.sleep(self._poll_seconds)
             async with self._uow_factory() as uow:
-                current = await uow.device_invocations.get(invocation.id)
+                current = self._owned(
+                    await uow.device_invocations.get(invocation.id),
+                    device_id=device_id,
+                    principal=principal,
+                )
         return current
 
-    async def _expire(self, invocation_id: UUID) -> DeviceInvocation:
+    async def _expire(
+        self,
+        invocation_id: UUID,
+        *,
+        device_id: UUID,
+        principal: Principal,
+    ) -> DeviceInvocation:
         """Sweep overdue rows, then honor whatever this invocation now holds."""
 
         async with self._uow_factory() as uow:
@@ -146,7 +191,11 @@ class PushWakeDeviceChannel:
                 now=self._clock.now(),
                 timeout_seconds=self._timeout_seconds,
             )
-            return await uow.device_invocations.get(invocation_id)
+            return self._owned(
+                await uow.device_invocations.get(invocation_id),
+                device_id=device_id,
+                principal=principal,
+            )
 
 
 class FakeDeviceChannel:

@@ -47,6 +47,7 @@ _START = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
 _SWEEP_INVOCATION_ID = UUID("00000000-0000-0000-0000-0000000002a0")
 _FRESH_INVOCATION_ID = UUID("00000000-0000-0000-0000-0000000002a1")
 _SWEEP_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002a2")
+_FOREIGN_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002a3")
 
 
 class _RacingInvocationStore:
@@ -232,6 +233,32 @@ async def test_a_replayed_invocation_wakes_the_device_exactly_once() -> None:
     async with factory() as uow:
         rows = await uow.notification_outbox.list(principal(), limit=10)
     assert [row.dedupe_key for row in rows] == [device_invocation_key(REPLAYED_INVOCATION_ID)]
+
+
+async def test_an_invocation_id_that_collides_with_a_foreign_row_is_refused() -> None:
+    """The replay path resolves rows by id alone; a foreign row is never adopted."""
+
+    factory, clock = await push_wake_stack()
+    channel = push_wake_channel(factory, clock)
+    foreign = DeviceInvocation(
+        id=INVOCATION_ID,
+        tenant_id="tenant-elsewhere",
+        device_id=_FOREIGN_DEVICE_ID,
+        run_id=RUN_ID,
+        tool_name=TOOL_NAME,
+        arguments={"recipient": "foreign-recipient", "body": "foreign body"},
+        status=DeviceInvocationStatus.PENDING,
+        created_at=NOW,
+    )
+    async with factory() as uow:
+        await uow.device_invocations.create(foreign)
+
+    with pytest.raises(DeviceChannelUnavailable):
+        await invoke(channel, invocation_id=INVOCATION_ID)
+
+    async with factory() as uow:
+        assert await uow.notification_outbox.list(principal(), limit=10) == []
+        assert await uow.device_invocations.get(INVOCATION_ID) == foreign
 
 
 def test_the_offline_outcome_has_a_platform_authored_message() -> None:
