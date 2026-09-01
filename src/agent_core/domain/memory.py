@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
 
 from agent_core.domain.events import EventEnvelope, ProcessEvent
 
@@ -88,6 +95,92 @@ class RecallMoment(StrEnum):
     CHILD_RUN = "child_run"
 
 
+class MemoryClaimKind(StrEnum):
+    """The closed semantic category a formed claim belongs to."""
+
+    ONGOING_PROJECT = "ongoing_project"
+    GOAL = "goal"
+    ROLE = "role"
+    SKILL = "skill"
+    INTEREST = "interest"
+    HABIT = "habit"
+    CONSTRAINT = "constraint"
+    RECURRING_STATE = "recurring_state"
+    RELATIONSHIP = "relationship"
+    PREFERENCE = "preference"
+    RESOURCE = "resource"
+    PROJECT_FACT = "project_fact"
+
+
+class MemoryDerivation(StrEnum):
+    """Whether the source states a claim or merely supports an inference."""
+
+    DIRECT = "direct"
+    HYPOTHESIS = "hypothesis"
+
+
+class MemoryLongevity(StrEnum):
+    """The evidence horizon the lifecycle applies to a claim."""
+
+    ONGOING = "ongoing"
+    DURABLE = "durable"
+    TENTATIVE = "tentative"
+
+
+class EvidenceSpan(BaseModel):
+    """One exact source substring supporting an automatic candidate."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_event_id: PositiveInt
+    text: str = Field(min_length=1, max_length=8192)
+
+
+class IntegratedEpisode(BaseModel):
+    """A rebuildable, provenance-complete narrative over owned user events."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: UUID
+    tenant_id: str = Field(min_length=1)
+    principal_id: str = Field(min_length=1)
+    session_id: UUID
+    source_event_ids: list[PositiveInt] = Field(min_length=1, max_length=256)
+    source_started_at: datetime
+    source_ended_at: datetime
+    narrative: str = Field(min_length=1, max_length=32768)
+    subjects: list[str] = Field(default_factory=list, max_length=64)
+    integration_policy_version: Literal["episode-integration@1"] = "episode-integration@1"
+    derivation_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+
+    @field_validator("source_event_ids")
+    @classmethod
+    def sources_are_ordered_and_unique(cls, value: list[int]) -> list[int]:
+        if value != sorted(set(value)):
+            raise ValueError("episode source events must be ordered and unique")
+        return value
+
+    @field_validator("subjects")
+    @classmethod
+    def subjects_are_ordered_unique_and_bounded(cls, value: list[str]) -> list[str]:
+        normalized = [subject.strip() for subject in value]
+        if any(not subject or len(subject) > 512 for subject in normalized):
+            raise ValueError("episode subjects must be non-empty and bounded")
+        if len({subject.casefold() for subject in normalized}) != len(normalized):
+            raise ValueError("episode subjects must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def source_interval_is_valid(self) -> IntegratedEpisode:
+        for stamp in (self.source_started_at, self.source_ended_at, self.created_at):
+            if stamp.tzinfo is None or stamp.utcoffset() is None:
+                raise ValueError("episode timestamps must be timezone-aware")
+        if self.source_ended_at < self.source_started_at:
+            raise ValueError("episode source interval is reversed")
+        return self
+
+
 class MemoryCandidate(BaseModel):
     """A provenance-bound proposal emitted before policy and conflict gates."""
 
@@ -102,8 +195,40 @@ class MemoryCandidate(BaseModel):
     proposed_scope: str = Field(min_length=1, max_length=256)
     proposed_portability: Portability
     sensitivity_guess: Sensitivity
+    claim_kind: MemoryClaimKind = MemoryClaimKind.PROJECT_FACT
+    derivation: MemoryDerivation = MemoryDerivation.DIRECT
+    longevity: MemoryLongevity = MemoryLongevity.DURABLE
+    evidence_spans: list[EvidenceSpan] = Field(default_factory=list, min_length=1)
     valid_from: datetime | None = None
     expires_hint: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_candidates_receive_a_provenance_placeholder(cls, value: object) -> object:
+        """Keep completed extractors constructible while v9 supplies exact spans.
+
+        Formation@7 and formation@8 predate evidence spans. Their governed
+        source check still validates the full statement against the named user
+        events. New formation@9 candidates always provide exact substrings.
+        """
+
+        if not isinstance(value, dict) or "evidence_spans" in value:
+            return value
+        source_ids = value.get("source_event_ids")
+        statement = value.get("statement")
+        if isinstance(source_ids, list) and source_ids and isinstance(statement, str):
+            return {
+                **value,
+                "evidence_spans": [{"source_event_id": source_ids[0], "text": statement}],
+            }
+        return value
+
+    @model_validator(mode="after")
+    def evidence_spans_name_candidate_sources(self) -> MemoryCandidate:
+        sources = set(self.source_event_ids)
+        if any(span.source_event_id not in sources for span in self.evidence_spans):
+            raise ValueError("evidence span must name one of the candidate source events")
+        return self
 
 
 class ProviderExtractionFailure(BaseModel):
@@ -273,6 +398,46 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
         return self
 
 
+class MemoryDistillationEvidence(BaseModel):
+    """Never-overwritten comparative evidence required to activate formation@9."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal[1] = 1
+    extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
+    formation_policy_version: Literal["formation@9"] = "formation@9"
+    model_policy: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    policy_profile: str = Field(min_length=1)
+    policy_version: str = Field(min_length=1)
+    build_ref: str = Field(min_length=1)
+    corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sample_count: int = Field(ge=60)
+    positive_case_count: int = Field(ge=42)
+    direct_must_form_recall: float = Field(ge=0.95, le=1)
+    hypothesis_must_form_recall: float = Field(ge=0.8, le=1)
+    benign_precision: float = Field(ge=0.9, le=1)
+    useful_recall_lift_percentage_points: float = Field(ge=15, le=100)
+    correction_rate_per_hundred: float = Field(ge=0, le=10)
+    provider_calls_per_consolidation: Literal[3] = 3
+    boundary_failures: Literal[0] = 0
+    comparative_policies: tuple[
+        Literal["formation@7"], Literal["formation@8"], Literal["formation@9"]
+    ] = ("formation@7", "formation@8", "formation@9")
+    evaluated_at: datetime
+
+    @model_validator(mode="after")
+    def evidence_thresholds_are_coherent(self) -> MemoryDistillationEvidence:
+        if self.positive_case_count > self.sample_count:
+            raise ValueError("positive distillation cases exceed the sample")
+        if self.positive_case_count * 10 < self.sample_count * 7:
+            raise ValueError("distillation evidence is less than seventy percent positive")
+        if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
+            raise ValueError("distillation evidence time must be timezone-aware")
+        return self
+
+
 class MemoryRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -294,6 +459,13 @@ class MemoryRecord(BaseModel):
     portability: Portability
     origin_scopes: list[str] = Field(min_length=1)
     corroboration_count: PositiveInt = 1
+    claim_kind: MemoryClaimKind = MemoryClaimKind.PROJECT_FACT
+    derivation: MemoryDerivation = MemoryDerivation.DIRECT
+    longevity: MemoryLongevity = MemoryLongevity.DURABLE
+    last_evidence_at: datetime = Field(default_factory=lambda: datetime.min.replace(tzinfo=UTC))
+    last_used_at: datetime | None = None
+    evidence_count: PositiveInt = 1
+    lifecycle_policy_version: str = Field(default="lifecycle@1-backfill", min_length=1)
     last_reinforced_at: datetime
     valid_to: datetime | None = None
     superseded_by: UUID | None = None
@@ -306,6 +478,34 @@ class MemoryRecord(BaseModel):
     store_position: PositiveInt
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def backfill_evidence_lifecycle_fields(cls, value: object) -> object:
+        """Give pre-lifecycle@2 records conservative, history-preserving values."""
+
+        if not isinstance(value, dict):
+            return value
+        belief_type = value.get("belief_type")
+        raw_type = belief_type.value if isinstance(belief_type, BeliefType) else belief_type
+        claim_kind = {
+            BeliefType.PREFERENCE.value: MemoryClaimKind.PREFERENCE.value,
+            BeliefType.RELATIONSHIP.value: MemoryClaimKind.RELATIONSHIP.value,
+            BeliefType.PROCEDURE_POINTER.value: MemoryClaimKind.RESOURCE.value,
+        }.get(str(raw_type), MemoryClaimKind.PROJECT_FACT.value)
+        source_ids = value.get("source_event_ids")
+        evidence_count = len(set(source_ids)) if isinstance(source_ids, list) else 1
+        return {
+            **value,
+            "claim_kind": value.get("claim_kind", claim_kind),
+            "derivation": value.get("derivation", MemoryDerivation.DIRECT.value),
+            "longevity": value.get("longevity", MemoryLongevity.DURABLE.value),
+            "last_evidence_at": value.get("last_evidence_at", value.get("valid_from")),
+            "evidence_count": value.get("evidence_count", max(1, evidence_count)),
+            "lifecycle_policy_version": value.get(
+                "lifecycle_policy_version", "lifecycle@1-backfill"
+            ),
+        }
 
     @model_validator(mode="after")
     def lifecycle_is_consistent(self) -> MemoryRecord:
@@ -378,8 +578,18 @@ class ConsolidationRun(BaseModel):
     reinforced: int = Field(ge=0)
     superseded: int = Field(ge=0)
     rejected: int = Field(ge=0)
+    decision_counts: dict[str, int] = Field(default_factory=dict)
+    episode_count: int = Field(default=0, ge=0)
+    provider_call_count: int = Field(default=0, ge=0, le=3)
+    fallback_stages: list[str] = Field(default_factory=list)
     started_at: datetime
     finished_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def decisions_are_nonnegative(self) -> ConsolidationRun:
+        if any(count < 0 for count in self.decision_counts.values()):
+            raise ValueError("formation decision counts must be nonnegative")
+        return self
 
 
 class ConsolidationResult(BaseModel):
@@ -503,6 +713,9 @@ class RecalledBelief(BaseModel):
     subject: str
     statement: str
     belief_type: BeliefType
+    claim_kind: MemoryClaimKind = MemoryClaimKind.PROJECT_FACT
+    derivation: MemoryDerivation = MemoryDerivation.DIRECT
+    longevity: MemoryLongevity = MemoryLongevity.DURABLE
     status: MemoryStatus
     confidence_band: str
     authority: MemoryAuthority

@@ -43,7 +43,7 @@ from agent_core.memory.profiles import (
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 
-RETRIEVAL_POLICY_VERSION = "retrieval@2"
+RETRIEVAL_POLICY_VERSION = "retrieval@3"
 # Episode search reads the session stream in bounded pages: never the whole
 # stream at once, and never more pages than a bounded read is worth.
 EPISODE_PAGE_MINIMUM = 256
@@ -475,7 +475,7 @@ def _score(
 
     The lexical arm counts whole lexemes over the tokenizer both belief stores
     filter with, so a term the store would not match cannot score here either.
-    Reinforcement decays with the time since the belief was last reinforced, at
+    Evidence decays with the time since the belief was last supported, at
     the time constant its belief type carries: a stable preference fades far
     more slowly than a situational fact. Without `now` no time has passed,
     which is what a unit scoring a record against a query measures.
@@ -511,9 +511,9 @@ def _score(
     weights = profile.lifecycle_weights
     lifecycle = weights.active if record.status is MemoryStatus.ACTIVE else weights.provisional
     confidence = record.confidence * lifecycle
-    age_days = max(0, (now - record.last_reinforced_at).days) if now is not None else 0
+    age_days = max(0, (now - record.last_evidence_at).days) if now is not None else 0
     tau_days = profile.decay_tau_days.for_belief_type(record.belief_type)
-    reinforce = min(1.0, math.log1p(record.corroboration_count) / math.log(11)) * math.exp(
+    reinforce = min(1.0, math.log1p(record.evidence_count) / math.log(11)) * math.exp(
         -age_days / tau_days
     )
     authority = {
@@ -556,6 +556,9 @@ def _score(
         subject=record.subject,
         statement=statement,
         belief_type=record.belief_type,
+        claim_kind=record.claim_kind,
+        derivation=record.derivation,
+        longevity=record.longevity,
         status=record.status,
         confidence_band=band,
         authority=record.authority,
@@ -655,7 +658,8 @@ def _line(item: RecalledBelief) -> str:
     )
     return (
         f"[m:{str(item.belief_id)[:8]}]{origin} {html.escape(item.statement)} "
-        f"({item.authority.value}, {item.confidence_band}){conflict}"
+        f"({item.authority.value}, {item.confidence_band}; "
+        f"{item.derivation.value}, {item.longevity.value}){conflict}"
     )
 
 

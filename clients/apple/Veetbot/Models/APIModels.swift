@@ -666,6 +666,9 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let subject: String
     public let statement: String
     public let beliefType: String
+    public let claimKind: String
+    public let derivation: String
+    public let longevity: String
     public let status: String
     public let polarity: String
     public let scope: String
@@ -685,6 +688,8 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let validFrom: Date
     public let validTo: Date?
     public let expiresAt: Date?
+    public let lastEvidenceAt: Date
+    public let lastUsedAt: Date?
     public let lastReinforcedAt: Date
     public let createdAt: Date
     public let updatedAt: Date
@@ -693,6 +698,9 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         case id, subject, statement, status, polarity, scope, portability, authority, sensitivity,
             confidence
         case beliefType = "belief_type"
+        case claimKind = "claim_kind"
+        case derivation
+        case longevity
         case corroborationCount = "corroboration_count"
         case flaggedForReview = "flagged_for_review"
         case conflictsWith = "conflicts_with"
@@ -705,6 +713,8 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         case validFrom = "valid_from"
         case validTo = "valid_to"
         case expiresAt = "expires_at"
+        case lastEvidenceAt = "last_evidence_at"
+        case lastUsedAt = "last_used_at"
         case lastReinforcedAt = "last_reinforced_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"

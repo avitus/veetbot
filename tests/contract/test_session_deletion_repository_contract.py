@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.memory.in_memory import (
+    InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
     InMemoryMemoryStore,
     InMemoryTraceStore,
@@ -81,6 +82,7 @@ async def _repository() -> tuple[
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
         memories=InMemoryMemoryStore(clock),
+        episodes=InMemoryIntegratedEpisodeStore(),
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),
         schedules=schedules,

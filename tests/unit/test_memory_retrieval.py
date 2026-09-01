@@ -330,11 +330,12 @@ async def test_conflict_partners_bypass_the_subject_cap_and_render_short_ids() -
     }
     assert capped not in returned
     assert (
-        "[m:aaaa1111] User prefers concise answers (user, high) conflicts=[m:cccc3333,m:dddd4444]"
+        "[m:aaaa1111] User prefers concise answers (user, high; direct, durable) "
+        "conflicts=[m:cccc3333,m:dddd4444]"
     ) in result.rendered
     assert (
-        "[m:dddd4444] User prefers exhaustive answers about deployment (user, medium) "
-        "conflicts=[m:aaaa1111]"
+        "[m:dddd4444] User prefers exhaustive answers about deployment "
+        "(user, medium; direct, durable) conflicts=[m:aaaa1111]"
     ) in result.rendered
     assert str(stated) not in result.rendered
 
@@ -607,11 +608,11 @@ def test_lexical_arm_scores_whole_lexemes_the_stores_filter_on() -> None:
     assert _score(record, recall_query(text="themes")) is not None
 
 
-def test_retrieval_policy_version_is_retrieval_2_in_render_header() -> None:
-    """Time decay and the penalties are a new ranking policy, and say so."""
+def test_retrieval_policy_version_is_retrieval_3_in_render_header() -> None:
+    """Evidence-age ranking and uncertainty rendering identify their policy."""
 
-    assert RETRIEVAL_POLICY_VERSION == "retrieval@2"
-    assert 'policy="retrieval@2"' in render_memory([], as_of=NOW)
+    assert RETRIEVAL_POLICY_VERSION == "retrieval@3"
+    assert 'policy="retrieval@3"' in render_memory([], as_of=NOW)
 
 
 async def test_near_duplicate_penalty_demotes_but_keeps_the_second_statement() -> None:

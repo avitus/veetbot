@@ -1,6 +1,6 @@
 turns:
   - kind: final
-    context_contains: "User launch code is ORBIT-7 (user, medium)"
+    context_contains: "User launch code is ORBIT-7 (user, medium; direct, durable)"
     text: ORBIT-7
     stop_reason: end_turn
   - kind: tool_call

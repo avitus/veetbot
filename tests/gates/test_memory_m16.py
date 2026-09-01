@@ -805,12 +805,12 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor(
 
 
 async def test_usage_feedback_marks_cited_and_never_raises_confidence(tmp_path: Path) -> None:
-    """Citing a belief resists decay, moves utility, and leaves confidence alone.
+    """Citing a belief records usage, not evidence, and leaves confidence alone.
 
     One turn recalls two stated preferences and the answer cites one of them by
     the identifier memory rendered, so the completion hook is observed marking
-    that belief used on the turn's trace, raising its utility, and moving its
-    reinforcement instant a day forward, while the belief that was returned and
+        that belief used on the turn's trace, raising its utility, and moving its
+        usage instant a day forward, while the belief that was returned and
     never used loses utility instead. Neither confidence moves: usage is
     evidence of usefulness, never of truth. Completing the run again finds its
     own citation event and changes nothing.
@@ -848,8 +848,9 @@ async def test_usage_feedback_marks_cited_and_never_raises_confidence(tmp_path: 
         beliefs = {belief.id: belief for belief in await composition.memory.list_memories()}
         assert beliefs[cited.id].utility > 0
         assert beliefs[cited.id].confidence == cited.confidence
-        assert beliefs[cited.id].last_reinforced_at == clock.now()
-        assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
+        assert beliefs[cited.id].last_used_at == clock.now()
+        assert beliefs[cited.id].last_evidence_at == cited.last_evidence_at
+        assert beliefs[cited.id].last_reinforced_at == cited.last_reinforced_at
         assert beliefs[uncited.id].utility < 0
         assert beliefs[uncited.id].confidence == uncited.confidence
         assert beliefs[uncited.id].last_reinforced_at == uncited.last_reinforced_at

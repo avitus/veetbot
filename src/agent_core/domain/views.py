@@ -20,6 +20,9 @@ from agent_core.domain.devices import (
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
+    MemoryClaimKind,
+    MemoryDerivation,
+    MemoryLongevity,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -219,8 +222,8 @@ class MemoryView(BaseModel):
 
     Built by an explicit allow-list rather than by excluding fields from
     `MemoryRecord`, so a field added later to the record does not leak here
-    by omission. `tenant_id`, `principal_id`, `utility`, and `store_position`
-    are withheld and do not exist on this model at all. `formation_run_id`,
+    by omission. Tenant identity, ranking state, cursor internals, and internal
+    lifecycle counters do not exist on this model. `formation_run_id`,
     `consolidation_policy_version`, and `origin_scopes` are exposed by owner
     decision (docs/status/questions-for-review.md, Milestone 17 section,
     2026-08-23).
@@ -232,6 +235,9 @@ class MemoryView(BaseModel):
     subject: str
     statement: str
     belief_type: BeliefType
+    claim_kind: MemoryClaimKind
+    derivation: MemoryDerivation
+    longevity: MemoryLongevity
     status: MemoryStatus
     polarity: Polarity
     scope: str
@@ -251,6 +257,8 @@ class MemoryView(BaseModel):
     valid_from: datetime
     valid_to: datetime | None
     expires_at: datetime | None
+    last_evidence_at: datetime
+    last_used_at: datetime | None
     last_reinforced_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -262,6 +270,9 @@ class MemoryView(BaseModel):
             subject=record.subject,
             statement=record.statement,
             belief_type=record.belief_type,
+            claim_kind=record.claim_kind,
+            derivation=record.derivation,
+            longevity=record.longevity,
             status=record.status,
             polarity=record.polarity,
             scope=record.scope,
@@ -281,6 +292,8 @@ class MemoryView(BaseModel):
             valid_from=record.valid_from,
             valid_to=record.valid_to,
             expires_at=record.expires_at,
+            last_evidence_at=record.last_evidence_at,
+            last_used_at=record.last_used_at,
             last_reinforced_at=record.last_reinforced_at,
             created_at=record.created_at,
             updated_at=record.updated_at,

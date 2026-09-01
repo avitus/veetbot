@@ -349,8 +349,8 @@ with:
 
 - `conf(b) = confidence × {active: 1.0, provisional: 0.4}` — provisional beliefs are
   retrievable but never dominant, and never enter the snapshot core;
-- `reinforce(b) = log1p(corroboration_count) / log1p(C_max) × exp(-Δt / τ)`, where
-  `Δt` is time since `last_reinforced_at` and `τ` varies by `belief_type` — stable
+- `reinforce(b) = log1p(evidence_count) / log1p(C_max) × exp(-Δt / τ)`, where
+  `Δt` is time since `last_evidence_at` and `τ` varies by `belief_type` — stable
   preferences decay slowly, situational facts quickly;
 - `authority(b)` from the belief's provenance: direct user statement, agent-affirmed
   conclusion, or inference;
@@ -449,9 +449,12 @@ what was blocked, and the `retrieval_policy_version`. Traces are the tuning data
 
 Retrieval then feeds back into formation, in both directions:
 
-- **Used beliefs resist decay.** When a belief is cited or demonstrably used, it
-  extends `last_reinforced_at` for decay purposes and raises `utility`. It does
-  **not** raise `confidence` — see the decision below.
+- **Used beliefs gain retrieval utility.** When a belief is cited or
+  demonstrably used, it moves `last_used_at` and raises `utility`. It does not
+  extend `last_evidence_at` or raise `confidence`: retrieval is not evidence
+  that the belief remains true. Milestone 21 supersedes the earlier single
+  reinforcement-clock behavior through
+  [adaptive memory distillation](adaptive-memory-distillation.md).
 - **Retrieved-but-never-used** lowers `utility`, so a belief that keeps winning the
   ranking without ever mattering stops winning it.
 - **Recall misses are a formation signal.** A subject that is repeatedly queried and
@@ -794,9 +797,10 @@ says *"Both are hard gates"* and the registry needs one identifier per gate.
   time — retrieval does not undo formation's refusal to guess.
 - **Provisional beliefs are retrievable but down-weighted** and never enter the
   snapshot core.
-- **Usage resets decay but never raises confidence.** Otherwise a wrong belief that
-  happens to rank well entrenches itself by being retrieved — evidence must come from
-  the world, not from the retriever.
+- **Usage never resets evidence decay or raises confidence.** Otherwise a wrong
+  belief that happens to rank well entrenches itself by being retrieved —
+  evidence must come from the world, not from the retriever. Usage moves only
+  `last_used_at` and utility.
 - **Fusion is reciprocal-rank, not score-normalized**, so arms can be added or removed
   without recalibration.
 - **Ranking weights are hand-set, versioned, and eval-tuned**; a learned reranker waits

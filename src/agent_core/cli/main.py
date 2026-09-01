@@ -148,6 +148,18 @@ class _MemoryFormationEvalModule(Protocol):
     ) -> Any | None: ...
 
 
+class _MemoryDistillationEvalModule(Protocol):
+    async def run_live_evaluation(
+        self,
+        repository_root: Path,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> Any | None: ...
+
+
 class _MemoryBenchmarkModule(Protocol):
     async def run_benchmark(
         self,
@@ -1034,6 +1046,53 @@ def eval_memory_formation(
     typer.echo(result.model_dump_json())
     if not result.passed:
         typer.echo(f"memory-formation evaluation failed: {result.failure_summary}", err=True)
+        raise typer.Exit(1)
+
+
+@eval_app.command("memory-distillation")
+def eval_memory_distillation(
+    model_policy: Annotated[
+        str,
+        typer.Option("--model-policy", help="Evaluate one declared model policy."),
+    ],
+    policy_profile: Annotated[
+        str,
+        typer.Option("--policy-profile", help="Evaluate one policy profile."),
+    ],
+    build_ref: Annotated[
+        str,
+        typer.Option("--build-ref", help="Commit or immutable build identifier."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Write passing formation@9 evidence to this path."),
+    ],
+) -> None:
+    """Compare formation@7, formation@8, and formation@9 on corpus v3."""
+
+    try:
+        module = cast(
+            _MemoryDistillationEvalModule,
+            importlib.import_module("agent_core.evals.memory_distillation"),
+        )
+        result = asyncio.run(
+            module.run_live_evaluation(
+                Path.cwd(),
+                model_policy=model_policy,
+                policy_profile=policy_profile,
+                build_ref=build_ref,
+                output=output,
+            )
+        )
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"memory-distillation evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to evaluate memory distillation")
+        return
+    typer.echo(result.model_dump_json())
+    if not result.passed:
+        typer.echo(f"memory-distillation evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
 
 

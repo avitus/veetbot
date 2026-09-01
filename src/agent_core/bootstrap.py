@@ -74,6 +74,7 @@ from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
 from agent_core.adapters.memory.in_memory import (
+    InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
     InMemoryMemoryStore,
     InMemoryTraceStore,
@@ -115,6 +116,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryUsageRepository,
 )
 from agent_core.adapters.persistence.memory_repositories import (
+    PostgresIntegratedEpisodeStore,
     PostgresKnowledgeStore,
     PostgresMemoryStore,
     PostgresTraceStore,
@@ -266,6 +268,7 @@ from agent_core.config import (
     WebProviderAllocation,
     WebProviderKind,
     load_config_document,
+    load_memory_distillation_evidence,
     load_notification_worker_settings,
     load_provider_extraction_evidence,
     load_schedule_worker_settings,
@@ -325,11 +328,17 @@ from agent_core.mcp.configuration import (
     validate_mcp_config,
 )
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.distillation import (
+    NemoriAssistedCandidateExtractor,
+    distillation_evidence_matches,
+)
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
+    NEMORI_FORMATION_POLICY_VERSION,
     SESSION_IDLE_SECONDS,
     DeterministicCandidateExtractor,
     GovernedMemoryService,
+    HighRecallCandidateExtractor,
 )
 from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
@@ -359,6 +368,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
+from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.notifications import PushTransport
 from agent_core.ports.persistence import (
@@ -592,6 +602,7 @@ def _memory_uow_repositories(
     skills: SkillRepository | None = None,
     mcp_servers: MCPServerRepository | None = None,
     memories: InMemoryMemoryStore | None = None,
+    episodes: InMemoryIntegratedEpisodeStore | None = None,
     traces: InMemoryTraceStore | None = None,
     knowledge: InMemoryKnowledgeStore | None = None,
 ) -> UnitOfWorkRepositories:
@@ -604,6 +615,7 @@ def _memory_uow_repositories(
     )
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
     memories = memories or InMemoryMemoryStore(clock)
+    episodes = episodes or InMemoryIntegratedEpisodeStore()
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
@@ -628,6 +640,7 @@ def _memory_uow_repositories(
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
         memories=memories,
+        episodes=episodes,
         traces=traces,
         knowledge=knowledge,
         schedules=schedules,
@@ -659,6 +672,7 @@ def _memory_uow_repositories(
         skills=skills,
         mcp_servers=mcp_servers,
         memories=memories,
+        episodes=episodes,
         traces=traces,
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
@@ -699,6 +713,7 @@ def _postgres_repository_factory(
         checkpoints = PostgresCheckpointRepository(session, clock, history)
         invocations = PostgresToolInvocationRepository(session, runs)
         memories = PostgresMemoryStore(session, clock)
+        episodes = PostgresIntegratedEpisodeStore(session)
         traces = PostgresTraceStore(session)
         knowledge = PostgresKnowledgeStore(session, clock)
         schedules = PostgresScheduleRepository(session)
@@ -735,6 +750,7 @@ def _postgres_repository_factory(
             ),
             mcp_servers=PostgresMCPServerRepository(session, clock),
             memories=memories,
+            episodes=episodes,
             traces=traces,
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
@@ -1273,6 +1289,7 @@ async def _compose(
     web_search_provider: WebProvider | WebProviderRouter | None,
     web_fetch_provider: WebProvider | WebProviderRouter | None,
     memory_provider_evaluation_mode: bool,
+    memory_distillation_evaluation_mode: bool,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
@@ -1472,7 +1489,7 @@ async def _compose(
         )
     model_provider = FakeModelProvider(script or default_fake_script(), clock)
     effective_providers = {"fake": model_provider, **model_providers}
-    memory_extractor = None
+    memory_extractor: MemoryCandidateExtractor | None = None
     memory_policy_version = FORMATION_POLICY_VERSION
     memory_mode = settings.memory_provider_extraction_mode
     extraction_model: ResolvedModel | None = None
@@ -1481,7 +1498,11 @@ async def _compose(
     evidence_source: str | None = None
     selection_outcome = "disabled"
     selection_reason = "configured_off"
-    if memory_mode is not MemoryProviderExtractionMode.OFF or memory_provider_evaluation_mode:
+    if (
+        memory_mode is not MemoryProviderExtractionMode.OFF
+        or memory_provider_evaluation_mode
+        or memory_distillation_evaluation_mode
+    ):
         try:
             if agent.model_policy in NON_ROUTED_MODEL_POLICIES:
                 extraction_model = ResolvedModel(
@@ -1500,6 +1521,7 @@ async def _compose(
         except ConfigurationError:
             if (
                 memory_provider_evaluation_mode
+                or memory_distillation_evaluation_mode
                 or memory_mode is MemoryProviderExtractionMode.REQUIRED
             ):
                 raise
@@ -1519,6 +1541,7 @@ async def _compose(
             if provider_unavailable_reason is not None:
                 if (
                     memory_provider_evaluation_mode
+                    or memory_distillation_evaluation_mode
                     or memory_mode is MemoryProviderExtractionMode.REQUIRED
                 ):
                     raise ConfigurationError(
@@ -1544,9 +1567,42 @@ async def _compose(
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_evaluation_mode"
+            elif memory_distillation_evaluation_mode:
+                assert extraction_provider is not None
+                memory_extractor = NemoriAssistedCandidateExtractor(
+                    provider=extraction_provider,
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    fallback=HighRecallCandidateExtractor(),
+                )
+                selection_outcome = "evaluation"
+                selection_reason = "explicit_distillation_evaluation_mode"
             else:
                 selected_evidence = None
+                selected_distillation_evidence = None
                 for evidence_path in provider_extraction_evidence_paths(settings):
+                    try:
+                        candidate_distillation_evidence = load_memory_distillation_evidence(
+                            evidence_path
+                        )
+                    except ConfigurationError:
+                        pass
+                    else:
+                        if distillation_evidence_matches(
+                            candidate_distillation_evidence,
+                            extraction_model,
+                            agent.policy_profile,
+                            ruleset.policy_version,
+                        ):
+                            selected_distillation_evidence = candidate_distillation_evidence
+                            evidence_source = (
+                                "operator"
+                                if evidence_path == settings.memory_provider_extraction_evidence
+                                else "release"
+                            )
+                            break
                     try:
                         candidate_evidence = load_provider_extraction_evidence(evidence_path)
                     except ConfigurationError:
@@ -1564,7 +1620,7 @@ async def _compose(
                             else "release"
                         )
                         break
-                if selected_evidence is None:
+                if selected_distillation_evidence is None and selected_evidence is None:
                     if memory_mode is MemoryProviderExtractionMode.REQUIRED:
                         raise ConfigurationError(
                             "provider-backed memory extraction requires matching "
@@ -1574,27 +1630,43 @@ async def _compose(
                     selection_reason = "no_matching_evidence"
                 else:
                     assert extraction_provider is not None
-                    memory_extractor = ProviderAssistedCandidateExtractor(
-                        provider=extraction_provider,
-                        resolved_model=extraction_model,
-                        uow_factory=uow_factory,
-                        clock=clock,
-                        ids=ids,
-                        principal=principal,
-                        agent_id=agent.id,
-                        agent_version=agent.version,
-                        policy_profile=agent.policy_profile,
-                        policy_version=ruleset.policy_version,
-                        evidence=selected_evidence,
-                        fallback=DeterministicCandidateExtractor(),
-                    )
-                    memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
-                    evidence_build_ref = selected_evidence.build_ref
-                    evidence_corpus_sha256 = selected_evidence.corpus_sha256
+                    if selected_distillation_evidence is not None:
+                        memory_extractor = NemoriAssistedCandidateExtractor(
+                            provider=extraction_provider,
+                            resolved_model=extraction_model,
+                            uow_factory=uow_factory,
+                            clock=clock,
+                            ids=ids,
+                            fallback=HighRecallCandidateExtractor(),
+                        )
+                        memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
+                        evidence_build_ref = selected_distillation_evidence.build_ref
+                        evidence_corpus_sha256 = selected_distillation_evidence.corpus_sha256
+                    else:
+                        assert selected_evidence is not None
+                        memory_extractor = ProviderAssistedCandidateExtractor(
+                            provider=extraction_provider,
+                            resolved_model=extraction_model,
+                            uow_factory=uow_factory,
+                            clock=clock,
+                            ids=ids,
+                            principal=principal,
+                            agent_id=agent.id,
+                            agent_version=agent.version,
+                            policy_profile=agent.policy_profile,
+                            policy_version=ruleset.policy_version,
+                            evidence=selected_evidence,
+                            fallback=DeterministicCandidateExtractor(),
+                        )
+                        memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+                        evidence_build_ref = selected_evidence.build_ref
+                        evidence_corpus_sha256 = selected_evidence.corpus_sha256
                     selection_outcome = "activated"
                     selection_reason = "matching_evidence"
         if memory_provider_evaluation_mode:
             memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+        elif memory_distillation_evaluation_mode:
+            memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
     selection_identity = ":".join(
         (
             principal.tenant_id,
@@ -2412,6 +2484,7 @@ async def build(
     browser_provider_override: BrowserProvider | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
+    memory_distillation_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
 
@@ -2419,17 +2492,18 @@ async def build(
     effective_settings = settings or load_settings()
     validate_settings(effective_settings)
     if (
-        memory_provider_evaluation_mode
+        (memory_provider_evaluation_mode or memory_distillation_evaluation_mode)
         and effective_settings.memory_provider_extraction_mode
         is MemoryProviderExtractionMode.REQUIRED
     ):
         raise ConfigurationError(
-            "provider memory extraction evaluation and activation are mutually exclusive"
+            "memory extraction evaluation and activation are mutually exclusive"
         )
+    if memory_provider_evaluation_mode and memory_distillation_evaluation_mode:
+        raise ConfigurationError("memory extraction evaluation modes are mutually exclusive")
     if (
-        memory_provider_evaluation_mode
-        and effective_settings.deployment_mode is DeploymentMode.PRODUCTION
-    ):
+        memory_provider_evaluation_mode or memory_distillation_evaluation_mode
+    ) and effective_settings.deployment_mode is DeploymentMode.PRODUCTION:
         raise ConfigurationError(
             "provider memory extraction evaluation mode is unavailable in production"
         )
@@ -2881,6 +2955,7 @@ async def build(
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
+            memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,

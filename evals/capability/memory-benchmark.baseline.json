@@ -4,7 +4,7 @@
   "corpus_sha256": "a6231758930c9f810cbd1a7f73549a96a80e1cc8480dccf23014cb30c5a0acfe",
   "formation_policy_version": "formation@7",
   "provider_formation_policy_version": "formation@8",
-  "retrieval_policy_version": "retrieval@2",
+  "retrieval_policy_version": "retrieval@3",
   "extractor_name": "deterministic-formation-v2",
   "build_ref": "3faa978ade6db50cc220956f58f015b61db3d5e9",
   "recorded_at": "2026-08-25T00:32:14.850068Z",

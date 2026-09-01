@@ -85,3 +85,4 @@ implementation without one.
 - [ADR-0074 — Automated macOS TestFlight delivery](0074-automated-macos-testflight-delivery.md)
 - [ADR-0075 — Native schedule browser over the existing control plane (Proposed)](0075-native-schedule-browser.md)
 - [ADR-0076 — Keenable and deterministic weighted web routing (Proposed)](0076-keenable-and-weighted-web-routing.md)
+- [ADR-0077 — Milestone 21 adaptive memory distillation (Proposed)](0077-milestone-21-adaptive-memory-distillation.md)

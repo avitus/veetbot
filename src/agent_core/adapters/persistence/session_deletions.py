@@ -283,6 +283,7 @@ class InMemorySessionDeletionRepository:
         trajectory_exports: Any,
         artifacts: Any,
         memories: Any,
+        episodes: Any,
         traces: Any,
         knowledge: Any,
         schedules: Any,
@@ -300,6 +301,7 @@ class InMemorySessionDeletionRepository:
         self._trajectory_exports = trajectory_exports
         self._artifacts = artifacts
         self._memories = memories
+        self._episodes = episodes
         self._traces = traces
         self._knowledge = knowledge
         self._schedules = schedules
@@ -329,6 +331,7 @@ class InMemorySessionDeletionRepository:
                     self._trajectory_exports._lock,
                     self._artifacts._lock,
                     self._memories._lock,
+                    self._episodes._lock,
                     self._traces._lock,
                     self._knowledge._lock,
                     self._notification_outbox._lock,
@@ -488,6 +491,19 @@ class InMemorySessionDeletionRepository:
         }
         self._memories._watermarks = {
             key: value for key, value in self._memories._watermarks.items() if key[2] != session_id
+        }
+        removed_episode_ids = {
+            key for key, value in self._episodes._records.items() if value.session_id == session_id
+        }
+        self._episodes._records = {
+            key: value
+            for key, value in self._episodes._records.items()
+            if key not in removed_episode_ids
+        }
+        self._episodes._by_derivation = {
+            key: value
+            for key, value in self._episodes._by_derivation.items()
+            if value not in removed_episode_ids
         }
         self._traces._traces = {
             key: value

@@ -22,6 +22,7 @@ from agent_core.domain.events import EventEnvelope, ProcessEvent
 from agent_core.domain.memory import (
     SENSITIVITY_ORDER,
     BeliefType,
+    EvidenceSpan,
     MemoryCandidate,
     MemoryExtractionResult,
     MemoryRecord,
@@ -617,6 +618,7 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
         sensitivity_guess=sensitivity,
         valid_from=claim.valid_from,
         expires_hint=claim.expires_hint,
+        evidence_spans=[EvidenceSpan(source_event_id=claim.source_event_ids[0], text=statement)],
     )
 
 

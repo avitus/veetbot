@@ -1122,6 +1122,7 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
                         "polarity": Polarity.ASSERT,
                         "portability": Portability.CONTEXTUAL,
                         "origin_scopes": ["integration"],
+                        "last_evidence_at": reinforced_at,
                         "last_reinforced_at": reinforced_at,
                         "formation_run_id": uuid4(),
                         "consolidation_policy_version": "formation@1",
@@ -1147,22 +1148,22 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
         async with composition.uow_factory() as uow:
             window = await uow.memories.list_idle(
                 composition.principal,
-                reinforced_before=now - timedelta(days=50),
+                evidence_before=now - timedelta(days=50),
                 limit=500,
             )
             bounded = await uow.memories.list_idle(
                 composition.principal,
-                reinforced_before=now - timedelta(days=50),
+                evidence_before=now - timedelta(days=50),
                 limit=1,
             )
             decay_window = await uow.memories.list_idle(
                 composition.principal,
-                reinforced_before=now - timedelta(days=50),
+                evidence_before=now - timedelta(days=50),
                 decay_confidence_ceiling=0.55,
                 limit=500,
             )
 
-        stamps = [(record.last_reinforced_at, str(record.id)) for record in window]
+        stamps = [(record.last_evidence_at, str(record.id)) for record in window]
         mine = [record.id for record in window if marker in record.subject]
         assert stamps == sorted(stamps)
         assert mine == [oldest_idle.id, high_confidence_idle.id, newer_idle.id]

@@ -117,7 +117,7 @@ import Testing
     @Test
     func testMemoryViewDecodesTheFullExposureListAndToleratesAnUnknownStatus() throws {
         let data = Data(
-            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","status":"archived","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":true,"conflicts_with":["00000000-0000-0000-0000-000000000102"],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[10,11,12],"formation_run_id":"00000000-0000-0000-0000-000000000104","consolidation_policy_version":"formation@1","origin_scopes":["project-a"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
+            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"archived","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":true,"conflicts_with":["00000000-0000-0000-0000-000000000102"],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[10,11,12],"formation_run_id":"00000000-0000-0000-0000-000000000104","consolidation_policy_version":"formation@1","origin_scopes":["project-a"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
                 .utf8
         )
 
@@ -129,6 +129,9 @@ import Testing
         #expect(memory.statement == "The user prefers dark mode.")
         #expect(memory.beliefType == "preference")
         #expect(memory.beliefTypeKind == .preference)
+        #expect(memory.claimKind == "preference")
+        #expect(memory.derivation == "direct")
+        #expect(memory.longevity == "durable")
         #expect(memory.status == "archived")
         #expect(memory.statusKind == nil)
         #expect(memory.polarity == "assert")
@@ -153,6 +156,8 @@ import Testing
         #expect(memory.validFrom == isoDate.date(from: "2026-08-01T00:00:00Z"))
         #expect(memory.validTo == nil)
         #expect(memory.expiresAt == nil)
+        #expect(memory.lastEvidenceAt == isoDate.date(from: "2026-08-15T00:00:00Z"))
+        #expect(memory.lastUsedAt == nil)
         #expect(memory.lastReinforcedAt == isoDate.date(from: "2026-08-15T00:00:00Z"))
         #expect(memory.createdAt == isoDate.date(from: "2026-07-01T00:00:00Z"))
         #expect(memory.updatedAt == isoDate.date(from: "2026-08-20T00:00:00Z"))
