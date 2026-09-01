@@ -7,13 +7,16 @@ from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
+from agent_core.domain.devices import Device, DeviceInvocation, DeviceInvocationStatus
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.notifications import (
     NOTIFICATION_TITLES,
+    DeviceInvocationSubjectStatus,
     NewNotification,
     NotificationKind,
     NotificationPayload,
     approval_requested_key,
+    device_invocation_key,
     question_asked_key,
     run_failed_key,
     schedule_occurrence_skipped_key,
@@ -228,6 +231,52 @@ class NotificationProducer:
                 "occurrence_id": occurrence.id,
             },
             dedupe_key=schedule_occurrence_skipped_key(occurrence.id),
+        )
+
+    async def for_device_invocation(
+        self,
+        uow: NotificationProductionUnitOfWork,
+        *,
+        invocation: DeviceInvocation,
+        device: Device,
+    ) -> bool:
+        if invocation.device_id != device.id or invocation.tenant_id != device.tenant_id:
+            raise ValueError("device invocation notification requires the invocation's own device")
+        if invocation.status is not DeviceInvocationStatus.PENDING:
+            raise ValueError("device invocation notification requires a pending invocation")
+        now = self._clock.now()
+        notification_id = self._ids.new_id()
+        kind = NotificationKind.DEVICE_INVOCATION
+        dedupe_key = device_invocation_key(invocation.id)
+        return await self._enqueue_or_audit(
+            uow,
+            lambda: NewNotification(
+                id=notification_id,
+                tenant_id=device.tenant_id,
+                principal_id=device.principal_id,
+                kind=kind,
+                dedupe_key=dedupe_key,
+                payload=NotificationPayload(
+                    kind=kind,
+                    title=NOTIFICATION_TITLES[kind],
+                    status=DeviceInvocationSubjectStatus.PENDING,
+                    invocation_id=invocation.id,
+                    device_id=invocation.device_id,
+                    notification_id=notification_id,
+                ),
+                priority=10,
+                expires_at=now + timedelta(hours=24),
+                next_attempt_at=now,
+                created_at=now,
+            ),
+            failure_context={
+                "tenant_id": device.tenant_id,
+                "principal_id": device.principal_id,
+                "notification_id": notification_id,
+                "invocation_id": invocation.id,
+                "device_id": invocation.device_id,
+            },
+            dedupe_key=dedupe_key,
         )
 
     async def _enqueue_or_audit(

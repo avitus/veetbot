@@ -40,6 +40,7 @@ DispatchProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
 _PENDING_BACKLOG_ALERT_AFTER = timedelta(minutes=5)
 _PENDING_BACKLOG_WARNING_COOLDOWN = timedelta(minutes=5)
+_DEVICE_NARROWED_KINDS = frozenset({NotificationKind.TEST, NotificationKind.DEVICE_INVOCATION})
 
 
 class DispatchProbeError(RuntimeError):
@@ -167,8 +168,14 @@ class NotificationDispatcher:
                 notification.principal_id,
                 notification.kind,
             )
-            if notification.kind is NotificationKind.TEST:
-                target_device_id = test_notification_target_device_id(notification.dedupe_key)
+            if notification.kind in _DEVICE_NARROWED_KINDS:
+                if notification.kind is NotificationKind.TEST:
+                    target_device_id = test_notification_target_device_id(notification.dedupe_key)
+                else:
+                    raw_target_device_id = notification.payload.target_device_id()
+                    target_device_id = (
+                        UUID(raw_target_device_id) if raw_target_device_id is not None else None
+                    )
                 targets = [target for target in targets if target.device_id == target_device_id]
             deliveries = await uow.notification_outbox.list_deliveries(notification.id)
 

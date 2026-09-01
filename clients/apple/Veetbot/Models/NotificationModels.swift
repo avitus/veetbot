@@ -33,6 +33,7 @@ public enum NotificationKind: String, Codable, CaseIterable, Sendable {
     case opsAlert = "ops_alert"
     case opsRecovered = "ops_recovered"
     case test
+    case deviceInvocation = "device_invocation"
 }
 
 public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
@@ -165,6 +166,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
     public let questionID: UUID?
     public let scheduleID: UUID?
     public let occurrenceID: UUID?
+    public let invocationID: UUID?
+    public let deviceID: UUID?
     public let notificationID: UUID
     public let signal: String?
     public let severity: String?
@@ -175,8 +178,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         guard let value = userInfo["veetbot"] as? [String: Any] else { return nil }
         let allowedKeys: Set<String> = [
             "version", "kind", "title", "status", "tool_name", "session_id", "run_id",
-            "approval_id", "question_id", "schedule_id", "occurrence_id", "notification_id",
-            "signal", "severity", "reason_code", "release_id",
+            "approval_id", "question_id", "schedule_id", "occurrence_id", "invocation_id",
+            "device_id", "notification_id", "signal", "severity", "reason_code", "release_id",
         ]
         guard Set(value.keys).isSubset(of: allowedKeys),
             JSONSerialization.isValidJSONObject(value),
@@ -198,6 +201,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
             "question_id": questionID,
             "schedule_id": scheduleID,
             "occurrence_id": occurrenceID,
+            "invocation_id": invocationID,
+            "device_id": deviceID,
         ]
         let present = Set(identifiers.compactMap { $0.value == nil ? nil : $0.key })
         guard present == Self.requiredIdentifiers[kind] else { return false }
@@ -225,6 +230,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsAlert: "Production alert",
         .opsRecovered: "Production recovered",
         .test: "Test notification",
+        .deviceInvocation: "Your device has a pending action",
     ]
 
     private static let requiredIdentifiers: [NotificationKind: Set<String>] = [
@@ -236,6 +242,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsAlert: [],
         .opsRecovered: [],
         .test: [],
+        .deviceInvocation: ["invocation_id", "device_id"],
     ]
 
     private static let allowedStatuses: [NotificationKind: Set<String?>] = [
@@ -249,6 +256,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsAlert: [nil],
         .opsRecovered: [nil],
         .test: [nil],
+        .deviceInvocation: ["pending"],
     ]
 
     enum CodingKeys: String, CodingKey {
@@ -260,6 +268,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         case questionID = "question_id"
         case scheduleID = "schedule_id"
         case occurrenceID = "occurrence_id"
+        case invocationID = "invocation_id"
+        case deviceID = "device_id"
         case notificationID = "notification_id"
         case reasonCode = "reason_code"
         case releaseID = "release_id"
