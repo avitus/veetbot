@@ -150,6 +150,8 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "PGSSLMODE=disable" in environment
     assert "WEB_SEARCH_PROVIDER=disabled" in environment
     assert "WEB_FETCH_PROVIDER=disabled" in environment
+    assert "WEB_SEARCH_PROVIDERS=" in environment
+    assert "WEB_FETCH_PROVIDERS=" in environment
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
@@ -167,6 +169,7 @@ def test_production_environment_preserves_process_boundaries() -> None:
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
     assert "FIRECRAWL_API_KEY=" in template_lines
+    assert "KEENABLE_API_KEY=" in template_lines
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
         for line in environment.splitlines()
@@ -357,6 +360,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "ANTHROPIC_API_KEY",
         "TAVILY_API_KEY",
         "FIRECRAWL_API_KEY",
+        "KEENABLE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
     } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
     assert "agent worker --role notify" in notify
@@ -380,6 +384,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "ANTHROPIC_API_KEY",
         "TAVILY_API_KEY",
         "FIRECRAWL_API_KEY",
+        "KEENABLE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
         "SANDBOX_MECHANISM",
         "AGENT_EXECUTION_SERVICE_SOCKET",

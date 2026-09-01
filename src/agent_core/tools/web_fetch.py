@@ -8,8 +8,12 @@ from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
 from agent_core.domain.web import WebProviderError, is_public_https_url
-from agent_core.ports.web import WebProvider
-from agent_core.tools.web_search import _failure, _provider_failure
+from agent_core.ports.web import WebProvider, WebProviderRouter
+from agent_core.tools.web_search import (
+    _coerce_web_provider_router,
+    _failure,
+    _provider_failure,
+)
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -56,11 +60,11 @@ class WebFetchTool:
         output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
     )
 
-    def __init__(self, provider: WebProvider) -> None:
+    def __init__(self, provider: WebProvider | WebProviderRouter) -> None:
         self._provider = provider
+        self._router = _coerce_web_provider_router(provider)
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
-        del context
         url = arguments.get("url")
         if not isinstance(url, str) or not is_public_https_url(url):
             return _failure(
@@ -68,13 +72,14 @@ class WebFetchTool:
                 "tool.web.url_disallowed",
                 retryable=False,
             )
+        provider = self._router.select(routing_key=f"web.fetch:{context.invocation_id}")
         try:
-            page = await self._provider.fetch(url)
+            page = await provider.fetch(url)
         except WebProviderError as error:
-            return _provider_failure(error)
+            return _provider_failure(error, provider_name=provider.name)
         content = _bounded_utf8(page.content, self.spec.maximum_output_bytes)
         structured = {
-            "provider": self._provider.name,
+            "provider": provider.name,
             "url": page.url,
             "title": page.title,
             "content": content,

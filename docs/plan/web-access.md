@@ -8,7 +8,8 @@ canonical: true
 
 This specification expands [engineering-plan.md](engineering-plan.md#32-web-access)
 and records the mechanism selected by
-[ADR-0054](../adr/0054-provider-neutral-web-access.md). It adds public-web
+[ADR-0054](../adr/0054-provider-neutral-web-access.md), as extended by
+[ADR-0076](../adr/0076-keenable-and-weighted-web-routing.md). It adds public-web
 discovery and page extraction without making a vendor API part of the agent's
 tool contract.
 
@@ -18,12 +19,13 @@ The first tranche exposes two read-only builtin capability tools:
 
 | Tool | Purpose | Recommended provider |
 | --- | --- | --- |
-| `web.search` | Discover and rank public pages for a query | Tavily |
-| `web.fetch` | Extract readable Markdown from one selected page | Firecrawl |
+| `web.search` | Discover and rank public pages for a query | Tavily 50%, Keenable 50% |
+| `web.fetch` | Extract readable Markdown from one selected page | Firecrawl 50%, Keenable 50% |
 
-Both Tavily and Firecrawl implement the same `WebProvider` port and both support
-both operations. The recommendation is a deployment default, not a coupling:
-an operator may select either provider independently for either tool.
+Tavily, Firecrawl, and Keenable implement the same `WebProvider` port and
+support both operations. The comparison allocation is the initial recommended
+rollout, not a coupling: an operator may select any one provider or weighted
+set independently for either tool.
 
 Crawling a site, interactive browsing, screenshots, research jobs, provider
 answers, provider-generated summaries, and provider-specific scrape actions are
@@ -39,6 +41,16 @@ and `close()` — plus a stable `name` attribute. Search returns only `title`,
 screenshots, images, links, and billing data do not cross the port. The tool
 result does name the serving provider in its `provider` field, so the model
 can attribute a source record without the vendor API shaping the contract.
+
+`WebProviderRouter.select(routing_key)` is a separate composition concern. A
+single-provider route is constant. A weighted route hashes the durable tool
+invocation identifier with SHA-256, maps it into the configured integer-weight
+range, and selects the first matching allocation. The capability name is part
+of the routing key. Retries and crash recovery reuse the invocation identifier
+and therefore remain pinned to the same provider; the router does not fail over
+after a provider error, because doing so would hide comparative failures and
+change retry semantics. Successful output and a provider-dispatched failure's
+durable `structured_result` name the selected provider.
 
 Search-result URLs are held to a looser standard than fetch targets: a result
 may use plain HTTP or a non-standard port because providers index such pages,
@@ -81,30 +93,53 @@ and explicitly keeps TLS verification enabled. These fields follow the official
 and [Firecrawl Scrape](https://docs.firecrawl.dev/api-reference/endpoint/scrape)
 contracts. The baselines were verified on 2026-08-18.
 
+The Keenable adapter calls the fixed endpoints
+`https://api.keenable.ai/v1/search` and
+`https://api.keenable.ai/v1/fetch`. Search requests bounded snippets and maps
+recency to Keenable relative `published_after` deltas. Because Keenable accepts
+one `site` rather than the port's include/exclude lists, multiple include
+domains fan out to one bounded request per domain. Include and exclude filters
+are mutually exclusive, so an excluding search is a single unfiltered request
+that over-fetches at most fifty rows and applies the exclusions locally before
+returning at most the requested number of results. Fetch requests bounded
+Markdown with `live=true` and no extraction prompt. Because Keenable bounds
+`snippet_max_length` and `max_chars` in characters while the shared reader
+bounds a response in bytes, each Keenable request raises its own reader budget
+to cover the characters it asked for at four bytes each. A response beyond that
+budget is still refused as oversize.
+These fields follow the official
+[Keenable Search](https://docs.keenable.ai/api-reference/search) and
+[Keenable Fetch](https://docs.keenable.ai/api-reference/fetch) contracts. The
+baseline was verified on 2026-08-31.
+
 ## Configuration and credentials
 
 Web access is disabled by default. The environment layer owns two independent
-selectors:
+weighted selectors:
 
 ```text
-WEB_SEARCH_PROVIDER=disabled | tavily | firecrawl
-WEB_FETCH_PROVIDER=disabled | tavily | firecrawl
+WEB_SEARCH_PROVIDERS=provider:percentage[,provider:percentage...]
+WEB_FETCH_PROVIDERS=provider:percentage[,provider:percentage...]
 ```
 
-The recommended hybrid is:
+Provider names are `tavily`, `firecrawl`, and `keenable`; entries are unique
+positive integer percentages that sum to 100. The initial comparison is:
 
 ```text
-WEB_SEARCH_PROVIDER=tavily
-WEB_FETCH_PROVIDER=firecrawl
+WEB_SEARCH_PROVIDERS=tavily:50,keenable:50
+WEB_FETCH_PROVIDERS=firecrawl:50,keenable:50
 ```
 
-`TAVILY_API_KEY` and `FIRECRAWL_API_KEY` enter the existing credential broker
-as the references `tavily` and `firecrawl`. Adapters resolve the reference at
-call time and place the secret only in the fixed provider request's bearer
-header. Secrets do not enter tool arguments, results, events, configuration
-documents, or model context. Selecting a provider controls tool registration
-and default advertisement independently: a disabled capability is absent from
-the registry.
+The backward-compatible `WEB_SEARCH_PROVIDER` and `WEB_FETCH_PROVIDER`
+selectors still accept one provider or `disabled`; an enabled singular selector
+cannot be combined with its plural form. Empty plural selectors defer to the
+singular values. `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, and `KEENABLE_API_KEY`
+enter the existing credential broker as the references `tavily`, `firecrawl`,
+and `keenable`. Adapters resolve the reference at call time and place the secret
+only in the fixed provider request's authentication header: bearer for Tavily
+and Firecrawl, `X-API-Key` for Keenable. Secrets do not enter tool arguments,
+results, events, configuration documents, or model context. A capability with
+no allocation is absent from the registry and default advertisement.
 
 The bootstrap fallback agent remains within the context plan's immutable
 6,000-token tool-definition cap. When either web capability is selected, that
@@ -149,17 +184,21 @@ unavailability, permanent provider rejection, invalid provider output, and a
 disallowed fetch URL; arguments that fail the tool schema return the platform's
 ordinary `tool.arguments_invalid`. HTTP 402 and Tavily's documented 432/433
 usage-limit responses become `tool.web.quota_exceeded` with an operator-action
-message and without the upstream body. Timeouts, transport failures, HTTP
+message and without the upstream body. Keenable's documented malformed-key
+400 and its 401/403 responses become `tool.web.auth_failed`. Timeouts,
+transport failures, HTTP
 408/425/429, and server errors are retryable; auth, exhausted quota, other
 client errors, schema failures, and local URL refusals are not. The tool
 pipeline retains ownership of any retry decision within the run deadline.
 
 ## Acceptance criteria
 
-- Tavily and Firecrawl pass the same search and fetch port contract and
+- Tavily, Firecrawl, and Keenable pass the same search and fetch port contract and
   normalize to byte-compatible domain shapes.
-- The recommended composition routes Tavily to `web.search` and Firecrawl to
-  `web.fetch`; each selector can also choose the other provider independently.
+- Single-provider, hybrid, and weighted configurations bind either capability
+  without changing its schema. The initial weighted comparison routes half of
+  search to Tavily and half to Keenable, and half of fetch to Firecrawl and half
+  to Keenable. Retries remain pinned to the selected provider.
 - Disabled capabilities are neither registered nor advertised by default.
 - A web-enabled context plan advertises the selected `web.search` and
   `web.fetch` capabilities directly. If the pinned skill catalog is empty, it
@@ -175,11 +214,12 @@ pipeline retains ownership of any retry decision within the run deadline.
 
 ## Hard gates
 
-1. **Provider contract.** Tavily and Firecrawl both pass the complete shared
+1. **Provider contract.** Tavily, Firecrawl, and Keenable pass the complete shared
    search-and-fetch contract and normalize to the same domain shapes. **M10.**
-2. **Capability routing.** The recommended hybrid and both single-provider
-   configurations bind the requested capabilities without changing either
-   agent-visible tool schema. **M10.**
+2. **Capability routing.** Single-provider, hybrid, and weighted configurations
+   bind the requested capabilities without changing either agent-visible tool
+   schema, and a durable invocation stays pinned to its selected provider.
+   **M10.**
 3. **Default-off registration.** A disabled capability is absent from both the
    registry and the advertised default tool set. **M10.**
 4. **Context advertisement.** A web-enabled run advertises the selected web

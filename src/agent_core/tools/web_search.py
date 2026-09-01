@@ -17,7 +17,7 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 from agent_core.domain.web import WebProviderError, WebSearchRequest
-from agent_core.ports.web import WebProvider
+from agent_core.ports.web import WebProvider, WebProviderRouter
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -82,7 +82,7 @@ def _failure(
     )
 
 
-def _provider_failure(error: WebProviderError) -> ToolResult:
+def _provider_failure(error: WebProviderError, *, provider_name: str) -> ToolResult:
     if error.reason_code == "tool.web.auth_failed":
         kind = ToolFailureKind.PERMISSION
     elif error.reason_code == "tool.web.output_invalid":
@@ -91,7 +91,26 @@ def _provider_failure(error: WebProviderError) -> ToolResult:
         kind = ToolFailureKind.TRANSPORT
     else:
         kind = ToolFailureKind.UPSTREAM_ERROR
-    return _failure(kind, error.reason_code, retryable=error.retryable)
+    result = _failure(kind, error.reason_code, retryable=error.retryable)
+    return result.model_copy(update={"structured": {"provider": provider_name}}, deep=True)
+
+
+class _FixedWebProviderRouter:
+    def __init__(self, provider: WebProvider) -> None:
+        self.allocations = ()
+        self._provider = provider
+
+    def select(self, *, routing_key: str) -> WebProvider:
+        del routing_key
+        return self._provider
+
+
+def _coerce_web_provider_router(
+    provider: WebProvider | WebProviderRouter,
+) -> WebProviderRouter:
+    return (
+        provider if isinstance(provider, WebProviderRouter) else _FixedWebProviderRouter(provider)
+    )
 
 
 class WebSearchTool:
@@ -111,11 +130,11 @@ class WebSearchTool:
         output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
     )
 
-    def __init__(self, provider: WebProvider) -> None:
+    def __init__(self, provider: WebProvider | WebProviderRouter) -> None:
         self._provider = provider
+        self._router = _coerce_web_provider_router(provider)
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
-        del context
         try:
             request = WebSearchRequest.model_validate(arguments)
         except ValidationError:
@@ -124,16 +143,17 @@ class WebSearchTool:
                 "tool.arguments_invalid",
                 retryable=False,
             )
+        provider = self._router.select(routing_key=f"web.search:{context.invocation_id}")
         try:
-            results = await self._provider.search(request)
+            results = await provider.search(request)
         except WebProviderError as error:
-            return _provider_failure(error)
+            return _provider_failure(error, provider_name=provider.name)
         records = [result.model_dump(mode="json") for result in results[: request.max_results]]
         # The declared output limit is a platform contract; a full page of
         # maximal results can exceed it, so drop trailing results until the
         # rendered part list fits. One schema-bounded result always fits.
         while True:
-            structured: dict[str, Any] = {"provider": self._provider.name, "results": records}
+            structured: dict[str, Any] = {"provider": provider.name, "results": records}
             part = TextPart(
                 text=json.dumps(
                     structured,

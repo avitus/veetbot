@@ -1,9 +1,10 @@
-"""Shared behavioral contract for the Tavily and Firecrawl web adapters."""
+"""Shared behavioral contract for every fixed-endpoint public-web adapter."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.web.common import MAXIMUM_RESPONSE_BYTES
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
+from agent_core.adapters.web.keenable import KeenableWebProvider
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.domain.web import WebProviderError, WebRecency, WebSearchRequest
 from agent_core.ports.web import WebProvider
@@ -23,8 +25,10 @@ def provider_factories() -> tuple[tuple[str, ProviderFactory], ...]:
         {
             "tavily": "synthetic-tavily-credential",
             "firecrawl": "synthetic-firecrawl-credential",
+            "keenable": "synthetic-keenable-credential",
         }
     )
+
     return (
         (
             "tavily",
@@ -33,6 +37,10 @@ def provider_factories() -> tuple[tuple[str, ProviderFactory], ...]:
         (
             "firecrawl",
             lambda client: FirecrawlWebProvider(credentials=credentials, client=client),
+        ),
+        (
+            "keenable",
+            lambda client: KeenableWebProvider(credentials=credentials, client=client),
         ),
     )
 
@@ -57,7 +65,7 @@ async def test_web_provider_search_contract(
                     }
                 ]
             }
-        else:
+        elif provider_name == "firecrawl":
             payload = {
                 "success": True,
                 "data": {
@@ -69,6 +77,18 @@ async def test_web_provider_search_contract(
                         }
                     ]
                 },
+            }
+        else:
+            payload = {
+                "query": "Ada Lovelace",
+                "results": [
+                    {
+                        "title": "Ada Lovelace",
+                        "url": "https://example.org/ada",
+                        "description": "A public biographical record.",
+                        "snippet": "A public biographical record.",
+                    }
+                ],
             }
         return httpx.Response(200, json=payload)
 
@@ -93,7 +113,11 @@ async def test_web_provider_search_contract(
     ]
     assert len(observed) == 1
     request = observed[0]
-    assert request.headers["authorization"].startswith("Bearer synthetic-")
+    if provider_name == "keenable":
+        assert request.headers["x-api-key"] == "synthetic-keenable-credential"
+        assert "authorization" not in request.headers
+    else:
+        assert request.headers["authorization"].startswith("Bearer synthetic-")
     body = json.loads(request.content)
     if provider_name == "tavily":
         assert request.url == "https://api.tavily.com/search"
@@ -106,7 +130,7 @@ async def test_web_provider_search_contract(
             "include_domains": ["example.org"],
             "time_range": "month",
         }
-    else:
+    elif provider_name == "firecrawl":
         assert request.url == "https://api.firecrawl.dev/v2/search"
         assert body == {
             "query": "Ada Lovelace",
@@ -115,6 +139,15 @@ async def test_web_provider_search_contract(
             "includeDomains": ["example.org"],
             "tbs": "qdr:m",
             "ignoreInvalidURLs": True,
+        }
+    else:
+        assert request.url == "https://api.keenable.ai/v1/search"
+        assert body == {
+            "query": "Ada Lovelace",
+            "site": "example.org",
+            "published_after": "1mo",
+            "snippet_max_length": 8192,
+            "max_results": 3,
         }
 
 
@@ -138,7 +171,7 @@ async def test_web_provider_fetch_contract(
                 ],
                 "failed_results": [],
             }
-        else:
+        elif provider_name == "firecrawl":
             payload = {
                 "success": True,
                 "data": {
@@ -149,6 +182,12 @@ async def test_web_provider_fetch_contract(
                     },
                 },
             }
+        else:
+            payload = {
+                "url": "https://example.org/ada",
+                "title": "Ada Lovelace",
+                "content": "# Ada Lovelace\n\nA public biographical record.",
+            }
         return httpx.Response(200, json=payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
@@ -158,21 +197,32 @@ async def test_web_provider_fetch_contract(
     assert page.content == "# Ada Lovelace\n\nA public biographical record."
     assert page.title == (None if provider_name == "tavily" else "Ada Lovelace")
     assert len(observed) == 1
-    body = json.loads(observed[0].content)
+    request = observed[0]
     if provider_name == "tavily":
+        body = json.loads(request.content)
         assert body == {
             "urls": ["https://example.org/ada"],
             "extract_depth": "basic",
             "include_images": False,
             "format": "markdown",
         }
-    else:
+    elif provider_name == "firecrawl":
+        body = json.loads(request.content)
         assert body == {
             "url": "https://example.org/ada",
             "formats": ["markdown"],
             "onlyMainContent": True,
             "skipTlsVerification": False,
         }
+    else:
+        assert request.method == "GET"
+        assert request.url.copy_with(query=None) == "https://api.keenable.ai/v1/fetch"
+        assert dict(request.url.params) == {
+            "url": "https://example.org/ada",
+            "max_chars": "524288",
+            "live": "true",
+        }
+        assert request.headers["x-api-key"] == "synthetic-keenable-credential"
 
 
 @pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
@@ -261,9 +311,9 @@ async def test_web_provider_normalizes_invalid_success_output(
     async def wire(request: httpx.Request) -> httpx.Response:
         del request
         payload: dict[str, object] = (
-            {"results": "not-a-list"}
-            if provider_name == "tavily"
-            else {"success": True, "data": {"web": "not-a-list"}}
+            {"success": True, "data": {"web": "not-a-list"}}
+            if provider_name == "firecrawl"
+            else {"results": "not-a-list"}
         )
         return httpx.Response(200, json=payload)
 
@@ -300,7 +350,7 @@ async def test_web_provider_maps_exclude_domains_and_every_recency(
 ) -> None:
     observed: list[httpx.Request] = []
     empty: dict[str, object] = (
-        {"results": []} if provider_name == "tavily" else {"success": True, "data": {"web": []}}
+        {"success": True, "data": {"web": []}} if provider_name == "firecrawl" else {"results": []}
     )
 
     async def wire(request: httpx.Request) -> httpx.Response:
@@ -326,10 +376,19 @@ async def test_web_provider_maps_exclude_domains_and_every_recency(
         assert all(body["exclude_domains"] == ["tracker.example"] for body in recency_values)
         assert all("include_domains" not in body for body in recency_values)
         assert [body["time_range"] for body in recency_values] == ["day", "week", "month", "year"]
-    else:
+    elif provider_name == "firecrawl":
         assert all(body["excludeDomains"] == ["tracker.example"] for body in recency_values)
         assert all("includeDomains" not in body for body in recency_values)
         assert [body["tbs"] for body in recency_values] == ["qdr:d", "qdr:w", "qdr:m", "qdr:y"]
+    else:
+        assert all("site" not in body for body in recency_values)
+        assert all(body["max_results"] == 50 for body in recency_values)
+        assert [body["published_after"] for body in recency_values] == [
+            "1d",
+            "7d",
+            "1mo",
+            "1y",
+        ]
 
 
 @pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
@@ -356,7 +415,7 @@ async def test_web_provider_rejects_unsuccessful_success_shaped_bodies(
                     await provider.fetch("https://example.org/ada")
                 assert raised.value.reason_code == "tool.web.provider_rejected"
                 assert raised.value.retryable is False
-        else:
+        elif provider_name == "firecrawl":
             bodies.append({"success": False, "data": {}})
             with pytest.raises(WebProviderError) as search_raised:
                 await provider.search(WebSearchRequest(query="Ada Lovelace"))
@@ -381,9 +440,9 @@ async def test_web_provider_rejects_result_rows_that_fail_domain_validation(
 
         del request
         payload: dict[str, object] = (
-            {"results": [row]}
-            if provider_name == "tavily"
-            else {"success": True, "data": {"web": [row]}}
+            {"success": True, "data": {"web": [row]}}
+            if provider_name == "firecrawl"
+            else {"results": [row]}
         )
         return httpx.Response(200, json=payload)
 
@@ -513,9 +572,9 @@ async def test_web_provider_defaults_and_truncates_result_fields(
     async def wire(request: httpx.Request) -> httpx.Response:
         del request
         payload: dict[str, object] = (
-            {"results": [row, untitled]}
-            if provider_name == "tavily"
-            else {"success": True, "data": {"web": [row, untitled]}}
+            {"success": True, "data": {"web": [row, untitled]}}
+            if provider_name == "firecrawl"
+            else {"results": [row, untitled]}
         )
         return httpx.Response(200, json=payload)
 
@@ -537,31 +596,43 @@ async def test_web_provider_bounds_fetched_page_content(
 
     async def wire(request: httpx.Request) -> httpx.Response:
         del request
-        payload: dict[str, object] = (
-            {"results": [{"url": "https://example.org/ada", "raw_content": long_content}]}
-            if provider_name == "tavily"
-            else {
+        if provider_name == "tavily":
+            payload: dict[str, object] = {
+                "results": [{"url": "https://example.org/ada", "raw_content": long_content}]
+            }
+        elif provider_name == "firecrawl":
+            payload = {
                 "success": True,
                 "data": {
                     "markdown": long_content,
                     "metadata": {"title": "t" * 2_000, "sourceURL": "https://example.org/ada"},
                 },
             }
-        )
+        else:
+            payload = {
+                "url": "https://example.org/ada",
+                "title": "t" * 2_000,
+                "content": long_content,
+            }
         return httpx.Response(200, json=payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
         page = await factory(client).fetch("https://example.org/ada")
 
     assert len(page.content) == 524_288
-    if provider_name == "firecrawl":
+    if provider_name in {"firecrawl", "keenable"}:
         assert page.title == "t" * 1_024
 
 
-@pytest.mark.parametrize("provider_name", ["tavily", "firecrawl"])
+@pytest.mark.parametrize("provider_name", ["tavily", "firecrawl", "keenable"])
 async def test_web_provider_close_only_closes_a_client_it_owns(provider_name: str) -> None:
     credentials = MappingCredentialResolver({})
-    provider_type = TavilyWebProvider if provider_name == "tavily" else FirecrawlWebProvider
+    if provider_name == "tavily":
+        provider_type: type[Any] = TavilyWebProvider
+    elif provider_name == "firecrawl":
+        provider_type = FirecrawlWebProvider
+    else:
+        provider_type = KeenableWebProvider
 
     owned = provider_type(credentials=credentials)
     await owned.close()
@@ -575,7 +646,7 @@ async def test_web_provider_close_only_closes_a_client_it_owns(provider_name: st
         assert shared.is_closed is False
 
 
-@pytest.mark.parametrize("provider_name", ["tavily", "firecrawl"])
+@pytest.mark.parametrize("provider_name", ["tavily", "firecrawl", "keenable"])
 async def test_web_provider_missing_credential_is_a_stable_auth_failure(
     provider_name: str,
 ) -> None:
@@ -585,13 +656,142 @@ async def test_web_provider_missing_credential_is_a_stable_auth_failure(
         raise AssertionError(f"network called without credential: {request.url}")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(reject_network)) as client:
-        provider: WebProvider = (
-            TavilyWebProvider(credentials=credentials, client=client)
-            if provider_name == "tavily"
-            else FirecrawlWebProvider(credentials=credentials, client=client)
-        )
+        if provider_name == "tavily":
+            provider: WebProvider = TavilyWebProvider(credentials=credentials, client=client)
+        elif provider_name == "firecrawl":
+            provider = FirecrawlWebProvider(credentials=credentials, client=client)
+        else:
+            provider = KeenableWebProvider(credentials=credentials, client=client)
         with pytest.raises(WebProviderError) as raised:
             await provider.search(WebSearchRequest(query="Ada Lovelace"))
 
     assert raised.value.reason_code == "tool.web.auth_failed"
+    assert raised.value.retryable is False
+
+
+async def test_keenable_preserves_multi_include_and_exclude_domain_semantics() -> None:
+    """The narrower upstream site filter must not narrow the platform contract."""
+
+    observed: list[dict[str, object]] = []
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        observed.append(body)
+        site = body.get("site")
+        if site is not None:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": str(site),
+                            "url": f"https://{site}/result",
+                            "snippet": "included",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Allowed",
+                        "url": "https://allowed.example/result",
+                        "snippet": "allowed",
+                    },
+                    {
+                        "title": "Excluded",
+                        "url": "https://news.tracker.example/result",
+                        "snippet": "excluded",
+                    },
+                ]
+            },
+        )
+
+    factory = dict(provider_factories())["keenable"]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        provider = factory(client)
+        included = await provider.search(
+            WebSearchRequest(
+                query="Ada",
+                max_results=2,
+                include_domains=("first.example", "second.example"),
+            )
+        )
+        excluded = await provider.search(
+            WebSearchRequest(
+                query="Ada",
+                max_results=2,
+                exclude_domains=("tracker.example",),
+            )
+        )
+
+    assert [result.url for result in included] == [
+        "https://first.example/result",
+        "https://second.example/result",
+    ]
+    assert [result.url for result in excluded] == ["https://allowed.example/result"]
+    assert [body.get("site") for body in observed[:2]] == [
+        "first.example",
+        "second.example",
+    ]
+    assert observed[2]["max_results"] == 50
+
+
+async def test_keenable_malformed_key_status_is_a_stable_auth_failure() -> None:
+    """Keenable documents HTTP 400 specifically for malformed API keys."""
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(400, text="malformed key diagnostic")
+
+    factory = dict(provider_factories())["keenable"]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(WebProviderError) as raised:
+            await factory(client).search(WebSearchRequest(query="Ada"))
+
+    assert raised.value.reason_code == "tool.web.auth_failed"
+    assert raised.value.retryable is False
+    assert "malformed key diagnostic" not in str(raised.value)
+
+
+async def test_keenable_reads_a_full_length_multi_byte_page() -> None:
+    """The requested character budget must fit inside the response byte reader."""
+
+    content = "\U0001f600" * 524_288
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        body = json.dumps(
+            {"url": "https://example.org/ada", "title": "Ada", "content": content},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        assert len(body) > MAXIMUM_RESPONSE_BYTES
+        return httpx.Response(200, content=body, headers={"Content-Type": "application/json"})
+
+    factory = dict(provider_factories())["keenable"]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        page = await factory(client).fetch("https://example.org/ada")
+
+    assert page.content == content
+
+
+async def test_keenable_fetch_still_refuses_a_response_beyond_its_own_budget() -> None:
+    """Widening the reader for requested characters must not unbound it."""
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        padding = b"a" * (4 * 524_288 + 64 * 1024 + 1)
+        return httpx.Response(
+            200,
+            content=b'{"url":"https://example.org/ada","content":"' + padding + b'"}',
+        )
+
+    factory = dict(provider_factories())["keenable"]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(WebProviderError) as raised:
+            await factory(client).fetch("https://example.org/ada")
+
+    assert raised.value.reason_code == "tool.web.output_invalid"
     assert raised.value.retryable is False

@@ -4185,7 +4185,7 @@ The event log already records every run in full (Section 6.8). This section adds
 
 The platform exposes current public information through provider-neutral,
 read-only tools. The detailed mechanism is specified in
-[web-access.md](web-access.md) and ADR-0054. The repository owner authorized
+[web-access.md](web-access.md), ADR-0054, and ADR-0076. The repository owner authorized
 this tranche on 2026-08-18 independently of scheduling, model-routing changes,
 and general-purpose subagents.
 
@@ -4195,9 +4195,11 @@ and general-purpose subagents.
 - `web.fetch` extracts readable content from one public HTTPS page.
 - Provider-specific request and response fields end at an adapter implementing
   one `WebProvider` port.
-- Search and fetch providers are selected independently. Tavily search plus
-  Firecrawl fetch is the recommended deployment, but either provider may serve
-  either capability without changing the tool names.
+- Search and fetch provider allocations are selected independently. A
+  deployment may bind one provider or a deterministic weighted set without
+  changing the tool names. The initial comparison routes 50 percent of search
+  to Tavily and 50 percent to Keenable, and 50 percent of fetch to Firecrawl
+  and 50 percent to Keenable.
 
 ### 32.2 Security and rollout
 
@@ -4215,9 +4217,11 @@ and general-purpose subagents.
 
 ### 32.3 Acceptance criteria
 
-- Tavily and Firecrawl pass the same search and fetch provider contract.
-- The recommended hybrid and both single-provider configurations compose
-  without changing an agent-visible tool schema.
+- Tavily, Firecrawl, and Keenable pass the same search and fetch provider
+  contract.
+- Single-provider, hybrid, and weighted configurations compose without
+  changing an agent-visible tool schema; a retry of one durable invocation
+  remains pinned to its selected provider.
 - A complete web tool invocation passes validation and policy, persists a
   bounded external-untrusted result, and can be consumed by the next model
   step.

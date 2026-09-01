@@ -64,6 +64,27 @@ private final class FrameAutosaveIgnoringWindow: NSWindow {
         #expect(MainWindowConfiguration.frameName != SettingsWindowConfiguration.frameName)
     }
 
+    @Test
+    func testSettingsPresenterAttachesExplicitResizePersistence() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
+            encoding: .utf8
+        )
+        let normalizedSource = source
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        #expect(
+            normalizedSource.contains(
+                "resizePersistence = PopupWindowResizePersistence( window: window, key: SettingsWindowConfiguration.storageKey )"
+            )
+        )
+    }
+
     @Test @MainActor
     func testMainWindowInstallsItsFrameAutosaveName() {
         let window = FrameAutosaveIgnoringWindow(
@@ -158,6 +179,87 @@ private final class FrameAutosaveIgnoringWindow: NSWindow {
         #expect(window.contentMinSize.height < SettingsWindowConfiguration.initialSize.height)
         #expect(window.contentMaxSize.width > SettingsWindowConfiguration.initialSize.width)
         #expect(window.contentMaxSize.height > SettingsWindowConfiguration.initialSize.height)
+    }
+
+    @Test @MainActor
+    func testEveryPopupRestoresItsOwnPersistedContentSize() {
+        let defaults = UserDefaults.standard
+        let settingsKey = "veetbot.settingsWindow.contentSize"
+        let memoryKey = "veetbot.memoryBrowser.contentSize"
+        let scheduleKey = "veetbot.scheduleBrowser.contentSize"
+        let settingsSize = NSSize(width: 811, height: 733)
+        let memorySize = NSSize(width: 877, height: 699)
+        let scheduleSize = NSSize(width: 923, height: 741)
+
+        for (key, size) in [
+            (settingsKey, settingsSize),
+            (memoryKey, memorySize),
+            (scheduleKey, scheduleSize),
+        ] {
+            defaults.set(NSStringFromSize(size), forKey: key)
+        }
+        defer {
+            for key in [settingsKey, memoryKey, scheduleKey] {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        let settingsWindow = popupWindow()
+        let memoryWindow = popupWindow()
+        let scheduleWindow = popupWindow()
+
+        SettingsWindowConfiguration.apply(to: settingsWindow)
+        MemoryBrowserWindowConfiguration.apply(to: memoryWindow)
+        ScheduleBrowserWindowConfiguration.apply(to: scheduleWindow)
+
+        #expect(settingsWindow.contentView?.frame.size == settingsSize)
+        #expect(memoryWindow.contentView?.frame.size == memorySize)
+        #expect(scheduleWindow.contentView?.frame.size == scheduleSize)
+    }
+
+    @Test @MainActor
+    func testPopupSizeStoreRecordsTheCurrentContentSize() throws {
+        let key = "veetbot.test.popup.contentSize.\(UUID().uuidString)"
+        let defaults = UserDefaults.standard
+        let size = NSSize(width: 849, height: 707)
+        defer { defaults.removeObject(forKey: key) }
+        let window = popupWindow()
+        window.setContentSize(size)
+
+        PopupWindowContentSizeStore.save(window: window, key: key)
+
+        let stored = try #require(defaults.string(forKey: key))
+        #expect(NSSizeFromString(stored) == size)
+    }
+
+    @Test @MainActor
+    func testResizePersistenceSavesAtTheEndOfAUserResize() throws {
+        let key = "veetbot.test.popup.liveResize.\(UUID().uuidString)"
+        let defaults = UserDefaults.standard
+        let size = NSSize(width: 901, height: 759)
+        defer { defaults.removeObject(forKey: key) }
+        let window = popupWindow()
+        let persistence = PopupWindowResizePersistence(window: window, key: key)
+        window.setContentSize(size)
+
+        NotificationCenter.default.post(
+            name: NSWindow.didEndLiveResizeNotification,
+            object: window
+        )
+
+        let stored = try #require(defaults.string(forKey: key))
+        #expect(NSSizeFromString(stored) == size)
+        _ = persistence
+    }
+
+    @MainActor
+    private func popupWindow() -> NSWindow {
+        NSWindow(
+            contentRect: NSRect(x: 40, y: 60, width: 600, height: 540),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
     }
 }
 #endif

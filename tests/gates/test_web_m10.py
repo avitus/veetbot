@@ -22,6 +22,9 @@ async def test_capability_routing() -> None:
         await composition_contract.test_one_provider_can_serve_both_web_capabilities(
             provider_name, provider_type
         )
+    await (
+        composition_contract.test_weighted_composition_routes_half_of_each_capability_to_keenable()
+    )
 
 
 async def test_default_off_registration() -> None:

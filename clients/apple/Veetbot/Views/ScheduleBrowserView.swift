@@ -242,6 +242,7 @@ private extension View {
 }
 
 enum ScheduleBrowserWindowConfiguration {
+    static let storageKey = "veetbot.scheduleBrowser.contentSize"
     static let minimumSize = NSSize(width: 560, height: 520)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
 
@@ -250,6 +251,12 @@ enum ScheduleBrowserWindowConfiguration {
         window.styleMask.insert(.resizable)
         window.contentMinSize = minimumSize
         window.contentMaxSize = maximumSize
+        PopupWindowContentSizeStore.restore(
+            window: window,
+            key: storageKey,
+            minimumSize: minimumSize,
+            maximumSize: maximumSize
+        )
     }
 }
 
@@ -265,6 +272,7 @@ private struct ScheduleBrowserWindowResizeView: NSViewRepresentable {
 
 private final class ScheduleBrowserWindowResizeNSView: NSView {
     private var keyWindowObserver: NSObjectProtocol?
+    private var resizePersistence: PopupWindowResizePersistence?
 
     deinit {
         if let keyWindowObserver {
@@ -278,15 +286,24 @@ private final class ScheduleBrowserWindowResizeNSView: NSView {
             NotificationCenter.default.removeObserver(keyWindowObserver)
         }
         keyWindowObserver = nil
+        resizePersistence = nil
         guard let window else { return }
-        applyConfigurationIfPossible()
+        applyConfigurationAfterPresentation()
+        resizePersistence = PopupWindowResizePersistence(
+            window: window,
+            key: ScheduleBrowserWindowConfiguration.storageKey
+        )
         keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: window,
             queue: .main
         ) { [weak self] _ in
-            self?.applyConfigurationIfPossible()
+            self?.applyConfigurationAfterPresentation()
         }
+    }
+
+    private func applyConfigurationAfterPresentation() {
+        applyConfigurationIfPossible()
         DispatchQueue.main.async { [weak self] in
             self?.applyConfigurationIfPossible()
         }

@@ -186,20 +186,23 @@ Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`, replace every
 model-policy overlay may instead retarget `balanced` to another configured
 provider.
 
-To enable the recommended public-web split, add the two provider credentials
-and select each capability independently in that same root-owned file:
+To enable the initial Keenable comparison, add all three provider credentials
+and route half of each capability to Keenable in that same root-owned file:
 
 ```text
-WEB_SEARCH_PROVIDER=tavily
-WEB_FETCH_PROVIDER=firecrawl
+WEB_SEARCH_PROVIDERS=tavily:50,keenable:50
+WEB_FETCH_PROVIDERS=firecrawl:50,keenable:50
 TAVILY_API_KEY=<production Tavily key>
 FIRECRAWL_API_KEY=<production Firecrawl key>
+KEENABLE_API_KEY=<production Keenable key>
 ```
 
 Do not put the real values in `.env.example`, the production template, CircleCI
 configuration, a commit, or a PR. The worker reads this environment when the
-release restarts its systemd unit; the selectors default to `disabled` when the
-capability is not intended for that deployment.
+release restarts its systemd unit. Plural selector entries must be unique
+positive integer percentages summing to 100. The legacy singular selectors
+remain valid for one-provider deployments, and both capabilities stay disabled
+when neither form enables them.
 
 Run `docker compose ls` before the first automated release. If an existing
 Veetbot PostgreSQL container was created under a Compose project name other than

@@ -4,6 +4,7 @@
 - Date: 2026-08-18
 - Related: Sections 8, 9, 11, 20, 22, and 32; ADR-0005, ADR-0008, ADR-0021
 - Detailed design: `docs/plan/web-access.md`
+- Extended by: ADR-0076 (Keenable and deterministic weighted web routing)
 
 ## Context
 
