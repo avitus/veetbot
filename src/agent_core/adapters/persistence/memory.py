@@ -37,6 +37,11 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
+from agent_core.domain.persona import (
+    PersonaDocument,
+    PersonaNomination,
+    PersonaNominationState,
+)
 from agent_core.domain.policies import IdempotencyClass, PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
@@ -1502,3 +1507,115 @@ class InMemoryCapabilityEvaluationRepository:
                 (cost for started_at, cost in self._attempt_costs.values() if started_at >= since),
                 start=Decimal("0"),
             )
+
+
+class InMemoryPersonaStore:
+    """Contract-backed persona document and nomination store."""
+
+    def __init__(self) -> None:
+        self._documents: dict[tuple[str, str], list[PersonaDocument]] = defaultdict(list)
+        self._nominations: dict[UUID, PersonaNomination] = {}
+        self._lock = asyncio.Lock()
+
+    async def active(self, principal: Principal) -> PersonaDocument | None:
+        async with self._lock:
+            versions = self._documents.get((principal.tenant_id, principal.principal_id), [])
+            return versions[-1] if versions else None
+
+    async def history(self, principal: Principal, *, limit: int = 50) -> list[PersonaDocument]:
+        async with self._lock:
+            versions = self._documents.get((principal.tenant_id, principal.principal_id), [])
+            return list(reversed(versions))[:limit]
+
+    async def append_version(
+        self, document: PersonaDocument, *, expected_version: int
+    ) -> PersonaDocument:
+        async with self._lock:
+            versions = self._documents[(document.tenant_id, document.principal_id)]
+            head = versions[-1].version if versions else 0
+            if expected_version != head:
+                raise ConflictError(
+                    f"persona expected version {expected_version} but head is {head}"
+                )
+            if document.version != head + 1:
+                raise ConflictError(
+                    f"persona version {document.version} does not follow head {head}"
+                )
+            versions.append(document)
+            return document
+
+    async def nominate(self, nomination: PersonaNomination) -> PersonaNomination:
+        async with self._lock:
+            for existing in self._nominations.values():
+                if (
+                    existing.tenant_id != nomination.tenant_id
+                    or existing.principal_id != nomination.principal_id
+                    or existing.belief_id != nomination.belief_id
+                ):
+                    continue
+                if existing.state is PersonaNominationState.NOMINATED:
+                    return existing
+                if existing.state in (
+                    PersonaNominationState.DECLINED,
+                    PersonaNominationState.AFFIRMED,
+                ):
+                    raise ConflictError(
+                        f"belief {nomination.belief_id} has a durable {existing.state} nomination"
+                    )
+            self._nominations[nomination.id] = nomination
+            return nomination
+
+    async def get_nomination(self, nomination_id: UUID, principal: Principal) -> PersonaNomination:
+        async with self._lock:
+            return self._owned_nomination(nomination_id, principal)
+
+    def _owned_nomination(self, nomination_id: UUID, principal: Principal) -> PersonaNomination:
+        nomination = self._nominations.get(nomination_id)
+        if (
+            nomination is None
+            or nomination.tenant_id != principal.tenant_id
+            or nomination.principal_id != principal.principal_id
+        ):
+            raise NotFoundError(f"persona nomination {nomination_id} not found")
+        return nomination
+
+    async def list_nominations(
+        self,
+        principal: Principal,
+        *,
+        state: PersonaNominationState | None = None,
+    ) -> list[PersonaNomination]:
+        async with self._lock:
+            rows = [
+                nomination
+                for nomination in self._nominations.values()
+                if nomination.tenant_id == principal.tenant_id
+                and nomination.principal_id == principal.principal_id
+                and (state is None or nomination.state is state)
+            ]
+            return sorted(rows, key=lambda nomination: nomination.nominated_at, reverse=True)
+
+    async def resolve_nomination(
+        self,
+        nomination_id: UUID,
+        principal: Principal,
+        *,
+        state: PersonaNominationState,
+        resolved_at: datetime,
+        affirmed_version: int | None = None,
+    ) -> PersonaNomination:
+        async with self._lock:
+            nomination = self._owned_nomination(nomination_id, principal)
+            if nomination.state is not PersonaNominationState.NOMINATED:
+                raise ConflictError(
+                    f"persona nomination {nomination_id} is already {nomination.state}"
+                )
+            resolved = nomination.model_copy(
+                update={
+                    "state": state,
+                    "resolved_at": resolved_at,
+                    "affirmed_version": affirmed_version,
+                }
+            )
+            self._nominations[nomination_id] = resolved
+            return resolved

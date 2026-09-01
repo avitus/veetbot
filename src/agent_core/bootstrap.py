@@ -105,6 +105,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryExportConsentRepository,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
+    InMemoryPersonaStore,
     InMemoryPolicyProfileRepository,
     InMemoryProcessEventRepository,
     InMemoryRunRepository,
@@ -128,6 +129,9 @@ from agent_core.adapters.persistence.notifications import (
     PostgresDeviceRegistrationIdempotencyRepository,
     PostgresDeviceRegistry,
     PostgresNotificationOutbox,
+)
+from agent_core.adapters.persistence.persona_repositories import (
+    PostgresPersonaStore,
 )
 from agent_core.adapters.persistence.projections import (
     PostgresSessionHistoryRepository,
@@ -674,6 +678,7 @@ def _memory_uow_repositories(
         memories=memories,
         episodes=episodes,
         traces=traces,
+        personas=InMemoryPersonaStore(),
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -752,6 +757,7 @@ def _postgres_repository_factory(
             memories=memories,
             episodes=episodes,
             traces=traces,
+            personas=PostgresPersonaStore(session),
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,

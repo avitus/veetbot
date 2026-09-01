@@ -1465,3 +1465,51 @@ class DelegationRow(Base):
     links_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PersonaDocumentRow(Base):
+    __tablename__ = "persona_documents"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entries: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    source: Mapped[str] = mapped_column(Text)
+    source_nomination_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PersonaNominationRow(Base):
+    __tablename__ = "persona_nominations"
+    __table_args__ = (
+        Index(
+            "ix_persona_nominations_open",
+            "tenant_id",
+            "principal_id",
+            "belief_id",
+            unique=True,
+            postgresql_where=text("state = 'nominated'"),
+        ),
+        Index(
+            "ix_persona_nominations_principal_state",
+            "tenant_id",
+            "principal_id",
+            "state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    statement: Mapped[str] = mapped_column(Text)
+    belief_type: Mapped[str] = mapped_column(Text)
+    authority: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float)
+    corroboration_count: Mapped[int] = mapped_column(Integer)
+    sensitivity: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    consolidation_run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    nominated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    affirmed_version: Mapped[int | None] = mapped_column(Integer)
