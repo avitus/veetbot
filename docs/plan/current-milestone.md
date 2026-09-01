@@ -30,9 +30,9 @@ title: Current Milestone
   parallel workstream, limited to one-time creation through the model.
   Milestone 20 — SMS through the owner's iPhone — is specified by
   [device-channel-and-sms.md](device-channel-and-sms.md) with twelve gates
-  and is a fifth parallel workstream on the same terms, its trigger-catalog
-  and registration-source widenings named in ADR-0073. Milestone 21 — the
-  WhatsApp business surface — is specified by
+  and is a fifth parallel workstream on the same terms and is in progress,
+  its trigger-catalog and registration-source widenings named in ADR-0073.
+  Milestone 21 — the WhatsApp business surface — is specified by
   [whatsapp-surface.md](whatsapp-surface.md) with twelve gates and is a
   sixth parallel workstream whose implementation begins when Milestone
   14's ports exist; its receipt-key generalization of the surface seam is

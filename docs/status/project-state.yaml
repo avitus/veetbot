@@ -459,7 +459,7 @@ milestones:
 
   "20":
     title: SMS through the owner's iPhone
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-26
     design: docs/plan/device-channel-and-sms.md
     adr: docs/adr/0073-milestone-20-sms-device-channel.md
@@ -477,6 +477,10 @@ milestones:
       - a websocket device transport and the waiting-on-device suspension kind
       - presence-based routing and hand-off (B7 residue)
       - Android capture and any second device-scoped tool
+    open_items:
+      - Server implementation of the twelve registered gates
+      - iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
+      - Owner end-to-end verification on a physical iPhone
     evidence:
       - check: Milestone 20 gate-area red phase
         outcome: observed_expected_failure

@@ -64,6 +64,15 @@ Remaining:
 
 - [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
 
+### Milestone 20 — SMS through the owner's iPhone
+
+The fifth parallel workstream, now under construction: the Section 29
+device channel with `device.sms.send` and the SMS ingest path. Remaining:
+
+- [ ] Server implementation of the twelve registered gates
+- [ ] iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
+- [ ] Owner end-to-end verification on a physical iPhone
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -76,9 +85,6 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 18 — First-class email integration** — thirteen gates; a
   parallel workstream whose completion additionally requires the owner's
   real-mailbox smoke.
-- **Milestone 20 — SMS through the owner's iPhone** — twelve gates; a
-  parallel workstream over the Section 29 device channel, implementable
-  immediately on completed Milestone 12.
 - **Milestone 21 — WhatsApp business surface** — twelve gates; a parallel
   workstream whose documents, gates, and Meta ceremony proceed now and
   whose implementation begins when Milestone 14's surface ports exist.
