@@ -13,6 +13,7 @@ from agent_core.ports.browser_authentications import BrowserAuthenticationReposi
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.delegations import DelegationRepository
+from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
 from agent_core.ports.devices import (
     DeviceRegistrationIdempotencyRepository,
     DeviceRegistry,
@@ -85,6 +86,8 @@ class RepositoryUnitOfWork(Protocol):
     schedule_admission: ScheduleAdmissionController
     devices: DeviceRegistry
     device_registration_idempotency: DeviceRegistrationIdempotencyRepository
+    device_invocations: DeviceInvocationStore
+    device_ingest: DeviceIngestStore
     notification_outbox: NotificationOutbox
     delegations: DelegationRepository
     queue: RunQueue | None

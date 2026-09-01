@@ -187,6 +187,7 @@ class DeviceView(BaseModel):
     push_token_updated_at: datetime | None
     push_token_invalidated_at: datetime | None
     muted_kinds: frozenset[NotificationKind]
+    capabilities: frozenset[str]
     status: DeviceStatus
     revoked_at: datetime | None
     last_seen_at: datetime

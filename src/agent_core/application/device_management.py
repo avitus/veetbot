@@ -113,6 +113,7 @@ class DeviceManagementService:
                         else existing.push_token_invalidated_at
                     ),
                     muted_kinds=registration.muted_kinds,
+                    capabilities=registration.capabilities,
                     status=DeviceStatus.ACTIVE,
                     revoked_at=None,
                     last_seen_at=now,
@@ -375,6 +376,7 @@ def _device_view(device: Device) -> DeviceView:
         push_token_updated_at=device.push_token_updated_at,
         push_token_invalidated_at=device.push_token_invalidated_at,
         muted_kinds=device.muted_kinds,
+        capabilities=device.capabilities,
         status=device.status,
         revoked_at=device.revoked_at,
         last_seen_at=device.last_seen_at,
@@ -392,6 +394,7 @@ def _optional_idempotency_key(value: str | None) -> str | None:
 def _registration_hash(registration: DeviceRegistration) -> str:
     payload = registration.model_dump(mode="json")
     payload["muted_kinds"] = sorted(kind.value for kind in registration.muted_kinds)
+    payload["capabilities"] = sorted(registration.capabilities)
     payload["push_token"] = (
         None if registration.push_token is None else registration.push_token.get_secret_value()
     )

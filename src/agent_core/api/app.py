@@ -49,10 +49,12 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.devices import (
+    DeviceCapability,
     DeviceKind,
     DeviceRegistration,
     PushEnvironment,
     PushProvider,
+    device_capability_issue,
     device_routing_issue,
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
@@ -249,6 +251,7 @@ class DeviceRegistrationRequest(BaseModel):
     push_token: str | None = Field(default=None, min_length=1, max_length=8192)
     push_environment: str | None = Field(default=None, min_length=1, max_length=32)
     muted_kinds: tuple[str, ...] = Field(default=(), max_length=len(NotificationKind))
+    capabilities: tuple[str, ...] = Field(default=(), max_length=len(DeviceCapability))
 
     def registration(self) -> DeviceRegistration:
         kind = _required_device_enum(DeviceKind, self.kind, "device.kind_unknown")
@@ -271,13 +274,19 @@ class DeviceRegistrationRequest(BaseModel):
                 "device.muted_kind_duplicate",
                 "muted notification kinds must be unique",
             )
+        capabilities = frozenset(self.capabilities)
+        if len(capabilities) != len(self.capabilities):
+            raise DeviceValidationError(
+                "device.capability_duplicate",
+                "device capabilities must be unique",
+            )
         issue = device_routing_issue(
             kind=kind,
             provider=provider,
             token_present=self.push_token is not None,
             environment=environment,
             app_bundle_id_present=self.app_bundle_id is not None,
-        )
+        ) or device_capability_issue(kind=kind, capabilities=capabilities)
         if issue is not None:
             raise DeviceValidationError(issue.reason_code, issue.message)
         return DeviceRegistration(
@@ -290,6 +299,7 @@ class DeviceRegistrationRequest(BaseModel):
             push_token=None if self.push_token is None else SecretStr(self.push_token),
             push_environment=environment,
             muted_kinds=muted,
+            capabilities=capabilities,
         )
 
 

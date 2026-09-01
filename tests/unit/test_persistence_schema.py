@@ -238,7 +238,13 @@ def test_notification_tables_encode_routing_identity_and_query_constraints() -> 
         for constraint in devices.constraints
         if isinstance(constraint, CheckConstraint)
     )
-    for required in ("push_provider", "push_token", "push_environment", "muted_kinds"):
+    for required in (
+        "push_provider",
+        "push_token",
+        "push_environment",
+        "muted_kinds",
+        "capabilities",
+    ):
         assert required in device_checks
 
     outbox = tables["notification_outbox"]
@@ -265,6 +271,72 @@ def test_notification_tables_encode_routing_identity_and_query_constraints() -> 
         if isinstance(constraint, UniqueConstraint)
     }
     assert ("notification_id", "device_id", "attempt") in delivery_unique_columns
+
+
+def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> None:
+    tables = Base.metadata.tables
+    assert {
+        "device_invocations",
+        "device_ingest_receipts",
+        "device_triage_sessions",
+    } <= tables.keys()
+
+    assert "capabilities" in tables["devices"].columns
+
+    invocations = tables["device_invocations"]
+    assert tuple(column.name for column in invocations.primary_key.columns) == ("id",)
+    assert {
+        foreign_key.parent.name: (foreign_key.target_fullname, foreign_key.ondelete)
+        for foreign_key in invocations.foreign_keys
+    } == {
+        "device_id": ("devices.id", "CASCADE"),
+        "run_id": ("runs.id", "CASCADE"),
+    }
+    invocation_checks = " ".join(
+        str(constraint.sqltext)
+        for constraint in invocations.constraints
+        if isinstance(constraint, CheckConstraint)
+    )
+    for status in ("pending", "sent", "cancelled", "failed", "expired"):
+        assert f"'{status}'" in invocation_checks
+    assert {tuple(column.name for column in index.columns) for index in invocations.indexes} >= {
+        ("device_id", "status", "created_at")
+    }
+
+    receipts = tables["device_ingest_receipts"]
+    assert tuple(column.name for column in receipts.primary_key.columns) == (
+        "device_id",
+        "channel",
+        "digest",
+    )
+    assert {
+        foreign_key.parent.name: (foreign_key.target_fullname, foreign_key.ondelete)
+        for foreign_key in receipts.foreign_keys
+    } == {
+        "device_id": ("devices.id", "CASCADE"),
+        "session_id": ("sessions.id", "SET NULL"),
+        "run_id": ("runs.id", "SET NULL"),
+    }
+    forbidden = {"sender", "body", "content", "text", "message"}
+    assert forbidden.isdisjoint(receipts.columns.keys())
+
+    triage = tables["device_triage_sessions"]
+    assert tuple(column.name for column in triage.primary_key.columns) == ("device_id", "channel")
+    assert {
+        foreign_key.parent.name: (foreign_key.target_fullname, foreign_key.ondelete)
+        for foreign_key in triage.foreign_keys
+    } == {
+        "device_id": ("devices.id", "CASCADE"),
+        "session_id": ("sessions.id", "CASCADE"),
+    }
+
+    migration = next(
+        (ROOT / "migrations" / "versions").glob("*_add_milestone_20_device_channel.py")
+    )
+    migration_sql = migration.read_text(encoding="utf-8")
+    for table in ("device_invocations", "device_ingest_receipts", "device_triage_sessions"):
+        assert f'_tenant_policy("{table}")' in migration_sql
+    assert "device_invocation" in migration_sql
 
 
 def test_delegation_table_encodes_trust_boundaries() -> None:

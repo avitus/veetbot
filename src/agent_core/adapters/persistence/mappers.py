@@ -11,8 +11,11 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ApprovalRow,
     ArtifactRow,
     DelegationRow,
+    DeviceIngestReceiptRow,
+    DeviceInvocationRow,
     DeviceRegistrationIdempotencyRow,
     DeviceRow,
+    DeviceTriageSessionRow,
     EventRow,
     IdempotencyKeyRow,
     ModelCallRow,
@@ -33,9 +36,13 @@ from agent_core.domain.approvals import ApprovalRequest
 from agent_core.domain.delegations import Delegation
 from agent_core.domain.devices import (
     Device,
+    DeviceIngestReceipt,
+    DeviceInvocation,
+    DeviceInvocationStatus,
     DeviceKind,
     DeviceRegistrationIdempotencyRecord,
     DeviceStatus,
+    DeviceTriageMapping,
     PushEnvironment,
     PushProvider,
 )
@@ -264,6 +271,7 @@ def device_to_domain(row: DeviceRow) -> Device:
         push_token_updated_at=row.push_token_updated_at,
         push_token_invalidated_at=row.push_token_invalidated_at,
         muted_kinds=frozenset(NotificationKind(value) for value in row.muted_kinds),
+        capabilities=frozenset(row.capabilities),
         status=DeviceStatus(row.status),
         revoked_at=row.revoked_at,
         last_seen_at=row.last_seen_at,
@@ -290,6 +298,7 @@ def device_values(device: Device) -> dict[str, Any]:
         "push_token_updated_at": device.push_token_updated_at,
         "push_token_invalidated_at": device.push_token_invalidated_at,
         "muted_kinds": sorted(kind.value for kind in device.muted_kinds),
+        "capabilities": sorted(device.capabilities),
         "status": device.status.value,
         "revoked_at": device.revoked_at,
         "last_seen_at": device.last_seen_at,
@@ -812,4 +821,74 @@ def delegation_values(delegation: Delegation) -> dict[str, Any]:
         "links_erased_at": delegation.links_erased_at,
         "created_at": delegation.created_at,
         "joined_at": delegation.joined_at,
+    }
+
+
+def device_invocation_to_domain(row: DeviceInvocationRow) -> DeviceInvocation:
+    return DeviceInvocation(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        device_id=row.device_id,
+        run_id=row.run_id,
+        tool_name=row.tool_name,
+        arguments=row.arguments,
+        status=DeviceInvocationStatus(row.status),
+        created_at=row.created_at,
+        resolved_at=row.resolved_at,
+    )
+
+
+def device_invocation_values(invocation: DeviceInvocation) -> dict[str, Any]:
+    return {
+        "id": invocation.id,
+        "tenant_id": invocation.tenant_id,
+        "device_id": invocation.device_id,
+        "run_id": invocation.run_id,
+        "tool_name": invocation.tool_name,
+        "arguments": invocation.arguments,
+        "status": invocation.status.value,
+        "created_at": invocation.created_at,
+        "resolved_at": invocation.resolved_at,
+    }
+
+
+def device_ingest_receipt_to_domain(row: DeviceIngestReceiptRow) -> DeviceIngestReceipt:
+    return DeviceIngestReceipt(
+        device_id=row.device_id,
+        tenant_id=row.tenant_id,
+        channel=row.channel,
+        digest=row.digest,
+        received_at=row.received_at,
+        session_id=row.session_id,
+        run_id=row.run_id,
+    )
+
+
+def device_ingest_receipt_values(receipt: DeviceIngestReceipt) -> dict[str, Any]:
+    return {
+        "device_id": receipt.device_id,
+        "tenant_id": receipt.tenant_id,
+        "channel": receipt.channel,
+        "digest": receipt.digest,
+        "received_at": receipt.received_at,
+        "session_id": receipt.session_id,
+        "run_id": receipt.run_id,
+    }
+
+
+def device_triage_mapping_to_domain(row: DeviceTriageSessionRow) -> DeviceTriageMapping:
+    return DeviceTriageMapping(
+        device_id=row.device_id,
+        tenant_id=row.tenant_id,
+        channel=row.channel,
+        session_id=row.session_id,
+    )
+
+
+def device_triage_mapping_values(mapping: DeviceTriageMapping) -> dict[str, Any]:
+    return {
+        "device_id": mapping.device_id,
+        "tenant_id": mapping.tenant_id,
+        "channel": mapping.channel,
+        "session_id": mapping.session_id,
     }

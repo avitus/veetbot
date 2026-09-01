@@ -94,6 +94,12 @@ from agent_core.adapters.persistence.delegations import (
     InMemoryDelegationRepository,
     PostgresDelegationRepository,
 )
+from agent_core.adapters.persistence.device_channel import (
+    InMemoryDeviceIngestStore,
+    InMemoryDeviceInvocationStore,
+    PostgresDeviceIngestStore,
+    PostgresDeviceInvocationStore,
+)
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -604,6 +610,8 @@ def _memory_uow_repositories(
     notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     delegations = InMemoryDelegationRepository()
+    device_invocations = InMemoryDeviceInvocationStore()
+    device_ingest = InMemoryDeviceIngestStore()
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -661,6 +669,8 @@ def _memory_uow_repositories(
         schedule_admission=AllowScheduleAdmissionController(),
         devices=devices,
         device_registration_idempotency=InMemoryDeviceRegistrationIdempotencyRepository(),
+        device_invocations=device_invocations,
+        device_ingest=device_ingest,
         notification_outbox=notification_outbox,
         delegations=delegations,
         queue=None,
@@ -741,6 +751,8 @@ def _postgres_repository_factory(
             device_registration_idempotency=(
                 PostgresDeviceRegistrationIdempotencyRepository(session)
             ),
+            device_invocations=PostgresDeviceInvocationStore(session),
+            device_ingest=PostgresDeviceIngestStore(session),
             notification_outbox=PostgresNotificationOutbox(session, clock),
             delegations=PostgresDelegationRepository(session),
             queue=PostgresRunQueue(
