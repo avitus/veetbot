@@ -871,8 +871,13 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
         'plutil -insert signingCertificate -string "Apple Distribution" "$export_options"'
     ) in archive_command
     assert (
+        'security find-certificate -a -c "3rd Party Mac Developer Installer" -Z' in archive_command
+    )
+    assert "awk '/^SHA-1 hash: / {print $3}'" in archive_command
+    assert '[[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]' in archive_command
+    assert (
         "plutil -insert installerSigningCertificate -string "
-        '"Mac Installer Distribution" "$export_options"'
+        '"$installer_certificate_sha1" "$export_options"'
     ) in archive_command
     assert "plutil -insert provisioningProfiles -xml" in archive_command
     assert "com.veetbot.apple" in archive_command

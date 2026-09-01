@@ -434,10 +434,13 @@ profile, because CircleCI rejects profiles for that certificate type. Do not
 place any of those binaries in the repository, a context variable, a cache, a
 workspace, or an artifact.
 
-The export options select `Apple Distribution` for the app signature and
-`Mac Installer Distribution` for the installer package explicitly. Keep those
-roles separate: the App Store provisioning profile contains the app
-distribution certificate, not the installer certificate.
+The export options select `Apple Distribution` for the app signature. For the
+installer package, the job discovers the single installed
+`3rd Party Mac Developer Installer` certificate and selects its SHA-1
+fingerprint explicitly; Xcode 26 does not resolve that legacy certificate name
+through its generic `Mac Installer Distribution` selector. Keep those roles
+separate: the App Store provisioning profile contains the app distribution
+certificate, not the installer certificate.
 
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
