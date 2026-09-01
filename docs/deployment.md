@@ -434,6 +434,11 @@ profile, because CircleCI rejects profiles for that certificate type. Do not
 place any of those binaries in the repository, a context variable, a cache, a
 workspace, or an artifact.
 
+The export options select `Apple Distribution` for the app signature and
+`Mac Installer Distribution` for the installer package explicitly. Keep those
+roles separate: the App Store provisioning profile contains the app
+distribution certificate, not the installer certificate.
+
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
 | Variable | Value |
