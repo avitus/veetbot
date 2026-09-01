@@ -104,7 +104,7 @@ nomination. All fourteen `gate.persona.*` checks, the full local repository
 check, the Apple package lane, and a fresh PostgreSQL lane pass locally.
 Remaining:
 
-- [ ] Run hosted CI and the CodeRabbit review loop on the dev to main pull request
+- [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
 
 ## Authorized
 

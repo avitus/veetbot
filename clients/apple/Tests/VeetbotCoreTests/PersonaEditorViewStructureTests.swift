@@ -29,6 +29,8 @@ import Testing
             "persona.add-entry",
             "persona.nomination.affirm",
             "persona.nomination.decline",
+            "persona.conflict.resolve",
+            "persona.conflict.use-server",
         ] {
             #expect(
                 source.contains(".accessibilityIdentifier(\"\(identifier)\")"),

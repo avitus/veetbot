@@ -39,6 +39,13 @@ public final class PersonaViewModel: ObservableObject {
     /// the drafts. The drafts are retained so the owner can merge by hand
     /// after a reload; nothing is overwritten and nothing is thrown away.
     @Published public private(set) var conflictDetected = false
+    /// The server document that won a version race. It remains separate from
+    /// the owner's local drafts so the two versions can be compared and
+    /// merged without silently replacing either one.
+    @Published public private(set) var conflictHead: PersonaView?
+    @Published private var mergeRequired = false
+
+    public var hasPendingMerge: Bool { mergeRequired }
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
 
@@ -61,6 +68,9 @@ public final class PersonaViewModel: ObservableObject {
         do {
             let document = try await client.getPersona()
             apply(document)
+            conflictHead = nil
+            mergeRequired = false
+            conflictDetected = false
             nominations = try await client.listPersonaNominations(state: "nominated").items
             unavailable = false
         } catch let HTTPTransportError.api(error) where error.code == .notFound {
@@ -73,6 +83,10 @@ public final class PersonaViewModel: ObservableObject {
     }
 
     public func save() async {
+        guard !hasPendingMerge else {
+            errorMessage = "Resolve the pending persona merge before saving."
+            return
+        }
         guard let client = await makeAPIClient() else {
             unavailable = true
             return
@@ -92,8 +106,11 @@ public final class PersonaViewModel: ObservableObject {
                 }
             )
             apply(document)
+            conflictHead = nil
+            mergeRequired = false
             conflictDetected = false
         } catch let HTTPTransportError.api(error) where error.code == .conflict {
+            mergeRequired = true
             conflictDetected = true
             errorMessage = error.message
         } catch {
@@ -101,16 +118,46 @@ public final class PersonaViewModel: ObservableObject {
         }
     }
 
-    /// Re-read the server head after a conflict; the drafts stay as typed.
+    /// Re-read the server head after a conflict. The winning document is kept
+    /// separately for comparison, while the local drafts and their original
+    /// version remain untouched until the owner resolves the merge.
     public func reloadAfterConflict() async {
         guard let client = await makeAPIClient() else { return }
         do {
             let document = try await client.getPersona()
-            version = document.version
+            conflictHead = document
             conflictDetected = false
+            errorMessage = nil
         } catch {
             errorMessage = Self.describe(error)
         }
+    }
+
+    /// Confirm that the visible local drafts include the owner's intended
+    /// merge. Only this explicit action advances their write precondition to
+    /// the server head that was shown alongside them.
+    public func resolveConflictKeepingDrafts() {
+        guard let conflictHead else { return }
+        version = conflictHead.version
+        self.conflictHead = nil
+        mergeRequired = false
+        conflictDetected = false
+        errorMessage = nil
+    }
+
+    /// Discard the local side of a conflict and adopt the displayed server
+    /// document exactly.
+    public func useConflictHead() {
+        guard let conflictHead else { return }
+        apply(conflictHead)
+        self.conflictHead = nil
+        mergeRequired = false
+        conflictDetected = false
+        errorMessage = nil
+    }
+
+    public func dismissConflictAlert() {
+        conflictDetected = false
     }
 
     public func affirm(_ nominationID: UUID) async {

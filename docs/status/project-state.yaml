@@ -652,7 +652,7 @@ milestones:
       - per-agent or per-surface persona variants
       - any change to AgentSpec.instructions
     open_items:
-      - Run hosted CI and the CodeRabbit review loop on the dev to main pull request
+      - Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
     evidence:
       - check: local Milestone 22 behavior and contracts
         outcome: passed_locally

@@ -75,24 +75,51 @@ import Testing
     }
 
     @Test
-    func testAConflictKeepsTheDraftsAndFlagsReloadAndMerge() async throws {
+    func testAConflictRetainsBothHeadsAndBlocksSaveUntilOwnerResolves() async throws {
+        let lock = NSLock()
+        var personaReads = 0
+        var personaWrites = 0
+        var personaWriteBodies: [Data] = []
         let model = try makeModel { request in
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/v1/persona"):
+                let read = lock.withLock {
+                    personaReads += 1
+                    return personaReads
+                }
                 return try self.response(
-                    for: request, statusCode: 200, body: self.personaJSON(version: 1)
+                    for: request,
+                    statusCode: 200,
+                    body: read == 1
+                        ? self.personaJSON(version: 1)
+                        : self.personaJSON(
+                            version: 2,
+                            entries: """
+                                {"text":"User values collaborative answers.","source":"user_edit","source_belief_id":null,"sensitivity":"internal"}
+                                """
+                        )
                 )
             case ("GET", "/v1/persona/nominations"):
                 return try self.response(
                     for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#
                 )
             case ("PUT", "/v1/persona"):
+                let write = lock.withLock {
+                    personaWrites += 1
+                    personaWriteBodies.append(request.bodyData ?? Data())
+                    return personaWrites
+                }
+                if write == 1 {
+                    return try self.response(
+                        for: request,
+                        statusCode: 409,
+                        body: """
+                            {"error":{"code":"conflict","message":"persona expected version 1 but head is 2","details":{},"request_id":"r-1"}}
+                            """
+                    )
+                }
                 return try self.response(
-                    for: request,
-                    statusCode: 409,
-                    body: """
-                        {"error":{"code":"conflict","message":"persona expected version 1 but head is 2","details":{},"request_id":"r-1"}}
-                        """
+                    for: request, statusCode: 200, body: self.personaJSON(version: 3)
                 )
             default:
                 return try self.response(for: request, statusCode: 404, body: "{}")
@@ -104,8 +131,31 @@ import Testing
         await model.save()
 
         #expect(model.conflictDetected == true)
+        #expect(model.hasPendingMerge == true)
         #expect(model.drafts[0].text == "User values direct answers, edited.")
         #expect(model.version == 1)
+
+        await model.reloadAfterConflict()
+        await model.save()
+
+        #expect(model.drafts[0].text == "User values direct answers, edited.")
+        #expect(model.version == 1)
+        #expect(model.conflictHead?.version == 2)
+        #expect(model.conflictHead?.entries.first?.text == "User values collaborative answers.")
+        #expect(model.hasPendingMerge == true)
+        #expect(lock.withLock { personaWrites } == 1)
+
+        model.resolveConflictKeepingDrafts()
+        #expect(model.version == 2)
+        #expect(model.conflictHead == nil)
+
+        await model.save()
+
+        #expect(model.version == 3)
+        #expect(lock.withLock { personaWrites } == 2)
+        let retryBody = try #require(lock.withLock { personaWriteBodies.last })
+        let retry = try JSONSerialization.jsonObject(with: retryBody) as? [String: Any]
+        #expect(retry?["expected_version"] as? Int == 2)
     }
 
     @Test

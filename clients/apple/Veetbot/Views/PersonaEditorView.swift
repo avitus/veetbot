@@ -27,7 +27,9 @@ public struct PersonaEditorView: View {
                         Button("Save") {
                             Task { await model.save() }
                         }
-                        .disabled(model.isSaving || model.unavailable)
+                        .disabled(
+                            model.isSaving || model.unavailable || model.hasPendingMerge
+                        )
                         .accessibilityIdentifier("persona.save")
                     }
                 }
@@ -48,16 +50,19 @@ public struct PersonaEditorView: View {
             "The persona changed while you were editing",
             isPresented: Binding(
                 get: { model.conflictDetected },
-                set: { if !$0 { Task { await model.reloadAfterConflict() } } }
+                set: { if !$0 { model.dismissConflictAlert() } }
             )
         ) {
-            Button("Reload version and keep my text") {
+            Button("Compare with server") {
                 Task { await model.reloadAfterConflict() }
+            }
+            Button("Cancel", role: .cancel) {
+                model.dismissConflictAlert()
             }
         } message: {
             Text(
-                "Your entries are kept as typed. Reloading picks up the new "
-                    + "version so the next save applies cleanly."
+                "Your entries are still local. Load the server version to "
+                    + "compare both sides before saving again."
             )
         }
     }
@@ -107,6 +112,44 @@ public struct PersonaEditorView: View {
                             + "every request. Entries marked with a seal were "
                             + "affirmed from the agent's memory."
                     )
+                }
+
+                if model.hasPendingMerge, let conflictHead = model.conflictHead {
+                    Section {
+                        ForEach(
+                            Array(conflictHead.entries.enumerated()),
+                            id: \.offset
+                        ) { _, entry in
+                            Text(entry.text)
+                        }
+                        Text(
+                            "Compare these server entries with your editable "
+                                + "drafts above. Save stays disabled until you "
+                                + "choose how to resolve the merge."
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        Button("I've merged the server changes") {
+                            model.resolveConflictKeepingDrafts()
+                        }
+                        .accessibilityIdentifier("persona.conflict.resolve")
+                        Button("Use the server version") {
+                            model.useConflictHead()
+                        }
+                        .accessibilityIdentifier("persona.conflict.use-server")
+                    } header: {
+                        Text("Server version \(conflictHead.version)")
+                    }
+                } else if model.hasPendingMerge {
+                    Section("Merge required") {
+                        Text(
+                            "Load the current server version before saving "
+                                + "these local drafts."
+                        )
+                        Button("Load server version") {
+                            Task { await model.reloadAfterConflict() }
+                        }
+                    }
                 }
 
                 if !model.nominations.isEmpty {
