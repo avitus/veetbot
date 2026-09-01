@@ -326,6 +326,8 @@ schedule.occurrence.{missed,              scheduling materializer, same         
   skipped_overlap,                        transaction as the occurrence
   authorization_failed,
   configuration_failed}
+device_invocation.created                 device-invocation write path, same     device_invocation
+                                          transaction as the device_invocations row
 ```
 
 The single terminal writer in `runtime/executor.py` is the only code that

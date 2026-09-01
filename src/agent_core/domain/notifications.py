@@ -26,6 +26,11 @@ class NotificationKind(StrEnum):
     DEVICE_INVOCATION = "device_invocation"
 
 
+DEVICE_CONFINED_KINDS: frozenset[NotificationKind] = frozenset(
+    {NotificationKind.TEST, NotificationKind.DEVICE_INVOCATION}
+)
+
+
 TEST_NOTIFICATION_DEDUPE_PREFIX = "device.test:"
 
 
@@ -165,18 +170,6 @@ class NotificationPayload(BaseModel):
             raise ValueError("test notification cannot carry a tool name")
         return self
 
-    def target_device_id(self) -> str | None:
-        """Device identifier this notification is confined to, if any (TEST and DEVICE_INVOCATION).
-
-        TEST narrows via its dedupe key (see ``test_notification_target_device_id``);
-        this accessor covers the kinds — DEVICE_INVOCATION today — whose device
-        confinement rides the payload itself.
-        """
-
-        if self.kind is NotificationKind.DEVICE_INVOCATION:
-            return None if self.device_id is None else str(self.device_id)
-        return None
-
 
 class Notification(BaseModel):
     """One durable notification-outbox record."""
@@ -242,6 +235,27 @@ class Notification(BaseModel):
         if self.settled_at is not None and self.settled_at < self.created_at:
             raise ValueError("notification settled_at precedes creation")
         return self
+
+    def target_device_id(self) -> UUID | None:
+        """The single device this notification is confined to, if any.
+
+        Total across the closed ``NotificationKind`` vocabulary — defined for
+        every kind, not just the two that narrow — so a caller can never read
+        "broadcast to everyone" from a kind that actually means "confined,
+        but unresolvable right now": TEST narrows via its dedupe key (see
+        ``test_notification_target_device_id``, which fails closed to
+        ``None`` on a malformed key); DEVICE_INVOCATION narrows via its own
+        payload identifier; every other kind returns ``None`` because it
+        never confines to one device. Callers still gate narrowing on
+        ``kind in DEVICE_CONFINED_KINDS`` — ``None`` alone cannot distinguish
+        "broadcast" from "confined to nobody resolvable."
+        """
+
+        if self.kind is NotificationKind.TEST:
+            return test_notification_target_device_id(self.dedupe_key)
+        if self.kind is NotificationKind.DEVICE_INVOCATION:
+            return self.payload.device_id
+        return None
 
 
 class NewNotification(BaseModel):

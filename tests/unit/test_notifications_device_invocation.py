@@ -9,17 +9,26 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.push import FakePushTransport
 from agent_core.application.notification_dispatcher import NotificationDispatcher
 from agent_core.application.notification_producer import NotificationProducer
-from agent_core.domain.devices import DeviceInvocation, DeviceInvocationStatus, PushProvider
+from agent_core.domain.devices import (
+    Device,
+    DeviceInvocation,
+    DeviceInvocationStatus,
+    DeviceKind,
+    DeviceStatus,
+    PushProvider,
+)
 from agent_core.domain.notifications import (
     NOTIFICATION_TITLES,
+    Notification,
     NotificationKind,
     NotificationPayload,
+    NotificationSeverity,
     NotificationStatus,
     device_invocation_key,
 )
@@ -64,7 +73,8 @@ def _payload(**updates: object) -> dict[str, object]:
 def test_device_invocation_payload_accepts_exactly_its_identifier_set() -> None:
     payload = NotificationPayload.model_validate(_payload())
 
-    assert payload.target_device_id() == str(DEVICE_ID)
+    assert payload.device_id == DEVICE_ID
+    assert payload.invocation_id == INVOCATION_ID
     dumped = payload.model_dump(mode="json", exclude_none=True)
     assert set(dumped) == {
         "version",
@@ -125,6 +135,68 @@ async def test_producer_enqueues_once_and_dedupes_on_replay() -> None:
     assert row.payload.invocation_id == INVOCATION_ID
     assert row.payload.device_id == DEVICE_ID
     assert row.status is NotificationStatus.PENDING
+    assert row.target_device_id() == DEVICE_ID
+
+
+def test_notification_target_device_id_is_total_across_the_vocabulary() -> None:
+    test_notification = Notification(
+        id=NOTIFICATION_ID,
+        tenant_id="tenant-a",
+        principal_id="principal-a",
+        kind=NotificationKind.TEST,
+        dedupe_key=f"device.test:{DEVICE_ID}:key",
+        payload=NotificationPayload(
+            kind=NotificationKind.TEST,
+            title=NOTIFICATION_TITLES[NotificationKind.TEST],
+            notification_id=NOTIFICATION_ID,
+        ),
+        priority=5,
+        status=NotificationStatus.PENDING,
+        attempts=0,
+        next_attempt_at=NOW,
+        created_at=NOW,
+    )
+    assert test_notification.target_device_id() == DEVICE_ID
+
+    malformed = test_notification.model_copy(update={"dedupe_key": "device.test:not-a-uuid:key"})
+    assert malformed.target_device_id() is None
+
+    device_invocation_notification = Notification(
+        id=NOTIFICATION_ID,
+        tenant_id="tenant-a",
+        principal_id="principal-a",
+        kind=NotificationKind.DEVICE_INVOCATION,
+        dedupe_key=device_invocation_key(INVOCATION_ID),
+        payload=NotificationPayload.model_validate(_payload()),
+        priority=10,
+        status=NotificationStatus.PENDING,
+        attempts=0,
+        next_attempt_at=NOW,
+        created_at=NOW,
+    )
+    assert device_invocation_notification.target_device_id() == DEVICE_ID
+
+    broadcast = Notification(
+        id=NOTIFICATION_ID,
+        tenant_id="tenant-a",
+        principal_id="principal-a",
+        kind=NotificationKind.OPS_ALERT,
+        dedupe_key="ops.tenant-a.disk_free.1",
+        payload=NotificationPayload(
+            kind=NotificationKind.OPS_ALERT,
+            title=NOTIFICATION_TITLES[NotificationKind.OPS_ALERT],
+            notification_id=NOTIFICATION_ID,
+            signal="disk_free",
+            severity=NotificationSeverity.CRITICAL,
+            reason_code="ops.disk_free",
+        ),
+        priority=5,
+        status=NotificationStatus.PENDING,
+        attempts=0,
+        next_attempt_at=NOW,
+        created_at=NOW,
+    )
+    assert broadcast.target_device_id() is None
 
 
 async def test_producer_requires_the_invocation_own_device() -> None:
@@ -147,6 +219,56 @@ async def test_producer_requires_a_pending_invocation() -> None:
     async with factory() as uow:
         with pytest.raises(ValueError, match="pending"):
             await producer.for_device_invocation(uow, invocation=resolved, device=target)
+
+
+async def test_claim_does_not_mistake_an_unrelated_devices_provider_for_the_named_target() -> None:
+    """The claim layer must narrow DEVICE_INVOCATION exactly as TEST already does.
+
+    The named target only speaks APNS; an unrelated device on the same
+    tenant/principal only speaks Telegram. A claim pass that only serves
+    Telegram must not be misled by the unrelated device's eligibility into
+    claiming a notification confined to the (unreachable-this-pass) APNS
+    device — it must stay unclaimed (PENDING), exactly as an equivalently
+    confined TEST notification would.
+    """
+
+    clock, factory = await memory_uow_factory()
+    producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
+    invocation = _invocation()
+    named = device(device_id=DEVICE_ID, client_device_id="target-device")
+    unrelated = Device(
+        id=OTHER_DEVICE_ID,
+        tenant_id="tenant-a",
+        principal_id="principal-a",
+        client_device_id="unrelated-surface",
+        name="Unrelated surface",
+        kind=DeviceKind.SURFACE,
+        platform="telegram",
+        app_bundle_id=None,
+        push_provider=PushProvider.TELEGRAM,
+        push_token=SecretStr("telegram-chat-ref"),  # noqa: S106
+        push_environment=None,
+        muted_kinds=frozenset(),
+        status=DeviceStatus.ACTIVE,
+        last_seen_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    async with factory() as uow:
+        await uow.devices.upsert(named, principal())
+        await uow.devices.upsert(unrelated, principal())
+        assert await producer.for_device_invocation(uow, invocation=invocation, device=named)
+
+        claimed = await uow.notification_outbox.claim_due(
+            NOW, 10, "notify-a", 30, frozenset({PushProvider.TELEGRAM})
+        )
+        assert claimed == []
+        [row] = await uow.notification_outbox.list(principal(), limit=10)
+
+    assert row.status is NotificationStatus.PENDING
+    assert row.attempts == 0
+    assert row.claimed_by is None
 
 
 def _dispatcher(factory, clock, ids, transport) -> NotificationDispatcher:  # type: ignore[no-untyped-def]
