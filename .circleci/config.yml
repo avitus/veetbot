@@ -121,6 +121,7 @@ jobs:
       - checkout
       - run:
           name: Archive and upload the macOS client to TestFlight
+          no_output_timeout: 30m
           command: |
             set -euo pipefail
             : "${APP_STORE_CONNECT_API_KEY_BASE64:?set APP_STORE_CONNECT_API_KEY_BASE64 in the veetbot-apple-testflight context}"
