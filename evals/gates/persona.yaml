@@ -1,0 +1,85 @@
+# Canonical gate registry entries for the persona area.
+- id: gate.persona.prefix_row_stable
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**The persona row is pinned and stable.** A scripted fifty-turn session with a mid-session persona edit yields exactly two distinct `prefix_sha256` values and one `context.epoch.rotated` event with reason `persona_changed`; within each epoch the hash is constant, and an empty persona renders no bytes, reproducing the pre-Milestone-22 prefix exactly."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.budget_capped
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**The persona class is capped.** The row holds at most thirty entries and 2,000 tokens and never yields; an over-cap persona fails session open with the class named, and the 17,000-token prefix ceiling holds."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.trust_labeled
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Trust and provenance are labeled.** Persona content renders in Region A at `TRUSTED_CONFIGURATION` with per-entry provenance, and nominated-but-unaffirmed text never renders in the row."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.revision_pinned
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**The revision is pinned per plan.** A session reads one persona revision for the life of an epoch; a concurrent edit changes no open plan's prefix, and two builds of one plan are byte-identical."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.secret_refused
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Secrets are refused at every write surface.** A credential-shaped value is refused before persistence at the CLI, the HTTP routes, and affirmation alike."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.injection_scanned
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Persona text is injection-scanned at load.** A poisoned entry renders as a `[BLOCKED]` placeholder and never as instruction text."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.promotion_requires_affirmation
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Only a human writes the persona.** No pipeline stage, tool call, or model output writes persona text; the only write paths are an owner edit and an explicit affirmation of a named nomination, and each write is recorded as an event."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.nomination_eligibility
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Nomination eligibility is closed.** Nominations arise only from the governed consolidation service, only over active, direct, durable, confidence- and corroboration-qualified, sensitivity-bounded beliefs, and never from a never-auto-store category or a statement failing the hazard scans."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.decline_durable
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Decline is durable.** A declined nomination's belief is never re-nominated, including after a full re-derivation."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.affirmed_linked
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Affirmation links and never consumes.** Affirmation marks the source belief promoted with bidirectional links, never supersedes or deletes it, and removing the persona entry clears the marker."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.snapshot_dedup
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**No double occupancy.** A promoted belief never occupies a session-open snapshot slot while its persona entry stands, and regains eligibility when the entry is removed; in-turn recall is unfiltered."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.routes_exact_scope
+  milestone: 22
+  kind: structural
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Routes carry exact scopes and the memory API stays read-only.** Every persona route requires exactly `persona.read` or `persona.write` and mounts only under `AGENT_PERSONA_API_ENABLED`; a walk of both routers shows `/v1/memories` still serves only GETs under `memory.read`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.revision_precondition
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Writes are revision-guarded.** A persona write without a matching `expected_version` is rejected with the `conflict` code and no partial write, and a corrected retry succeeds."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.persona.principal_scoped
+  milestone: 22
+  kind: case
+  spec: docs/plan/persona-surface.md#hard-gates
+  statement: "**Persona data is principal-scoped.** Documents and nominations carry tenant and principal as repository predicates in both stores under one contract, and a cross-principal read is an indistinguishable 404."
+  check: tests/gates/pending.py::pending_gate

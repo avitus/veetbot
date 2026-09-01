@@ -2432,7 +2432,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - three hundred and fifty-one gate declarations, comprising three hundred and forty-two across twenty-four detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and forty-eight registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 18; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and forty-eight registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - four hundred gate declarations, comprising three hundred and ninety-one across twenty-six detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and ninety-seven registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 22; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and ninety-seven registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -2892,7 +2892,7 @@ Memory also gets a human surface and injection hardening (v2.2):
 - Injection as a frozen snapshot once per session (the prompt-stability invariant, Section 10.1); mid-session writes persist but do not mutate the cached prefix.
 - Prompt-injection scanning of memory at load, replacing poisoned entries with \[BLOCKED\] placeholders.
 - External semantic memory as a provider behind the memory port (for example Honcho); the builtin store plus at most one external provider.
-- An optional persona/identity surface layered over AgentSpec.instructions. Recorded as ADR-0014.
+- An optional persona/identity surface layered over AgentSpec.instructions. Recorded as ADR-0014. Entered as Milestone 22 on 2026-09-01 (ADR-0079, [persona-surface.md](persona-surface.md)), layered at assembly time rather than by editing the spec.
 
 The write path - how episodes become durable, curated beliefs - is specified in detail in [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md) and ADR-0018. The read path - query formation, hybrid recall, ranking, budgeted injection, and retrieval traces - is specified in [memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md) and ADR-0019.
 
@@ -3658,6 +3658,63 @@ The milestone does not include reinforcement learning, fine-tuning, embeddings,
 service, global cross-principal consolidation, new retrieval arms, or a public
 memory-write API.
 
+### Milestone 22: Persona surface and curated belief promotion
+
+The owner authorized this milestone on 2026-09-01, choosing curated promotion
+over automatic promotion and the full edit stack. It is a parallel workstream
+and does not advance the verified sequential ceiling past unfinished
+Milestones 13 through 15. The detailed design is
+[persona-surface.md](persona-surface.md) and ADR-0079, which also records the
+adjustment of roadmap item B6's entry condition for this item; the design
+declares fourteen gates before implementation begins.
+
+Implement:
+
+- A persisted, versioned, principal-scoped persona document: an ordered list
+  of entries, each carrying provenance — owner-typed or affirmed from a named
+  belief — and sensitivity, with `expected_version` optimistic concurrency
+  and version 0 as the real, empty, readable starting state.
+- A new Region A prefix row directly after the agent instructions, rendered
+  un-enveloped at `TRUSTED_CONFIGURATION`, capped at thirty entries and
+  2,000 tokens, never yielding, with the prefix ceiling moving from 15,000
+  to 17,000; an empty persona renders no bytes at all.
+- Revision pinning per context plan and one epoch rotation with reason
+  `persona_changed` at the next plan after an edit — the lifecycle an
+  agent-instruction edit already has.
+- Governed persona nomination inside consolidation over active, direct,
+  durable, corroborated, sensitivity-bounded beliefs, with a bounded
+  outstanding set; explicit owner affirmation appending the statement at
+  `USER` authority with bidirectional belief linkage, durable decline, and
+  withdrawal when a source belief dies before review.
+- Snapshot de-duplication: a promoted belief leaves the session-open
+  snapshot while its persona entry stands and returns when it is removed,
+  with the deterministic benchmark baseline re-recorded in the implementing
+  change under ADR-0069 decision 2.
+- Secret-material refusal at every write surface, injection scanning at
+  load with `[BLOCKED]` replacement, and sensitivity filtering at plan
+  creation.
+- Six `/v1/persona` routes behind `AGENT_PERSONA_API_ENABLED` with the exact
+  scopes `persona.read` and `persona.write`, the `agent persona` CLI group,
+  and a native editor with nomination review on the existing Swift lanes.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- A formed belief reaches the persona only through an owner edit or an
+  explicit affirmation of a named nomination; no pipeline stage, tool call,
+  or model output writes persona text.
+- A mid-session persona edit produces exactly one epoch rotation with reason
+  `persona_changed`, and a session with an empty persona reproduces the
+  pre-Milestone-22 prefix byte-for-byte.
+- Nothing under `/v1/memories` gains a verb; the Milestone 17 read-only walk
+  passes with the persona router mounted.
+- Credential-shaped content is refused at every persona write surface, and a
+  poisoned entry renders as `[BLOCKED]`, never as instruction text.
+
+The milestone does not include automatic promotion at any threshold, belief
+edit, retraction, or deletion over HTTP, per-agent or per-surface persona
+variants, or any change to `AgentSpec.instructions`.
+
 ### Native schedule browser
 
 The owner authorized the native schedule browser on 2026-08-29 (ADR-0075) as
@@ -3709,7 +3766,7 @@ owner's current ranking, not a schedule.
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
-| B6 | Memory residue after Milestone 21: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
+| B6 | Memory residue after Milestone 22: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation. The persona surface entered as Milestone 22 on 2026-09-01 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |

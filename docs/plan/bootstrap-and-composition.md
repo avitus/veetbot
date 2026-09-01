@@ -311,7 +311,7 @@ Milestone 19 reuses the schedule pair: the composition root registers
 work that no materializer will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
-`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 15,000-token
+`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 17,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
 cap. Not one of them differs between two deployments of the same revision.
 They differ between *revisions*, which is another way of saying they belong in
@@ -381,7 +381,7 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, snapshot caps, the 15,000 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 17,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
   memory/profiles.yaml     RRF k, decay and usage knobs
@@ -638,7 +638,7 @@ decisions that can be made from configuration alone, before anything is
 built. Authentication configured or fail. Production refuses the development
 sandbox. Production refuses any policy profile, principal, or tenant name
 beginning with `eval.` or `tenant_eval`. The configured context plan's prefix
-classes sum to at most 15,000 tokens. Nothing has been constructed yet, so
+classes sum to at most 17,000 tokens. Nothing has been constructed yet, so
 nothing has to be torn down, which is the entire reason these checks are
 first rather than convenient.
 
@@ -723,7 +723,7 @@ the probe is built from a `Composition` that has no provider client on it.
 | Production refuses the dev sandbox | ADR-0008 | 1 |
 | Production cannot load an eval identity | eval spec | 1 and 4 |
 | Readiness must not call a provider | plan §16 | 5 |
-| Prefix classes fit the 15,000 ceiling | context spec | 1 and per session |
+| Prefix classes fit the 17,000 ceiling | context spec | 1 and per session |
 | Role-conditional composition | runtime spec | 5 |
 | Migrations upgrade cleanly | plan §25 | not startup |
 | A port with no contract module fails | eval spec | build gate |

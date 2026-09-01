@@ -510,6 +510,30 @@ document's error envelope and its closed code vocabulary unchanged, and the
 cross-principal not-found rule extends to the ceiling: a belief above it is
 indistinguishable from one that does not exist.
 
+### The Milestone 22 persona extension
+
+[persona-surface.md](persona-surface.md) adds six routes and one exact scope
+pair, `persona.read` and `persona.write`, mounted only when
+`AGENT_PERSONA_API_ENABLED` is set. The persona document and its nominations
+are a distinct resource: nothing under `/v1/memories` is added or made
+non-GET, and Milestone 17's read-only walk still holds.
+
+```text
+GET    /v1/persona                                   persona.read
+PUT    /v1/persona                                   persona.write
+GET    /v1/persona/history                           persona.read
+GET    /v1/persona/nominations                       persona.read
+POST   /v1/persona/nominations/{nomination_id}/affirm    persona.write
+POST   /v1/persona/nominations/{nomination_id}/decline   persona.write
+```
+
+The persona design owns the request and view schemas, the `expected_version`
+precondition on every write — a stale version is this document's existing
+`conflict` code, with no partial write — the content-refusal rules, and
+fourteen gates. The routes use this document's error envelope and closed code
+vocabulary unchanged; the scope vocabulary block gains the pair when the
+implementation lands, as the Milestone 14 scopes did.
+
 ### Tenancy is a repository argument, never a filter applied afterwards
 
 Every repository method that reads a tenant-scoped resource takes the

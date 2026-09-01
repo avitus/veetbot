@@ -78,8 +78,8 @@ is a property of the item's **type**, decided at design time, never at run time.
 
 **Region A — the frozen prefix.** Built once per session and byte-stable for the
 life of the prefix epoch. It carries platform policy, agent instructions, the
-filtered tool definitions, the session-open memory snapshot, and the framing text
-that tells the model how to treat everything downstream.
+persona row, the filtered tool definitions, the session-open memory snapshot, and
+the framing text that tells the model how to treat everything downstream.
 
 **Region B — the turn body.** Rebuilt on every request. It carries the compacted
 history summary, recent conversation items, the working-state block, in-turn recall
@@ -100,20 +100,25 @@ Assembly order is fixed and total:
 | 1 | A | Platform policy and hardline rules | `PLATFORM` |
 | 2 | A | Framing: how to treat memory, tool output, and untrusted spans | `PLATFORM` |
 | 3 | A | Agent instructions (pinned `AgentSpec` version) | `TRUSTED_CONFIGURATION` |
-| 4 | A | Tool definitions (filtered, canonically serialized) | `TRUSTED_CONFIGURATION` |
-| 5 | A | Skill catalog (pinned at session open) | per entry |
-| 6 | A | Session-open memory snapshot | `MEMORY` |
-| 7 | B | Compacted history summary, if any | `PLATFORM` (see below) |
-| 8 | B | Retained conversation items, oldest to newest | per item |
-| 9 | B | Loaded skill bodies, in load order | per skill |
-| 10 | B | Working-state block | per entry |
-| 11 | B | In-turn recall and correction lines | `MEMORY` |
-| 12 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
-| 13 | B | The current user message | `USER` |
+| 4 | A | Persona row (pinned persona revision) | `TRUSTED_CONFIGURATION` |
+| 5 | A | Tool definitions (filtered, canonically serialized) | `TRUSTED_CONFIGURATION` |
+| 6 | A | Skill catalog (pinned at session open) | per entry |
+| 7 | A | Session-open memory snapshot | `MEMORY` |
+| 8 | B | Compacted history summary, if any | `PLATFORM` (see below) |
+| 9 | B | Retained conversation items, oldest to newest | per item |
+| 10 | B | Loaded skill bodies, in load order | per skill |
+| 11 | B | Working-state block | per entry |
+| 12 | B | In-turn recall and correction lines | `MEMORY` |
+| 13 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
+| 14 | B | The current user message | `USER` |
 
-Rows 5 and 9 are added by [skills.md](skills.md), which owns their content,
-their caps, and their trust derivation. They are listed here because assembly
-order is fixed and total, and a table that omits two of its rows is neither.
+Rows 6 and 10 are added by [skills.md](skills.md), which owns their content,
+their caps, and their trust derivation. Row 4 is added at Milestone 22 by
+[persona-surface.md](persona-surface.md), which owns its content, its cap, its
+promotion rules, and the row's rotation behavior; an empty persona renders no
+bytes at all, so a session without one reproduces the three-row instruction
+prefix exactly. They are listed here because assembly
+order is fixed and total, and a table that omits three of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -182,6 +187,20 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
+### The persona row
+
+Milestone 22 adds one Region A row between the agent instructions and the tool
+definitions: the persona row, rendered from a persisted, versioned,
+principal-scoped document at `TRUSTED_CONFIGURATION`. A session pins one
+persona revision when its plan is created; a mid-session edit persists
+immediately and takes effect at the next context plan as a single epoch
+rotation with reason `persona_changed` — exactly the behavior an
+agent-instruction edit already has. An empty persona renders no bytes, so
+every session without one keeps today's prefix byte-for-byte.
+[persona-surface.md](persona-surface.md) owns the document's data model, the
+promotion rules that feed it, the cap, and the gates that watch all of it;
+this document owns only the row's place in the assembly order and its region.
+
 ## The budget allocator
 
 Section 11.3 specifies `ContextBudget` as seven integers and requires an allocator
@@ -212,6 +231,7 @@ ceiling.
 | --- | --- | --- | --- | --- |
 | A | Platform policy | 2,000 | No | Never — fails at plan time |
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
+| A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 6,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
@@ -250,7 +270,9 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 15,000 tokens. If a plan exceeds it,
+The prefix classes sum to a hard ceiling of 17,000 tokens — 15,000 before
+Milestone 22's persona row, whose 2,000-token class raised the ceiling by
+exactly its own cap, the same move the skill classes made. If a plan exceeds it,
 **the session fails to open with a structured error naming the offending class**.
 It does not silently truncate the agent's instructions. A truncated system prompt
 is an agent that behaves subtly wrong forever, which is far worse than a session

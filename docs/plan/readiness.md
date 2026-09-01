@@ -558,7 +558,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4022-4099`
+Section 28 of the plan is not empty — `engineering-plan.md:4079-4156`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -577,7 +577,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1376`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4097` requires a container-escape attempt as
+    `engineering-plan.md:4154` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -859,10 +859,13 @@ Several items remain partial.
 
 The remaining partials are: session history and artifacts as retrieval sources
 (named as sources, not designed as such); expiration (a policy with no sweep
-job in the corpus reviewed here); the external memory provider port (named, no
-contract); and the persona and identity surface over
-`AgentSpec.instructions` (no statement of how a formed belief reaches the
-instruction text, or whether it may).
+job in the corpus reviewed here); and the external memory provider port
+(named, no contract). The fourth partial this review originally recorded —
+the persona and identity surface over `AgentSpec.instructions`, with no
+statement of how a formed belief reaches the instruction text, or whether it
+may — is resolved by [persona-surface.md](persona-surface.md) and ADR-0079:
+a formed belief reaches the instruction text only through the owner's
+explicit affirmation of a governed nomination, and never otherwise.
 
 The human-editable surface gap identified by the readiness review is now
 closed through the CLI decision in ADR-0045. `agent memory list`, `get`, `edit`,
@@ -981,10 +984,10 @@ review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1761`, and the sibling join
 at `runtime-loop.md:1150` reads it. Restricted context is
-`context-engine.md:291`, where `runs.seed_event_sequence` is nullable
+`context-engine.md:313`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
-child-run recall class at `memory-retrieval-and-ranking.md:87`, which
+child-run recall class at `memory-retrieval-and-ranking.md:90`, which
 gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:979`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
@@ -998,7 +1001,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:636` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:4006` and `engineering-plan.md:3033` and picked
+`engineering-plan.md:4063` and `engineering-plan.md:3033` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1401,14 +1404,44 @@ The readiness verdict is **Authorized**: ADR-0077, twenty-four new
 sequence, explicit migration and erasure rules, and a comparative corpus
 contract specify the whole workstream before production-code changes begin.
 Reinforcement learning, fine-tuning, semantic retrieval, `pgvector`, external
-memory providers, temporal graphs, persona editing, global consolidation, and a
-public write API remain deferred.
+memory providers, temporal graphs, global consolidation, and a
+public write API remain deferred; persona editing has since entered as
+Milestone 22 (ADR-0079).
+
+## Milestone 22: the persona surface, authorized and specified
+
+On 2026-09-01 the owner authorized Milestone 22, the persona surface and
+curated belief promotion, as a seventh parallel workstream. The feature is
+ADR-0014 decision 5's deferred persona/identity surface — the one memory
+partial this review had left standing, because no document said how a formed
+belief reaches the instruction text, or whether it may.
+
+[persona-surface.md](persona-surface.md) answers it: a persisted, versioned,
+principal-scoped document of entries renders as a new Region A prefix row at
+trusted-configuration trust, directly after the agent instructions, capped
+and pinned per context plan, with an empty persona rendering no bytes at
+all; and the only path across the trust boundary is human — an owner edit,
+or the owner's explicit affirmation of a nomination the governed
+consolidation service raised from its strongest direct, durable,
+corroborated beliefs. Declines are durable, promotion links rather than
+consumes, and a promoted belief leaves the session-open snapshot while its
+entry stands. The write surfaces are the `agent persona` CLI, six
+`/v1/persona` routes behind a default-off flag with an exact scope pair, and
+a native editor; the memory read API gains no verb, and secret refusal and
+injection scanning guard the row's content on the way in and the way out.
+
+The readiness verdict is **Authorized**: ADR-0079, fourteen new
+`gate.persona.*` entries in an area of their own, the Milestone 22 census
+row, a five-step build sequence, and the entry-condition adjustment recorded
+in the ADR specify the workstream before production-code changes begin.
+Automatic promotion at any threshold, belief writes over HTTP, and per-agent
+persona variants remain excluded.
 
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4101-4259` for links to other documents returned
+`engineering-plan.md:4158-4316` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1629,7 +1662,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1482` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2584` against
-    `model-gateway.md:1795` and `milestone-map.md:1497`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1537`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1638,7 +1671,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4097` requires a test the harness's case set
+    `engineering-plan.md:4154` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

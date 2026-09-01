@@ -581,7 +581,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:839-841`). The gateway translates those hints into
+(`context-engine.md:861-863`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -619,14 +619,14 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:817-819` and the
+The cached-prefix ratio is defined in `context-engine.md:839-841` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
 `model.response.completed` event. The context engine's metric reads those.
 Below roughly 90 per cent on a session that should be stable, the invariant is
 leaking, and the diagnosis is a prefix diff, which is why `prefix_sha256` is
-recorded on `model.request.started` (`context-engine.md:133-141`). Two
+recorded on `model.request.started` (`context-engine.md:138-146`). Two
 consecutive requests in one session with different prefix hashes and no
 intervening epoch bump is the signature of the bug.
 
@@ -638,7 +638,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:225`
+native tool calling, how much output to reserve. `context-engine.md:245`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -697,7 +697,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:193's second half
+    default_output_reserve: int  # context-engine.md:212's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```
@@ -1105,7 +1105,7 @@ model_calls                          -- one row per attempt
                                      -- because the stability gate asserts
                                      -- exactly one distinct value per session
                                      -- and a NULL cannot participate
-                                     -- (`context-engine.md:133-141`)
+                                     -- (`context-engine.md:138-146`)
   input_tokens          INTEGER NOT NULL
   cached_input_tokens   INTEGER NOT NULL
   cache_write_tokens    INTEGER NOT NULL
@@ -1486,7 +1486,7 @@ Neither half is both readable and privileged.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:401-405` requires that a
+be answerable by a tool result; `context-engine.md:423-427` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
@@ -1528,8 +1528,8 @@ class ModelRequestStarted(BaseModel):
     model: str
     model_policy: str
     registry_version: str
-    prefix_sha256: str | None    # context-engine.md:127-135
-    prefix_epoch: int            # context-engine.md:163-177
+    prefix_sha256: str | None    # context-engine.md:138-146
+    prefix_epoch: int            # context-engine.md:168-182
     input_token_estimate: int    # the plan's estimate, pre-call
     cache_breakpoints_sent: int
     cache_breakpoints_dropped: int

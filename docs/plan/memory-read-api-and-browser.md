@@ -20,13 +20,13 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:460-470). That surface is right for an
+(memory-formation-and-consolidation.md:487-497). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
 The retrieval design already drew the line this milestone builds on. A recall
 trace explains one answer; browsing everything the agent believes is *a
-different surface* (memory-retrieval-and-ranking.md:659-660), and that surface
+different surface* (memory-retrieval-and-ranking.md:674-675), and that surface
 has never existed anywhere but the command line. Milestone 17 builds it: two
 GET routes, one exact scope, one default-off flag, and a browser in the Apple
 client.
@@ -64,7 +64,7 @@ find it here should find the reason here.
    not safe behind a route at any ceiling. That predicate must be added, and
    the trace store's contract suite must observe it, before a trace route is
    designed. Beyond the defect, a trace view owes the minimum-of-two-ceilings
-   rule (memory-retrieval-and-ranking.md:664-670), which is a second ceiling
+   rule (memory-retrieval-and-ranking.md:679-685), which is a second ceiling
    mechanism in a milestone whose whole ceiling story is one parameter.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
@@ -79,8 +79,12 @@ find it here should find the reason here.
 Milestone 16's residue list excludes "an HTTP memory surface"
 (memory-evaluation-and-lifecycle.md:66-73). This milestone takes the read half
 of that exclusion and no more. The semantic arm, the external provider, the
-persona surface, the entity graph, and belief merge remain excluded exactly as
-ADR-0069 left them.
+entity graph, and belief merge remain excluded exactly as ADR-0069 left them.
+The persona surface left that residue at Milestone 22 (ADR-0079,
+[persona-surface.md](persona-surface.md)); its routes are a distinct resource,
+and the write half of this milestone's exclusion — belief edit, retraction,
+and deletion over HTTP — stands unchanged, with hard gate 6 still walking the
+memory router to prove it.
 
 ## The routes
 
@@ -163,7 +167,7 @@ extends the existing cross-tenant-404 rule
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
-(memory-retrieval-and-ranking.md:664-670).
+(memory-retrieval-and-ranking.md:679-685).
 
 ### Errors
 
@@ -191,7 +195,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1503-1520) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1527-1544) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text

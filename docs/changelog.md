@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-01 — Milestone 22 specified: the persona surface
+
+- Authorized and specified Milestone 22, the persona surface and curated
+  belief promotion, as a seventh parallel workstream (ADR-0079,
+  [persona-surface.md](plan/persona-surface.md)). An owner-edited, versioned
+  persona document renders as a new trusted Region A prefix row directly
+  after the agent instructions, and a formed belief reaches that text only
+  through the owner's explicit affirmation of a governed nomination —
+  resolving the readiness review's last memory partial without weakening
+  "memory is data, never instructions". Fourteen `gate.persona.*` entries
+  open a new registry area; the census moves from 383 to 397 entries and the
+  prefix ceiling from 15,000 to 17,000 tokens. Implementation has not begun;
+  every Milestone 22 gate points at the pending check.
+
 ## 2026-08-29 — Model stream accepts ordinary `risk-...` URLs
 
 - Boundary-anchored the normalized stream's `sk-` provider-key detector so it

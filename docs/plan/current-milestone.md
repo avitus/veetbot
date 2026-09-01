@@ -36,7 +36,11 @@ title: Current Milestone
   [adaptive-memory-distillation.md](adaptive-memory-distillation.md) with
   twenty-four gates and is a sixth parallel workstream, adding integrated
   episodes, high-recall direct and hypothesis formation, and evidence-based
-  forgetting.
+  forgetting. Milestone 22 — the persona surface and curated belief
+  promotion — is specified by [persona-surface.md](persona-surface.md) with
+  fourteen gates and is a seventh parallel workstream, adding an owner-edited
+  trusted prefix row that a formed belief reaches only through explicit
+  owner affirmation.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -53,9 +57,13 @@ title: Current Milestone
   schedules, was authorized on 2026-08-27 as a fifth (ADR-0073), each without
   advancing the verified ceiling. Milestone 21, adaptive memory distillation,
   was authorized on 2026-08-31 as a sixth (ADR-0077) on the same terms.
+  Milestone 22, the persona surface and curated belief promotion, was
+  authorized on 2026-09-01 as a seventh (ADR-0079), again without advancing
+  the verified ceiling.
 - **Deferred:** New model-routing behavior and everything still listed in the
   engineering plan's roadmap subsection. Milestone 21 removes only adaptive
-  memory distillation from that residue; learned memory policies, semantic
+  memory distillation from that residue and Milestone 22 removes only the
+  persona surface; learned memory policies, semantic
   retrieval, external memory providers, and the remaining roadmap items stay
   unauthorized.
 - **Project status:** Milestones 0 through 12 are complete: all 247 cumulative
@@ -197,6 +205,10 @@ Milestone 21's
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and ADR-0077
 add twenty-four `gate.memory.*` entries for integrated episodes, high-recall
 formation, evidence-based forgetting, comparative evidence, and activation.
+Milestone 22's [persona-surface.md](persona-surface.md) and ADR-0079 landed
+with that milestone's authorization on 2026-09-01, adding fourteen
+`gate.persona.*` entries in a new area of their own for the trusted persona
+row, curated promotion, and the persona surfaces.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -245,6 +257,7 @@ substitute.
 - [Milestone 19 — conversational schedule creation](engineering-plan.md#milestone-19-conversational-schedule-creation)
 - [Milestone 20 — calendar recurrence and conversational schedules](engineering-plan.md#milestone-20-calendar-recurrence-and-conversational-schedules)
 - [Milestone 21 — adaptive memory distillation](engineering-plan.md#milestone-21-adaptive-memory-distillation)
+- [Milestone 22 — persona surface and curated belief promotion](engineering-plan.md#milestone-22-persona-surface-and-curated-belief-promotion)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -291,6 +304,8 @@ criteria and the same scheduling design.
 Milestone 21's contract is its twenty-four new `gate.memory.*` entries plus the
 plan's acceptance criteria and the
 [adaptive-memory-distillation design](adaptive-memory-distillation.md).
+Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
+plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 
 ## Completion rule
 
@@ -359,3 +374,11 @@ intended production tuple is published, all relevant local, PostgreSQL, and
 hosted lanes pass on the final head, and the final CodeRabbit review is clean.
 Because it is a parallel workstream, completion does not advance the verified
 gate ceiling past the sequential milestones.
+
+Milestone 22 completes when its fourteen gates and the cumulative registry
+pass, the deterministic benchmark baseline has been re-recorded by the change
+that implements snapshot de-duplication, the native Apple lanes pass because
+the persona editor is half of what the milestone delivers, all relevant
+local, PostgreSQL, and hosted lanes pass on the final head, and the final
+CodeRabbit review is clean. Because it is a parallel workstream, completion
+does not advance the verified gate ceiling past the sequential milestones.

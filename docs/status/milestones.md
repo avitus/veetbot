@@ -104,6 +104,11 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
+- **Milestone 22 — Persona surface and curated belief promotion** — fourteen
+  gates in a new `persona` area; a seventh parallel workstream. An
+  owner-edited persona document renders as a trusted Region A prefix row, and
+  a formed belief reaches it only through the owner's explicit affirmation of
+  a governed nomination.
 ## Deferred
 
 Nothing on the engineering plan's
@@ -113,7 +118,7 @@ for it. That roadmap holds, among its items: tenant activation of
 self-authored skills (B1), dynamic model routing and a second provider
 adapter (B2), Slack and email inbound surfaces (B3), email and webhook
 notification transports (B4), scheduling residue such as cron, interval
-multipliers, and dependency graphs (B5), the memory residue after Milestone 21 — the semantic arm,
+multipliers, and dependency graphs (B5), the memory residue after Milestone 22 — the semantic arm,
 `pgvector`, an external memory provider, and a learned memory policy (B6) — device-scoped tools and
 presence routing (B7), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
