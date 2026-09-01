@@ -401,6 +401,63 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    public func getPersona() async throws -> PersonaView {
+        try await transport.send(TransportRequest(method: .get, path: "/v1/persona"))
+    }
+
+    public func updatePersona(
+        expectedVersion: Int,
+        entries: [UpdatePersonaEntryBody]
+    ) async throws -> PersonaView {
+        try await transport.send(
+            TransportRequest(
+                method: .put,
+                path: "/v1/persona",
+                body: try JSONEncoder.server.encode(
+                    UpdatePersonaBody(expectedVersion: expectedVersion, entries: entries)
+                )
+            )
+        )
+    }
+
+    public func personaHistory(limit: Int = 20) async throws -> Page<PersonaView> {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/persona/history",
+                queryItems: [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))]
+            )
+        )
+    }
+
+    public func listPersonaNominations(state: String? = nil) async throws
+        -> Page<PersonaNominationView>
+    {
+        var query: [URLQueryItem] = []
+        if let state { query.append(URLQueryItem(name: "state", value: state)) }
+        return try await transport.send(
+            TransportRequest(method: .get, path: "/v1/persona/nominations", queryItems: query)
+        )
+    }
+
+    public func affirmPersonaNomination(_ id: UUID) async throws -> PersonaView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/persona/nominations/\(id.uuidString)/affirm"
+            )
+        )
+    }
+
+    public func declinePersonaNomination(_ id: UUID) async throws -> PersonaNominationView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/persona/nominations/\(id.uuidString)/decline"
+            )
+        )
+    }
+
     public func listSchedules(
         limit: Int = 50,
         cursor: String? = nil

@@ -141,7 +141,9 @@ private struct SessionSidebar: View {
     @State private var newConversationDestination =
         SessionSidebarDestination.freshConversation()
     @StateObject private var memoryViewModel = MemoryViewModel()
+    @StateObject private var personaViewModel = PersonaViewModel()
     @State private var showingMemoryBrowser = false
+    @State private var showingPersonaEditor = false
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
 
@@ -196,6 +198,16 @@ private struct SessionSidebar: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button {
+                    showingPersonaEditor = true
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                        .foregroundColor(AppTheme.turquoise)
+                }
+                .accessibilityLabel("Persona")
+                .accessibilityIdentifier("sidebar.persona")
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
                     showingScheduleBrowser = true
                 } label: {
                     Image(systemName: "calendar")
@@ -207,6 +219,9 @@ private struct SessionSidebar: View {
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
+        }
+        .sheet(isPresented: $showingPersonaEditor) {
+            PersonaEditorView(model: personaViewModel)
         }
         .sheet(isPresented: $showingScheduleBrowser) {
             ScheduleBrowserView(model: scheduleViewModel)
