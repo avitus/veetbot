@@ -11,6 +11,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import DeviceIngestReceip
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
 from agent_core.domain.devices import DeviceTriageMapping
+from agent_core.domain.errors import NotFoundError
 from tests.contract import test_device_ingest_store_contract as ingest_contract
 from tests.contract import test_device_invocation_store_contract as invocation_contract
 from tests.contract.support import (
@@ -23,7 +24,10 @@ from tests.contract.support import (
     run,
     session,
 )
-from tests.contract.test_device_registry_contract import device
+from tests.contract.test_device_registry_contract import (
+    assert_declared_capabilities_survive_the_round_trip,
+    device,
+)
 from tests.integration.m2_support import database_settings
 
 _DEVICE_IDS = (
@@ -115,6 +119,59 @@ async def test_postgres_attach_routing_pins_the_session_and_run_on_the_receipt()
                 assert row.session_id == SESSION_ID
                 assert row.run_id == RUN_ID
                 assert row.received_at == NOW
+                raise _RollbackContractError
+
+
+async def test_postgres_device_row_round_trips_declared_capabilities() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await uow.session.execute(
+                    text("SELECT set_config('agent_core.tenant_id', 'tenant-a', true)")
+                )
+                await assert_declared_capabilities_survive_the_round_trip(uow.devices)
+                raise _RollbackContractError
+
+
+async def test_postgres_device_deletion_purges_its_device_channel_rows() -> None:
+    """Deleting a device succeeds and leaves no device-channel row behind.
+
+    The registry's delete is a bare ``DELETE FROM devices``; it enumerates no
+    dependent table. ON DELETE CASCADE is therefore what keeps deletion from
+    either failing permanently or orphaning rows.
+    """
+
+    tables = ("device_invocations", "device_ingest_receipts", "device_triage_sessions")
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await _seed(uow)
+                await uow.device_invocations.create(invocation_contract.invocation())
+                await uow.device_ingest.record(ingest_contract.receipt())
+                await uow.device_ingest.set_triage_mapping(
+                    DeviceTriageMapping(
+                        device_id=ingest_contract.DEVICE_ID,
+                        tenant_id=TENANT,
+                        channel=ingest_contract.CHANNEL,
+                        session_id=SESSION_ID,
+                    )
+                )
+                assert [
+                    await uow.session.scalar(text(f"SELECT count(*) FROM {table}"))  # noqa: S608
+                    for table in tables
+                ] == [1, 1, 1]
+
+                await uow.devices.delete(invocation_contract.DEVICE_ID, principal())
+                await uow.devices.delete(ingest_contract.DEVICE_ID, principal())
+
+                with pytest.raises(NotFoundError):
+                    await uow.devices.get(invocation_contract.DEVICE_ID, principal())
+                assert [
+                    await uow.session.scalar(text(f"SELECT count(*) FROM {table}"))  # noqa: S608
+                    for table in tables
+                ] == [0, 0, 0]
                 raise _RollbackContractError
 
 

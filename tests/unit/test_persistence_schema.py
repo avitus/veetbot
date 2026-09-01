@@ -273,6 +273,14 @@ def test_notification_tables_encode_routing_identity_and_query_constraints() -> 
     assert ("notification_id", "device_id", "attempt") in delivery_unique_columns
 
 
+def _device_ondelete(table: Table) -> str | None:
+    return next(
+        foreign_key.ondelete
+        for foreign_key in table.foreign_keys
+        if foreign_key.parent.name == "device_id"
+    )
+
+
 def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> None:
     tables = Base.metadata.tables
     assert {
@@ -328,6 +336,26 @@ def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> Non
     } == {
         "device_id": ("devices.id", "CASCADE"),
         "session_id": ("sessions.id", "CASCADE"),
+    }
+
+    # Device deletion is a bare DELETE on devices with no dependent-table purge
+    # (PostgresDeviceRegistry.delete), so every device-scoped row here must
+    # CASCADE or deletion fails permanently the moment one row exists. The
+    # RESTRICT on notification_deliveries.device_id is the deliberate contrast:
+    # that table is the delivery audit trail and pins the device on purpose.
+    assert {
+        table_name: _device_ondelete(tables[table_name])
+        for table_name in (
+            "device_invocations",
+            "device_ingest_receipts",
+            "device_triage_sessions",
+            "notification_deliveries",
+        )
+    } == {
+        "device_invocations": "CASCADE",
+        "device_ingest_receipts": "CASCADE",
+        "device_triage_sessions": "CASCADE",
+        "notification_deliveries": "RESTRICT",
     }
 
     migration = next(

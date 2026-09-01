@@ -11,7 +11,13 @@ def test_registration_hash_is_stable_across_python_hash_seeds() -> None:
     script = """
 from pydantic import SecretStr
 from agent_core.application.device_management import _registration_hash
-from agent_core.domain.devices import DeviceKind, DeviceRegistration, PushEnvironment, PushProvider
+from agent_core.domain.devices import (
+    DeviceCapability,
+    DeviceKind,
+    DeviceRegistration,
+    PushEnvironment,
+    PushProvider,
+)
 from agent_core.domain.notifications import NotificationKind
 
 registration = DeviceRegistration(
@@ -24,6 +30,7 @@ registration = DeviceRegistration(
     push_token=SecretStr("push-token"),
     push_environment=PushEnvironment.SANDBOX,
     muted_kinds=frozenset(NotificationKind),
+    capabilities=frozenset(capability.value for capability in DeviceCapability),
 )
 print(_registration_hash(registration))
 """
