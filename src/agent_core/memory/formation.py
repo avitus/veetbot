@@ -23,6 +23,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
+    SENSITIVITY_ORDER,
     BeliefRejection,
     BeliefType,
     ConsolidationResult,
@@ -47,12 +48,18 @@ from agent_core.domain.memory import (
     UsageFeedback,
 )
 from agent_core.domain.messages import TextPart
+from agent_core.domain.persona import (
+    PERSONA_ENTRY_MAX_CHARS,
+    PersonaNomination,
+    PersonaNominationState,
+)
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.profiles import (
     DEFAULT_FORMATION_PROFILE,
     DEFAULT_RETRIEVAL_PROFILE,
     DecayTauDays,
     FormationProfile,
+    PersonaNominationProfile,
     UsageDeltas,
 )
 from agent_core.ports.determinism import Clock, IdFactory
@@ -207,6 +214,17 @@ _SENTENCE_OPENERS = frozenset(
         "your",
     }
 )
+
+
+def contains_secret_material(value: str) -> bool:
+    """True when a statement carries credential-shaped material.
+
+    The system prompt must not contain secrets, and the persona is system
+    prompt: every persona write surface refuses on this check before
+    persistence (persona-surface.md).
+    """
+
+    return _SECRET.search(value) is not None
 
 
 def contains_memory_injection(value: str) -> bool:
@@ -1666,6 +1684,8 @@ class GovernedMemoryService:
                                     if candidate.derivation is MemoryDerivation.HYPOTHESIS
                                     else "committed_direct"
                                 ] += 1
+                if not should_retry and beliefs:
+                    await self._nominate_persona_candidates(uow, beliefs, consolidation_id)
                 watermark_after = watermark if should_retry else after
                 if should_retry:
                     assert provider_failure is not None
@@ -1763,6 +1783,95 @@ class GovernedMemoryService:
             finally:
                 await uow.maintenance.release_memory_session(self._principal, session_id)
         return ConsolidationResult(run=audit, beliefs=beliefs, conflicted=conflicted)
+
+    async def _nominate_persona_candidates(
+        self,
+        uow: RepositoryUnitOfWork,
+        beliefs: list[MemoryRecord],
+        consolidation_id: UUID,
+    ) -> None:
+        """Raise persona nominations for beliefs that clear the persona bar.
+
+        Runs inside the consolidation's unit of work, only on a committing
+        pass — never a retry or no-work path. Only this governed service
+        nominates; affirmation stays a human act on another surface
+        (persona-surface.md).
+        """
+
+        profile = self._profile.persona_nomination
+        now = self._clock.now()
+        open_rows = await uow.personas.list_nominations(
+            self._principal, state=PersonaNominationState.NOMINATED
+        )
+        open_count = 0
+        open_belief_ids: set[UUID] = set()
+        for row in open_rows:
+            try:
+                source = await uow.memories.get(row.belief_id, self._principal)
+            except NotFoundError:
+                source = None
+            if source is None or source.status is not MemoryStatus.ACTIVE:
+                # The belief died before review; the slot frees and the
+                # withdrawal records why the owner never saw it.
+                await uow.personas.resolve_nomination(
+                    row.id,
+                    self._principal,
+                    state=PersonaNominationState.WITHDRAWN,
+                    resolved_at=now,
+                )
+                continue
+            open_count += 1
+            open_belief_ids.add(row.belief_id)
+        active_document = await uow.personas.active(self._principal)
+        already_affirmed = (
+            set(active_document.affirmed_belief_ids) if active_document is not None else set()
+        )
+        for belief in beliefs:
+            if open_count >= profile.max_open:
+                return
+            if belief.id in open_belief_ids or belief.id in already_affirmed:
+                continue
+            if not self._persona_eligible(belief, profile):
+                continue
+            try:
+                stored = await uow.personas.nominate(
+                    PersonaNomination(
+                        id=self._ids.new_id(),
+                        tenant_id=self._principal.tenant_id,
+                        principal_id=self._principal.principal_id,
+                        belief_id=belief.id,
+                        statement=belief.statement,
+                        belief_type=belief.belief_type,
+                        authority=belief.authority,
+                        confidence=belief.confidence,
+                        corroboration_count=belief.corroboration_count,
+                        sensitivity=belief.sensitivity,
+                        consolidation_run_id=consolidation_id,
+                        nominated_at=now,
+                    )
+                )
+            except ConflictError:
+                # A durable decline or a standing affirmation: never again.
+                continue
+            open_count += 1
+            open_belief_ids.add(stored.belief_id)
+
+    @staticmethod
+    def _persona_eligible(belief: MemoryRecord, profile: PersonaNominationProfile) -> bool:
+        return (
+            belief.status is MemoryStatus.ACTIVE
+            and belief.derivation is MemoryDerivation.DIRECT
+            and belief.belief_type in (BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR)
+            and belief.scope == "user"
+            and belief.portability is not Portability.LOCAL
+            and belief.polarity is Polarity.ASSERT
+            and not belief.flagged_for_review
+            and belief.confidence >= profile.min_confidence
+            and belief.corroboration_count >= profile.min_corroboration
+            and SENSITIVITY_ORDER[belief.sensitivity] <= SENSITIVITY_ORDER[Sensitivity.INTERNAL]
+            and len(belief.statement) <= PERSONA_ENTRY_MAX_CHARS
+            and not contains_automatic_memory_hazard(belief.statement)
+        )
 
     def _established_fact_candidates(
         self,

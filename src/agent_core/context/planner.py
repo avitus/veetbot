@@ -123,7 +123,7 @@ class EventContextPlanner:
         model: ResolvedModel,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
-            persona_text, persona_version = await self._active_persona(principal)
+            persona_text, persona_version, persona_affirmed = await self._active_persona(principal)
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
@@ -167,6 +167,7 @@ class EventContextPlanner:
                     ),
                     persona_text=persona_text,
                     persona_version=persona_version,
+                    persona_affirmed=persona_affirmed,
                 )
             return await self._create(
                 session,
@@ -178,6 +179,7 @@ class EventContextPlanner:
                 reason="session_first_model_request",
                 persona_text=persona_text,
                 persona_version=persona_version,
+                persona_affirmed=persona_affirmed,
             )
 
     async def rotate(self, session_id: UUID, reason: str) -> ContextPlan:
@@ -191,7 +193,7 @@ class EventContextPlanner:
             )
             return await self._append(rotated, "context.epoch.rotated", reason)
 
-    async def _active_persona(self, principal: Principal) -> tuple[str, int]:
+    async def _active_persona(self, principal: Principal) -> tuple[str, int, tuple[UUID, ...]]:
         """The rendered persona row and its pinned version for this principal.
 
         Rendering filters entries above the session surface's sensitivity
@@ -203,7 +205,7 @@ class EventContextPlanner:
         async with self._uow_factory() as uow:
             document = await uow.personas.active(principal)
         if document is None:
-            return "", 0
+            return "", 0, ()
         # The load-time injection scan is the guarantee (the write surfaces
         # scan too, but only this pass covers text stored before a pattern
         # existed). A poisoned entry renders as a placeholder, never as
@@ -221,6 +223,7 @@ class EventContextPlanner:
         return (
             render_persona(screened, ceiling=Sensitivity.RESTRICTED),
             document.version,
+            document.affirmed_belief_ids,
         )
 
     async def _create(
@@ -235,6 +238,7 @@ class EventContextPlanner:
         reason: str,
         persona_text: str = "",
         persona_version: int = 0,
+        persona_affirmed: tuple[UUID, ...] = (),
     ) -> ContextPlan:
         classes = self._config.get("classes")
         if not isinstance(classes, dict):
@@ -285,6 +289,9 @@ class EventContextPlanner:
                     max_items=int(memory_config["max_items"]),
                     min_score=0.1,
                     sensitivity_ceiling=Sensitivity.RESTRICTED,
+                    # Beliefs the persona row already carries never occupy a
+                    # snapshot slot (persona-surface.md).
+                    exclude_ids=persona_affirmed,
                 ),
                 session_id=session.id,
                 moment=RecallMoment.SNAPSHOT.value,

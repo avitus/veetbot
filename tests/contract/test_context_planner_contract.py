@@ -1,4 +1,6 @@
+from datetime import datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import yaml
@@ -13,6 +15,7 @@ from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.domain.errors import ContextOverflow
+from agent_core.domain.memory import MemoryCorrection, RecallQuery, RecallResult
 from agent_core.domain.messages import ResolvedModel
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.tools.registry import StaticToolRegistry
@@ -274,3 +277,90 @@ async def test_context_planner_rejects_a_persona_over_its_cap() -> None:
 
     with pytest.raises(ContextOverflow, match="context prefix class persona exceeds its cap"):
         await planner.plan(session(), agent(), principal(), model)
+
+
+class _SpyRetriever:
+    def __init__(self) -> None:
+        self.queries: list[RecallQuery] = []
+
+    async def corrections(
+        self,
+        *,
+        snapshot_id: UUID,
+        watermark: int,
+        as_of: datetime | None = None,
+    ) -> list[MemoryCorrection]:
+        return []
+
+    async def recall(
+        self,
+        query: RecallQuery,
+        *,
+        session_id: UUID,
+        run_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        moment: str = "in_turn",
+        surface_id: str = "private",
+    ) -> RecallResult:
+        self.queries.append(query)
+        return RecallResult(
+            items=[],
+            rendered="",
+            tokens=0,
+            truncated=False,
+            trace_id=UUID(int=999),
+            watermark=0,
+        )
+
+
+async def test_context_planner_excludes_affirmed_beliefs_from_the_snapshot() -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    spy = _SpyRetriever()
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        memory_retriever=spy,
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    promoted = UUID("00000000-0000-0000-0000-000000000501")
+
+    async with factory() as uow:
+        await uow.personas.append_version(
+            PersonaDocument(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                version=1,
+                entries=(
+                    PersonaEntry(
+                        text="User prefers concise answers.",
+                        source=PersonaEntrySource.AFFIRMATION,
+                        source_belief_id=promoted,
+                    ),
+                ),
+                source=PersonaEntrySource.AFFIRMATION,
+                created_at=NOW,
+            ),
+            expected_version=0,
+        )
+
+    await planner.plan(session(), agent(), principal(), model)
+    assert len(spy.queries) == 1
+    assert spy.queries[0].exclude_ids == (promoted,)

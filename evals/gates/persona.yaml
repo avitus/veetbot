@@ -46,13 +46,13 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Nomination eligibility is closed.** Nominations arise only from the governed consolidation service, only over active, direct, durable, confidence- and corroboration-qualified, sensitivity-bounded beliefs, and never from a never-auto-store category or a statement failing the hazard scans."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_persona_nomination.py::test_consolidation_nominates_a_qualifying_belief_exactly_once
 - id: gate.persona.decline_durable
   milestone: 22
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Decline is durable.** A declined nomination's belief is never re-nominated, including after a full re-derivation."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_persona_nomination.py::test_a_declined_belief_is_never_renominated
 - id: gate.persona.affirmed_linked
   milestone: 22
   kind: case
@@ -64,7 +64,7 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**No double occupancy.** A promoted belief never occupies a session-open snapshot slot while its persona entry stands, and regains eligibility when the entry is removed; in-turn recall is unfiltered."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_m22.py::test_snapshot_dedup
 - id: gate.persona.routes_exact_scope
   milestone: 22
   kind: structural

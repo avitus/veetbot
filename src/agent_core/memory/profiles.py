@@ -106,6 +106,14 @@ class DecayProfile(_ProfileModel):
     max_per_sweep: int = Field(default=200, ge=1)
 
 
+class PersonaNominationProfile(_ProfileModel):
+    """The persona bar: when a consolidated belief earns a nomination."""
+
+    min_confidence: float = Field(default=0.75, gt=0.0, le=1.0)
+    min_corroboration: int = Field(default=3, ge=1)
+    max_open: int = Field(default=5, ge=1)
+
+
 class FormationProfile(_ProfileModel):
     """When consolidation runs and which formation behaviors are enabled."""
 
@@ -114,6 +122,7 @@ class FormationProfile(_ProfileModel):
     scheduled_interval_seconds: int = Field(default=86_400, ge=1)
     established_facts_enabled: bool = True
     decay: DecayProfile = Field(default_factory=DecayProfile)
+    persona_nomination: PersonaNominationProfile = Field(default_factory=PersonaNominationProfile)
 
 
 class SnapshotProfile(_ProfileModel):

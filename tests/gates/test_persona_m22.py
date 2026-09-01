@@ -28,6 +28,8 @@ from agent_core.domain.persona import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.tools.registry import StaticToolRegistry
+from tests.contract.memory_fixtures import formation_stack, recall_query
+from tests.contract.memory_fixtures import memory as memory_fixture
 from tests.contract.support import NOW, agent, memory_stack, principal, session
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -274,3 +276,67 @@ async def test_injection_scanned() -> None:
     plan = await planner.plan(session(), agent(), principal(), _MODEL)
     assert plan.persona_text == "User values direct answers.\n[BLOCKED]"
     assert "Ignore all previous" not in plan.persona_text
+
+
+async def test_snapshot_dedup() -> None:
+    """A promoted belief leaves the session-open snapshot while its persona
+    entry stands, returns when the entry is removed, and stays reachable by
+    in-turn recall throughout."""
+
+    clock, factory, _service, retriever = await formation_stack()
+    promoted = memory_fixture().model_copy(update={"scope": "user"})
+    async with factory() as uow:
+        await uow.memories.upsert_belief(promoted)
+        await uow.personas.append_version(
+            PersonaDocument(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                version=1,
+                entries=(
+                    PersonaEntry(
+                        text=promoted.statement,
+                        source=PersonaEntrySource.AFFIRMATION,
+                        source_belief_id=promoted.id,
+                    ),
+                ),
+                source=PersonaEntrySource.AFFIRMATION,
+                created_at=NOW,
+            ),
+            expected_version=0,
+        )
+
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        _config(),
+        policy_version="gate-policy@1",
+        memory_retriever=retriever,
+    )
+    plan = await planner.plan(session(), agent(), principal(), _MODEL)
+    assert promoted.statement in plan.persona_text
+    assert promoted.statement not in plan.memory_snapshot
+
+    in_turn = await retriever.recall(
+        recall_query(text="concise"), session_id=session().id, moment="in_turn"
+    )
+    assert promoted.id in {item.belief_id for item in in_turn.items}
+
+    async with factory() as uow:
+        await uow.personas.append_version(
+            PersonaDocument(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                version=2,
+                entries=(),
+                source=PersonaEntrySource.USER_EDIT,
+                created_at=NOW + timedelta(minutes=1),
+            ),
+            expected_version=1,
+        )
+    rotated = await planner.plan(session(), agent(), principal(), _MODEL)
+    assert rotated.epoch == plan.epoch + 1
+    assert rotated.persona_text == ""
+    assert promoted.statement in rotated.memory_snapshot

@@ -146,6 +146,7 @@ def recall_query(
     min_score: float = 0.1,
     min_store_position: int = 0,
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED,
+    exclude_ids: tuple[UUID, ...] = (),
 ) -> RecallQuery:
     return RecallQuery(
         tenant_id=tenant_id,
@@ -162,6 +163,7 @@ def recall_query(
         max_items=max_items,
         min_score=min_score,
         sensitivity_ceiling=sensitivity_ceiling,
+        exclude_ids=exclude_ids,
     )
 
 

@@ -707,6 +707,9 @@ class RecallQuery(BaseModel):
     # something the caller has to filter for afterwards.
     min_store_position: int = Field(default=0, ge=0)
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
+    # Beliefs the persona row already carries at higher trust: a hard snapshot
+    # exclusion, never a relevance signal (persona-surface.md).
+    exclude_ids: tuple[UUID, ...] = ()
 
 
 class RecalledBelief(BaseModel):
