@@ -177,17 +177,43 @@ def _check_generated_child_limits(
         or (remaining_cost is not None and remaining_cost <= 0)
         or (parent.deadline_at is not None and parent.deadline_at <= NOW)
     )
-    reserve_exhausted = (
-        remaining_steps <= DEFAULTS.synthesis_reserve_steps
-        or remaining_model_calls <= DEFAULTS.synthesis_reserve_model_calls
-        or (remaining_cost is not None and remaining_cost <= DEFAULTS.synthesis_reserve_cost)
-    )
+    # The final-synthesis reserve is measured against each *derived child* total --
+    # ``min(requested or default, the parent's remaining)`` -- not against the
+    # parent's remaining value alone: subagents-and-delegation.md:284-293 derives
+    # the research allowance from ``child.max_*``, and
+    # subagents-and-delegation.md:309-311 rejects "a child limit that cannot
+    # contain both research work and those reserves". A brief may therefore
+    # request less than the parent has left and still be rejected. Cost is
+    # reserved per brief, in order (subagents-and-delegation.md:296-302).
+    reserve_exhausted = False
+    reserved = Decimal("0")
+    for wanted in requested:
+        asked = wanted or DelegationLimits()
+        child_steps = min(asked.max_steps or DEFAULTS.max_steps, remaining_steps)
+        child_model_calls = min(
+            asked.max_model_calls or DEFAULTS.max_model_calls, remaining_model_calls
+        )
+        child_cost = asked.max_cost or DEFAULTS.max_cost
+        if remaining_cost is not None:
+            available = remaining_cost - reserved
+            if available <= 0:
+                reserve_exhausted = True
+                break
+            child_cost = min(child_cost, available)
+        if (
+            child_steps <= DEFAULTS.synthesis_reserve_steps
+            or child_model_calls <= DEFAULTS.synthesis_reserve_model_calls
+            or child_cost <= DEFAULTS.synthesis_reserve_cost
+        ):
+            reserve_exhausted = True
+            break
+        reserved += child_cost
 
     try:
         derived = derive_child_limits(parent, briefs, DEFAULTS, now=NOW)
     except DelegationValidationError as error:
         assert error.reason == "delegation.budget_insufficient"
-        assert exhausted or reserve_exhausted or (remaining_cost is not None and len(briefs) > 1)
+        assert exhausted or reserve_exhausted
         return
 
     assert not exhausted
