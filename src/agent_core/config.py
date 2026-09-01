@@ -103,6 +103,7 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    persona_api_enabled: bool = False
     delegation_enabled: bool = False
     email_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
@@ -1090,6 +1091,7 @@ def _load_settings(
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
+    persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     configured_gmail_files = {
@@ -1229,6 +1231,7 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        persona_api_enabled=persona_api_enabled,
         delegation_enabled=delegation_enabled,
         email_enabled=email_enabled,
         push_provider=push_provider,

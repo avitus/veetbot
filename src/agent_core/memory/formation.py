@@ -21,6 +21,7 @@ from agent_core.domain.errors import (
     ToolValidationError,
 )
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.hazards import INJECTION_PATTERN, SECRET_PATTERN
 from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
@@ -108,15 +109,8 @@ logger = logging.getLogger(__name__)
 # The citation form the renderer emits, read back exactly as it is written:
 # eight lower-case hex digits of the belief identifier (retrieval.py:576).
 _CITED_BELIEF = re.compile(r"\[m:([0-9a-f]{8})\]")
-_SECRET = re.compile(
-    r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
-    re.I,
-)
-_INJECTION = re.compile(
-    r"(?:ignore\s+(?:all\s+)?previous|system\s+prompt|developer\s+message|"
-    r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
-    re.I,
-)
+_SECRET = SECRET_PATTERN
+_INJECTION = INJECTION_PATTERN
 _TRANSIENT = re.compile(r"\b(?:right now|this turn|temporary|today only)\b", re.I)
 _CLAUSE_BOUNDARY = re.compile(
     r"[.!?;\r\n]+|,\s+(?:and\s+)?(?=(?:i|we)\b)|\s+and\s+(?=(?:i|we)\b)",

@@ -32,6 +32,11 @@ class ConflictError(AgentCoreError):
         self.details = details or {}
 
 
+class PersonaContentError(AgentCoreError):
+    """Persona text was refused before persistence: secrets, injection
+    patterns, oversize entries, or provenance the caller may not mint."""
+
+
 class ScheduleValidationError(AgentCoreError):
     """A schedule definition failed one stable boundary rule."""
 

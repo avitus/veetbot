@@ -34,6 +34,7 @@ from agent_core.application.services import (
     DeviceService,
     MemoryReadService,
     NotificationService,
+    PersonaService,
     RunService,
     ScheduleService,
     SessionService,
@@ -58,6 +59,11 @@ from agent_core.domain.devices import (
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.notifications import NotificationKind
+from agent_core.domain.persona import (
+    PERSONA_MAX_ENTRIES,
+    PersonaEntryDraft,
+    PersonaNominationState,
+)
 from agent_core.domain.schedules import (
     ScheduleDefinition,
     ScheduleOccurrence,
@@ -73,6 +79,8 @@ from agent_core.domain.views import (
     MemoryView,
     NotificationInboxItem,
     Page,
+    PersonaNominationView,
+    PersonaView,
     RunView,
     SessionMessageView,
     SessionView,
@@ -150,6 +158,24 @@ class ApplicationServices(Protocol):
 
     @property
     def memory(self) -> MemoryReadService: ...
+
+    @property
+    def persona(self) -> PersonaService: ...
+
+
+class UpdatePersonaEntryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=500)
+    sensitivity: Sensitivity = Sensitivity.INTERNAL
+    source_belief_id: UUID | None = None
+
+
+class UpdatePersonaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    entries: list[UpdatePersonaEntryRequest] = Field(max_length=PERSONA_MAX_ENTRIES)
 
 
 class CreateSessionRequest(BaseModel):
@@ -1238,6 +1264,95 @@ def create_app(
 
     if settings.memory_api_enabled:
         app.include_router(memory_router)
+
+    persona_router = APIRouter()
+
+    @persona_router.get(
+        "/v1/persona",
+        openapi_extra={"required_scope": "persona.read"},
+    )
+    async def get_persona(
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.read")],
+    ) -> PersonaView:
+        # The persona is the owner's standing instruction text; no shared or
+        # on-disk cache may keep it, exactly as a belief body.
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.get(authenticated)
+
+    @persona_router.put(
+        "/v1/persona",
+        openapi_extra={"required_scope": "persona.write"},
+    )
+    async def update_persona(
+        request: UpdatePersonaRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.write")],
+    ) -> PersonaView:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.update(
+            authenticated,
+            expected_version=request.expected_version,
+            entries=[
+                PersonaEntryDraft(
+                    text=entry.text,
+                    sensitivity=entry.sensitivity,
+                    source_belief_id=entry.source_belief_id,
+                )
+                for entry in request.entries
+            ],
+        )
+
+    @persona_router.get(
+        "/v1/persona/history",
+        openapi_extra={"required_scope": "persona.read"},
+    )
+    async def persona_history(
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.read")],
+        limit: Annotated[int, Query(ge=1)] = 50,
+    ) -> Page[PersonaView]:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.history(authenticated, limit=min(limit, 200))
+
+    @persona_router.get(
+        "/v1/persona/nominations",
+        openapi_extra={"required_scope": "persona.read"},
+    )
+    async def persona_nominations(
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.read")],
+        state: PersonaNominationState | None = None,
+    ) -> Page[PersonaNominationView]:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.nominations(authenticated, state=state)
+
+    @persona_router.post(
+        "/v1/persona/nominations/{nomination_id}/affirm",
+        openapi_extra={"required_scope": "persona.write"},
+    )
+    async def affirm_persona_nomination(
+        nomination_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.write")],
+    ) -> PersonaView:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.affirm(authenticated, nomination_id)
+
+    @persona_router.post(
+        "/v1/persona/nominations/{nomination_id}/decline",
+        openapi_extra={"required_scope": "persona.write"},
+    )
+    async def decline_persona_nomination(
+        nomination_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.write")],
+    ) -> PersonaNominationView:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.decline(authenticated, nomination_id)
+
+    if settings.persona_api_enabled:
+        app.include_router(persona_router)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

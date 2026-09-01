@@ -34,6 +34,13 @@ from agent_core.domain.notifications import (
     NotificationDelivery,
     NotificationKind,
 )
+from agent_core.domain.persona import (
+    PersonaDocument,
+    PersonaEntry,
+    PersonaEntrySource,
+    PersonaNomination,
+    PersonaNominationState,
+)
 from agent_core.domain.runs import FailureReason, RunStatus
 from agent_core.domain.sessions import SessionStatus
 
@@ -318,3 +325,79 @@ class ArtifactContent:
 
     artifact: ArtifactView
     open: Callable[[], Awaitable[AsyncIterator[bytes]]]
+
+
+class PersonaEntryView(BaseModel):
+    """One persona entry as every surface renders it: text, provenance, tier."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    source: PersonaEntrySource
+    source_belief_id: UUID | None
+    sensitivity: Sensitivity
+
+    @classmethod
+    def from_entry(cls, entry: PersonaEntry) -> PersonaEntryView:
+        return cls(
+            text=entry.text,
+            source=entry.source,
+            source_belief_id=entry.source_belief_id,
+            sensitivity=entry.sensitivity,
+        )
+
+
+class PersonaView(BaseModel):
+    """The persona document's exposure list; tenant and principal withheld."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version: int
+    entries: list[PersonaEntryView]
+    source: PersonaEntrySource
+    created_at: datetime
+
+    @classmethod
+    def from_document(cls, document: PersonaDocument) -> PersonaView:
+        return cls(
+            version=document.version,
+            entries=[PersonaEntryView.from_entry(entry) for entry in document.entries],
+            source=document.source,
+            created_at=document.created_at,
+        )
+
+
+class PersonaNominationView(BaseModel):
+    """A nomination's exposure list; tenant and principal withheld."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    belief_id: UUID
+    statement: str
+    belief_type: BeliefType
+    authority: MemoryAuthority
+    confidence: float
+    corroboration_count: int
+    sensitivity: Sensitivity
+    state: PersonaNominationState
+    nominated_at: datetime
+    resolved_at: datetime | None
+    affirmed_version: int | None
+
+    @classmethod
+    def from_nomination(cls, nomination: PersonaNomination) -> PersonaNominationView:
+        return cls(
+            id=nomination.id,
+            belief_id=nomination.belief_id,
+            statement=nomination.statement,
+            belief_type=nomination.belief_type,
+            authority=nomination.authority,
+            confidence=nomination.confidence,
+            corroboration_count=nomination.corroboration_count,
+            sensitivity=nomination.sensitivity,
+            state=nomination.state,
+            nominated_at=nomination.nominated_at,
+            resolved_at=nomination.resolved_at,
+            affirmed_version=nomination.affirmed_version,
+        )

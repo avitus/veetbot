@@ -219,6 +219,7 @@ from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
     PublicMemoryService,
+    PublicPersonaService,
     PublicRunService,
     PublicSessionService,
 )
@@ -244,6 +245,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     NotificationService as PublicNotificationServiceContract,
+)
+from agent_core.application.services import (
+    PersonaService as PublicPersonaServiceContract,
 )
 from agent_core.application.services import (
     RunService as PublicRunServiceContract,
@@ -440,6 +444,7 @@ class ApplicationServices:
     devices: PublicDeviceServiceContract
     notifications: PublicNotificationServiceContract
     memory: PublicMemoryReadServiceContract
+    persona: PublicPersonaServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -2192,6 +2197,7 @@ async def _compose(
             devices=device_service,
             notifications=notification_inbox,
             memory=PublicMemoryService(uow_factory=uow_factory),
+            persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 

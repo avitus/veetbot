@@ -16,12 +16,12 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import ConflictError, ContextOverflow
 from agent_core.domain.events import NewEvent
+from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.persona import render_persona
 from agent_core.domain.sessions import Session, project_scope
 from agent_core.domain.tools import ToolSpec
-from agent_core.memory.formation import contains_memory_injection
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryRetriever
@@ -214,7 +214,7 @@ class EventContextPlanner:
             update={
                 "entries": tuple(
                     entry.model_copy(update={"text": "[BLOCKED]"})
-                    if contains_memory_injection(entry.text)
+                    if contains_injection_pattern(entry.text)
                     else entry
                     for entry in document.entries
                 )

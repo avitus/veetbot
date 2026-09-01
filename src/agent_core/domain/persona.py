@@ -99,6 +99,22 @@ class PersonaDocument(BaseModel):
         )
 
 
+class PersonaEntryDraft(BaseModel):
+    """One entry as a write surface submits it; the service derives `source`.
+
+    A draft naming a `source_belief_id` is a *kept* affirmation entry: the
+    belief must already be affirmed in the current head. New affirmation
+    provenance enters only through an explicit affirmation of a nomination -
+    an owner edit can keep, reword, or drop a promoted entry, never mint one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: str = Field(min_length=1, max_length=PERSONA_ENTRY_MAX_CHARS)
+    sensitivity: Sensitivity = Sensitivity.INTERNAL
+    source_belief_id: UUID | None = None
+
+
 class PersonaNomination(BaseModel):
     """A consolidation-raised candidate awaiting the owner's verdict.
 

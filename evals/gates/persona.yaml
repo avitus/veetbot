@@ -28,7 +28,7 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Secrets are refused at every write surface.** A credential-shaped value is refused before persistence at the CLI, the HTTP routes, and affirmation alike."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_api_boundary_m22.py::test_secret_refused_at_every_write_surface
 - id: gate.persona.injection_scanned
   milestone: 22
   kind: case
@@ -40,7 +40,7 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Only a human writes the persona.** No pipeline stage, tool call, or model output writes persona text; the only write paths are an owner edit and an explicit affirmation of a named nomination, and each write is recorded as an event."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_api_boundary_m22.py::test_persona_writes_are_recorded_as_events
 - id: gate.persona.nomination_eligibility
   milestone: 22
   kind: case
@@ -58,7 +58,7 @@
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Affirmation links and never consumes.** Affirmation marks the source belief promoted with bidirectional links, never supersedes or deletes it, and removing the persona entry clears the marker."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_api_boundary_m22.py::test_nomination_review_affirm_decline_and_linkage
 - id: gate.persona.snapshot_dedup
   milestone: 22
   kind: case
@@ -70,16 +70,16 @@
   kind: structural
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Routes carry exact scopes and the memory API stays read-only.** Every persona route requires exactly `persona.read` or `persona.write` and mounts only under `AGENT_PERSONA_API_ENABLED`; a walk of both routers shows `/v1/memories` still serves only GETs under `memory.read`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_api_boundary_m22.py::test_routes_exact_scope_and_memory_read_only
 - id: gate.persona.revision_precondition
   milestone: 22
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Writes are revision-guarded.** A persona write without a matching `expected_version` is rejected with the `conflict` code and no partial write, and a corrected retry succeeds."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_persona_api_boundary_m22.py::test_persona_document_lifecycle_scopes_and_refusals
 - id: gate.persona.principal_scoped
   milestone: 22
   kind: case
   spec: docs/plan/persona-surface.md#hard-gates
   statement: "**Persona data is principal-scoped.** Documents and nominations carry tenant and principal as repository predicates in both stores under one contract, and a cross-principal read is an indistinguishable 404."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/contract/test_persona_store_contract.py::test_nominations_are_principal_scoped
