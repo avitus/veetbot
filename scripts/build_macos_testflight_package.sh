@@ -24,18 +24,6 @@ signing_keychain="$(
 [[ "$signing_keychain" == "$HOME/Library/Keychains/circleci-signing.keychain-db" ]]
 test -f "$signing_keychain"
 
-echo "Authorizing Apple command-line tools to use the ephemeral signing keys."
-security unlock-keychain -p "" "$signing_keychain"
-security set-key-partition-list -S apple-tool:,apple:,codesign: \
-  -s -k "" "$signing_keychain"
-
-installer_certificate_sha1="$(
-  security find-certificate -a -c "3rd Party Mac Developer Installer" -Z \
-    "$signing_keychain" \
-    | awk '/^SHA-1 hash: / {print $3}'
-)"
-[[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]
-
 echo "Archiving macOS build $APPLE_BUILD_NUMBER with App Store distribution signing."
 xcodebuild archive \
   -project clients/apple/Veetbot.xcodeproj \
@@ -60,10 +48,73 @@ test "$archived_build_number" = "$APPLE_BUILD_NUMBER"
 test "$archived_bundle_id" = "com.veetbot.apple"
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
+temporary_root="${TMPDIR:-/tmp}"
+packaging_root="$(mktemp -d "${temporary_root%/}/veetbot-package-signing.XXXXXX")"
+transferred_identities="$packaging_root/identities.p12"
+packaging_keychain="$packaging_root/veetbot-productbuild.keychain-db"
+transfer_password="$(uuidgen)$(uuidgen)"
+packaging_keychain_password="$(uuidgen)$(uuidgen)"
+cleanup_packaging_keychain() {
+  security delete-keychain "$packaging_keychain" 2>/dev/null || true
+  rm -f -- "$transferred_identities" "$packaging_keychain"
+  rmdir "$packaging_root" 2>/dev/null || true
+}
+trap cleanup_packaging_keychain EXIT
+umask 077
+
+export_identities_with_deadline() {
+  security export \
+    -k "$signing_keychain" \
+    -t identities -f pkcs12 \
+    -P "$transfer_password" \
+    -o "$transferred_identities" &
+  local export_pid=$!
+
+  local attempt
+  for attempt in {1..12}; do
+    if ! kill -0 "$export_pid" 2>/dev/null; then
+      wait "$export_pid"
+      return
+    fi
+    echo "Waiting for managed signing identity export (${attempt}/12)."
+    sleep 5
+  done
+
+  if kill -0 "$export_pid" 2>/dev/null; then
+    kill "$export_pid" 2>/dev/null || true
+    wait "$export_pid" 2>/dev/null || true
+    echo "Managed signing identity export required interaction after 60 seconds." >&2
+    return 1
+  fi
+  wait "$export_pid"
+}
+
+echo "Transferring the managed identities into an isolated packaging keychain."
+export_identities_with_deadline
+test -s "$transferred_identities"
+security create-keychain -p "$packaging_keychain_password" "$packaging_keychain"
+security set-keychain-settings -lut 3600 "$packaging_keychain"
+security unlock-keychain -p "$packaging_keychain_password" "$packaging_keychain"
+security import "$transferred_identities" \
+  -k "$packaging_keychain" \
+  -P "$transfer_password" \
+  -T /usr/bin/codesign \
+  -T /usr/bin/productbuild \
+  -T /usr/bin/security
+security set-key-partition-list -S apple-tool:,apple:,codesign: \
+  -s -k "$packaging_keychain_password" "$packaging_keychain"
+
+installer_certificate_sha1="$(
+  security find-certificate -a -c "3rd Party Mac Developer Installer" -Z \
+    "$packaging_keychain" \
+    | awk '/^SHA-1 hash: / {print $3}'
+)"
+[[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]
+
 echo "Signing the installer package with the installed Mac Installer identity."
 productbuild \
   --sign "$installer_certificate_sha1" \
-  --keychain "$signing_keychain" \
+  --keychain "$packaging_keychain" \
   --component "$app_path" /Applications \
   "$pkg_path"
 test -s "$pkg_path"

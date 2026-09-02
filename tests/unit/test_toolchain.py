@@ -895,12 +895,16 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in package_command
     assert "security list-keychains -d user" in package_command
     assert "circleci-signing.keychain-db" in package_command
-    assert 'security unlock-keychain -p "" "$signing_keychain"' in package_command
+    assert "security export" in package_command
+    assert "-t identities -f pkcs12" in package_command
+    assert "security create-keychain" in package_command
+    assert "security import" in package_command
     assert "security set-key-partition-list -S apple-tool:,apple:,codesign:" in package_command
-    assert '-s -k "" "$signing_keychain"' in package_command
+    assert '-s -k "$packaging_keychain_password" "$packaging_keychain"' in package_command
+    assert "security delete-keychain" in package_command
     assert "productbuild \\" in package_command
     assert '--sign "$installer_certificate_sha1"' in package_command
-    assert '--keychain "$signing_keychain"' in package_command
+    assert '--keychain "$packaging_keychain"' in package_command
     assert '--component "$app_path" /Applications' in package_command
     assert 'test -s "$pkg_path"' in package_command
     assert 'pkgutil --check-signature "$pkg_path"' in package_command
@@ -909,12 +913,9 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert 'test -s "$pkg_path"' in upload_command
     assert "$testflight_dir" not in upload_command
     assert "xcrun altool --upload-app" in upload_command
-    assert package_command.index("security set-key-partition-list") < package_command.index(
-        "productbuild"
-    )
-    assert package_command.index("productbuild") < package_command.index(
-        "pkgutil --check-signature"
-    )
+    productbuild_index = package_command.rindex("\nproductbuild \\")
+    assert package_command.index("security set-key-partition-list") < productbuild_index
+    assert productbuild_index < package_command.index("pkgutil --check-signature")
     assert '--file "$pkg_path"' in upload_command
     assert "--type macos" in upload_command
     assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
