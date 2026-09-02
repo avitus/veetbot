@@ -30,6 +30,7 @@ from agent_core.domain.messages import (
     ScriptedTurn,
     StopReason,
     TextPart,
+    ToolResultItem,
     UserMessage,
 )
 from agent_core.domain.policies import (
@@ -39,7 +40,7 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunStatus
-from agent_core.domain.views import DeviceIngestResult
+from agent_core.domain.views import DeviceIngestResult, TextContentBlock
 from agent_core.ports.policies import PolicyEngine
 from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME
 from tests.contract.test_device_registry_contract import device
@@ -220,11 +221,43 @@ async def test_a_waiting_standing_run_takes_the_message_as_untrusted_input() -> 
         waiting = await composition.runs.get(first.run_id)
         second = await _ingest(composition, body=OTHER_BODY)
         resumed = await composition.runs.get(first.run_id)
+        events = await _session_events(composition, first.session_id)
+        async with composition.uow_factory() as uow:
+            history = await uow.history.read(first.session_id, events[-1].sequence)
 
     assert waiting.status is RunStatus.WAITING_FOR_USER
     assert second.run_id == first.run_id
     assert second.session_id == first.session_id
     assert resumed.status is RunStatus.COMPLETED
+
+    # The delivery is the untrusted half of the deliver-input path: both the
+    # message it appends and the tool result it completes carry the device's
+    # trust, so dropping either would let the resumed turn reach a plain allow.
+    delivered = [
+        event
+        for event in events
+        if event.event_type == "user.message.created"
+        and event.derivation_key == f"device.ingest:{_digest_of(OTHER_BODY)}"
+    ]
+    assert [event.payload["trust"] for event in delivered] == ["external_untrusted"]
+    assert [event.actor_type for event in delivered] == ["device"]
+    completed = [
+        event
+        for event in events
+        if event.event_type == "tool.call.completed"
+        and event.derivation_key == f"device.ingest.completed:{_digest_of(OTHER_BODY)}"
+    ]
+    assert [event.payload["result_item"]["trust"] for event in completed] == ["external_untrusted"]
+    assert [
+        item.trust
+        for item in history.items
+        if isinstance(item, UserMessage) and OTHER_BODY in str(item.content)
+    ] == [TrustLevel.EXTERNAL_UNTRUSTED]
+    assert [
+        item.trust
+        for item in history.items
+        if isinstance(item, ToolResultItem) and OTHER_BODY in str(item.content)
+    ] == [TrustLevel.EXTERNAL_UNTRUSTED]
 
 
 async def test_a_busy_standing_session_rotates_onto_a_fresh_session() -> None:
@@ -373,7 +406,11 @@ async def test_the_message_body_lands_only_in_the_seed_event_content() -> None:
 
 
 def _digest() -> str:
-    return ingest_digest(SENDER, BODY, NOW)
+    return _digest_of(BODY)
+
+
+def _digest_of(body: str) -> str:
+    return ingest_digest(SENDER, body, NOW)
 
 
 async def test_a_triage_turn_cannot_reach_a_plain_allow() -> None:
@@ -429,3 +466,139 @@ async def test_a_triage_turn_cannot_reach_a_plain_allow() -> None:
     assert recording == [PolicyDecisionType.REQUIRE_APPROVAL]
     assert parked.status is RunStatus.WAITING_FOR_APPROVAL
     assert [approval.tool_name for approval in pending] == [DEVICE_SMS_SEND_TOOL_NAME]
+
+
+def _draft_reply_script(*, preamble: list[ScriptedTurn]) -> FakeModelScript:
+    """Answer the owner first, then let the next triage turn reach for the send."""
+
+    return FakeModelScript(
+        turns=[
+            *preamble,
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name=DEVICE_SMS_SEND_TOOL_NAME,
+                        arguments={"recipient": SENDER, "body": "Feeding at six."},
+                        call_id="draft-reply",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Drafted."),
+        ]
+    )
+
+
+def _record_device_decisions(
+    composition: Composition,
+    recording: list[PolicyDecisionType],
+) -> None:
+    inner = composition.tool_pipeline._policy
+
+    class _Recording:
+        async def evaluate(
+            self,
+            action: ProposedAction,
+            principal: Principal,
+            run: Run,
+        ) -> PolicyDecision:
+            decision = await inner.evaluate(action, principal, run)
+            if action.name == DEVICE_SMS_SEND_TOOL_NAME:
+                recording.append(decision.decision)
+            return decision
+
+    composition.tool_pipeline._policy = cast(PolicyEngine, _Recording())
+
+
+async def test_an_owner_turn_in_the_triage_session_does_not_launder_the_next_message() -> None:
+    """Gate 10 in the steady state: an owner message earlier in the session is not consent.
+
+    The standing triage session accumulates owner turns — every alert answered,
+    every question asked. The trust of the turn being executed is the trust of
+    the message that opened it, not of the newest owner message anywhere behind
+    it.
+    """
+
+    channel = FakeDeviceChannel(
+        clock=FixedClock(NOW),
+        capabilities={DEVICE_ID: frozenset({DEVICE_SMS_SEND_TOOL_NAME})},
+    )
+    async with build(
+        settings=_settings(),
+        script=_draft_reply_script(
+            preamble=[ScriptedTurn(text="Triaged."), ScriptedTurn(text="Noted.")]
+        ),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        device_channel_override=channel,
+    ) as composition:
+        await _seed_device(composition)
+        recording: list[PolicyDecisionType] = []
+
+        first = await _ingest(composition)
+        owner_run = await composition.runs.submit("Thanks, noted.", first.session_id)
+        await composition.runs.wait_terminal(owner_run)
+        _record_device_decisions(composition, recording)
+        second = await _ingest(composition, body=OTHER_BODY)
+        parked = await composition.runs.get(second.run_id)
+        pending = await composition.approvals.list_pending(run_id=second.run_id)
+
+    assert second.session_id == first.session_id
+    assert recording == [PolicyDecisionType.REQUIRE_APPROVAL]
+    assert parked.status is RunStatus.WAITING_FOR_APPROVAL
+    assert [approval.tool_name for approval in pending] == [DEVICE_SMS_SEND_TOOL_NAME]
+    assert channel.invocations == []
+
+
+async def test_an_owner_answer_to_a_triage_question_does_not_launder_the_next_message() -> None:
+    """The same steady state reached through the ask_user path the design names."""
+
+    channel = FakeDeviceChannel(
+        clock=FixedClock(NOW),
+        capabilities={DEVICE_ID: frozenset({DEVICE_SMS_SEND_TOOL_NAME})},
+    )
+    async with build(
+        settings=_settings(),
+        script=_draft_reply_script(
+            preamble=[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="conversation.ask_user",
+                            arguments={"question": "Should I reply to the sitter?"},
+                            call_id="ask-owner",
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                ),
+                ScriptedTurn(text="Triaged."),
+            ]
+        ),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        device_channel_override=channel,
+    ) as composition:
+        await _seed_device(composition)
+        recording: list[PolicyDecisionType] = []
+
+        first = await _ingest(composition)
+        events = await composition.runs.events(first.run_id)
+        waiting_event = next(
+            event for event in events if event.event_type == "run.waiting_for_user"
+        )
+        await composition.services.runs.deliver_input(
+            composition.principal,
+            first.run_id,
+            [TextContentBlock(text="Yes, tell them six o'clock.")],
+            UUID(str(waiting_event.payload["question_id"])),
+        )
+        await composition.runs.wait_terminal(first.run_id)
+        _record_device_decisions(composition, recording)
+        second = await _ingest(composition, body=OTHER_BODY)
+        parked = await composition.runs.get(second.run_id)
+
+    assert second.session_id == first.session_id
+    assert second.run_id != first.run_id
+    assert recording == [PolicyDecisionType.REQUIRE_APPROVAL]
+    assert parked.status is RunStatus.WAITING_FOR_APPROVAL
+    assert channel.invocations == []

@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **150 configuration knobs** across the specifications;
+The corpus now declares **153 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -300,7 +300,8 @@ sweep bounds, and the operator trace retention — less the three interactive
 snapshot caps that leave `memory/profiles.yaml` for `context/plan.yaml`, plus
 Milestone 13's thirteen delegation knobs: the four fan-out caps, the five
 default child limits, the three final-synthesis reserves, and the summary byte
-ceiling. The plan originally names **three
+ceiling, plus Milestone 20's three device knobs: the invocation timeout, the
+per-device daily ingest cap, and the poll-back interval. The plan originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -323,13 +324,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-150 falls out.
+153 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-150 tuning knobs in YAML.
+153 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -337,7 +338,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 150 knobs live, at the values the
+    module that owns it. This is where all 153 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -1246,7 +1247,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 150 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 153 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1268,7 +1269,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 150 declared knobs into files and leaves ten fields in
+   sorts all 153 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,

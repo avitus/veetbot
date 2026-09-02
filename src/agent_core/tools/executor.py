@@ -276,7 +276,14 @@ def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive")
     active_turn: list[object] = []
     for item in reversed(checkpoint.conversation):
         active_turn.append(item)
-        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
+        if isinstance(item, UserMessage):
+            # The turn is opened by the newest user message, whatever its
+            # trust. A device-ingested message is not laundered by an owner
+            # message earlier in the same standing session, and the checkpoint
+            # stamp cannot carry the fact either — the context builder rewrites
+            # it from request metadata at the top of every step.
+            if item.trust is not TrustLevel.USER:
+                return item.trust
             break
     else:
         return TrustLevel.EXTERNAL_UNTRUSTED

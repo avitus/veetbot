@@ -334,6 +334,21 @@ async def test_the_ingest_route_reports_its_routing_and_never_echoes_the_body() 
             revoked = await client.post(
                 f"/v1/devices/{REVOKED_DEVICE_ID}/messages", json=_message()
             )
+            # A device the caller cannot see stays absent even when the body it
+            # posted would have been refused on its own merits: presence is
+            # revalidated before the message is judged.
+            unknown_bad_channel = await client.post(
+                f"/v1/devices/{UUID(int=404)}/messages",
+                json=_message(channel="imessage"),
+            )
+            foreign_bad_channel = await client.post(
+                f"/v1/devices/{FOREIGN_DEVICE_ID}/messages",
+                json=_message(channel="imessage"),
+            )
+            owned_bad_channel = await client.post(
+                f"/v1/devices/{DEVICE_ID}/messages",
+                json=_message(channel="imessage"),
+            )
 
     assert accepted.status_code == 202
     assert set(accepted.json()) == {"duplicate", "session_id", "run_id"}
@@ -344,6 +359,10 @@ async def test_the_ingest_route_reports_its_routing_and_never_echoes_the_body() 
     assert foreign.status_code == 404
     assert revoked.status_code == 409
     assert BODY not in revoked.text
+    assert unknown_bad_channel.status_code == 404
+    assert foreign_bad_channel.status_code == 404
+    assert owned_bad_channel.status_code == 422
+    assert owned_bad_channel.json()["error"]["details"] == {"reason": "channel_unsupported"}
 
 
 async def test_the_daily_cap_answers_429_without_repeating_the_message() -> None:

@@ -117,7 +117,6 @@ class DeviceMessageIngestService:
         """Record one captured message and seed or continue its triage run."""
 
         require_scope(principal, "device.write")
-        self._admit(channel, sender, body)
         digest = ingest_digest(sender, body, received_at)
         origin: dict[str, object] = {
             "kind": "device_ingest",
@@ -127,7 +126,11 @@ class DeviceMessageIngestService:
         }
         resumed = False
         async with self._uow_factory() as uow:
+            # Presence is revalidated before any judgement about the message,
+            # so a device this principal cannot see is absent rather than
+            # informed about which of its fields the platform would reject.
             await self._present_device(uow, principal, device_id)
+            self._admit(channel, sender, body)
             await self._admit_daily_volume(uow, device_id, channel, received_at)
             stored = await uow.device_ingest.record(
                 DeviceIngestReceipt(
