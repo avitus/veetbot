@@ -585,6 +585,7 @@ class ConsolidationRun(BaseModel):
     episode_count: int = Field(default=0, ge=0)
     provider_call_count: int = Field(default=0, ge=0, le=3)
     fallback_stages: list[str] = Field(default_factory=list)
+    provider_stage_metrics: dict[str, dict[str, int | str | None]] = Field(default_factory=dict)
     started_at: datetime
     finished_at: datetime | None = None
 

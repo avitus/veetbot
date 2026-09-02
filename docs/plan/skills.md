@@ -915,7 +915,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:4259` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:4269` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at

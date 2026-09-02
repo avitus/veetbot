@@ -25,6 +25,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryCandidate,
+    MemoryDistillationEvidence,
     MemoryExtractionResult,
     Polarity,
     Portability,
@@ -2212,6 +2213,63 @@ async def test_auto_mode_activates_matching_release_bundled_evidence(
     assert ":matching_evidence:release:" in selections[0].derivation_key
     assert selections[0].payload["evidence_build_ref"] == "test-build"
     assert selections[0].payload["evidence_corpus_sha256"] == "a" * 64
+
+
+async def test_auto_mode_prefers_newer_distillation_evidence_over_older_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    (release_root / "a-formation8.json").write_text(
+        _evidence()
+        .model_copy(
+            update={
+                "model_policy": "fake-balanced",
+                "policy_version": _runtime_policy_version(),
+            }
+        )
+        .model_dump_json(),
+        encoding="utf-8",
+    )
+    (release_root / "b-formation9.json").write_text(
+        MemoryDistillationEvidence(
+            model_policy="fake-balanced",
+            provider="fake",
+            model="scripted",
+            policy_profile="default",
+            policy_version=_runtime_policy_version(),
+            build_ref="distillation-build",
+            corpus_sha256="b" * 64,
+            sample_count=61,
+            positive_case_count=49,
+            direct_must_form_recall=1,
+            hypothesis_must_form_recall=1,
+            benign_precision=0.96,
+            useful_recall_lift_percentage_points=90,
+            correction_rate_per_hundred=0,
+            evaluated_at=NOW,
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+
+    assert len(selections) == 1
+    assert selections[0].payload["outcome"] == "activated"
+    assert selections[0].payload["evidence_build_ref"] == "distillation-build"
+    assert selections[0].payload["evidence_corpus_sha256"] == "b" * 64
 
 
 async def test_off_mode_never_resolves_a_formation_provider(tmp_path: Path) -> None:

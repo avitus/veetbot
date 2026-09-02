@@ -2,6 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-08-31
+- Amended: 2026-09-02
 - Related: Sections 13, 20, 21, 22, and 24 of the engineering plan;
   ADR-0014, ADR-0018, ADR-0019, ADR-0022, ADR-0045, ADR-0051, ADR-0057,
   ADR-0068, ADR-0069, ADR-0070
@@ -83,6 +84,26 @@ training loop, reinforcement learning, or a new dependency into this milestone.
     count, fallback, recall, candidate bounds, grounding, telemetry, evidence
     clocks, forgetting, promotion, rendering, corrections, persistence,
     evaluation, and activation.
+15. **Episode output is a topical partition, not a session-sized singleton.**
+    Provider fragments must form an ordered complete partition of source-event
+    provenance. Anticipation receives the actual earlier source prefix for each
+    episode and never the episode being predicted.
+16. **Silent omission is a protocol failure.** The distillation response
+    accounts for every bounded source clause. `represented` is valid only when
+    it references a same-episode prediction attributed to a live memory, and
+    every formed candidate is grounded back to a coverage unit.
+17. **The production rich-conversation regression is a release blocker.** The
+    actual three-turn exercise discussion is an eleven-memory must-form case in
+    the shared three-policy corpus, including its improvement goal and
+    age-aware recommendation preference, not merely a narrow regex unit test.
+18. **Passing evidence activates immediately.** The exact-tuple evidence gate
+    stays because it measures recall and boundary behavior, but there is no
+    subsequent shadow, canary, or manual opt-in stage. `auto` selects the
+    bundled passing `formation@9` artifact at startup.
+19. **Candidate-local validation is isolated after structural validation.** A
+    malformed response or coverage ledger selects the deterministic fallback;
+    a locally invalid candidate is rejected and counted while valid siblings
+    remain eligible. One bad proposal cannot erase a rich response.
 
 ## Consequences
 
@@ -98,6 +119,9 @@ training loop, reinforcement learning, or a new dependency into this milestone.
 - Provider assistance remains evidence-gated. Until a valid `formation@9`
   artifact exists, automatic composition keeps the currently evidenced
   `formation@8` rather than treating the new code as activated.
+- Each consolidation audit exposes content-free tokens, cost, latency, and
+  outcome for all three provider stages, making a low-recall provider response
+  distinguishable from a provider failure or local validation fallback.
 - The deterministic and previous provider policies remain available as honest
   controls, so a claimed lift can be reproduced rather than inferred from two
   unrelated runs.

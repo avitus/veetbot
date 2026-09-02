@@ -806,6 +806,20 @@ def load_memory_distillation_evidence(path: Path) -> MemoryDistillationEvidence:
         ) from exc
 
 
+def load_memory_release_evidence(
+    path: Path,
+) -> ProviderExtractionEvaluationEvidence | MemoryDistillationEvidence:
+    """Load either supported provider-memory activation artifact."""
+
+    try:
+        return load_memory_distillation_evidence(path)
+    except ConfigurationError:
+        try:
+            return load_provider_extraction_evidence(path)
+        except ConfigurationError as exc:
+            raise ConfigurationError("provider memory release evidence did not pass") from exc
+
+
 def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     """Return operator evidence first, followed by immutable release-bundled evidence."""
 
@@ -819,12 +833,9 @@ def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
 
 def _provider_extraction_evidence_is_valid(path: Path) -> bool:
     try:
-        load_provider_extraction_evidence(path)
+        load_memory_release_evidence(path)
     except ConfigurationError:
-        try:
-            load_memory_distillation_evidence(path)
-        except ConfigurationError:
-            return False
+        return False
     return True
 
 

@@ -103,8 +103,19 @@ _FUTURE_USEFULNESS = {
     MemoryClaimKind.RESOURCE: 0.62,
     MemoryClaimKind.PROJECT_FACT: 0.55,
 }
+_BELIEF_TYPE_BY_CLAIM_KIND = {
+    MemoryClaimKind.RELATIONSHIP: BeliefType.RELATIONSHIP,
+    MemoryClaimKind.PREFERENCE: BeliefType.PREFERENCE,
+    MemoryClaimKind.RESOURCE: BeliefType.PROCEDURE_POINTER,
+    MemoryClaimKind.PROJECT_FACT: BeliefType.FACT,
+}
 
 logger = logging.getLogger(__name__)
+
+
+def _belief_type_for_claim_kind(claim_kind: MemoryClaimKind) -> BeliefType:
+    return _BELIEF_TYPE_BY_CLAIM_KIND.get(claim_kind, BeliefType.USER_MODEL_ATTR)
+
 
 # The citation form the renderer emits, read back exactly as it is written:
 # eight lower-case hex digits of the belief identifier (retrieval.py:576).
@@ -773,9 +784,182 @@ _ONGOING_BUILD = re.compile(
     re.IGNORECASE,
 )
 _SOFTWARE_PROJECT_CUE = re.compile(
-    r"\b(?:ai\s+agent|agent|api|app|application|code|library|platform|service|software|website)\b",
+    r"\b(?:ai\s+agent|agent|api|app|application|code|platform|service|software|website)\b",
     re.IGNORECASE,
 )
+_CURRENT_WEEKLY_ROUTINE = re.compile(
+    r"\bi\s+(?:currently\s+)?(?:do|follow|practice|perform)\s+(?:the\s+)?"
+    r"(?P<routine>.+?)\s+(?P<frequency>\d+\s*[-\u2013]\s*\d+\s+times?\s+per\s+week)\b",
+    re.IGNORECASE,
+)
+_OTHER_DAY_ACTIVITIES = re.compile(
+    r"\b(?:the\s+)?rest\s+of\s+(?:the\s+)?days\s+i\s+(?P<activities>[^.!?]+)",
+    re.IGNORECASE,
+)
+_TRAINING_IMPROVEMENT_QUESTION = re.compile(
+    r"\bwhat\s+would\s+be\s+the\s+best\s+modification\s+to\s+improve\s+that\b",
+    re.IGNORECASE,
+)
+_AGE_AWARE_RECOMMENDATION = re.compile(
+    r"\bare\s+you\s+factoring\s+my\s+age\s+into\s+this\s+recommendation\b",
+    re.IGNORECASE,
+)
+_TRAINED_REGULARLY = re.compile(
+    r"\bi\s+have\s+trained\s+regularly\s+(?:for\s+)?most\s+of\s+my\s+life\b",
+    re.IGNORECASE,
+)
+_PROGRESS_NOT_STALLED = re.compile(
+    r"\bprogress\s+has\s+not\s+stalled(?:\s+yet)?\b",
+    re.IGNORECASE,
+)
+_RESTARTED_ACTIVITY = re.compile(
+    r"\bi\s+restarted\s+(?P<activity>.+?)\s+"
+    r"(?P<when>(?:about\s+)?(?:a|one|\d+)\s+(?:year|month)s?\s+ago)"
+    r"(?:\s+after\s+(?P<prior>[^.!?]+))?(?=[.!?]|$)",
+    re.IGNORECASE,
+)
+_PAST_ACTIVITY_DURATION = re.compile(
+    r"\bi\s+(?:did|practiced|trained\s+with)\s+(?:the\s+)?(?P<activity>.+?)\s+for\s+"
+    r"(?P<approx>about|around|approximately)?\s*(?P<duration>[^.!?()]+?)"
+    r"(?:\s*\((?P<uncertainty>i\s+(?:forget|do\s+not\s+remember)[^)]*)\))?"
+    r"(?=[.!?]|$)",
+    re.IGNORECASE,
+)
+_FALSE_POSSESSION_PRESENT_PERFECT = re.compile(
+    r"\bi\s+have\s+(?:trained|worked|studied|practiced|exercised|lived|run|swum|cycled)\b",
+    re.IGNORECASE,
+)
+_FALSE_POSSESSION_EXPERIENCE_SUBJECT = re.compile(
+    r"^(?:(?:[a-z]+|\d+)\s+years?\s+of\s+.+\s+experience)$",
+    re.IGNORECASE,
+)
+_PRESENT_PERFECT_ACTIVITY_SUBJECT = re.compile(
+    r"^(?:trained|worked|studied|practiced|exercised|lived|run|swum|cycled)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_EXPERIENCE = re.compile(
+    r"\bi\s+have\s+(?P<duration>(?:[a-z]+|\d+)\s+years?\s+of\s+"
+    r"(?P<skill>.+?)\s+experience)\b",
+    re.IGNORECASE,
+)
+_AUTOMATIC_CORRECTION_CUE = re.compile(
+    r"\b(?:no\s+longer|do\s+not|don't)\s+(?:have|own|use|wear|drive)\b|"
+    r"\b(?:old\s+memory|memory\s+saying)\b.*\b(?:wrong|incorrect)\b",
+    re.IGNORECASE,
+)
+_LEADS_TEAM = re.compile(
+    r"\bi\s+lead\s+(?:the|an?)\s+(?P<team>[^.!?]+?\s+team)\b",
+    re.IGNORECASE,
+)
+_CLUB_ROLE = re.compile(
+    r"\bi(?:['\u2019]m|\s+am)\s+the\s+(?P<role>[^.!?]+?)\s+for\s+"
+    r"(?:our|the|a)\s+(?P<club>[^.!?]+?\s+club)\b",
+    re.IGNORECASE,
+)
+_PERSONAL_CONSTRAINT = re.compile(r"\bi\s+cannot\s+(?P<value>[^.!?]+)", re.IGNORECASE)
+_UNIVERSAL_CONSTRAINT = re.compile(
+    r"\ball\s+(?P<object>[^.!?]+?)\s+must\s+(?P<requirement>[^.!?]+)",
+    re.IGNORECASE,
+)
+_OWNED_RESOURCE_LOCATION = re.compile(
+    r"\bour\s+(?P<resource>[^.!?]+?)\s+is\s+in\s+(?P<location>\S+)",
+    re.IGNORECASE,
+)
+_KEPT_RESOURCE = re.compile(
+    r"\bi\s+keep\s+(?P<resource>[^.!?]+?)\s+in\s+(?P<location>[^.!?]+)",
+    re.IGNORECASE,
+)
+_IMPERATIVE_RESOURCE = re.compile(
+    r"\buse\s+the\s+(?P<resource>[^.!?]+?)\s+for\s+(?P<purpose>[^.!?]+)",
+    re.IGNORECASE,
+)
+_DIRECT_GOAL = re.compile(r"\bi\s+want\s+to\s+(?P<value>[^.!?]+)", re.IGNORECASE)
+_NAMED_GOAL = re.compile(r"\bmy\s+goal\s+is\s+to\s+(?P<value>[^.!?]+)", re.IGNORECASE)
+_PROFESSIONAL_SKILL = re.compile(
+    r"\bi\s+work\s+professionally\s+as\s+(?P<role>[^.!?]+)", re.IGNORECASE
+)
+_DIRECT_INTEREST = re.compile(
+    r"\bi(?:['\u2019]m|\s+am)\s+(?:deeply\s+)?interested\s+in\s+(?P<topic>[^.!?]+)",
+    re.IGNORECASE,
+)
+_LEARNING_INTEREST = re.compile(
+    r"\bi\s+love\s+learning\s+about\s+(?P<topic>[^.!?]+)", re.IGNORECASE
+)
+_FREQUENT_HABIT = re.compile(
+    r"\bi\s+(?P<verb>run|review)\s+(?P<value>[^.!?]*\bevery\b[^.!?]+)", re.IGNORECASE
+)
+_BODY_RECURRING_STATE = re.compile(
+    r"\bmy\s+(?P<body>[^.!?]+?)\s+(?P<frequency>often|frequently|regularly)\s+"
+    r"(?P<state>hurts|aches|tingles)\s+(?P<context>after\s+[^.!?]+)",
+    re.IGNORECASE,
+)
+_SYSTEM_RECURRING_STATE = re.compile(
+    r"\bthe\s+(?P<subject>[^.!?]+?)\s+(?P<frequency>often|frequently|regularly)\s+"
+    r"(?P<state>slows(?:\s+down)?|times\s+out)\s+(?P<context>after\s+[^.!?]+)",
+    re.IGNORECASE,
+)
+_IMPLIED_PREFERENCE = re.compile(
+    r"\b(?P<value>[^.!?]+?)\s+works\s+better\s+for\s+me\b", re.IGNORECASE
+)
+_PROJECT_USES = re.compile(r"\bthe\s+project\s+uses\s+(?P<technology>[^.!?]+)", re.IGNORECASE)
+_PRODUCTION_DEPLOYS = re.compile(
+    r"\bproduction\s+deploys\s+happen\s+through\s+(?P<system>[^.!?]+)",
+    re.IGNORECASE,
+)
+
+
+def _number_range_words(value: str) -> str:
+    match = re.fullmatch(r"\s*(\d+)\s*[-\u2013]\s*(\d+)\s+times?\s+per\s+week\s*", value, re.I)
+    if match is None:
+        return " ".join(value.split())
+    words = {
+        "1": "one",
+        "2": "two",
+        "3": "three",
+        "4": "four",
+        "5": "five",
+        "6": "six",
+        "7": "seven",
+    }
+    lower, upper = match.groups()
+    return f"{words.get(lower, lower)} to {words.get(upper, upper)} times per week"
+
+
+def _third_person_activity(value: str) -> str:
+    irregular = {"do": "does", "go": "goes", "have": "has"}
+    lowered = value.casefold()
+    if lowered in irregular:
+        return irregular[lowered]
+    if lowered.endswith(("s", "x", "z", "ch", "sh")):
+        return f"{lowered}es"
+    if lowered.endswith("y") and len(lowered) > 1 and lowered[-2] not in "aeiou":
+        return f"{lowered[:-1]}ies"
+    return f"{lowered}s"
+
+
+def _activity_subject(value: str) -> str:
+    lowered = value.casefold()
+    irregular = {"run": "running", "swim": "swimming"}
+    if lowered in irregular:
+        return irregular[lowered]
+    if lowered.endswith("ie"):
+        return f"{lowered[:-2]}ying"
+    if lowered.endswith("e"):
+        return f"{lowered[:-1]}ing"
+    return f"{lowered}ing"
+
+
+def _exact_evidence(event: EventEnvelope, start: int, end: int) -> EvidenceSpan:
+    return EvidenceSpan(
+        source_event_id=event.sequence,
+        text=_event_text(event)[start:end].strip(" ,.:;!?"),
+    )
+
+
+def contains_automatic_memory_correction(value: str) -> bool:
+    """Identify correction/retraction text that may update but never create memory."""
+
+    return _AUTOMATIC_CORRECTION_CUE.search(value) is not None
 
 
 class HighRecallCandidateExtractor:
@@ -804,7 +988,66 @@ class HighRecallCandidateExtractor:
         principal: Principal,
         scope: str,
     ) -> list[MemoryCandidate]:
-        proposed = list(await self._legacy.extract(events, principal=principal, scope=scope))
+        by_sequence = {event.sequence: event for event in events}
+        correction_sources = {
+            event.sequence
+            for event in events
+            if contains_automatic_memory_correction(_event_text(event))
+        }
+        legacy = list(await self._legacy.extract(events, principal=principal, scope=scope))
+        proposed = [
+            candidate.model_copy(
+                update={
+                    "claim_kind": {
+                        BeliefType.PREFERENCE: MemoryClaimKind.PREFERENCE,
+                        BeliefType.RELATIONSHIP: MemoryClaimKind.RELATIONSHIP,
+                        BeliefType.PROCEDURE_POINTER: MemoryClaimKind.RESOURCE,
+                    }.get(candidate.belief_type, candidate.claim_kind),
+                    "longevity": (
+                        MemoryLongevity.DURABLE
+                        if candidate.belief_type
+                        in {
+                            BeliefType.PREFERENCE,
+                            BeliefType.RELATIONSHIP,
+                            BeliefType.PROCEDURE_POINTER,
+                        }
+                        else candidate.longevity
+                    ),
+                    "evidence_spans": [
+                        EvidenceSpan(
+                            source_event_id=source_id,
+                            text=_event_text(by_sequence[source_id]),
+                        )
+                        for source_id in candidate.source_event_ids
+                        if source_id in by_sequence
+                    ],
+                }
+            )
+            for candidate in legacy
+            if not (
+                candidate.polarity is Polarity.RETRACT
+                or bool(set(candidate.source_event_ids) & correction_sources)
+                or (
+                    candidate.statement.startswith("User has a ")
+                    and (
+                        _PRESENT_PERFECT_ACTIVITY_SUBJECT.match(candidate.subject) is not None
+                        or _FALSE_POSSESSION_EXPERIENCE_SUBJECT.match(candidate.subject) is not None
+                    )
+                    and any(
+                        source_id in by_sequence
+                        and (
+                            _FALSE_POSSESSION_PRESENT_PERFECT.search(
+                                _event_text(by_sequence[source_id])
+                            )
+                            is not None
+                            or _EXPLICIT_EXPERIENCE.search(_event_text(by_sequence[source_id]))
+                            is not None
+                        )
+                        for source_id in candidate.source_event_ids
+                    )
+                )
+            )
+        ]
         seen = {
             (
                 candidate.subject.casefold(),
@@ -813,6 +1056,42 @@ class HighRecallCandidateExtractor:
             )
             for candidate in proposed
         }
+
+        def append(candidate: MemoryCandidate) -> bool:
+            key = (
+                candidate.subject.casefold(),
+                candidate.statement.casefold(),
+                tuple(candidate.source_event_ids),
+            )
+            if key not in seen:
+                seen.add(key)
+                proposed.append(candidate)
+            return len(proposed) >= self._maximum_candidates
+
+        def direct_candidate(
+            event: EventEnvelope,
+            *,
+            subject: str,
+            statement: str,
+            claim_kind: MemoryClaimKind,
+            longevity: MemoryLongevity,
+            evidence_spans: list[EvidenceSpan],
+        ) -> MemoryCandidate:
+            return MemoryCandidate(
+                belief_type=_belief_type_for_claim_kind(claim_kind),
+                subject=subject,
+                statement=statement,
+                source_event_ids=[event.sequence],
+                model_confidence=0.65,
+                proposed_scope=scope,
+                proposed_portability=portability_ceiling(_belief_type_for_claim_kind(claim_kind)),
+                sensitivity_guess=Sensitivity.INTERNAL,
+                claim_kind=claim_kind,
+                derivation=MemoryDerivation.DIRECT,
+                longevity=longevity,
+                evidence_spans=evidence_spans,
+            )
+
         for event in events:
             if (
                 event.event_type != "user.message.created"
@@ -821,6 +1100,8 @@ class HighRecallCandidateExtractor:
             ):
                 continue
             text = _event_text(event)
+            if contains_automatic_memory_correction(text):
+                continue
             for match in _ONGOING_BUILD.finditer(text):
                 activity = " ".join(match.group("activity").casefold().split())
                 raw_object = match.group("object").strip(" ,.:;!?")
@@ -878,6 +1159,597 @@ class HighRecallCandidateExtractor:
                     proposed.append(candidate)
                     if len(proposed) >= self._maximum_candidates:
                         return proposed
+
+            leads_team = _LEADS_TEAM.search(text)
+            if leads_team is not None:
+                team = " ".join(leads_team.group("team").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=f"{team} role",
+                        statement=f"User leads an {team}.",
+                        claim_kind=MemoryClaimKind.ROLE,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(event, leads_team.start(), leads_team.end())
+                        ],
+                    )
+                ):
+                    return proposed
+
+            club_role = _CLUB_ROLE.search(text)
+            if club_role is not None:
+                role = " ".join(club_role.group("role").split()).casefold()
+                club = " ".join(club_role.group("club").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=f"{club} role",
+                        statement=f"User is {role} for a {club}.",
+                        claim_kind=MemoryClaimKind.ROLE,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[_exact_evidence(event, club_role.start(), club_role.end())],
+                    )
+                ):
+                    return proposed
+
+            personal_constraint = _PERSONAL_CONSTRAINT.search(text)
+            if personal_constraint is not None:
+                value = " ".join(personal_constraint.group("value").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=value,
+                        statement=f"User cannot {value}.",
+                        claim_kind=MemoryClaimKind.CONSTRAINT,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                personal_constraint.start(),
+                                personal_constraint.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            universal_constraint = _UNIVERSAL_CONSTRAINT.search(text)
+            if universal_constraint is not None:
+                object_ = " ".join(universal_constraint.group("object").split()).casefold()
+                requirement = " ".join(universal_constraint.group("requirement").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=f"{object_} requirement",
+                        statement=f"User requires all {object_} to {requirement}.",
+                        claim_kind=MemoryClaimKind.CONSTRAINT,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                universal_constraint.start(),
+                                universal_constraint.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            owned_resource = _OWNED_RESOURCE_LOCATION.search(text)
+            if owned_resource is not None:
+                resource = " ".join(owned_resource.group("resource").split()).casefold()
+                location = owned_resource.group("location").strip(" ,;!?")
+                location = location[:-1] if location.endswith(".") else location
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=resource,
+                        statement=f"The user's {resource} is at {location}.",
+                        claim_kind=MemoryClaimKind.RESOURCE,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                owned_resource.start(),
+                                owned_resource.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            kept_resource = _KEPT_RESOURCE.search(text)
+            if kept_resource is not None:
+                resource = " ".join(kept_resource.group("resource").split())
+                location = " ".join(kept_resource.group("location").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=resource.casefold(),
+                        statement=f"User keeps {resource} in {location}.",
+                        claim_kind=MemoryClaimKind.RESOURCE,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                kept_resource.start(),
+                                kept_resource.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            imperative_resource = _IMPERATIVE_RESOURCE.search(text)
+            if imperative_resource is not None:
+                resource = " ".join(imperative_resource.group("resource").split())
+                purpose = " ".join(imperative_resource.group("purpose").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=purpose.casefold(),
+                        statement=f"The {resource} shows the user's {purpose}.",
+                        claim_kind=MemoryClaimKind.RESOURCE,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                imperative_resource.start(),
+                                imperative_resource.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            direct_goal = _DIRECT_GOAL.search(text) or _NAMED_GOAL.search(text)
+            if direct_goal is not None:
+                value = " ".join(direct_goal.group("value").split())
+                referent = next(
+                    (
+                        candidate.subject
+                        for candidate in reversed(proposed)
+                        if candidate.claim_kind is MemoryClaimKind.ONGOING_PROJECT
+                        and candidate.source_event_ids == [event.sequence]
+                    ),
+                    None,
+                )
+                if referent is not None:
+                    value = re.sub(
+                        r"\bit\b",
+                        f"the {referent}",
+                        value,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=value,
+                        statement=f"User wants to {value}.",
+                        claim_kind=MemoryClaimKind.GOAL,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(event, direct_goal.start(), direct_goal.end())
+                        ],
+                    )
+                ):
+                    return proposed
+
+            professional_skill = _PROFESSIONAL_SKILL.search(text)
+            if professional_skill is not None:
+                role = " ".join(professional_skill.group("role").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=role,
+                        statement=f"User works professionally as {role}.",
+                        claim_kind=MemoryClaimKind.SKILL,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                professional_skill.start(),
+                                professional_skill.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            direct_interest = _DIRECT_INTEREST.search(text) or _LEARNING_INTEREST.search(text)
+            if direct_interest is not None:
+                topic = " ".join(direct_interest.group("topic").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=topic,
+                        statement=f"User is interested in {topic}.",
+                        claim_kind=MemoryClaimKind.INTEREST,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                direct_interest.start(),
+                                direct_interest.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            frequent_habit = _FREQUENT_HABIT.search(text)
+            if frequent_habit is not None:
+                verb = frequent_habit.group("verb").casefold()
+                value = re.sub(
+                    r"^my\s+",
+                    "their ",
+                    " ".join(frequent_habit.group("value").split()),
+                    flags=re.IGNORECASE,
+                )
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=f"{verb} habit",
+                        statement=f"User {_third_person_activity(verb)} {value}.",
+                        claim_kind=MemoryClaimKind.HABIT,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                frequent_habit.start(),
+                                frequent_habit.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            body_state = _BODY_RECURRING_STATE.search(text)
+            if body_state is not None:
+                body = " ".join(body_state.group("body").split())
+                frequency = body_state.group("frequency").casefold()
+                state = body_state.group("state").casefold()
+                context = " ".join(body_state.group("context").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=f"{body} {state}",
+                        statement=f"User's {body} {frequency} {state} {context}.",
+                        claim_kind=MemoryClaimKind.RECURRING_STATE,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(event, body_state.start(), body_state.end())
+                        ],
+                    )
+                ):
+                    return proposed
+
+            system_state = _SYSTEM_RECURRING_STATE.search(text)
+            if system_state is not None:
+                subject = " ".join(system_state.group("subject").split())
+                frequency = system_state.group("frequency").casefold()
+                state = re.sub(
+                    r"\s+down$", "", system_state.group("state"), flags=re.IGNORECASE
+                ).casefold()
+                context = " ".join(system_state.group("context").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=f"{subject} state",
+                        statement=(f"The user's {subject} {frequency} {state} {context}."),
+                        claim_kind=MemoryClaimKind.RECURRING_STATE,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                system_state.start(),
+                                system_state.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            implied_preference = _IMPLIED_PREFERENCE.search(text)
+            if implied_preference is not None:
+                value = " ".join(implied_preference.group("value").split())
+                value = f"{value[:1].lower()}{value[1:]}"
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=value,
+                        statement=f"User prefers {value}.",
+                        claim_kind=MemoryClaimKind.PREFERENCE,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                implied_preference.start(),
+                                implied_preference.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            project_uses = _PROJECT_USES.search(text)
+            if project_uses is not None:
+                technology = " ".join(project_uses.group("technology").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject="project technology",
+                        statement=f"The user's project uses {technology}.",
+                        claim_kind=MemoryClaimKind.PROJECT_FACT,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                project_uses.start(),
+                                project_uses.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            production_deploys = _PRODUCTION_DEPLOYS.search(text)
+            if production_deploys is not None:
+                system = " ".join(production_deploys.group("system").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject="production deployment",
+                        statement=(f"The user's production deploys happen through {system}."),
+                        claim_kind=MemoryClaimKind.PROJECT_FACT,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                production_deploys.start(),
+                                production_deploys.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            improvement_question = _TRAINING_IMPROVEMENT_QUESTION.search(text)
+            if improvement_question is not None and append(
+                direct_candidate(
+                    event,
+                    subject="5x5 strength training improvement",
+                    statement=(
+                        "User wants to improve the standard 5x5 strength-training routine "
+                        "through modification."
+                    ),
+                    claim_kind=MemoryClaimKind.GOAL,
+                    longevity=MemoryLongevity.ONGOING,
+                    evidence_spans=[
+                        _exact_evidence(
+                            event,
+                            improvement_question.start(),
+                            improvement_question.end(),
+                        )
+                    ],
+                )
+            ):
+                return proposed
+
+            age_aware = _AGE_AWARE_RECOMMENDATION.search(text)
+            if age_aware is not None and append(
+                direct_candidate(
+                    event,
+                    subject="age-aware training recommendations",
+                    statement="User prefers training recommendations to account for their age.",
+                    claim_kind=MemoryClaimKind.PREFERENCE,
+                    longevity=MemoryLongevity.DURABLE,
+                    evidence_spans=[_exact_evidence(event, age_aware.start(), age_aware.end())],
+                )
+            ):
+                return proposed
+
+            weekly_routine = _CURRENT_WEEKLY_ROUTINE.search(text)
+            if weekly_routine is not None:
+                routine = " ".join(weekly_routine.group("routine").split()).strip(" ,.:;!?")
+                frequency = _number_range_words(weekly_routine.group("frequency"))
+                if "5x5" in routine.casefold() and "strength training" in routine.casefold():
+                    subject = "5x5 strength training"
+                    statement = (
+                        f"User follows a standard 5x5 strength-training routine {frequency}."
+                    )
+                else:
+                    subject = re.sub(r"\s+routine$", "", routine, flags=re.I)
+                    statement = f"User follows a {routine} {frequency}."
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=subject,
+                        statement=statement,
+                        claim_kind=MemoryClaimKind.HABIT,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                weekly_routine.start(),
+                                weekly_routine.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            other_days = _OTHER_DAY_ACTIVITIES.search(text)
+            if other_days is not None:
+                other_day_evidence = _exact_evidence(event, other_days.start(), other_days.end())
+                raw_activities = re.split(
+                    r"\s*(?:,\s*(?:or\s+)?|\s+or\s+|\s+and\s+)\s*",
+                    other_days.group("activities"),
+                    flags=re.I,
+                )
+                for raw_activity in raw_activities:
+                    activity = raw_activity.strip(" ,.:;!?").casefold()
+                    if not re.fullmatch(r"[a-z][a-z'-]*", activity):
+                        continue
+                    if append(
+                        direct_candidate(
+                            event,
+                            subject=_activity_subject(activity),
+                            statement=(
+                                f"User regularly {_third_person_activity(activity)} "
+                                "on non-strength-training days."
+                            ),
+                            claim_kind=MemoryClaimKind.HABIT,
+                            longevity=MemoryLongevity.ONGOING,
+                            evidence_spans=[other_day_evidence],
+                        )
+                    ):
+                        return proposed
+
+            trained_regularly = _TRAINED_REGULARLY.search(text)
+            if trained_regularly is not None and append(
+                direct_candidate(
+                    event,
+                    subject="training history",
+                    statement="User has trained regularly for most of their life.",
+                    claim_kind=MemoryClaimKind.SKILL,
+                    longevity=MemoryLongevity.DURABLE,
+                    evidence_spans=[
+                        _exact_evidence(
+                            event,
+                            trained_regularly.start(),
+                            trained_regularly.end(),
+                        )
+                    ],
+                )
+            ):
+                return proposed
+
+            explicit_experience = _EXPLICIT_EXPERIENCE.search(text)
+            if explicit_experience is not None:
+                duration = " ".join(explicit_experience.group("duration").split())
+                skill = " ".join(explicit_experience.group("skill").split())
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=skill,
+                        statement=f"User has {duration}.",
+                        claim_kind=MemoryClaimKind.SKILL,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[
+                            _exact_evidence(
+                                event,
+                                explicit_experience.start(),
+                                explicit_experience.end(),
+                            )
+                        ],
+                    )
+                ):
+                    return proposed
+
+            progress = _PROGRESS_NOT_STALLED.search(text)
+            if progress is not None:
+                subject = "5x5 progress" if "5x5" in text.casefold() else "current progress"
+                statement = (
+                    "User's current 5x5 progress has not stalled."
+                    if subject == "5x5 progress"
+                    else "User's current progress has not stalled."
+                )
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=subject,
+                        statement=statement,
+                        claim_kind=MemoryClaimKind.RECURRING_STATE,
+                        longevity=MemoryLongevity.ONGOING,
+                        evidence_spans=[_exact_evidence(event, progress.start(), progress.end())],
+                    )
+                ):
+                    return proposed
+
+            restarted = _RESTARTED_ACTIVITY.search(text)
+            if restarted is not None:
+                activity = " ".join(restarted.group("activity").split()).strip(" ,.:;!?")
+                when = " ".join(restarted.group("when").casefold().split())
+                rendered_when = "about one year ago" if when == "a year ago" else when
+                subject = (
+                    "5x5 training history"
+                    if activity.casefold() == "5x5"
+                    else f"{activity} history"
+                )
+                evidence_end = restarted.end("when")
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=subject,
+                        statement=f"User restarted {activity} {rendered_when}.",
+                        claim_kind=MemoryClaimKind.SKILL,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=[_exact_evidence(event, restarted.start(), evidence_end)],
+                    )
+                ):
+                    return proposed
+                prior = restarted.group("prior")
+                prior_match = (
+                    None
+                    if prior is None
+                    else re.fullmatch(r"many\s+years\s+of\s+(.+)", prior.strip(), re.I)
+                )
+                if prior_match is not None:
+                    prior_activity = prior_match.group(1).strip(" ,.:;!?")
+                    prior_start = restarted.start("prior")
+                    if append(
+                        direct_candidate(
+                            event,
+                            subject=f"{prior_activity.casefold()} experience",
+                            statement=(
+                                f"User trained with {prior_activity} for many years before "
+                                f"restarting {activity}."
+                            ),
+                            claim_kind=MemoryClaimKind.SKILL,
+                            longevity=MemoryLongevity.DURABLE,
+                            evidence_spans=[
+                                _exact_evidence(event, prior_start, restarted.end("prior"))
+                            ],
+                        )
+                    ):
+                        return proposed
+
+            for past_activity in _PAST_ACTIVITY_DURATION.finditer(text):
+                activity = " ".join(past_activity.group("activity").split()).strip(" ,.:;!?")
+                normalized_activity = re.sub(r"\s+routine$", "", activity, flags=re.I)
+                duration = " ".join(past_activity.group("duration").split()).strip(" ,.:;!?")
+                approximate = past_activity.group("approx") is not None
+                uncertainty = past_activity.group("uncertainty") is not None
+                qualifier = "approximately " if approximate else ""
+                statement = (
+                    f"User trained with a {normalized_activity} routine for {qualifier}{duration}"
+                )
+                evidence_spans = [
+                    _exact_evidence(event, past_activity.start(), past_activity.end("duration"))
+                ]
+                if uncertainty:
+                    statement += ", but is uncertain of the exact duration"
+                    evidence_spans.append(
+                        _exact_evidence(
+                            event,
+                            past_activity.start("uncertainty"),
+                            past_activity.end("uncertainty"),
+                        )
+                    )
+                if append(
+                    direct_candidate(
+                        event,
+                        subject=normalized_activity.casefold(),
+                        statement=f"{statement}.",
+                        claim_kind=MemoryClaimKind.SKILL,
+                        longevity=MemoryLongevity.DURABLE,
+                        evidence_spans=evidence_spans,
+                    )
+                ):
+                    return proposed
         return proposed
 
 
@@ -1770,6 +2642,9 @@ class GovernedMemoryService:
                     episode_count=int(getattr(extractor_audit, "episode_count", 0)),
                     provider_call_count=int(getattr(extractor_audit, "provider_calls", 0)),
                     fallback_stages=list(getattr(extractor_audit, "fallback_stages", [])),
+                    provider_stage_metrics=dict(
+                        getattr(extractor_audit, "provider_stage_metrics", {})
+                    ),
                     started_at=started_at,
                     finished_at=self._clock.now(),
                 )

@@ -3628,6 +3628,9 @@ Implement:
 - A formation corpus of at least sixty cases and an offline three-policy
   comparison against the frozen `formation@7` and `formation@8` controls, with
   version-bound activation evidence.
+- An ordered source-coverage ledger on the final call so every user clause is
+  explicitly formed, represented by an attributable prior memory, or assigned
+  a bounded non-memory disposition; silent omission is invalid.
 
 Acceptance criteria:
 
@@ -3635,6 +3638,10 @@ Acceptance criteria:
 - The statement "I am building a personal AI agent" forms the direct ongoing
   memory "User is building a personal AI agent" and may form likely software-
   development experience only as a tentative hypothesis.
+- The production three-turn exercise conversation forms separate memories for
+  the 5x5 improvement goal, age-aware recommendation preference, 5x5 frequency,
+  swimming, running, biking, lifelong training, unstalled progress, 5x5 restart,
+  calisthenics history, and approximate gymnastic strength-training history.
 - Direct must-form recall is at least 95 percent, hypothesis must-form recall is
   at least 80 percent, benign precision is at least 90 percent, and useful
   recall improves at least fifteen percentage points over `formation@8`.
@@ -3643,8 +3650,9 @@ Acceptance criteria:
   or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
   state, or sensitivity permitted by policy alone is not a rejection reason.
 - Every eligible provider consolidation makes exactly three batched calls and
-  every failed or invalid stage falls back deterministically with content-free
-  audit metadata.
+  every failed or structurally invalid stage falls back deterministically with
+  content-free audit metadata. Candidate-local invalidity rejects and counts
+  that proposal without discarding valid siblings.
 - Repeated recall or citation cannot extend evidence lifetime; later supporting
   user evidence refreshes and may promote a hypothesis without duplicating the
   live belief.
@@ -3652,6 +3660,8 @@ Acceptance criteria:
   integration, retry, replay, and policy upgrades.
 - `formation@9` activates only for the exact comparative-evidence tuple; until
   then automatic composition retains the evidenced `formation@8` behavior.
+  Once the passing artifact is bundled, automatic composition activates it
+  immediately for that tuple without a shadow or canary phase.
 
 The milestone does not include reinforcement learning, fine-tuning, embeddings,
 `pgvector`, a temporal entity graph, a persona editor, an external memory

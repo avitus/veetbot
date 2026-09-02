@@ -14,7 +14,7 @@ Milestone 9 and 16 memory designs, and is recorded by
 
 The owner authorized this workstream on 2026-08-31 after observing that the
 current memory former is dramatically too timid to be useful. The concrete
-failure is ordinary and consequential:
+failures are ordinary and consequential. The first was:
 
 > I am building a personal AI agent and I am wondering what to use for web
 > search and web fetch.
@@ -25,6 +25,16 @@ building a personal AI agent.** It may also form **User likely has
 software-development experience.** as an explicitly tentative hypothesis. The
 first is stated evidence; the second is a useful inference that must be allowed
 to fade if later conversation never supports it.
+
+The second production regression was a three-turn training discussion. The
+user stated a two-to-three-times-weekly 5x5 routine, swimming, running, and
+biking on other days, lifelong regular training, current unstalled progress, a
+5x5 restart after years of calisthenics, and roughly six years of gymnastic
+strength training. The old path retained only the malformed ownership claim
+"User has a trained regularly most of my life." Formation must treat facts
+embedded in questions as evidence, split coordinated activities into atomic
+claims, preserve frequency, history, current status, and expressed
+uncertainty, and never let one malformed parse consume a rich conversation.
 
 Milestone 21 deliberately favors useful recall over timidity. A few provisional
 false positives are acceptable when their derivation is visible, their evidence
@@ -126,14 +136,16 @@ IntegratedEpisode
 ```
 
 The integration batch contains only trusted user events for the owning tenant,
-principal, and session, ordered by event sequence. The provider may make the
-narrative coherent and resolve pronouns within that batch; it may not add a
-fact with no supporting source text. Every sentence in the narrative cites at
-least one source event through the provider response. Local validation rejects
-an unknown sequence, an unowned sequence, an empty citation, a duplicate
-subject, or a narrative span not supported by its citations. Validation failure
-falls back to a deterministic episode whose narrative is the ordered source
-text joined under the same bounds.
+principal, and session, ordered by event sequence. The provider partitions it
+into one or more compact topical episodes; the flattened provenance is an
+ordered complete partition of the input. The provider may make each narrative
+coherent and resolve pronouns within its fragment; it may not add a fact with
+no supporting source text. Every sentence in every narrative cites at least
+one source event through the provider response. Local validation rejects an
+unknown sequence, an unowned sequence, an empty citation, a duplicate subject,
+overlapping or omitted provenance, or a narrative span not supported by its
+citations. Validation failure falls back to one deterministic episode whose
+narrative is the ordered source text joined under the same bounds.
 
 `IntegratedEpisodeStore` has `put`, `get`, `for_session`, and
 `delete_for_session`. `put` is idempotent on `derivation_key`; both in-memory
@@ -172,8 +184,24 @@ platform already knew the fact.
 
 The final call sees the validated integrated episodes, the source events, and
 the blinded predictions. It emits closed semantic claims with exact source
-event and evidence-span citations. Local code owns canonical rendering,
-scope, sensitivity classification, confidence, longevity, and expiry.
+event and evidence-span citations plus an ordered source-coverage ledger. Local
+code owns canonical subject composition and uncertainty language as well as
+scope, portability, sensitivity floors, confidence, longevity, and expiry.
+
+The final request splits user text at bounded sentence and first-person clause
+boundaries. Every resulting `coverage_unit` must appear exactly once as
+`formed`, `represented`, `transient`, `unsafe`, or `not_memory`. A formed unit
+names the zero-based candidates it grounds, and every candidate is named by at
+least one formed unit. A represented unit names an anticipation prediction for
+the same episode, and that prediction must cite a live prior memory; ordinary
+model expectation cannot justify omission. Missing units, unknown indexes,
+negative indexes, ungrounded candidates, or falsely attributed represented
+units invalidate the stage and select the deterministic high-recall fallback.
+After that structural validation, local policy validates each candidate
+independently: an invalid candidate is rejected and counted without discarding
+its valid siblings, and the stage outcome is `partial_validation`. This keeps
+one bad proposal from recreating the all-or-nothing recall failure while no
+invalid proposal reaches consolidation.
 
 A directly stated claim is not suppressed merely because a general model could
 predict it. It may be skipped as redundant only when an existing live memory
@@ -350,10 +378,12 @@ displaced_global        provider_invalid
 
 `ConsolidationRun` stores the category counts plus episode count, provider call
 count, fallback stages, direct proposed/committed, hypothesis
-proposed/committed, and prediction-attributed redundancies. The sum of terminal
-categories equals proposals plus provider-invalid claims. Events and metrics
-carry counts, versions, and normalized failure classes only—never source text,
-episode narrative, evidence spans, or memory statements.
+proposed/committed, prediction-attributed redundancies, coverage dispositions,
+rejected provider candidates, and per-stage input, cached-input, cache-write,
+output, and reasoning tokens, cost, latency, and outcome. The sum of terminal
+categories equals proposals plus provider-invalid claims. Events and metrics carry counts, versions, and
+normalized failure classes only—never source text, episode narrative, evidence
+spans, or memory statements.
 
 ## Evaluation and activation evidence
 
@@ -377,6 +407,9 @@ The core scenarios include:
 5. an unsupported hypothesis retires after thirty days and an unsupported
    ongoing state after ninety;
 6. repeated citations do not extend either lifetime.
+7. the production three-turn training conversation forms all eleven supported
+   memories: the improvement goal, age-aware recommendation preference,
+   routine, three activities, progress, and four training-history claims.
 
 The live-model command below evaluates all three policies over the same cases
 and publishes a never-overwritten `MemoryDistillationEvidence` only when:
@@ -399,7 +432,8 @@ Publication requires:
   cross-principal, and cross-tenant failures are all zero;
 - direct `must_form` recall is at least 95 percent;
 - hypothesis `must_form` recall is at least 80 percent;
-- precision over benign positive and negative cases is at least 90 percent;
+- precision against exhaustive, semantic-paraphrase-aware gold claims over
+  benign positive and negative cases is at least 90 percent;
 - useful recall is at least fifteen percentage points above `formation@8`;
 - every claim kind has a positive case and the personal-agent core passes;
 - measurable user correction or rejection is below ten per one hundred
@@ -412,14 +446,20 @@ The thresholds intentionally tolerate some provisional false positives. The
 wrong optimization is near-perfect precision achieved by suppressing useful
 memory.
 
+There is no shadow, canary, or manual opt-in phase after passing evidence is
+bundled. `auto` selects `formation@9` immediately for the exact production
+tuple. `formation@8` remains an honest control and the fallback for a different
+or unevidenced tuple, not a conservative rollout stage.
+
 ## Persistence and migration
 
 One structural revision adds the integrated-episode table, the new belief and
 formation-audit columns, and the bounded indexes on evidence expiry and episode
 ownership. A separate data revision backfills beliefs in bounded primary-key
-pages. Both upgrades and downgrades are explicit; downgrade of the data revision
-is lossy only for derived fields and is declared as such. `EXPECTED_REVISION`
-advances with the structural head.
+pages. A following additive revision adds the content-free per-stage metrics
+document to consolidation audits. All upgrades and downgrades are explicit;
+downgrade of the data revision is lossy only for derived fields and is declared
+as such. `EXPECTED_REVISION` advances with the structural head.
 
 The in-memory store and PostgreSQL repositories translate row models by hand,
 return domain values only, and run the shared contracts. No provider call occurs
@@ -473,13 +513,15 @@ short units of work with idempotent derivation keys.
    distillation once each, with no candidate-level call. Registered as
    `gate.memory.prediction_error_calls`, case. **M21.**
 6. **Every provider stage has an audited deterministic fallback.** A transient,
-   permanent, protocol, or validation failure records only normalized metadata,
-   completes with locally derived episodes and candidates, and never partly
-   trusts an invalid stage. Registered as `gate.memory.distill_fallback`, case.
-   **M21.**
-7. **Direct ongoing projects form at high recall.** The personal-agent core
+   permanent, protocol, or structural validation failure records only normalized
+   metadata and completes with locally derived episodes and candidates. After
+   structural validation, an invalid candidate is rejected and counted without
+   discarding valid siblings. Registered as `gate.memory.distill_fallback`,
+   case. **M21.**
+7. **Rich direct evidence forms at high recall.** The personal-agent core
    statement forms `User is building a personal AI agent.` as a direct ongoing
-   project with exact user provenance. Registered as
+   project with exact user provenance, and the production training conversation
+   forms its eleven atomic supported memories. Registered as
    `gate.memory.direct_high_recall`, case. **M21.**
 8. **Useful hypotheses form as hypotheses.** The same core statement may form
    `User likely has software-development experience.` as tentative and never as
@@ -541,8 +583,9 @@ short units of work with idempotent derivation keys.
     provenance, authority, or formation version, and erasure removes the new
     rows. Registered as `gate.memory.schema_backfill`, structural. **M21.**
 22. **Corpus v3 has the declared coverage.** It contains at least sixty cases,
-    at least seventy percent positive, every claim kind and label class, all six
-    core scenarios, exact evidence text, and no duplicate identifier.
+    at least seventy percent positive, every claim kind and label class, all
+    seven core scenarios including the rich production regression, exact
+    evidence text, and no duplicate identifier.
     Registered as `gate.memory.formation_corpus_v3`, structural. **M21.**
 23. **Comparative evidence proves marked useful-recall lift.** One offline run
     compares `formation@7`, `formation@8`, and `formation@9`; evidence publishes

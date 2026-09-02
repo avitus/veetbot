@@ -1,0 +1,27 @@
+{
+  "benign_precision": 0.96875,
+  "boundary_failures": 0,
+  "build_ref": "content-6973e8ddc75c6e40947e1f368abf2a969592cf5725e0fdbe5453a426b59fbfc2",
+  "comparative_policies": [
+    "formation@7",
+    "formation@8",
+    "formation@9"
+  ],
+  "corpus_sha256": "52480c045154d67368a69f0d27ced5d99606e696d5beff5b94c8bed93a006ae3",
+  "correction_rate_per_hundred": 0.0,
+  "direct_must_form_recall": 1.0,
+  "evaluated_at": "2026-09-02T17:51:16.818150Z",
+  "extractor_version": "nemori-assisted-v1",
+  "formation_policy_version": "formation@9",
+  "hypothesis_must_form_recall": 1.0,
+  "model": "gpt-5.6-sol",
+  "model_policy": "balanced",
+  "policy_profile": "default",
+  "policy_version": "default@8905b6f85895+hb03f69cf",
+  "positive_case_count": 49,
+  "provider": "openai",
+  "provider_calls_per_consolidation": 3,
+  "sample_count": 61,
+  "schema_version": 1,
+  "useful_recall_lift_percentage_points": 92.53731343283582
+}

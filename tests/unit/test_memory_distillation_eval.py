@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 import agent_core.evals.memory_distillation as memory_eval
 from agent_core.cli.main import app
+from agent_core.domain.memory import MemoryClaimKind, MemoryDerivation, MemoryLongevity
 from agent_core.evals.memory_distillation import MemoryDistillationCase
 
 
@@ -59,6 +60,44 @@ def test_distillation_scorer_matches_closed_fields_and_counts_false_positives() 
     assert score.false_positives == 1
     assert score.direct_must_form_expected == 1
     assert score.direct_must_form_matched == 1
+
+
+def test_distillation_scorer_accepts_semantically_equivalent_canonical_wording() -> None:
+    belief_type = memory_eval.DistillationEvaluationBelief
+    case = MemoryDistillationCase.model_validate(
+        {
+            "id": "goal-semantic-901",
+            "label": "must_form",
+            "scenario": "ordinary",
+            "events": [{"actor": "user", "text": "My goal is to finish the marathon."}],
+            "expected": [
+                {
+                    "claim_kind": "goal",
+                    "derivation": "direct",
+                    "longevity": "ongoing",
+                    "subjects": ["marathon"],
+                    "statements": ["User wants to finish the marathon."],
+                    "evidence_text": ["finish the marathon"],
+                }
+            ],
+        }
+    )
+
+    score = memory_eval.score_distillation_case(
+        case,
+        [
+            belief_type(
+                claim_kind=MemoryClaimKind.GOAL,
+                derivation=MemoryDerivation.DIRECT,
+                longevity=MemoryLongevity.ONGOING,
+                subject="User",
+                statement="User's goal is to finish the marathon.",
+            )
+        ],
+    )
+
+    assert score.matched == 1
+    assert score.false_positives == 0
 
 
 def test_distillation_cli_command_is_registered() -> None:

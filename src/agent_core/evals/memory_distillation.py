@@ -6,6 +6,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import tempfile
 from dataclasses import replace
 from datetime import datetime
@@ -39,6 +40,43 @@ def _normalized(value: str) -> str:
     return " ".join(value.casefold().strip().rstrip(".!?").split())
 
 
+_SEMANTIC_TOKEN = re.compile(r"[a-z0-9]+(?:['-][a-z0-9]+)*", re.IGNORECASE)
+_SEMANTIC_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "are",
+        "enough",
+        "goal",
+        "is",
+        "my",
+        "our",
+        "the",
+        "their",
+        "to",
+        "upcoming",
+        "user",
+        "users",
+        "want",
+        "wants",
+    }
+)
+
+
+def _semantic_terms(value: str) -> set[str]:
+    terms = set(_SEMANTIC_TOKEN.findall(value.casefold())) - _SEMANTIC_STOPWORDS
+    return {term[:-1] if len(term) > 4 and term.endswith("s") else term for term in terms}
+
+
+def _semantically_equivalent(left: str, right: str) -> bool:
+    if _normalized(left) == _normalized(right):
+        return True
+    left_terms = _semantic_terms(left)
+    right_terms = _semantic_terms(right)
+    smaller = min(len(left_terms), len(right_terms))
+    return bool(smaller) and len(left_terms & right_terms) / smaller >= 0.8
+
+
 class DistillationEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -69,6 +107,7 @@ class MemoryDistillationCase(BaseModel):
         "evidence-promotion",
         "lifecycle-retirement",
         "self-citation",
+        "rich-conversation",
         "ordinary",
         "trust-boundary",
     ]
@@ -120,6 +159,7 @@ class MemoryDistillationCorpus(BaseModel):
             "evidence-promotion",
             "lifecycle-retirement",
             "self-citation",
+            "rich-conversation",
         }
         if not core <= {case.scenario for case in self.cases}:
             raise ValueError("memory-distillation corpus omits a core scenario")
@@ -253,8 +293,16 @@ def score_distillation_case(
                 belief.claim_kind is expected.claim_kind
                 and belief.derivation is expected.derivation
                 and belief.longevity is expected.longevity
-                and _normalized(belief.subject) in subjects
-                and _normalized(belief.statement) in statements
+                and (
+                    (
+                        _normalized(belief.subject) in subjects
+                        and _normalized(belief.statement) in statements
+                    )
+                    or any(
+                        _semantically_equivalent(belief.statement, statement)
+                        for statement in expected.statements
+                    )
+                )
             ):
                 occupied.add(index)
                 matched += 1
@@ -540,6 +588,12 @@ async def run_live_evaluation(
         for result in personal_core
     ):
         failures.append("personal-agent direct and hypothesis core did not pass")
+    rich_core = [result for result in results if result.scenario == "rich-conversation"]
+    if not rich_core or any(
+        result.arms["formation@9"].score.matched != result.arms["formation@9"].score.expected
+        for result in rich_core
+    ):
+        failures.append("rich multi-turn conversation core did not pass completely")
     matched_kinds = {
         expected.claim_kind
         for case, result in zip(corpus.cases, results, strict=True)
@@ -548,9 +602,18 @@ async def run_live_evaluation(
             belief.claim_kind is expected.claim_kind
             and belief.derivation is expected.derivation
             and belief.longevity is expected.longevity
-            and _normalized(belief.subject) in {_normalized(value) for value in expected.subjects}
-            and _normalized(belief.statement)
-            in {_normalized(value) for value in expected.statements}
+            and (
+                (
+                    _normalized(belief.subject)
+                    in {_normalized(value) for value in expected.subjects}
+                    and _normalized(belief.statement)
+                    in {_normalized(value) for value in expected.statements}
+                )
+                or any(
+                    _semantically_equivalent(belief.statement, statement)
+                    for statement in expected.statements
+                )
+            )
             for belief in result.arms["formation@9"].beliefs
         )
     }

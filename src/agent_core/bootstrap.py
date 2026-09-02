@@ -1593,7 +1593,8 @@ async def _compose(
             else:
                 selected_evidence = None
                 selected_distillation_evidence = None
-                for evidence_path in provider_extraction_evidence_paths(settings):
+                evidence_paths = provider_extraction_evidence_paths(settings)
+                for evidence_path in evidence_paths:
                     try:
                         candidate_distillation_evidence = load_memory_distillation_evidence(
                             evidence_path
@@ -1614,23 +1615,25 @@ async def _compose(
                                 else "release"
                             )
                             break
-                    try:
-                        candidate_evidence = load_provider_extraction_evidence(evidence_path)
-                    except ConfigurationError:
-                        continue
-                    if provider_extraction_evidence_matches(
-                        candidate_evidence,
-                        extraction_model,
-                        agent.policy_profile,
-                        ruleset.policy_version,
-                    ):
-                        selected_evidence = candidate_evidence
-                        evidence_source = (
-                            "operator"
-                            if evidence_path == settings.memory_provider_extraction_evidence
-                            else "release"
-                        )
-                        break
+                if selected_distillation_evidence is None:
+                    for evidence_path in evidence_paths:
+                        try:
+                            candidate_evidence = load_provider_extraction_evidence(evidence_path)
+                        except ConfigurationError:
+                            continue
+                        if provider_extraction_evidence_matches(
+                            candidate_evidence,
+                            extraction_model,
+                            agent.policy_profile,
+                            ruleset.policy_version,
+                        ):
+                            selected_evidence = candidate_evidence
+                            evidence_source = (
+                                "operator"
+                                if evidence_path == settings.memory_provider_extraction_evidence
+                                else "release"
+                            )
+                            break
                 if selected_distillation_evidence is None and selected_evidence is None:
                     if memory_mode is MemoryProviderExtractionMode.REQUIRED:
                         raise ConfigurationError(

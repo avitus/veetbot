@@ -26,14 +26,19 @@ import pytest
 from agent_core.config import (
     PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT,
     ConfigurationError,
-    load_provider_extraction_evidence,
+    load_memory_release_evidence,
 )
-from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+from agent_core.domain.memory import (
+    MemoryDistillationEvidence,
+    ProviderExtractionEvaluationEvidence,
+)
 
 ActivationTuple = tuple[str, str, str, str, str, str, str]
 
 
-def _activation_tuple(evidence: ProviderExtractionEvaluationEvidence) -> ActivationTuple:
+def _activation_tuple(
+    evidence: ProviderExtractionEvaluationEvidence | MemoryDistillationEvidence,
+) -> ActivationTuple:
     """The seven fields startup validation matches an artifact against."""
 
     return (
@@ -58,7 +63,7 @@ def _duplicate_activation_tuples(root: Path) -> dict[ActivationTuple, list[str]]
 
     claimed: dict[ActivationTuple, list[str]] = {}
     for path in _bundled_artifacts(root):
-        evidence = load_provider_extraction_evidence(path)
+        evidence = load_memory_release_evidence(path)
         claimed.setdefault(_activation_tuple(evidence), []).append(path.name)
     return {tuple_: names for tuple_, names in claimed.items() if len(names) > 1}
 
@@ -68,8 +73,11 @@ def test_every_bundled_artifact_parses_through_the_runtime_loader() -> None:
 
     assert artifacts, "the release bundle holds no artifact for the runtime to load"
     for path in artifacts:
-        evidence = load_provider_extraction_evidence(path)
-        assert isinstance(evidence, ProviderExtractionEvaluationEvidence)
+        evidence = load_memory_release_evidence(path)
+        assert isinstance(
+            evidence,
+            (ProviderExtractionEvaluationEvidence, MemoryDistillationEvidence),
+        )
         assert all(field for field in _activation_tuple(evidence))
 
 
