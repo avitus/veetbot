@@ -31,6 +31,8 @@ public struct RootView: View {
     @EnvironmentObject private var appearance: AppearancePreferences
     #if os(iOS)
     @EnvironmentObject private var smsIntegration: SmsIntegrationPreferences
+    @State private var composingInvocation: SmsInvocation?
+    @State private var answeredSmsInvocationIDs: Set<UUID> = []
     #endif
     #if os(macOS)
     @StateObject private var settingsWindowPresenter = SettingsWindowPresenter()
@@ -54,26 +56,13 @@ public struct RootView: View {
         }
         #endif
         #if os(iOS)
-        .sheet(item: composedInvocation) { invocation in
+        .sheet(item: composedInvocation, onDismiss: { presentNextSmsInvocation() }) { invocation in
             SmsComposeSheet(invocation: invocation) { result in
-                Task {
-                    await model.completeSmsInvocation(
-                        invocation,
-                        with: DeviceInvocationResult(composeResult: result)
-                    )
-                }
+                answerSmsInvocation(invocation, with: DeviceInvocationResult(composeResult: result))
             }
             .ignoresSafeArea()
         }
-        .onChange(of: model.pendingSmsInvocation) { invocation in
-            guard
-                case .unsupported(let unsupported) = SmsInvocationDisposition.resolve(
-                    invocation,
-                    canSendText: SmsComposeSheet.canSend
-                )
-            else { return }
-            Task { await model.completeSmsInvocation(unsupported, with: .failed) }
-        }
+        .onChange(of: model.pendingSmsInvocation) { _ in presentNextSmsInvocation() }
         .task(id: smsRecoveryKey) {
             guard scenePhase == .active, smsIntegration.integrationEnabled else { return }
             await model.refreshPendingSmsInvocations()
@@ -155,25 +144,51 @@ public struct RootView: View {
     }
 
     #if os(iOS)
-    /// The invocation the compose sheet should show. Dismissing the sheet by
-    /// hand never reaches the compose delegate, so that path posts the
-    /// cancellation the server is still waiting for.
+    /// The invocation this sheet is showing — the view's own state, not the
+    /// head of the model's queue, which may already have advanced. Dismissing
+    /// the sheet by hand never reaches the compose delegate, so that path
+    /// posts the cancellation for the invocation that was on screen.
     private var composedInvocation: Binding<SmsInvocation?> {
         Binding(
-            get: {
-                guard
-                    case .compose(let invocation) = SmsInvocationDisposition.resolve(
-                        model.pendingSmsInvocation,
-                        canSendText: SmsComposeSheet.canSend
-                    )
-                else { return nil }
-                return invocation
-            },
+            get: { composingInvocation },
             set: { newValue in
-                guard newValue == nil, let presented = model.pendingSmsInvocation else { return }
-                Task { await model.completeSmsInvocation(presented, with: .cancelled) }
+                guard newValue == nil, let dismissed = composingInvocation else { return }
+                answerSmsInvocation(dismissed, with: .cancelled)
             }
         )
+    }
+
+    /// Records the owner's outcome for the invocation that was on screen. The
+    /// id is retired here, synchronously, because the sheet's dismissal can
+    /// reach `onDismiss` before the view model has settled the queue — and a
+    /// dismissal must never bring the answered invocation back.
+    private func answerSmsInvocation(
+        _ invocation: SmsInvocation,
+        with result: DeviceInvocationResult
+    ) {
+        answeredSmsInvocationIDs.insert(invocation.id)
+        composingInvocation = nil
+        Task { await model.completeSmsInvocation(invocation, with: result) }
+    }
+
+    /// Shows the next unanswered invocation once nothing is on screen. A
+    /// device that cannot send text reports the failure instead of presenting
+    /// a sheet the owner could not use.
+    private func presentNextSmsInvocation() {
+        guard composingInvocation == nil else { return }
+        switch SmsInvocationDisposition.resolve(
+            model.pendingSmsInvocation,
+            canSendText: SmsComposeSheet.canSend
+        ) {
+        case .idle:
+            break
+        case .compose(let invocation):
+            guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
+            composingInvocation = invocation
+        case .unsupported(let invocation):
+            guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
+            answerSmsInvocation(invocation, with: .failed)
+        }
     }
 
     /// Re-runs the recovery fetch when the app comes forward, when the owner

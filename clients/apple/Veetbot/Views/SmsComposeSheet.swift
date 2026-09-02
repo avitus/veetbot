@@ -39,12 +39,14 @@ struct SmsComposeSheet: UIViewControllerRepresentable {
             self.onFinish = onFinish
         }
 
+        /// Reports the outcome and leaves dismissal to the state change that
+        /// report causes. Dismissing the controller here as well would race
+        /// SwiftUI's own dismissal of the sheet.
         func messageComposeViewController(
             _ controller: MFMessageComposeViewController,
             didFinishWith result: MessageComposeResult
         ) {
             onFinish(result)
-            controller.dismiss(animated: true)
         }
     }
 }

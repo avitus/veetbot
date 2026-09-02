@@ -125,6 +125,10 @@ public final class ChatViewModel: ObservableObject {
     private var pendingNotificationPayload: NotificationPushPayload?
     private var smsInvocations = SmsInvocationQueue()
     private var smsInvocationDeviceID: UUID?
+    /// Held rather than rebuilt per call: the service remembers the results it
+    /// still owes the server, and a fresh instance would forget them.
+    private var smsService: DeviceInvocationService?
+    private var smsServiceBaseURL: URL?
 
     public init(
         tokenStore: any TokenStore = KeychainTokenStore(),
@@ -320,12 +324,24 @@ public final class ChatViewModel: ObservableObject {
         await loadSmsInvocations(deviceID: deviceID, reportingFailures: false)
     }
 
-    private func loadSmsInvocations(deviceID: UUID, reportingFailures: Bool) async {
-        guard let api else { return }
+    /// One service per (connection, device), kept alive so the results it owes
+    /// the server survive between a failed post and the next recovery fetch.
+    private func smsInvocationService(for deviceID: UUID) -> DeviceInvocationService? {
+        guard let api else { return nil }
+        if let smsService, smsInvocationDeviceID == deviceID, smsServiceBaseURL == baseURL {
+            return smsService
+        }
         let service = DeviceInvocationService(api: api, deviceID: deviceID)
+        smsService = service
+        smsInvocationDeviceID = deviceID
+        smsServiceBaseURL = baseURL
+        return service
+    }
+
+    private func loadSmsInvocations(deviceID: UUID, reportingFailures: Bool) async {
+        guard let service = smsInvocationService(for: deviceID) else { return }
         do {
             let invocations = try await service.nextSmsInvocations()
-            smsInvocationDeviceID = deviceID
             smsInvocations.merge(invocations)
             pendingSmsInvocation = smsInvocations.presented
         } catch {
@@ -336,19 +352,21 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Posts the owner's outcome for the presented invocation exactly once and
-    /// brings forward whatever is waiting behind it.
+    /// Posts the owner's outcome for the invocation that was on screen and
+    /// brings forward whatever is waiting behind it. An outcome for anything
+    /// other than the presented invocation — a sheet dismissal that arrives
+    /// after the head advanced — settles nothing and posts nothing.
     public func completeSmsInvocation(
         _ invocation: SmsInvocation,
         with result: DeviceInvocationResult
     ) async {
-        guard smsInvocations.presented?.id == invocation.id else { return }
-        let deviceID = smsInvocationDeviceID ?? registeredDeviceID
-        smsInvocations.settle(invocation.id)
+        guard smsInvocations.settle(invocation.id) else { return }
         pendingSmsInvocation = smsInvocations.presented
-        guard let api, let deviceID else { return }
-        await DeviceInvocationService(api: api, deviceID: deviceID)
-            .complete(invocation, with: result)
+        guard
+            let deviceID = smsInvocationDeviceID ?? registeredDeviceID,
+            let service = smsInvocationService(for: deviceID)
+        else { return }
+        await service.complete(invocation, with: result)
     }
 
     /// Drops every invocation this client was holding without posting a
@@ -357,6 +375,8 @@ public final class ChatViewModel: ObservableObject {
     private func clearPendingSmsInvocations() {
         smsInvocations.removeAll()
         smsInvocationDeviceID = nil
+        smsService = nil
+        smsServiceBaseURL = nil
         registeredDeviceID = nil
         pendingSmsInvocation = nil
     }
