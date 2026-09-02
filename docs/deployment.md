@@ -441,6 +441,13 @@ fingerprint explicitly for `productbuild`. Keep those roles separate: the App
 Store provisioning profile contains the app distribution certificate, not the
 installer certificate.
 
+After CircleCI installs both bundles, the job requires its ephemeral
+`circleci-signing.keychain-db`, unlocks that CI-only keychain's null password,
+and grants its signing keys the `apple-tool:`, `apple:`, and `codesign:`
+partitions. This runner-local access control lets Apple's command-line signing
+tools use the installer private key without opening a headless keychain prompt;
+it does not alter the stored certificate or outlive the job.
+
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
 | Variable | Value |

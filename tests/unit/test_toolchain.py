@@ -889,12 +889,21 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert "-allowProvisioningUpdates" not in upload_command
     assert "-authenticationKeyPath" not in upload_command
     assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in upload_command
+    assert "security list-keychains -d user" in upload_command
+    assert "circleci-signing.keychain-db" in upload_command
+    assert 'security unlock-keychain -p "" "$signing_keychain"' in upload_command
+    assert "security set-key-partition-list -S apple-tool:,apple:,codesign:" in upload_command
+    assert '-s -k "" "$signing_keychain"' in upload_command
     assert "productbuild \\" in upload_command
     assert '--sign "$installer_certificate_sha1"' in upload_command
+    assert '--keychain "$signing_keychain"' in upload_command
     assert '--component "$app_path" /Applications' in upload_command
     assert 'test -s "$pkg_path"' in upload_command
     assert 'pkgutil --check-signature "$pkg_path"' in upload_command
     assert "xcrun altool --upload-app" in upload_command
+    assert upload_command.index("security set-key-partition-list") < upload_command.index(
+        "productbuild"
+    )
     assert upload_command.index("productbuild") < upload_command.index("pkgutil --check-signature")
     assert upload_command.index("pkgutil --check-signature") < upload_command.index(
         "xcrun altool --upload-app"

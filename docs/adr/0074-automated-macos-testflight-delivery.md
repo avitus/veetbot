@@ -48,7 +48,11 @@ shared with an Apple publication job.
    `veetbot-app-store`, plus the `Mac Installer Distribution` identity required
    to sign the App Store package in `veetbot-mac-installer`. The job invokes
    `install_signing_bundle` for both; certificate and profile bytes never become
-   repository variables or workspace artifacts.
+   repository variables or workspace artifacts. Before package signing, the job
+   unlocks CircleCI's ephemeral null-password signing keychain and grants its
+   signing keys the `apple-tool:`, `apple:`, and `codesign:` partitions. That
+   runner-local access prevents `productbuild` from blocking on an unavailable
+   GUI keychain prompt and disappears with the temporary keychain after the job.
 5. The non-secret Apple team ID remains authoritative in the checked-in Xcode
    project. The archive uses that Release build setting. A separate restricted
    context, `veetbot-apple-testflight`, supplies only the App Store Connect API
