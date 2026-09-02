@@ -61,6 +61,7 @@ NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002d0")
 FOREIGN_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002d1")
 REVOKED_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002d2")
+SIBLING_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002d9")
 UNKNOWN_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002d3")
 INVOCATION_ID = UUID("00000000-0000-0000-0000-0000000002d4")
 SECOND_INVOCATION_ID = UUID("00000000-0000-0000-0000-0000000002d5")
@@ -418,6 +419,16 @@ async def test_gate_foreign_device_denied() -> None:
         device_channel_override=_fake_channel(clock),
     ) as composition:
         await _seed_device(composition)
+        # The threat this gate actually names: every device in the deployment
+        # authenticates as the same owner principal, so the owner's *second*
+        # phone clears the route's principal-scoped presence check and is
+        # refused only by the invocation's own device ownership.
+        await _seed_device(
+            composition,
+            device_id=SIBLING_DEVICE_ID,
+            client_device_id="second-installation",
+            token="push-token-c",
+        )
         await _seed_device(
             composition,
             device_id=FOREIGN_DEVICE_ID,
@@ -444,7 +455,12 @@ async def test_gate_foreign_device_denied() -> None:
             unknown_fetch = await client.get(f"/v1/devices/{UNKNOWN_DEVICE_ID}/invocations")
             foreign_fetch = await client.get(f"/v1/devices/{FOREIGN_DEVICE_ID}/invocations")
             revoked_fetch = await client.get(f"/v1/devices/{REVOKED_DEVICE_ID}/invocations")
+            sibling_fetch = await client.get(f"/v1/devices/{SIBLING_DEVICE_ID}/invocations")
             owner_fetch = await client.get(f"/v1/devices/{DEVICE_ID}/invocations")
+            sibling_result = await client.post(
+                f"/v1/devices/{SIBLING_DEVICE_ID}/invocations/{INVOCATION_ID}/result",
+                json={"status": "sent"},
+            )
             foreign_result = await client.post(
                 f"/v1/devices/{FOREIGN_DEVICE_ID}/invocations/{INVOCATION_ID}/result",
                 json={"status": "sent"},
@@ -456,13 +472,20 @@ async def test_gate_foreign_device_denied() -> None:
         async with composition.uow_factory() as uow:
             untouched = await uow.device_invocations.get(INVOCATION_ID)
 
+    # Another principal's device, and one this principal never registered, are
+    # both simply absent: the route's presence read is principal scoped.
     assert unknown_fetch.status_code == 404
     assert foreign_fetch.status_code == 404
+    assert foreign_result.status_code == 404
     assert revoked_fetch.status_code == 409
     assert revoked_fetch.json()["error"]["details"]["reason"] == "device_revoked"
-    assert [row["id"] for row in owner_fetch.json()["invocations"]] == [str(INVOCATION_ID)]
-    assert foreign_result.status_code == 404
     assert revoked_result.status_code == 409
+    # The owner's own second phone is present and live, so presence admits it.
+    # It still sees nothing it does not own and cannot answer for its sibling.
+    assert sibling_fetch.status_code == 200
+    assert sibling_fetch.json() == {"invocations": []}
+    assert sibling_result.status_code == 404
+    assert [row["id"] for row in owner_fetch.json()["invocations"]] == [str(INVOCATION_ID)]
     assert untouched.status is DeviceInvocationStatus.PENDING
 
 
