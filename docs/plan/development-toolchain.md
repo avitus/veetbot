@@ -294,8 +294,11 @@ job           target invoked         needs     runs on
 5 sandbox     make test-sandbox      machine   every push, PR
 6 apple       make test-apple        Xcode     every push, PR
               make test-apple-ui
-7 apple-      xcodebuild archive      signing   main, after deploy-app
-  testflight  xcodebuild export       API key
+7 apple-      shared archive and     signing   dev
+  signing-    package script
+  smoke
+8 apple-      shared archive and     signing   main, after deploy-app
+  testflight  package script, altool API key
 ```
 
 Jobs 1 and 2 partition `make check`, split so the cheap one fails
@@ -316,7 +319,16 @@ fixture to exercise historical-transcript
 selection, switching, and new-conversation navigation without a live server or
 credential. Release packaging depends on both additional gates.
 
-Job 7 is delivery, not a verification partition and not part of `make check`.
+Job 7 is a pre-merge signing smoke, not a verification partition and not part of
+`make check`. On trusted `dev` pushes it installs the same two CircleCI signing
+bundles and runs the same repository-owned archive, application-signature,
+installer-package, and package-signature path that production uses. It receives
+no App Store Connect context, contains no API key handling or `altool` call, and
+cannot upload the package it creates. This job is the live proof that the
+managed macOS keychain is usable by the headless Apple packaging tools before a
+release reaches `main`; the package is discarded with the executor.
+
+Job 8 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
 CircleCI-managed `veetbot-app-store` and `veetbot-mac-installer` signing
 bundles, archives the generic macOS destination with `pipeline.number` as
@@ -364,10 +376,12 @@ Three workflow-level facts complete the definition:
     sandbox and Apple jobs 5 and 6 for ordinary VCS pipelines, including
     pull-request branches.
     A pipeline with `run_live: true` selects the manual live workflow instead.
-    The fourth job also runs nightly on `main` at 07:17 UTC. Production delivery
-    begins only after all five `verify` jobs pass. On `main`, macOS TestFlight
-    delivery follows the successful application deploy in its own serial group;
-    it does not run for pull requests or manual live-model pipelines.
+    The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
+    runs only on trusted `dev`; it does not receive publication credentials.
+    Production delivery begins only after all five `verify` jobs pass. On
+    `main`, macOS TestFlight delivery follows the successful application deploy
+    in its own serial group; it does not run for pull requests or manual
+    live-model pipelines.
 2.  **Python version.** A single version, 3.12, not a matrix. The
     project pins `requires-python >=3.12` and runs one deployment; a
     matrix here would test a configuration nothing runs.
@@ -623,11 +637,12 @@ done badly.
     placeholder service is one nobody starts and nobody maintains.
 10. **One CircleCI configuration file and one Python version.** The four
     original verification jobs retain their specified partitions. The later
-    sandbox, native Apple, server delivery, and macOS TestFlight delivery jobs
-    share the same file under ADR-0048, ADR-0049, and ADR-0074. No Python matrix
-    is added: the project pins `>=3.12` and runs one deployment, so a matrix
-    would test a configuration nothing runs. The `uv` cache keys on `uv.lock`,
-    so a cache miss means a dependency changed.
+    sandbox, native Apple, pre-merge Apple signing smoke, server delivery, and
+    macOS TestFlight delivery jobs share the same file under ADR-0048,
+    ADR-0049, and ADR-0074. No Python matrix is added: the project pins `>=3.12`
+    and runs one deployment, so a matrix would test a configuration nothing
+    runs. The `uv` cache keys on `uv.lock`, so a cache miss means a dependency
+    changed.
 11. **Job 4 does not run on pull requests.** Live tests need a
     credential a fork cannot have and cost money per run. Schedule and
     manual dispatch only, which is where `RUN_LIVE_MODEL_TESTS=1` is

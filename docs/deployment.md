@@ -448,6 +448,18 @@ partitions. This runner-local access control lets Apple's command-line signing
 tools use the installer private key without opening a headless keychain prompt;
 it does not alter the stored certificate or outlive the job.
 
+The `apple-signing-smoke` job proves this complete signing path on trusted
+`dev` pushes before a release pull request is opened. It runs the same
+repository-owned archive and package script as `apple-testflight`, including
+the archived identity checks, application-signature verification,
+`productbuild`, and `pkgutil` verification. It receives neither the
+`veetbot-apple-testflight` context nor an App Store Connect API key, does not
+invoke `altool`, persists no artifact, and therefore cannot publish its package.
+Because it can use both signing identities, access to `dev` and changes to the
+CircleCI workflow are nevertheless release-signing security boundaries. Keep
+`dev` restricted to trusted maintainers and require the smoke job to pass on the
+exact revision proposed for `main`.
+
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
 | Variable | Value |
@@ -485,8 +497,9 @@ that counter.
 
 ## Automatic delivery
 
-An ordinary branch or pull request runs verification only. On `main`, after all
-five required verification lanes pass:
+An ordinary branch or pull request runs verification only. A `dev` push also
+runs the non-publishing Apple signing smoke described above. On `main`, after
+all five required verification lanes pass:
 
 - `package-release` archives the exact tested commit, builds MkDocs in strict
   mode, and records both artifacts' SHA-256 values;

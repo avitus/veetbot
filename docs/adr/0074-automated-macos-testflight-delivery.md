@@ -73,7 +73,16 @@ shared with an Apple publication job.
 7. Apple delivery has its own CircleCI serial group. A newer `main` pipeline
    cannot race an older upload, and the Apple signing authority is not coupled
    to the production host's serial group or context.
-8. The owner must configure automatic distribution for the intended TestFlight
+8. A non-publishing `apple-signing-smoke` job runs only on the trusted `dev`
+   branch before the final release pull request. It installs the same two
+   signing bundles and invokes the same repository-owned archive and package
+   script as `apple-testflight`, including application and package signature
+   verification. It receives no App Store Connect context or API key, invokes
+   no upload tool, and retains no artifact. A passing smoke therefore proves
+   the real managed-keychain and `productbuild` path without granting Apple API
+   publication authority; `dev` write access remains signing authority and must
+   be restricted accordingly.
+9. The owner must configure automatic distribution for the intended TestFlight
    group and enable automatic updates in TestFlight on each Mac. Those user and
    App Store Connect settings are prerequisites outside the repository; the app
    cannot force them.
@@ -99,6 +108,10 @@ gate.
   job are release-signing security controls. Compromise of either Apple
   credential boundary can publish a trusted binary even though it grants no
   production-host or agent credential.
+- The trusted `dev` branch can exercise the distribution identities before
+  merge, but cannot upload through the smoke job. This is a deliberate expansion
+  of signing-key exposure that replaces production deployments as the first
+  integration test of the managed keychain.
 - External setup is intentionally fail-closed. Until the signing bundle and
   restricted context exist, the `main` delivery workflow cannot report success.
 
