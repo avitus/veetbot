@@ -75,6 +75,7 @@ from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
 from agent_core.adapters.memory.in_memory import (
+    InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
     InMemoryMemoryStore,
     InMemoryTraceStore,
@@ -111,6 +112,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryExportConsentRepository,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
+    InMemoryPersonaStore,
     InMemoryPolicyProfileRepository,
     InMemoryProcessEventRepository,
     InMemoryRunRepository,
@@ -122,6 +124,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryUsageRepository,
 )
 from agent_core.adapters.persistence.memory_repositories import (
+    PostgresIntegratedEpisodeStore,
     PostgresKnowledgeStore,
     PostgresMemoryStore,
     PostgresTraceStore,
@@ -133,6 +136,9 @@ from agent_core.adapters.persistence.notifications import (
     PostgresDeviceRegistrationIdempotencyRepository,
     PostgresDeviceRegistry,
     PostgresNotificationOutbox,
+)
+from agent_core.adapters.persistence.persona_repositories import (
+    PostgresPersonaStore,
 )
 from agent_core.adapters.persistence.projections import (
     PostgresSessionHistoryRepository,
@@ -194,6 +200,8 @@ from agent_core.adapters.skills.stores import (
     InMemorySkillPackageStore,
 )
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
+from agent_core.adapters.web.keenable import KeenableWebProvider
+from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
@@ -219,6 +227,7 @@ from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
     PublicMemoryService,
+    PublicPersonaService,
     PublicRunService,
     PublicSessionService,
 )
@@ -249,6 +258,9 @@ from agent_core.application.services import (
     NotificationService as PublicNotificationServiceContract,
 )
 from agent_core.application.services import (
+    PersonaService as PublicPersonaServiceContract,
+)
+from agent_core.application.services import (
     RunService as PublicRunServiceContract,
 )
 from agent_core.application.services import (
@@ -272,8 +284,10 @@ from agent_core.config import (
     MemoryProviderExtractionMode,
     PushProviderKind,
     Settings,
+    WebProviderAllocation,
     WebProviderKind,
     load_config_document,
+    load_memory_distillation_evidence,
     load_notification_worker_settings,
     load_provider_extraction_evidence,
     load_schedule_worker_settings,
@@ -327,13 +341,23 @@ from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
 from agent_core.knowledge.service import KnowledgeService
-from agent_core.mcp.configuration import validate_mcp_config
+from agent_core.mcp.configuration import (
+    EMAIL_SERVER_IDS,
+    email_server_configs,
+    validate_mcp_config,
+)
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.distillation import (
+    NemoriAssistedCandidateExtractor,
+    distillation_evidence_matches,
+)
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
+    NEMORI_FORMATION_POLICY_VERSION,
     SESSION_IDLE_SECONDS,
     DeterministicCandidateExtractor,
     GovernedMemoryService,
+    HighRecallCandidateExtractor,
 )
 from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
@@ -363,6 +387,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
+from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.notifications import PushTransport
 from agent_core.ports.persistence import (
@@ -373,7 +398,7 @@ from agent_core.ports.persistence import (
 )
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.tools import DeviceChannel
-from agent_core.ports.web import WebProvider
+from agent_core.ports.web import WebProvider, WebProviderRouter
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
@@ -433,6 +458,7 @@ class ApplicationServices:
     device_ingest: PublicDeviceIngestServiceContract
     notifications: PublicNotificationServiceContract
     memory: PublicMemoryReadServiceContract
+    persona: PublicPersonaServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -599,6 +625,7 @@ def _memory_uow_repositories(
     skills: SkillRepository | None = None,
     mcp_servers: MCPServerRepository | None = None,
     memories: InMemoryMemoryStore | None = None,
+    episodes: InMemoryIntegratedEpisodeStore | None = None,
     traces: InMemoryTraceStore | None = None,
     knowledge: InMemoryKnowledgeStore | None = None,
 ) -> UnitOfWorkRepositories:
@@ -611,6 +638,7 @@ def _memory_uow_repositories(
     )
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
     memories = memories or InMemoryMemoryStore(clock)
+    episodes = episodes or InMemoryIntegratedEpisodeStore()
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
@@ -637,6 +665,7 @@ def _memory_uow_repositories(
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
         memories=memories,
+        episodes=episodes,
         traces=traces,
         knowledge=knowledge,
         schedules=schedules,
@@ -668,7 +697,9 @@ def _memory_uow_repositories(
         skills=skills,
         mcp_servers=mcp_servers,
         memories=memories,
+        episodes=episodes,
         traces=traces,
+        personas=InMemoryPersonaStore(),
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -710,6 +741,7 @@ def _postgres_repository_factory(
         checkpoints = PostgresCheckpointRepository(session, clock, history)
         invocations = PostgresToolInvocationRepository(session, runs)
         memories = PostgresMemoryStore(session, clock)
+        episodes = PostgresIntegratedEpisodeStore(session)
         traces = PostgresTraceStore(session)
         knowledge = PostgresKnowledgeStore(session, clock)
         schedules = PostgresScheduleRepository(session)
@@ -746,7 +778,9 @@ def _postgres_repository_factory(
             ),
             mcp_servers=PostgresMCPServerRepository(session, clock),
             memories=memories,
+            episodes=episodes,
             traces=traces,
+            personas=PostgresPersonaStore(session),
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,
@@ -1283,9 +1317,10 @@ async def _compose(
     mcp_scripts: Mapping[str, ScriptedMCPServer] | None,
     credential_resolver: CredentialResolver,
     mcp_server_configs: tuple[MCPServerConfig, ...],
-    web_search_provider: WebProvider | None,
-    web_fetch_provider: WebProvider | None,
+    web_search_provider: WebProvider | WebProviderRouter | None,
+    web_fetch_provider: WebProvider | WebProviderRouter | None,
     memory_provider_evaluation_mode: bool,
+    memory_distillation_evaluation_mode: bool,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
@@ -1489,7 +1524,7 @@ async def _compose(
         )
     model_provider = FakeModelProvider(script or default_fake_script(), clock)
     effective_providers = {"fake": model_provider, **model_providers}
-    memory_extractor = None
+    memory_extractor: MemoryCandidateExtractor | None = None
     memory_policy_version = FORMATION_POLICY_VERSION
     memory_mode = settings.memory_provider_extraction_mode
     extraction_model: ResolvedModel | None = None
@@ -1498,7 +1533,11 @@ async def _compose(
     evidence_source: str | None = None
     selection_outcome = "disabled"
     selection_reason = "configured_off"
-    if memory_mode is not MemoryProviderExtractionMode.OFF or memory_provider_evaluation_mode:
+    if (
+        memory_mode is not MemoryProviderExtractionMode.OFF
+        or memory_provider_evaluation_mode
+        or memory_distillation_evaluation_mode
+    ):
         try:
             if agent.model_policy in NON_ROUTED_MODEL_POLICIES:
                 extraction_model = ResolvedModel(
@@ -1517,6 +1556,7 @@ async def _compose(
         except ConfigurationError:
             if (
                 memory_provider_evaluation_mode
+                or memory_distillation_evaluation_mode
                 or memory_mode is MemoryProviderExtractionMode.REQUIRED
             ):
                 raise
@@ -1536,6 +1576,7 @@ async def _compose(
             if provider_unavailable_reason is not None:
                 if (
                     memory_provider_evaluation_mode
+                    or memory_distillation_evaluation_mode
                     or memory_mode is MemoryProviderExtractionMode.REQUIRED
                 ):
                     raise ConfigurationError(
@@ -1561,9 +1602,42 @@ async def _compose(
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_evaluation_mode"
+            elif memory_distillation_evaluation_mode:
+                assert extraction_provider is not None
+                memory_extractor = NemoriAssistedCandidateExtractor(
+                    provider=extraction_provider,
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    fallback=HighRecallCandidateExtractor(),
+                )
+                selection_outcome = "evaluation"
+                selection_reason = "explicit_distillation_evaluation_mode"
             else:
                 selected_evidence = None
+                selected_distillation_evidence = None
                 for evidence_path in provider_extraction_evidence_paths(settings):
+                    try:
+                        candidate_distillation_evidence = load_memory_distillation_evidence(
+                            evidence_path
+                        )
+                    except ConfigurationError:
+                        pass
+                    else:
+                        if distillation_evidence_matches(
+                            candidate_distillation_evidence,
+                            extraction_model,
+                            agent.policy_profile,
+                            ruleset.policy_version,
+                        ):
+                            selected_distillation_evidence = candidate_distillation_evidence
+                            evidence_source = (
+                                "operator"
+                                if evidence_path == settings.memory_provider_extraction_evidence
+                                else "release"
+                            )
+                            break
                     try:
                         candidate_evidence = load_provider_extraction_evidence(evidence_path)
                     except ConfigurationError:
@@ -1581,7 +1655,7 @@ async def _compose(
                             else "release"
                         )
                         break
-                if selected_evidence is None:
+                if selected_distillation_evidence is None and selected_evidence is None:
                     if memory_mode is MemoryProviderExtractionMode.REQUIRED:
                         raise ConfigurationError(
                             "provider-backed memory extraction requires matching "
@@ -1591,27 +1665,43 @@ async def _compose(
                     selection_reason = "no_matching_evidence"
                 else:
                     assert extraction_provider is not None
-                    memory_extractor = ProviderAssistedCandidateExtractor(
-                        provider=extraction_provider,
-                        resolved_model=extraction_model,
-                        uow_factory=uow_factory,
-                        clock=clock,
-                        ids=ids,
-                        principal=principal,
-                        agent_id=agent.id,
-                        agent_version=agent.version,
-                        policy_profile=agent.policy_profile,
-                        policy_version=ruleset.policy_version,
-                        evidence=selected_evidence,
-                        fallback=DeterministicCandidateExtractor(),
-                    )
-                    memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
-                    evidence_build_ref = selected_evidence.build_ref
-                    evidence_corpus_sha256 = selected_evidence.corpus_sha256
+                    if selected_distillation_evidence is not None:
+                        memory_extractor = NemoriAssistedCandidateExtractor(
+                            provider=extraction_provider,
+                            resolved_model=extraction_model,
+                            uow_factory=uow_factory,
+                            clock=clock,
+                            ids=ids,
+                            fallback=HighRecallCandidateExtractor(),
+                        )
+                        memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
+                        evidence_build_ref = selected_distillation_evidence.build_ref
+                        evidence_corpus_sha256 = selected_distillation_evidence.corpus_sha256
+                    else:
+                        assert selected_evidence is not None
+                        memory_extractor = ProviderAssistedCandidateExtractor(
+                            provider=extraction_provider,
+                            resolved_model=extraction_model,
+                            uow_factory=uow_factory,
+                            clock=clock,
+                            ids=ids,
+                            principal=principal,
+                            agent_id=agent.id,
+                            agent_version=agent.version,
+                            policy_profile=agent.policy_profile,
+                            policy_version=ruleset.policy_version,
+                            evidence=selected_evidence,
+                            fallback=DeterministicCandidateExtractor(),
+                        )
+                        memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+                        evidence_build_ref = selected_evidence.build_ref
+                        evidence_corpus_sha256 = selected_evidence.corpus_sha256
                     selection_outcome = "activated"
                     selection_reason = "matching_evidence"
         if memory_provider_evaluation_mode:
             memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+        elif memory_distillation_evaluation_mode:
+            memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
     selection_identity = ":".join(
         (
             principal.tenant_id,
@@ -2188,6 +2278,7 @@ async def _compose(
             device_ingest=device_ingest_service,
             notifications=notification_inbox,
             memory=PublicMemoryService(uow_factory=uow_factory),
+            persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 
@@ -2368,7 +2459,30 @@ def _web_provider(
         return TavilyWebProvider(credentials=credentials)
     if kind is WebProviderKind.FIRECRAWL:
         return FirecrawlWebProvider(credentials=credentials)
+    if kind is WebProviderKind.KEENABLE:
+        return KeenableWebProvider(credentials=credentials)
     raise ConfigurationError(f"unsupported web provider {kind.value!r}")
+
+
+def _configured_web_provider_route(
+    allocations: tuple[WebProviderAllocation, ...],
+    credentials: CredentialResolver,
+    cache: dict[WebProviderKind, WebProvider],
+) -> WebProvider | WebProviderRouter | None:
+    if not allocations:
+        return None
+    weighted: list[tuple[WebProvider, int]] = []
+    for allocation in allocations:
+        provider = cache.get(allocation.provider)
+        if provider is None:
+            provider = _web_provider(allocation.provider, credentials)
+            if provider is None:
+                raise ConfigurationError("disabled web provider cannot receive traffic")
+            cache[allocation.provider] = provider
+        weighted.append((provider, allocation.weight))
+    if len(weighted) == 1:
+        return weighted[0][0]
+    return WeightedWebProviderRouter(weighted)
 
 
 def _browser_provider(
@@ -2467,6 +2581,7 @@ async def build(
     device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
+    memory_distillation_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
 
@@ -2474,17 +2589,18 @@ async def build(
     effective_settings = settings or load_settings()
     validate_settings(effective_settings)
     if (
-        memory_provider_evaluation_mode
+        (memory_provider_evaluation_mode or memory_distillation_evaluation_mode)
         and effective_settings.memory_provider_extraction_mode
         is MemoryProviderExtractionMode.REQUIRED
     ):
         raise ConfigurationError(
-            "provider memory extraction evaluation and activation are mutually exclusive"
+            "memory extraction evaluation and activation are mutually exclusive"
         )
+    if memory_provider_evaluation_mode and memory_distillation_evaluation_mode:
+        raise ConfigurationError("memory extraction evaluation modes are mutually exclusive")
     if (
-        memory_provider_evaluation_mode
-        and effective_settings.deployment_mode is DeploymentMode.PRODUCTION
-    ):
+        memory_provider_evaluation_mode or memory_distillation_evaluation_mode
+    ) and effective_settings.deployment_mode is DeploymentMode.PRODUCTION:
         raise ConfigurationError(
             "provider memory extraction evaluation mode is unavailable in production"
         )
@@ -2529,6 +2645,28 @@ async def build(
             principal_id=effective_settings.auth_principal_id,
             roles=set(effective_settings.auth_roles),
             scopes=set(effective_settings.auth_scopes),
+        )
+    supplied_email_rows = tuple(
+        config for config in mcp_servers if config.server_id in EMAIL_SERVER_IDS
+    )
+    if supplied_email_rows:
+        raise ConfigurationError(
+            "first-party Gmail MCP rows are composed only through AGENT_EMAIL_ENABLED"
+        )
+    composed_email_rows = email_server_configs(
+        effective_principal.tenant_id,
+        enabled=effective_settings.email_enabled,
+    )
+    effective_mcp_servers = (*mcp_servers, *composed_email_rows)
+    if composed_email_rows:
+        effective_principal = effective_principal.model_copy(
+            update={
+                "scopes": {
+                    *effective_principal.scopes,
+                    *(scope for row in composed_email_rows for scope in row.required_scopes),
+                }
+            },
+            deep=True,
         )
     validate_runtime_identity(
         effective_settings,
@@ -2628,13 +2766,11 @@ async def build(
         effective_settings.deployment_mode,
         model_policy,
     )
-    web_search_enabled = (
-        web_search_provider_override is not None
-        or effective_settings.web_search_provider is not WebProviderKind.DISABLED
+    web_search_enabled = web_search_provider_override is not None or bool(
+        effective_settings.web_search_providers
     )
-    web_fetch_enabled = (
-        web_fetch_provider_override is not None
-        or effective_settings.web_fetch_provider is not WebProviderKind.DISABLED
+    web_fetch_enabled = web_fetch_provider_override is not None or bool(
+        effective_settings.web_fetch_providers
     )
     browser_enabled = (
         browser_provider_override is not None
@@ -2704,6 +2840,7 @@ async def build(
     engine = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
+    web_provider_cache: dict[WebProviderKind, WebProvider] = {}
     browser_provider: BrowserProvider | None = None
     browser_profile_http_client: httpx.AsyncClient | None = None
     browser_sessions: BrowserSessionControlPlane | None = None
@@ -2817,29 +2954,33 @@ async def build(
         web_search_provider = (
             web_search_provider_override
             if web_search_provider_override is not None
-            else _web_provider(
-                effective_settings.web_search_provider,
+            else _configured_web_provider_route(
+                effective_settings.web_search_providers,
                 effective_credential_resolver,
+                web_provider_cache,
             )
         )
-        if web_search_provider is not None:
-            web_providers.append(web_search_provider)
+        if web_search_provider_override is not None:
+            web_providers.append(web_search_provider_override)
         web_fetch_provider = (
             web_fetch_provider_override
             if web_fetch_provider_override is not None
-            else (
-                web_search_provider
-                if web_search_provider_override is None
-                and web_search_provider is not None
-                and effective_settings.web_fetch_provider is effective_settings.web_search_provider
-                else _web_provider(
-                    effective_settings.web_fetch_provider,
-                    effective_credential_resolver,
-                )
+            else _configured_web_provider_route(
+                effective_settings.web_fetch_providers,
+                effective_credential_resolver,
+                web_provider_cache,
             )
         )
-        if web_fetch_provider is not None and web_fetch_provider is not web_search_provider:
-            web_providers.append(web_fetch_provider)
+        if (
+            web_fetch_provider_override is not None
+            and web_fetch_provider is not web_search_provider
+        ):
+            web_providers.append(web_fetch_provider_override)
+        web_providers.extend(
+            provider
+            for provider in web_provider_cache.values()
+            if all(provider is not tracked for tracked in web_providers)
+        )
         browser_provider = (
             browser_provider_override
             if browser_provider_override is not None
@@ -2913,10 +3054,11 @@ async def build(
             mcp_clients=mcp_client_factory,
             mcp_scripts=mcp_scripts,
             credential_resolver=effective_credential_resolver,
-            mcp_server_configs=mcp_servers,
+            mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
+            memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,

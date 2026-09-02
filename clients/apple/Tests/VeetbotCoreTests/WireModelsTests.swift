@@ -117,7 +117,7 @@ import Testing
     @Test
     func testMemoryViewDecodesTheFullExposureListAndToleratesAnUnknownStatus() throws {
         let data = Data(
-            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","status":"archived","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":true,"conflicts_with":["00000000-0000-0000-0000-000000000102"],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[10,11,12],"formation_run_id":"00000000-0000-0000-0000-000000000104","consolidation_policy_version":"formation@1","origin_scopes":["project-a"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
+            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"archived","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":true,"conflicts_with":["00000000-0000-0000-0000-000000000102"],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[10,11,12],"formation_run_id":"00000000-0000-0000-0000-000000000104","consolidation_policy_version":"formation@1","origin_scopes":["project-a"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
                 .utf8
         )
 
@@ -129,6 +129,9 @@ import Testing
         #expect(memory.statement == "The user prefers dark mode.")
         #expect(memory.beliefType == "preference")
         #expect(memory.beliefTypeKind == .preference)
+        #expect(memory.claimKind == "preference")
+        #expect(memory.derivation == "direct")
+        #expect(memory.longevity == "durable")
         #expect(memory.status == "archived")
         #expect(memory.statusKind == nil)
         #expect(memory.polarity == "assert")
@@ -153,9 +156,47 @@ import Testing
         #expect(memory.validFrom == isoDate.date(from: "2026-08-01T00:00:00Z"))
         #expect(memory.validTo == nil)
         #expect(memory.expiresAt == nil)
+        #expect(memory.lastEvidenceAt == isoDate.date(from: "2026-08-15T00:00:00Z"))
+        #expect(memory.lastUsedAt == nil)
         #expect(memory.lastReinforcedAt == isoDate.date(from: "2026-08-15T00:00:00Z"))
         #expect(memory.createdAt == isoDate.date(from: "2026-07-01T00:00:00Z"))
         #expect(memory.updatedAt == isoDate.date(from: "2026-08-20T00:00:00Z"))
+    }
+
+    @Test
+    func testScheduleSummaryAndDetailDecodeCalendarValuesAndUnknownState() throws {
+        let summaryData = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000701","state":"ARCHIVED","pause_reason":null,"current_revision":3,"next_fire_at":"2026-09-30T01:00:00Z","title":"Month-end review","instruction_preview":"Review unfinished commitments.","cadence":{"kind":"MONTHLY","local_time":"18:00:00","days_of_month":[15],"last_day":true,"timezone":"America/Los_Angeles"},"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T01:00:00Z"}"#
+                .utf8
+        )
+
+        let summary = try JSONDecoder.server.decode(ScheduleListItemView.self, from: summaryData)
+
+        #expect(summary.id.uuidString == "00000000-0000-0000-0000-000000000701")
+        #expect(summary.state == "ARCHIVED")
+        #expect(summary.stateKind == nil)
+        #expect(summary.cadence.kindKind == .monthly)
+        #expect(summary.cadence.daysOfMonth == [15])
+        #expect(summary.cadence.lastDay == true)
+        #expect(summary.cadence.timezone == "America/Los_Angeles")
+
+        let detailData = Data(
+            #"{"schedule":{"id":"00000000-0000-0000-0000-000000000701","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":3,"next_fire_at":"2026-09-30T01:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T01:00:00Z"},"revision":{"schedule_id":"00000000-0000-0000-0000-000000000701","revision":3,"title":"Month-end review","instruction":"Review the month and summarize unfinished commitments.","agent_id":"00000000-0000-0000-0000-000000000702","agent_version":"3","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":10,"max_tool_calls":20,"max_input_tokens":null,"max_output_tokens":4096,"max_cost":"1.25","deadline_at":null},"run_timeout_seconds":300,"cadence":{"kind":"YEARLY","local_time":"09:30:00","dates":[{"month":2,"day":29},{"month":12,"day":31}],"timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":2,"created_by_principal_id":"principal","created_at":"2026-08-29T01:00:00Z"},"replayed":false}"#
+                .utf8
+        )
+
+        let detail = try JSONDecoder.server.decode(ScheduleRecordView.self, from: detailData)
+
+        #expect(detail.schedule.stateKind == .active)
+        #expect(detail.revision.instruction == "Review the month and summarize unfinished commitments.")
+        #expect(detail.revision.cadence.kindKind == .yearly)
+        #expect(detail.revision.cadence.dates == [
+            ScheduleMonthDayView(month: 2, day: 29),
+            ScheduleMonthDayView(month: 12, day: 31),
+        ])
+        #expect(detail.revision.limits.maxCost == "1.25")
+        #expect(detail.revision.limits.synthesisReserveSteps == nil)
+        #expect(detail.revision.requestedScopes.isEmpty)
     }
 
     @Test
@@ -170,5 +211,37 @@ import Testing
 
         #expect(role == .unknown("system"))
         #expect(try JSONDecoder.server.decode(SessionMessageRole.self, from: encoded) == role)
+    }
+
+    @Test
+    func testPersonaViewDecodesTheServerShapeWithProvenance() throws {
+        let data = Data(
+            #"{"version":2,"entries":[{"text":"User values direct answers.","source":"user_edit","source_belief_id":null,"sensitivity":"internal"},{"text":"User prefers concise answers.","source":"affirmation","source_belief_id":"00000000-0000-0000-0000-000000000501","sensitivity":"internal"}],"source":"affirmation","created_at":"2026-09-01T12:00:00Z"}"#
+                .utf8
+        )
+
+        let persona = try JSONDecoder.server.decode(PersonaView.self, from: data)
+
+        #expect(persona.version == 2)
+        #expect(persona.entries.count == 2)
+        #expect(persona.entries[0].sourceBeliefID == nil)
+        #expect(
+            persona.entries[1].sourceBeliefID
+                == UUID(uuidString: "00000000-0000-0000-0000-000000000501"))
+    }
+
+    @Test
+    func testPersonaNominationDecodesOpenAndResolvedShapes() throws {
+        let open = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000601","belief_id":"00000000-0000-0000-0000-000000000501","statement":"User prefers concise answers.","belief_type":"preference","authority":"affirmed","confidence":0.9,"corroboration_count":3,"sensitivity":"internal","state":"nominated","nominated_at":"2026-09-01T11:00:00Z","resolved_at":null,"affirmed_version":null}"#
+                .utf8
+        )
+
+        let nomination = try JSONDecoder.server.decode(PersonaNominationView.self, from: open)
+
+        #expect(nomination.state == "nominated")
+        #expect(nomination.resolvedAt == nil)
+        #expect(nomination.affirmedVersion == nil)
+        #expect(nomination.corroborationCount == 3)
     }
 }

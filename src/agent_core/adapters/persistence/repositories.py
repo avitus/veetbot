@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import cast as sql_cast
 
 from agent_core.adapters.live_events import event_channel
+from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import (
     agent_to_domain,
     agent_values,
@@ -106,7 +107,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
-from agent_core.domain.policies import PolicyProfileRecord
+from agent_core.domain.policies import IdempotencyClass, PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     Run,
@@ -138,21 +139,6 @@ def _rowcount(result: Any) -> int:
     return int(result.rowcount or 0)
 
 
-def _constraint_name(exc: IntegrityError) -> str | None:
-    candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        name = getattr(candidate, "constraint_name", None)
-        if isinstance(name, str):
-            return name
-        diagnostic = getattr(candidate, "diag", None)
-        name = getattr(diagnostic, "constraint_name", None)
-        if isinstance(name, str):
-            return name
-    return None
-
-
 def _sqlstate(exc: DBAPIError) -> str | None:
     candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
     for candidate in candidates:
@@ -171,7 +157,7 @@ async def execute_run_insert(session: AsyncSession, statement: Any) -> int:
         async with session.begin_nested():
             return _rowcount(await session.execute(statement))
     except IntegrityError as exc:
-        constraint = _constraint_name(exc)
+        constraint = constraint_name(exc)
         if constraint == ACTIVE_RUN_CONSTRAINT:
             raise ConflictError("session already has a non-terminal run") from exc
         if constraint == PARENT_SKILL_REVIEW_CONSTRAINT:
@@ -1100,6 +1086,35 @@ class PostgresToolInvocationRepository:
         ).one_or_none()
         return None if row is None else invocation_to_domain(row)
 
+    async def has_uncertain_non_idempotent(
+        self,
+        run_id: UUID,
+        *,
+        tool_name: str,
+        normalized_arguments_hash: str,
+        principal: Principal,
+    ) -> bool:
+        """Use the run index to detect one identical ambiguous mutation."""
+
+        await self._runs.get(run_id, principal)
+        invocation_id = await self._session.scalar(
+            select(ToolInvocationRow.id)
+            .where(
+                ToolInvocationRow.run_id == run_id,
+                ToolInvocationRow.status == ToolInvocationStatus.UNCERTAIN.value,
+                ToolInvocationRow.idempotency_class.not_in(
+                    (
+                        IdempotencyClass.READ_ONLY.value,
+                        IdempotencyClass.IDEMPOTENT.value,
+                    )
+                ),
+                ToolInvocationRow.tool_name == tool_name,
+                ToolInvocationRow.normalized_arguments_hash == normalized_arguments_hash,
+            )
+            .limit(1)
+        )
+        return invocation_id is not None
+
     async def transition(
         self,
         invocation_id: UUID,
@@ -1593,7 +1608,7 @@ class PostgresBrowserProfileRepository:
             async with self._session.begin_nested():
                 row = (await self._session.scalars(statement)).one_or_none()
         except IntegrityError as exc:
-            if _constraint_name(exc) == "uq_browser_profiles_provider_ref":
+            if constraint_name(exc) == "uq_browser_profiles_provider_ref":
                 raise ConflictError("browser provider reference is already bound") from exc
             raise
         if row is not None:

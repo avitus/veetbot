@@ -448,6 +448,173 @@ public struct Page<Item: Codable & Sendable>: Codable, Sendable {
     }
 }
 
+public enum ScheduleStateKind: String, Codable, CaseIterable, Sendable {
+    case active = "ACTIVE"
+    case paused = "PAUSED"
+    case completed = "COMPLETED"
+    case cancelled = "CANCELLED"
+}
+
+public enum ScheduleCadenceKind: String, Codable, CaseIterable, Sendable {
+    case once = "ONCE"
+    case daily = "DAILY"
+    case weekly = "WEEKLY"
+    case monthly = "MONTHLY"
+    case yearly = "YEARLY"
+}
+
+public struct ScheduleMonthDayView: Codable, Equatable, Sendable {
+    public let month: Int
+    public let day: Int
+
+    public init(month: Int, day: Int) {
+        self.month = month
+        self.day = day
+    }
+}
+
+/// A forward-compatible projection of the server's closed cadence union.
+/// `kind` remains a raw string so an additive server value can still render
+/// generically on an older client (ADR-0075 decision 7).
+public struct ScheduleCadenceView: Codable, Equatable, Sendable {
+    public let kind: String
+    public let at: Date?
+    public let localTime: String?
+    public let timezone: String?
+    public let weekdays: [Int]?
+    public let daysOfMonth: [Int]?
+    public let lastDay: Bool?
+    public let dates: [ScheduleMonthDayView]?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, at, timezone, weekdays, dates
+        case localTime = "local_time"
+        case daysOfMonth = "days_of_month"
+        case lastDay = "last_day"
+    }
+
+    public var kindKind: ScheduleCadenceKind? { ScheduleCadenceKind(rawValue: kind) }
+}
+
+public struct ScheduleListItemView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let state: String
+    public let pauseReason: String?
+    public let currentRevision: Int
+    public let nextFireAt: Date?
+    public let title: String
+    public let instructionPreview: String
+    public let cadence: ScheduleCadenceView
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, state, title, cadence
+        case pauseReason = "pause_reason"
+        case currentRevision = "current_revision"
+        case nextFireAt = "next_fire_at"
+        case instructionPreview = "instruction_preview"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public var stateKind: ScheduleStateKind? { ScheduleStateKind(rawValue: state) }
+}
+
+public struct ScheduleIdentityView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let tenantID: String
+    public let principalID: String
+    public let state: String
+    public let pauseReason: String?
+    public let currentRevision: Int
+    public let nextFireAt: Date?
+    public let consecutiveFailures: Int
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, state
+        case tenantID = "tenant_id"
+        case principalID = "principal_id"
+        case pauseReason = "pause_reason"
+        case currentRevision = "current_revision"
+        case nextFireAt = "next_fire_at"
+        case consecutiveFailures = "consecutive_failures"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public var stateKind: ScheduleStateKind? { ScheduleStateKind(rawValue: state) }
+}
+
+public struct ScheduleRunLimitsView: Codable, Equatable, Sendable {
+    public let maxSteps: Int
+    public let maxModelCalls: Int
+    public let maxToolCalls: Int
+    public let maxInputTokens: Int?
+    public let maxOutputTokens: Int?
+    public let maxCost: String?
+    public let deadlineAt: Date?
+    /// Added after the original scheduling control plane. These stay optional
+    /// so a client can inspect schedules on an older server that still exposes
+    /// the Milestone 11 routes.
+    public let synthesisReserveSteps: Int?
+    public let synthesisReserveModelCalls: Int?
+    public let synthesisReserveCost: String?
+
+    enum CodingKeys: String, CodingKey {
+        case maxSteps = "max_steps"
+        case maxModelCalls = "max_model_calls"
+        case maxToolCalls = "max_tool_calls"
+        case maxInputTokens = "max_input_tokens"
+        case maxOutputTokens = "max_output_tokens"
+        case maxCost = "max_cost"
+        case deadlineAt = "deadline_at"
+        case synthesisReserveSteps = "synthesis_reserve_steps"
+        case synthesisReserveModelCalls = "synthesis_reserve_model_calls"
+        case synthesisReserveCost = "synthesis_reserve_cost"
+    }
+}
+
+public struct ScheduleRevisionView: Codable, Equatable, Sendable {
+    public let scheduleID: UUID
+    public let revision: Int
+    public let title: String
+    public let instruction: String
+    public let agentID: UUID
+    public let agentVersion: String
+    public let policyProfile: String
+    public let requestedScopes: [String]
+    public let limits: ScheduleRunLimitsView
+    public let runTimeoutSeconds: Int
+    public let cadence: ScheduleCadenceView
+    public let timezone: String?
+    public let misfireGraceSeconds: Int
+    public let maxConsecutiveFailures: Int
+    public let createdByPrincipalID: String
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case revision, title, instruction, limits, cadence, timezone
+        case scheduleID = "schedule_id"
+        case agentID = "agent_id"
+        case agentVersion = "agent_version"
+        case policyProfile = "policy_profile"
+        case requestedScopes = "requested_scopes"
+        case runTimeoutSeconds = "run_timeout_seconds"
+        case misfireGraceSeconds = "misfire_grace_seconds"
+        case maxConsecutiveFailures = "max_consecutive_failures"
+        case createdByPrincipalID = "created_by_principal_id"
+        case createdAt = "created_at"
+    }
+}
+
+public struct ScheduleRecordView: Codable, Equatable, Sendable {
+    public let schedule: ScheduleIdentityView
+    public let revision: ScheduleRevisionView
+}
+
 public enum MemoryStatusKind: String, Codable, CaseIterable, Sendable {
     case candidate
     case provisional
@@ -499,6 +666,9 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let subject: String
     public let statement: String
     public let beliefType: String
+    public let claimKind: String
+    public let derivation: String
+    public let longevity: String
     public let status: String
     public let polarity: String
     public let scope: String
@@ -518,6 +688,8 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let validFrom: Date
     public let validTo: Date?
     public let expiresAt: Date?
+    public let lastEvidenceAt: Date
+    public let lastUsedAt: Date?
     public let lastReinforcedAt: Date
     public let createdAt: Date
     public let updatedAt: Date
@@ -526,6 +698,9 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         case id, subject, statement, status, polarity, scope, portability, authority, sensitivity,
             confidence
         case beliefType = "belief_type"
+        case claimKind = "claim_kind"
+        case derivation
+        case longevity
         case corroborationCount = "corroboration_count"
         case flaggedForReview = "flagged_for_review"
         case conflictsWith = "conflicts_with"
@@ -538,6 +713,8 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         case validFrom = "valid_from"
         case validTo = "valid_to"
         case expiresAt = "expires_at"
+        case lastEvidenceAt = "last_evidence_at"
+        case lastUsedAt = "last_used_at"
         case lastReinforcedAt = "last_reinforced_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -632,5 +809,108 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         case .image(let artifactID, _, _), .file(let artifactID, _, _):
             return artifactID
         }
+    }
+}
+
+/// One persona entry as the server renders it: text, provenance, and tier
+/// (persona-surface.md). `sourceBeliefID` is set exactly when the entry was
+/// affirmed from a nomination rather than typed by the owner.
+public struct PersonaEntryView: Codable, Equatable, Sendable {
+    public let text: String
+    public let source: String
+    public let sourceBeliefID: UUID?
+    public let sensitivity: String
+
+    enum CodingKeys: String, CodingKey {
+        case text, source, sensitivity
+        case sourceBeliefID = "source_belief_id"
+    }
+
+    public init(text: String, source: String, sourceBeliefID: UUID?, sensitivity: String) {
+        self.text = text
+        self.source = source
+        self.sourceBeliefID = sourceBeliefID
+        self.sensitivity = sensitivity
+    }
+}
+
+/// The persona document head, mirroring the server's `PersonaView` exposure
+/// list; version 0 with no entries is the real, unwritten starting state.
+public struct PersonaView: Codable, Equatable, Sendable {
+    public let version: Int
+    public let entries: [PersonaEntryView]
+    public let source: String
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case version, entries, source
+        case createdAt = "created_at"
+    }
+
+    public init(version: Int, entries: [PersonaEntryView], source: String, createdAt: Date) {
+        self.version = version
+        self.entries = entries
+        self.source = source
+        self.createdAt = createdAt
+    }
+}
+
+/// A consolidation-raised persona candidate awaiting the owner's verdict.
+public struct PersonaNominationView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let beliefID: UUID
+    public let statement: String
+    public let beliefType: String
+    public let authority: String
+    public let confidence: Double
+    public let corroborationCount: Int
+    public let sensitivity: String
+    public let state: String
+    public let nominatedAt: Date
+    public let resolvedAt: Date?
+    public let affirmedVersion: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, statement, authority, confidence, sensitivity, state
+        case beliefID = "belief_id"
+        case beliefType = "belief_type"
+        case corroborationCount = "corroboration_count"
+        case nominatedAt = "nominated_at"
+        case resolvedAt = "resolved_at"
+        case affirmedVersion = "affirmed_version"
+    }
+}
+
+/// One entry of a guarded persona replacement (`PUT /v1/persona`).
+public struct UpdatePersonaEntryBody: Codable, Equatable, Sendable {
+    public let text: String
+    public let sensitivity: String
+    public let sourceBeliefID: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case text, sensitivity
+        case sourceBeliefID = "source_belief_id"
+    }
+
+    public init(text: String, sensitivity: String = "internal", sourceBeliefID: UUID? = nil) {
+        self.text = text
+        self.sensitivity = sensitivity
+        self.sourceBeliefID = sourceBeliefID
+    }
+}
+
+/// The guarded persona replacement request body.
+public struct UpdatePersonaBody: Codable, Equatable, Sendable {
+    public let expectedVersion: Int
+    public let entries: [UpdatePersonaEntryBody]
+
+    enum CodingKeys: String, CodingKey {
+        case expectedVersion = "expected_version"
+        case entries
+    }
+
+    public init(expectedVersion: Int, entries: [UpdatePersonaEntryBody]) {
+        self.expectedVersion = expectedVersion
+        self.entries = entries
     }
 }

@@ -330,11 +330,12 @@ async def test_conflict_partners_bypass_the_subject_cap_and_render_short_ids() -
     }
     assert capped not in returned
     assert (
-        "[m:aaaa1111] User prefers concise answers (user, high) conflicts=[m:cccc3333,m:dddd4444]"
+        "[m:aaaa1111] User prefers concise answers (user, high; direct, durable) "
+        "conflicts=[m:cccc3333,m:dddd4444]"
     ) in result.rendered
     assert (
-        "[m:dddd4444] User prefers exhaustive answers about deployment (user, medium) "
-        "conflicts=[m:aaaa1111]"
+        "[m:dddd4444] User prefers exhaustive answers about deployment "
+        "(user, medium; direct, durable) conflicts=[m:aaaa1111]"
     ) in result.rendered
     assert str(stated) not in result.rendered
 
@@ -408,10 +409,14 @@ async def test_snapshot_uses_the_core_profile_and_is_reproducible() -> None:
 
 
 def _ids(start: int) -> SequenceIdFactory:
+    """Build a deterministic UUID sequence for one retrieval test."""
+
     return SequenceIdFactory(UUID(int=value) for value in range(start, start + 1_000))
 
 
 async def test_rrf_k_and_lifecycle_weights_come_from_the_retrieval_profile() -> None:
+    """Fusion and lifecycle scoring consume the reviewed retrieval profile."""
+
     clock, factory, _service, retriever = await formation_stack()
     async with factory() as uow:
         await uow.memories.upsert_belief(
@@ -449,6 +454,27 @@ async def test_rrf_k_and_lifecycle_weights_come_from_the_retrieval_profile() -> 
     )
     assert shipped_score is not None and downweighted is not None
     assert downweighted.score < shipped_score.score
+
+
+def test_ranking_weights_come_from_the_retrieval_profile() -> None:
+    """Retrieval uses the reviewed profile coefficients instead of literals."""
+
+    matchless_profile = RetrievalProfile.model_validate({"ranking_weights": {"match": 0.0}})
+
+    shipped = RetrievalProfile().ranking_weights
+    assert (
+        shipped.match,
+        shipped.confidence,
+        shipped.reinforce,
+        shipped.authority,
+        shipped.scope,
+        shipped.utility,
+    ) == (0.4, 0.2, 0.1, 0.15, 0.1, 0.05)
+
+    default_score = _score(memory(), recall_query())
+    matchless = _score(memory(), recall_query(min_score=0.0), profile=matchless_profile)
+    assert default_score is not None and matchless is not None
+    assert matchless.score < default_score.score
 
 
 async def test_snapshot_reserves_durable_share() -> None:
@@ -582,11 +608,11 @@ def test_lexical_arm_scores_whole_lexemes_the_stores_filter_on() -> None:
     assert _score(record, recall_query(text="themes")) is not None
 
 
-def test_retrieval_policy_version_is_retrieval_2_in_render_header() -> None:
-    """Time decay and the penalties are a new ranking policy, and say so."""
+def test_retrieval_policy_version_is_retrieval_3_in_render_header() -> None:
+    """Evidence-age ranking and uncertainty rendering identify their policy."""
 
-    assert RETRIEVAL_POLICY_VERSION == "retrieval@2"
-    assert 'policy="retrieval@2"' in render_memory([], as_of=NOW)
+    assert RETRIEVAL_POLICY_VERSION == "retrieval@3"
+    assert 'policy="retrieval@3"' in render_memory([], as_of=NOW)
 
 
 async def test_near_duplicate_penalty_demotes_but_keeps_the_second_statement() -> None:

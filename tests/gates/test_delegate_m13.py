@@ -32,6 +32,7 @@ from agent_core.domain.errors import DelegationValidationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     FakeModelScript,
+    ModelTransientError,
     ModelUsage,
     ScriptedToolCall,
     ScriptedTurn,
@@ -208,6 +209,18 @@ def _check_generated_child_limits(
             reserve_exhausted = True
             break
         reserved += child_cost
+    requested_reserve_exhausted = any(
+        limits is not None
+        and (
+            (limits.max_steps is not None and limits.max_steps <= DEFAULTS.synthesis_reserve_steps)
+            or (
+                limits.max_model_calls is not None
+                and limits.max_model_calls <= DEFAULTS.synthesis_reserve_model_calls
+            )
+            or (limits.max_cost is not None and limits.max_cost <= DEFAULTS.synthesis_reserve_cost)
+        )
+        for limits in requested
+    )
 
     try:
         derived = derive_child_limits(parent, briefs, DEFAULTS, now=NOW)
@@ -217,6 +230,7 @@ def _check_generated_child_limits(
         return
 
     assert not exhausted
+    assert not requested_reserve_exhausted
     assert len(derived) == len(briefs)
     for child in derived:
         assert 0 < child.max_steps <= remaining_steps
@@ -596,22 +610,24 @@ def test_delegate_run_advertises_governed_defaults_for_long_research() -> None:
     assert "governed defaults" in limits_schema["description"]
 
 
-async def test_delegated_research_cannot_consume_synthesis_headroom(tmp_path: Path) -> None:
-    """Stop tool research before the child spends its reserved final step."""
+@pytest.mark.parametrize("dimension", ["steps", "model_calls", "cost"])
+async def test_delegated_research_cannot_consume_synthesis_headroom(
+    tmp_path: Path,
+    dimension: str,
+) -> None:
+    """Stop tool research before retries spend any reserved synthesis budget."""
 
     child_agent_id = UUID("00000000-0000-0000-0000-000000000171")
     child_session_id = UUID("00000000-0000-0000-0000-000000000172")
     child_run_id = UUID("00000000-0000-0000-0000-000000000173")
-    limits = RunLimits.model_validate(
-        {
-            "max_steps": 2,
-            "max_model_calls": 4,
-            "max_tool_calls": 4,
-            "max_cost": "2.00",
-            "synthesis_reserve_steps": 1,
-            "synthesis_reserve_model_calls": 1,
-            "synthesis_reserve_cost": "0.25",
-        }
+    limits = RunLimits(
+        max_steps=2 if dimension == "steps" else 4,
+        max_model_calls=2 if dimension == "model_calls" else 4,
+        max_tool_calls=4,
+        max_cost=Decimal("0.40") if dimension == "cost" else Decimal("2.00"),
+        synthesis_reserve_steps=1,
+        synthesis_reserve_model_calls=1,
+        synthesis_reserve_cost=Decimal("0.25"),
     )
     child_agent = support.agent().model_copy(
         update={
@@ -656,13 +672,32 @@ async def test_delegated_research_cannot_consume_synthesis_headroom(tmp_path: Pa
             )
         ],
         stop_reason=StopReason.TOOL_USE,
-        usage=ModelUsage(cost=Decimal("0.10")),
+        usage=ModelUsage(cost=Decimal("0.05")),
     )
+    if dimension == "steps":
+        turns = [tool_turn, tool_turn]
+        expected_invocations = 1
+    else:
+        transient = ModelTransientError(
+            provider="fake",
+            model="scripted",
+            attempt_id=UUID("00000000-0000-0000-0000-000000000174"),
+            message="retry within the delegated synthesis boundary",
+            stream_had_output=False,
+        )
+        turns = [
+            ScriptedTurn(
+                fail_with=transient,
+                usage=ModelUsage(cost=Decimal("0.20") if dimension == "cost" else Decimal("0.05")),
+            ),
+            tool_turn,
+        ]
+        expected_invocations = 0
 
     async with build(
         settings=_delegation_settings(tmp_path),
         principal=principal(),
-        script=FakeModelScript(turns=[tool_turn, tool_turn]),
+        script=FakeModelScript(turns=turns),
         fixed_clock_at=support.NOW,
         sequential_ids=True,
     ) as app:
@@ -688,8 +723,8 @@ async def test_delegated_research_cannot_consume_synthesis_headroom(tmp_path: Pa
 
     assert failed.status is RunStatus.FAILED
     assert failed.failure is not None
-    assert failed.failure.details == {"synthesis_reserve": "steps"}
-    assert len(invocations) == 1
+    assert failed.failure.details == {"synthesis_reserve": dimension}
+    assert len(invocations) == expected_invocations
 
 
 async def test_persisted_delegate_run_v1_remains_resolvable_for_export(tmp_path: Path) -> None:

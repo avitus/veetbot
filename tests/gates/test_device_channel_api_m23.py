@@ -1,4 +1,4 @@
-"""Milestone 20 device-channel HTTP gates: fetch, result, and ingest.
+"""Milestone 23 device-channel HTTP gates: fetch, result, and ingest.
 
 The three routes are the phone's whole server surface. Each one revalidates the
 device's presence before it reads anything, because the invocation store

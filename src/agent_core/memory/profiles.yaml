@@ -8,10 +8,21 @@ formation:
     floor_confidence: 0.2
     step: 0.05
     max_per_sweep: 200
+  persona_nomination:
+    min_confidence: 0.75
+    min_corroboration: 3
+    max_open: 5
 retrieval:
   semantic_enabled: false
   reciprocal_rank_fusion_k: 60
   durable_item_share: 0.6666666667
+  ranking_weights:
+    match: 0.4
+    confidence: 0.2
+    reinforce: 0.1
+    authority: 0.15
+    scope: 0.1
+    utility: 0.05
   lifecycle_weights:
     active: 1.0
     provisional: 0.4

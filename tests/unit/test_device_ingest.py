@@ -1,4 +1,4 @@
-"""Milestone 20 SMS ingest: the projector, triage seeding, and the daily cap.
+"""Milestone 23 SMS ingest: the projector, triage seeding, and the daily cap.
 
 The device channel appends an ingested message as a device-originated user
 message the projector must reproduce at `EXTERNAL_UNTRUSTED`, because the

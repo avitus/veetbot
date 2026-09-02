@@ -114,6 +114,8 @@ async def test_fetch_rejects_non_public_or_non_https_destinations_before_provide
 
 
 async def test_fetch_returns_page_content_as_external_untrusted() -> None:
+    """Fetched public content retains its external-untrusted trust label."""
+
     provider = FakeWebProvider()
     result = await WebFetchTool(provider).execute(
         {"url": "https://example.org/ada"},
@@ -137,9 +139,13 @@ class FailingWebProvider(FakeWebProvider):
     retryable: bool = True
 
     async def search(self, request: WebSearchRequest) -> tuple[WebSearchResult, ...]:
+        """Raise the configured normalized search-provider failure."""
+
         raise WebProviderError(self.reason_code, retryable=self.retryable)
 
     async def fetch(self, url: str) -> WebPage:
+        """Raise the configured normalized fetch-provider failure."""
+
         raise WebProviderError(self.reason_code, retryable=self.retryable)
 
 
@@ -149,6 +155,7 @@ class FailingWebProvider(FakeWebProvider):
         ("tool.web.auth_failed", False, ToolFailureKind.PERMISSION),
         ("tool.web.output_invalid", False, ToolFailureKind.OUTPUT_INVALID),
         ("tool.web.provider_unavailable", True, ToolFailureKind.TRANSPORT),
+        ("tool.web.quota_exceeded", False, ToolFailureKind.UPSTREAM_ERROR),
         ("tool.web.provider_rejected", False, ToolFailureKind.UPSTREAM_ERROR),
     ],
 )
@@ -157,6 +164,8 @@ async def test_provider_failures_keep_their_stable_kind_and_retryability(
     retryable: bool,
     kind: ToolFailureKind,
 ) -> None:
+    """Both web tools preserve normalized provider failure metadata."""
+
     provider = FailingWebProvider(reason_code=reason_code, retryable=retryable)
 
     search_result = await WebSearchTool(provider).execute({"query": "Ada"}, tool_context())

@@ -847,7 +847,7 @@ import Testing
         let lock = NSLock()
         var requests: [URLRequest] = []
         let memoryJSON = """
-            {"id":"\(memoryID.uuidString)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(sessionID.uuidString)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
+            {"id":"\(memoryID.uuidString)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(sessionID.uuidString)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
             """
         StubURLProtocol.handler = { request in
             lock.withLock { requests.append(request) }
@@ -933,6 +933,111 @@ import Testing
         } catch {
             Issue.record("unexpected error: \(error)")
         }
+    }
+
+    @Test
+    func testListSchedulesUsesOnlyTheReadIndexAndBoundsItsPageSize() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"items":[],"next_cursor":null}"#.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        _ = try await client.listSchedules(limit: 500, cursor: "schedule cursor")
+
+        let request = try #require(lock.withLock { requests.first })
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.path == "/v1/schedules")
+        let query = try #require(
+            URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+        )
+        #expect(query.contains(URLQueryItem(name: "limit", value: "200")))
+        #expect(query.contains(URLQueryItem(name: "cursor", value: "schedule cursor")))
+    }
+
+    @Test
+    func testGetScheduleUsesTheExistingPointRead() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000711")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(self.scheduleDetailJSON(id: scheduleID).utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        let record = try await client.getSchedule(scheduleID)
+
+        #expect(record.schedule.id == scheduleID)
+        #expect(record.revision.instruction == "Review the full schedule instruction.")
+        let request = try #require(lock.withLock { requests.first })
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.path == "/v1/schedules/\(scheduleID.uuidString)")
+        #expect(request.url?.query == nil)
+    }
+
+    @Test
+    func testScheduleListDegradesButPointReadPreservesNotFound() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"not_found","message":"Not found.","details":{},"request_id":"old-server"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.listSchedules()
+            Issue.record("expected the schedule index to degrade on an older server")
+        } catch let error as VeetbotAPIClientError {
+            guard case .scheduleBrowsingUnavailable = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+            #expect(error.errorDescription == "This server does not support schedule browsing yet.")
+        }
+
+        do {
+            _ = try await client.getSchedule(UUID())
+            Issue.record("expected a missing schedule to remain an ordinary not-found")
+        } catch HTTPTransportError.api(let apiError) {
+            #expect(apiError.code == .notFound)
+            #expect(apiError.statusCode == 404)
+        }
+    }
+
+    private func scheduleDetailJSON(id: UUID) -> String {
+        #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":1,"title":"Daily review","instruction":"Review the full schedule instruction.","agent_id":"00000000-0000-0000-0000-000000000712","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
     }
 
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {

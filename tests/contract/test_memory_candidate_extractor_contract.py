@@ -19,6 +19,7 @@ from agent_core.domain.messages import (
     ScriptedTurn,
 )
 from agent_core.memory import SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
+from agent_core.memory.distillation import NemoriAssistedCandidateExtractor
 from agent_core.memory.formation import MAX_EXTRACTOR_PROPOSALS, DeterministicCandidateExtractor
 from agent_core.memory.model_extraction import ModelAssistedCandidateExtractor
 from agent_core.memory.provider_extraction import (
@@ -128,6 +129,26 @@ async def _extractor_subject(
                 policy_version="default@test",
                 evidence=_evidence(),
                 fallback=DeterministicCandidateExtractor(),
+            ),
+            factory,
+        )
+    if implementation is NemoriAssistedCandidateExtractor:
+        provider = FakeModelProvider(
+            FakeModelScript(turns=[ScriptedTurn(text="not-json") for _stage in range(3)]),
+            clock,
+        )
+        return (
+            NemoriAssistedCandidateExtractor(
+                provider=provider,
+                resolved_model=ResolvedModel(
+                    provider="fake",
+                    model="scripted",
+                    policy_name="fake",
+                    resolved_at=NOW,
+                ),
+                uow_factory=factory,
+                clock=clock,
+                ids=SequenceIdFactory(UUID(int=value) for value in range(8_200, 8_300)),
             ),
             factory,
         )

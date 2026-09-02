@@ -21,8 +21,8 @@ presence and a capability set, unified under one session-key resolver (DM per
 user, group per participant, thread shared)", and requires that "an unknown
 sender on a Surface is default-denied and must complete an explicit pairing
 step (one-time code, expiry, rate-limit, lockout) before any run is created on
-their behalf" (engineering-plan.md:4035-4036). Section 22 repeats the
-default-deny as a security-baseline item (engineering-plan.md:3658), ADR-0017
+their behalf" (engineering-plan.md:4286-4287). Section 22 repeats the
+default-deny as a security-baseline item (engineering-plan.md:3909), ADR-0017
 decided the pairing shape, and the seam audit found the rest: "Surfaces are
 Devices with an empty capability set", the session-key resolver is "the one
 genuinely new mechanism in Section 29", pairing "needs a home and an endpoint
@@ -266,7 +266,7 @@ class InboundReceipt(BaseModel):
 
 The receipt is keyed by `(surface_id, external_update_id)`; for Telegram the
 value is the decimal `update_id`, and a webhook channel keys its provider's
-message identifier (ADR-0074). The receipt carries no content and is the
+message identifier (ADR-0081). The receipt carries no content and is the
 idempotency boundary for inbound delivery and the reverse map from a run to
 the chat that asked for it.
 
@@ -390,7 +390,7 @@ resolution entry point.
 
 ## Security
 
-- Default-deny and pairing before any run (engineering-plan.md:3658, ADR-0017
+- Default-deny and pairing before any run (engineering-plan.md:3909, ADR-0017
   decision 5). An unpaired sender stores no content.
 - Pairing codes: at least forty bits, salted hash, constant-time comparison,
   ten-minute expiry, five attempts, one-hour per-sender lockout, returned
@@ -410,7 +410,7 @@ resolution entry point.
   never exceeds the paired principal: `granted_scopes` is a subset of the
   minter's scopes at minting, intersected with the principal's current scopes
   at every message, and revocation is effective before the next message
-  (engineering-plan.md:4071).
+  (engineering-plan.md:3271-3273).
 - Outbound redaction: secrets and raw provider errors never reach the chat;
   reasoning is never in events and so never in a reply.
 - Abuse controls: per-sender messages per minute, per-tenant active surface

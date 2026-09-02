@@ -868,7 +868,7 @@ class MemoryRow(Base):
             "tenant_id",
             "principal_id",
             "status",
-            "last_reinforced_at",
+            "last_evidence_at",
         ),
         Index(
             "ix_memories_fts",
@@ -897,6 +897,13 @@ class MemoryRow(Base):
     portability: Mapped[str] = mapped_column(Text)
     origin_scopes: Mapped[list[str]] = mapped_column(JSONB)
     corroboration_count: Mapped[int] = mapped_column(Integer)
+    claim_kind: Mapped[str] = mapped_column(Text)
+    derivation: Mapped[str] = mapped_column(Text)
+    longevity: Mapped[str] = mapped_column(Text)
+    last_evidence_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence_count: Mapped[int] = mapped_column(Integer)
+    lifecycle_policy_version: Mapped[str] = mapped_column(Text)
     last_reinforced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     superseded_by: Mapped[UUID | None] = mapped_column(
@@ -911,6 +918,40 @@ class MemoryRow(Base):
     store_position: Mapped[int] = mapped_column(BigInteger, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IntegratedEpisodeRow(Base):
+    __tablename__ = "integrated_episodes"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "principal_id",
+            "derivation_key",
+            name="uq_integrated_episodes_owner_derivation",
+        ),
+        Index(
+            "ix_integrated_episodes_owner_session_source",
+            "tenant_id",
+            "principal_id",
+            "session_id",
+            "source_started_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    source_event_ids: Mapped[list[int]] = mapped_column(JSONB)
+    source_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    narrative: Mapped[str] = mapped_column(Text)
+    subjects: Mapped[list[str]] = mapped_column(JSONB)
+    integration_policy_version: Mapped[str] = mapped_column(Text)
+    derivation_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class MemoryRejectionRow(Base):
@@ -954,6 +995,12 @@ class ConsolidationRunRow(Base):
     reinforced: Mapped[int] = mapped_column(Integer)
     superseded: Mapped[int] = mapped_column(Integer)
     rejected: Mapped[int] = mapped_column(Integer)
+    decision_counts: Mapped[dict[str, int]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    episode_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    provider_call_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    fallback_stages: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -1428,6 +1475,54 @@ class DelegationRow(Base):
     links_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PersonaDocumentRow(Base):
+    __tablename__ = "persona_documents"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entries: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    source: Mapped[str] = mapped_column(Text)
+    source_nomination_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PersonaNominationRow(Base):
+    __tablename__ = "persona_nominations"
+    __table_args__ = (
+        Index(
+            "ix_persona_nominations_open",
+            "tenant_id",
+            "principal_id",
+            "belief_id",
+            unique=True,
+            postgresql_where=text("state = 'nominated'"),
+        ),
+        Index(
+            "ix_persona_nominations_principal_state",
+            "tenant_id",
+            "principal_id",
+            "state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    statement: Mapped[str] = mapped_column(Text)
+    belief_type: Mapped[str] = mapped_column(Text)
+    authority: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float)
+    corroboration_count: Mapped[int] = mapped_column(Integer)
+    sensitivity: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    consolidation_run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    nominated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    affirmed_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class DeviceInvocationRow(Base):

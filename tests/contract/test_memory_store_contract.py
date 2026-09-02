@@ -363,11 +363,11 @@ async def test_query_matches_whole_words_the_way_full_text_search_does() -> None
     assert await store.query(recall_query(text="...")) == []
 
 
-async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() -> None:
+async def test_list_idle_returns_the_least_recently_evidenced_live_beliefs() -> None:
     """The decay sweep's window is ordered by idleness, not by write position.
 
     A store larger than one sweep's ceiling must still offer the belief that
-    has gone unreinforced the longest, or a bounded sweep never reaches it.
+    has gone without evidence the longest, or a bounded sweep never reaches it.
     """
 
     store = _store()
@@ -376,7 +376,7 @@ async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() ->
         return memory(belief_id=belief_id, statement=f"Belief {belief_id}").model_copy(
             update={
                 "subject": f"subject-{belief_id}",
-                "last_reinforced_at": NOW - timedelta(days=days),
+                "last_evidence_at": NOW - timedelta(days=days),
                 "store_position": position,
             }
         )
@@ -392,12 +392,12 @@ async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() ->
         await store.upsert_belief(record)
 
     cutoff = NOW - timedelta(days=50)
-    window = await store.list_idle(principal(), reinforced_before=cutoff, limit=10)
-    bounded = await store.list_idle(principal(), reinforced_before=cutoff, limit=2)
-    cut = await store.list_idle(principal(), reinforced_before=NOW - timedelta(days=300), limit=10)
+    window = await store.list_idle(principal(), evidence_before=cutoff, limit=10)
+    bounded = await store.list_idle(principal(), evidence_before=cutoff, limit=2)
+    cut = await store.list_idle(principal(), evidence_before=NOW - timedelta(days=300), limit=10)
     foreign = await store.list_idle(
         principal().model_copy(update={"tenant_id": "tenant-b"}),
-        reinforced_before=NOW,
+        evidence_before=NOW,
         limit=10,
     )
     eligible = idle(527, 300, 7).model_copy(
@@ -410,7 +410,7 @@ async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() ->
     await store.upsert_belief(eligible_high_confidence)
     decay_window = await store.list_idle(
         principal(),
-        reinforced_before=cutoff,
+        evidence_before=cutoff,
         decay_confidence_ceiling=0.55,
         limit=2,
     )

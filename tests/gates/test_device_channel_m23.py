@@ -1,4 +1,4 @@
-"""Milestone 20 device-channel and SMS gates."""
+"""Milestone 23 device-channel and SMS gates."""
 
 from __future__ import annotations
 

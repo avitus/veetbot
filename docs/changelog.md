@@ -4,6 +4,28 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-01 — Milestone 22 specified: the persona surface
+
+- Authorized and specified Milestone 22, the persona surface and curated
+  belief promotion, as a seventh parallel workstream (ADR-0079,
+  [persona-surface.md](plan/persona-surface.md)). An owner-edited, versioned
+  persona document renders as a new trusted Region A prefix row directly
+  after the agent instructions, and a formed belief reaches that text only
+  through the owner's explicit affirmation of a governed nomination —
+  resolving the readiness review's last memory partial without weakening
+  "memory is data, never instructions". Fourteen `gate.persona.*` entries
+  open a new registry area; the census moves from 383 to 397 entries and the
+  prefix ceiling from 15,000 to 17,000 tokens. Implementation has not begun;
+  every Milestone 22 gate points at the pending check.
+
+## 2026-08-29 — Model stream accepts ordinary `risk-...` URLs
+
+- Boundary-anchored the normalized stream's `sk-` provider-key detector so it
+  no longer starts inside an ordinary word such as the `sk-...` substring of a
+  `risk-...` URL. Genuine provider-key prefixes, authorization headers, bearer
+  values, and private-key markers remain rejected. A production-derived model
+  stream regression covers the URL false positive.
+
 ## 2026-08-26 — Routine fact lookups avoid sandbox approval
 
 - Added least-powerful-tool guidance to the versioned default agent: routine
@@ -134,6 +156,20 @@ title: Changelog
   normalized stream and trajectory exporter share one bearer-value rule that
   covers short opaque credential-shaped values without rejecting ordinary
   authorization prose.
+
+## 2026-08-26 — Automated macOS TestFlight delivery
+
+- Added a `main`-only `apple-testflight` CircleCI job after the production API
+  deploy. It installs CircleCI's managed Apple signing bundle, uses the
+  project-scoped pipeline number as `CFBundleVersion`, verifies the archived
+  bundle identifier, build number, and signature, and uploads directly to App
+  Store Connect with a restricted API-key context. The key exists only in a
+  mode-restricted temporary file and the signed archive is not retained.
+- Added ADR-0074 and documented the signing-bundle, context, TestFlight-group,
+  automatic-update, counter, and first-delivery prerequisites. The Apple
+  signing authority remains separate from the production-host deployment
+  context, and the job reports upload acceptance rather than claiming Apple's
+  later processing or device installation has completed.
 
 ## 2026-08-24 — Deployment sudo contract covers notifications
 

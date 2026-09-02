@@ -1,7 +1,7 @@
-"""Add Milestone 20 — device capabilities, invocations, ingest, and triage sessions.
+"""Add Milestone 23 — device capabilities, invocations, ingest, and triage sessions.
 
 Revision ID: f1c7a3e05b28
-Revises: a9c5e2f7d413
+Revises: e3a1c5d7f9b2
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "f1c7a3e05b28"
-down_revision: str | Sequence[str] | None = "a9c5e2f7d413"
+down_revision: str | Sequence[str] | None = "e3a1c5d7f9b2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

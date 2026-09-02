@@ -141,7 +141,11 @@ private struct SessionSidebar: View {
     @State private var newConversationDestination =
         SessionSidebarDestination.freshConversation()
     @StateObject private var memoryViewModel = MemoryViewModel()
+    @StateObject private var personaViewModel = PersonaViewModel()
     @State private var showingMemoryBrowser = false
+    @State private var showingPersonaEditor = false
+    @StateObject private var scheduleViewModel = ScheduleViewModel()
+    @State private var showingScheduleBrowser = false
 
     var body: some View {
         Group {
@@ -192,9 +196,35 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Memory")
                 .accessibilityIdentifier("sidebar.memory")
             }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showingPersonaEditor = true
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                        .foregroundColor(AppTheme.turquoise)
+                }
+                .accessibilityLabel("Persona")
+                .accessibilityIdentifier("sidebar.persona")
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showingScheduleBrowser = true
+                } label: {
+                    Image(systemName: "calendar")
+                        .foregroundColor(AppTheme.orange)
+                }
+                .accessibilityLabel("Schedules")
+                .accessibilityIdentifier("sidebar.schedules")
+            }
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
+        }
+        .sheet(isPresented: $showingPersonaEditor) {
+            PersonaEditorView(model: personaViewModel)
+        }
+        .sheet(isPresented: $showingScheduleBrowser) {
+            ScheduleBrowserView(model: scheduleViewModel)
         }
     }
 
@@ -498,6 +528,7 @@ enum MainWindowConfiguration {
 
 enum SettingsWindowConfiguration {
     static let frameName: NSWindow.FrameAutosaveName = "VeetbotSettingsWindow"
+    static let storageKey = "veetbot.settingsWindow.contentSize"
     static let minimumSize = NSSize(width: 520, height: 440)
     static let initialSize = NSSize(width: 720, height: 680)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
@@ -507,12 +538,101 @@ enum SettingsWindowConfiguration {
         window.styleMask.insert(.resizable)
         window.contentMinSize = minimumSize
         window.contentMaxSize = maximumSize
+        PopupWindowContentSizeStore.restore(
+            window: window,
+            key: storageKey,
+            minimumSize: minimumSize,
+            maximumSize: maximumSize
+        )
+    }
+}
+
+enum PopupWindowContentSizeStore {
+    @MainActor
+    static func save(window: NSWindow, key: String) {
+        guard let size = window.contentView?.frame.size else { return }
+        UserDefaults.standard.set(NSStringFromSize(size), forKey: key)
+    }
+
+    @MainActor
+    static func restore(
+        window: NSWindow,
+        key: String,
+        minimumSize: NSSize,
+        maximumSize: NSSize
+    ) {
+        guard
+            let value = UserDefaults.standard.string(forKey: key),
+            let size = validSize(from: value)
+        else { return }
+
+        window.setContentSize(
+            NSSize(
+                width: min(max(size.width, minimumSize.width), maximumSize.width),
+                height: min(max(size.height, minimumSize.height), maximumSize.height)
+            )
+        )
+    }
+
+    private static func validSize(from value: String) -> NSSize? {
+        let size = NSSizeFromString(value)
+        guard
+            size.width.isFinite,
+            size.height.isFinite,
+            size.width > 0,
+            size.height > 0
+        else { return nil }
+        return size
+    }
+}
+
+@MainActor
+final class PopupWindowResizePersistence: NSObject {
+    private weak var window: NSWindow?
+    private let key: String
+
+    init(window: NSWindow, key: String) {
+        self.window = window
+        self.key = key
+        super.init()
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(windowDidResize(_:)),
+            name: NSWindow.didResizeNotification,
+            object: window
+        )
+        center.addObserver(
+            self,
+            selector: #selector(windowDidEndLiveResize(_:)),
+            name: NSWindow.didEndLiveResizeNotification,
+            object: window
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func windowDidResize(_ notification: Notification) {
+        guard
+            let window,
+            notification.object as? NSWindow === window,
+            window.inLiveResize
+        else { return }
+        PopupWindowContentSizeStore.save(window: window, key: key)
+    }
+
+    @objc private func windowDidEndLiveResize(_ notification: Notification) {
+        guard let window, notification.object as? NSWindow === window else { return }
+        PopupWindowContentSizeStore.save(window: window, key: key)
     }
 }
 
 @MainActor
 private final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindowDelegate {
     private var controller: NSWindowController?
+    private var resizePersistence: PopupWindowResizePersistence?
 
     func show(model: ChatViewModel, appearance: AppearancePreferences) {
         if let window = controller?.window {
@@ -527,12 +647,11 @@ private final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindo
             backing: .buffered,
             defer: false
         )
-        SettingsWindowConfiguration.apply(to: window)
         window.title = "Veetbot Settings"
         window.isReleasedWhenClosed = false
-        window.delegate = self
         let restoredFrame = window.setFrameUsingName(SettingsWindowConfiguration.frameName)
         window.setFrameAutosaveName(SettingsWindowConfiguration.frameName)
+        SettingsWindowConfiguration.apply(to: window)
 
         let settings = ConnectionSettingsView(
             model: model,
@@ -543,9 +662,15 @@ private final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindo
         .appTypography(appearance)
         .tint(AppTheme.turquoise)
         window.contentViewController = NSHostingController(rootView: settings)
+        SettingsWindowConfiguration.apply(to: window)
+        window.delegate = self
 
         let controller = NSWindowController(window: window)
         self.controller = controller
+        resizePersistence = PopupWindowResizePersistence(
+            window: window,
+            key: SettingsWindowConfiguration.storageKey
+        )
         if !restoredFrame { window.center() }
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -553,6 +678,7 @@ private final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindo
 
     func windowWillClose(_ notification: Notification) {
         guard notification.object as? NSWindow === controller?.window else { return }
+        resizePersistence = nil
         controller = nil
     }
 }

@@ -13,6 +13,8 @@ PROCESS_ROOT="$TEST_ROOT/proc"
 LOG_FILE="$TEST_ROOT/commands.log"
 DOCKER_STATE="$TEST_ROOT/docker-production-image"
 FAIL_MARKER="$TEST_ROOT/docs-switch-failed"
+SERVICES_STOPPED="$TEST_ROOT/services-stopped"
+ENV_FILE="$TEST_ROOT/veetbot.env"
 RAW_RUNBOOK="$TEST_ROOT/manual-rollback.raw.sh"
 RUNBOOK="$TEST_ROOT/manual-rollback.sh"
 PREVIOUS_ID=20260810-152200-1111111
@@ -21,6 +23,7 @@ TARGET_ID=20260810-152233-abcdef0
 mkdir -p \
   "$BIN_DIR" \
   "$DEPLOY_ROOT/releases/$PREVIOUS_ID" \
+  "$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin" \
   "$DEPLOY_ROOT/releases/$TARGET_ID" \
   "$DEPLOY_ROOT/shared" \
   "$PROCESS_ROOT/4242" \
@@ -30,6 +33,10 @@ printf 'VEETBOT_RELEASE_ID=%s\n' "$PREVIOUS_ID" \
   >"$DEPLOY_ROOT/releases/$PREVIOUS_ID/.release.env"
 printf 'VEETBOT_RELEASE_ID=%s\n' "$TARGET_ID" \
   >"$DEPLOY_ROOT/releases/$TARGET_ID/.release.env"
+printf '%s\n' \
+  'POSTGRES_USER=agent' \
+  'POSTGRES_DB=agent' \
+  'COMPOSE_PROJECT_NAME=veetbot' >"$ENV_FILE"
 printf '%s\n' "$PREVIOUS_ID" >"$DOCS_ROOT/releases/$PREVIOUS_ID/release.txt"
 printf '%s\n' "$TARGET_ID" >"$DOCS_ROOT/releases/$TARGET_ID/release.txt"
 touch \
@@ -49,6 +56,17 @@ write_stub() {
 }
 
 write_stub flock 'exit 0'
+write_stub timeout '
+  printf "timeout %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  while (($#)); do
+    case "$1" in
+      --signal=* | --kill-after=*) shift ;;
+      *s) shift; break ;;
+      *) exit 1 ;;
+    esac
+  done
+  "$@"
+'
 write_stub readlink '
   if [[ "${1:-}" == -f ]]; then
     shift
@@ -97,6 +115,11 @@ write_stub docker '
     else
       exit 1
     fi
+  elif [[ "${1:-}" == compose ]]; then
+    if [[ "${VEETBOT_TEST_REQUIRE_QUIESCED_QUERY:-0}" == 1 ]]; then
+      [[ -f "$VEETBOT_TEST_SERVICES_STOPPED" ]]
+    fi
+    printf "%s\n" "${VEETBOT_TEST_INCOMPATIBLE_SCHEDULE_REVISIONS:-0}"
   else
     exit 1
   fi
@@ -107,7 +130,13 @@ write_stub sudo '
 '
 write_stub systemctl '
   printf "systemctl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
-  if [[ "${1:-}" == show ]]; then printf "4242\n"; fi
+  if [[ "${1:-}" == stop ]]; then
+    : >"$VEETBOT_TEST_SERVICES_STOPPED"
+  elif [[ "${1:-}" == restart ]]; then
+    rm -f -- "$VEETBOT_TEST_SERVICES_STOPPED"
+  elif [[ "${1:-}" == show ]]; then
+    printf "4242\n"
+  fi
 '
 write_stub curl '
   printf "curl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
@@ -124,6 +153,9 @@ write_stub curl '
   printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
     "$VEETBOT_TEST_READY_RELEASE" >"$headers"
 '
+printf '#!/usr/bin/env bash\nset -Eeuo pipefail\nprintf "%%s\\n" "${VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY:-incompatible}"\n' \
+  >"$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python"
+chmod +x "$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python"
 
 awk '
   /^## Manual rollback$/ { in_section = 1; next }
@@ -143,12 +175,29 @@ run_rollback() {
   BASH_ENV=/dev/null \
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_DOCKER_STATE="$DOCKER_STATE" \
+  VEETBOT_TEST_SERVICES_STOPPED="$SERVICES_STOPPED" \
   VEETBOT_TEST_TARGET_ID="$TARGET_ID" \
   VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$TARGET_ID}" \
   VEETBOT_TEST_DOCS_CURRENT="$DOCS_ROOT/current" \
   VEETBOT_TEST_FAIL_MARKER="$FAIL_MARKER" \
+  VEETBOT_ENV_FILE="$ENV_FILE" \
     "$RUNBOOK"
 }
+
+if VEETBOT_TEST_INCOMPATIBLE_SCHEDULE_REVISIONS=1 \
+  VEETBOT_TEST_REQUIRE_QUIESCED_QUERY=1 \
+  run_rollback >"$TEST_ROOT/incompatible-schedule.out" 2>&1; then
+  printf 'rollback across incompatible schedule revisions unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
+grep -Fq "docker compose --env-file $ENV_FILE" "$LOG_FILE"
+grep -Fq 'systemctl stop veetbot-execution' "$LOG_FILE"
+grep -Fq 'timeout --signal=TERM --kill-after=5s 20s docker compose' "$LOG_FILE"
+grep -Fq -- '--env PGCONNECT_TIMEOUT=5' "$LOG_FILE"
+grep -Fq -- '--env PGOPTIONS=-c statement_timeout=5000' "$LOG_FILE"
+: >"$LOG_FILE"
 
 if VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE=1 run_rollback \
   >"$TEST_ROOT/failed.out" 2>&1; then

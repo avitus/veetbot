@@ -19,7 +19,7 @@ The plan designed subagents under Milestone 10 and deferred them behind a gate:
 "add subagents only when evaluation evidence shows that a single agent fails"
 for one of five reasons — independent parallel work, context isolation,
 specialized permissions, specialized tools, or independent verification
-(engineering-plan.md:2994-3004). This document honours that gate as written.
+(engineering-plan.md:3041-3049). This document honours that gate as written.
 Construction is authorized now; tenant activation requires the evidence the
 gate names, and the evidence is part of the milestone rather than a
 precondition for starting it, because the platform has to be able to delegate
@@ -31,15 +31,15 @@ control tool that spawns a child run and suspends the parent
 `WAITING_FOR_APPROVAL` carrying a typed `CHILD_RUN` suspension rather than an
 eighth run state (runtime-loop.md:284-292); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
-(runtime-loop.md:1136-1147); a child's result enters the parent labelled
+(runtime-loop.md:1146-1157); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:971-977); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
-(context-engine.md:291-294, memory-retrieval-and-ranking.md:87); and the
+(context-engine.md:313-316, memory-retrieval-and-ranking.md:90); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:986): the
+The readiness review measured what was left (readiness.md:998): the
 objective had a carrier and no schema, the child budget was additive with no
 rule deriving a child's own limits, the separate trace and the artifact
 references were picked up by no specification, and a child run could not be
@@ -71,8 +71,8 @@ materializes bounded child runs. It includes:
   failures.
 
 The milestone does not include handoffs (the parent retains the user
-interaction and the final response, engineering-plan.md:2992); role-named
-agents for planning, writing, or criticism (engineering-plan.md:3004);
+interaction and the final response, engineering-plan.md:3039); role-named
+agents for planning, writing, or criticism (engineering-plan.md:3051);
 delegation deeper than one level; cross-tenant or cross-principal delegation;
 any change to model routing; a new `WAITING_FOR_CHILD` run status; a child that
 may itself call `delegate.run` or `skill.manage`; or push notification of child
@@ -125,7 +125,7 @@ The plan's "explicit objective" requirement had a carrier and no schema. One
 because independent parallel work — the first of the gate's five reasons — is
 exactly fan-out from one invocation, and a parent that suspends on the call
 cannot fan out any other way. Each brief is structured, because the child
-seeds from its brief and from nothing else (context-engine.md:291-294), so
+seeds from its brief and from nothing else (context-engine.md:313-316), so
 everything the child needs to stop correctly has to be in it:
 
 ```python
@@ -231,12 +231,12 @@ No new run status. The parent's step ends when the pipeline raises a
 child_run_ids)`, the executor writes `WAITING_FOR_APPROVAL` and the
 `run.waiting_for_approval` event whose payload carries the suspension kind and
 child identifiers, and releases the lease exactly once, as
-runtime-loop.md:1000-1030 specifies for all three suspension kinds. The single
+runtime-loop.md:1010-1040 specifies for all three suspension kinds. The single
 terminal writer's finalize path, which today treats every non-user suspension
 as an approval, branches on the kind: a `CHILD_RUN` suspension appends no
 `approval.requested` and enqueues no Milestone 12 notification.
 
-The join is the post-terminal hook runtime-loop.md:1136-1147 describes. When a
+The join is the post-terminal hook runtime-loop.md:1146-1157 describes. When a
 `DELEGATED` child reaches a terminal state, the hook checks whether every
 sibling under the same `parent_run_id` is terminal. If so, it completes the
 parent's suspended invocation as `tool.call.completed` with one result item
@@ -278,7 +278,7 @@ completes once and the parent re-queues once.
 ## Limits, budget, and deadline
 
 The plan requires a child budget and a child deadline and says fan-out usage
-is additive (engineering-plan.md:593). The rule that derives a child's own
+is additive (engineering-plan.md:636). The rule that derives a child's own
 limits — the partial the readiness review named — is:
 
 ```text
@@ -372,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1004). The resolution is the one the review log recorded as
+(readiness.md:1008). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation

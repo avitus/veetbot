@@ -24,6 +24,7 @@ class ContextClass(StrEnum):
     PLATFORM_POLICY = "platform_policy"
     FRAMING = "framing"
     AGENT_INSTRUCTIONS = "agent_instructions"
+    PERSONA = "persona"
     TOOL_DEFINITIONS = "tool_definitions"
     SKILL_CATALOG = "skill_catalog"
     MEMORY_SNAPSHOT = "memory_snapshot"
@@ -41,6 +42,7 @@ REGION_ASSIGNMENTS: dict[ContextClass, ContextRegion] = {
     ContextClass.PLATFORM_POLICY: ContextRegion.PREFIX,
     ContextClass.FRAMING: ContextRegion.PREFIX,
     ContextClass.AGENT_INSTRUCTIONS: ContextRegion.PREFIX,
+    ContextClass.PERSONA: ContextRegion.PREFIX,
     ContextClass.TOOL_DEFINITIONS: ContextRegion.PREFIX,
     ContextClass.SKILL_CATALOG: ContextRegion.PREFIX,
     ContextClass.MEMORY_SNAPSHOT: ContextRegion.PREFIX,
@@ -62,6 +64,7 @@ class ContextBudget(BaseModel):
     reserve_output_tokens: int = Field(gt=0)
     platform_tokens: int = Field(ge=0)
     agent_tokens: int = Field(ge=0)
+    persona_tokens: int = Field(default=0, ge=0)
     tool_tokens: int = Field(ge=0)
     skill_catalog_tokens: int = Field(ge=0)
     skill_body_tokens: int = Field(ge=0)
@@ -97,6 +100,10 @@ class ContextPlan(BaseModel):
     snapshot_id: UUID | None = None
     snapshot_watermark: int = Field(default=0, ge=0)
     memory_snapshot: str = ""
+    # The rendered persona row pinned at plan creation; defaults keep every
+    # persisted pre-Milestone-22 plan event validating unchanged.
+    persona_text: str = ""
+    persona_version: int = Field(default=0, ge=0)
     skill_pins: tuple[SkillPin, ...] = ()
     skill_catalog: tuple[CatalogMetadata, ...] = ()
     cache_breakpoints: tuple[CacheBreakpoint, ...] = ()

@@ -105,6 +105,31 @@ Data & Privacy displays the installed marketing version and build number. The
 first build with recoverable Website Access is version 0.1.1 (2), so an older
 installed binary can be identified without comparing source revisions.
 
+## TestFlight delivery
+
+The `apple-testflight` CircleCI job archives the generic macOS destination from
+each tested `main` revision after the production API deploy succeeds. It uses
+CircleCI's project-scoped pipeline number as the build number without editing
+the tracked Xcode project, verifies the archived build number, bundle identifier,
+and code signature, and uploads directly to App Store Connect. Xcode's automatic
+build-number management is disabled during export so Apple receives the value
+the job inspected. The signed archive is not retained as a CircleCI artifact.
+
+The job installs the CircleCI-managed `veetbot-app-store` application-signing
+bundle and `veetbot-mac-installer` installer-signing bundle, and uses only the
+restricted `veetbot-apple-testflight` context for App Store Connect
+authentication. The setup procedure and exact context variables are in the
+[production deployment guide](deployment.md#macos-testflight-delivery).
+The first pipeline number used this way must be greater than the latest macOS
+build already accepted by App Store Connect.
+
+App Store Connect must assign accepted builds to the intended TestFlight group,
+with automatic distribution enabled if every build should become available
+without operator action. Each Mac must install Veetbot through TestFlight and
+enable automatic updates there. Upload success means Xcode handed the build to
+Apple successfully; later processing, group assignment, and installation remain
+external states visible in App Store Connect and TestFlight.
+
 ## Runtime behavior
 
 One submitted message creates one run. A stable idempotency key is reused across

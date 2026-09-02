@@ -8,6 +8,8 @@ import pytest
 
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
+from agent_core.adapters.web.keenable import KeenableWebProvider
+from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
@@ -83,6 +85,37 @@ async def test_one_provider_can_serve_both_web_capabilities(
         assert fetch._provider is search._provider
 
 
+async def test_weighted_composition_routes_half_of_each_capability_to_keenable() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "WEB_SEARCH_PROVIDERS": "tavily:50,keenable:50",
+            "WEB_FETCH_PROVIDERS": "firecrawl:50,keenable:50",
+            "TAVILY_API_KEY": "synthetic-tavily-credential",
+            "FIRECRAWL_API_KEY": "synthetic-firecrawl-credential",
+            "KEENABLE_API_KEY": "synthetic-keenable-credential",
+        }
+    )
+
+    async with build(settings=settings, enabled_tools=["web.search", "web.fetch"]) as composition:
+        registry = composition.tool_pipeline._registry
+        search = cast(RegisteredTool, registry.get("web.search")).implementation
+        fetch = cast(RegisteredTool, registry.get("web.fetch")).implementation
+        assert isinstance(search, WebSearchTool)
+        assert isinstance(fetch, WebFetchTool)
+        assert isinstance(search._router, WeightedWebProviderRouter)
+        assert isinstance(fetch._router, WeightedWebProviderRouter)
+        assert [
+            (type(allocation.provider), allocation.weight)
+            for allocation in search._router.allocations
+        ] == [(TavilyWebProvider, 50), (KeenableWebProvider, 50)]
+        assert [
+            (type(allocation.provider), allocation.weight)
+            for allocation in fetch._router.allocations
+        ] == [(FirecrawlWebProvider, 50), (KeenableWebProvider, 50)]
+
+
 async def test_disabled_web_capabilities_are_not_registered() -> None:
     settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
 
@@ -133,6 +166,8 @@ async def test_web_search_runs_through_policy_and_persists_untrusted_result() ->
 
 
 async def test_retryable_web_provider_outage_does_not_advise_argument_changes() -> None:
+    """Transient provider outages keep retry guidance distinct from bad input."""
+
     provider = FailingWebProvider()
     script = FakeModelScript(
         turns=[
@@ -165,6 +200,58 @@ async def test_retryable_web_provider_outage_does_not_advise_argument_changes() 
     assert invocations[0].outcome is not None
     assert invocations[0].outcome.status.value == "unavailable"
     assert invocations[0].outcome.retryable is True
+    assert invocations[0].outcome.remediation == "none"
+
+
+async def test_web_search_quota_failure_reports_operator_action() -> None:
+    """Quota failures surface safe capacity guidance through the run loop."""
+
+    provider = FailingWebProvider(
+        reason_code="tool.web.quota_exceeded",
+        retryable=False,
+    )
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="web.search",
+                        arguments={
+                            "query": (
+                                "Bun appears to have been a big breakthrough. "
+                                "Why is it so much better than NodeJS?"
+                            )
+                        },
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="The search provider needs operator attention."),
+        ]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        sequential_ids=True,
+        web_search_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit(
+            "Bun appears to have been a big breakthrough. Why is it so much better than NodeJS?"
+        )
+        await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+
+    assert len(invocations) == 1
+    assert invocations[0].outcome is not None
+    assert invocations[0].outcome.reason_code == "tool.web.quota_exceeded"
+    assert invocations[0].outcome.message == (
+        "The web provider's usage or billing limit has been reached; "
+        "an operator must restore provider capacity."
+    )
+    assert invocations[0].outcome.retryable is False
     assert invocations[0].outcome.remediation == "none"
 
 

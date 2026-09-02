@@ -1,14 +1,14 @@
-# ADR-0075: Tool-name-keyed policy rules and declared human confirmation
+# ADR-0082: Tool-name-keyed policy rules and declared human confirmation
 
 - Status: Accepted
 - Date: 2026-09-01
-- Related: engineering plan Sections 9.2, 9.3, and 11.2; ADR-0017, ADR-0073
+- Related: engineering plan Sections 9.2, 9.3, and 11.2; ADR-0017, ADR-0080
 - Detailed design: `docs/plan/policy-and-approvals.md`,
   `docs/plan/device-channel-and-sms.md`
 
 ## Context
 
-ADR-0073 decided that `device.sms.send` classifies `ALLOW`, because iOS makes
+ADR-0080 decided that `device.sms.send` classifies `ALLOW`, because iOS makes
 the owner's Send tap non-bypassable and a second in-app approval would duplicate
 rather than add control. Implementing that decision exposed three things the
 ADR did not settle, all of which are authorization mechanics and therefore
@@ -80,7 +80,7 @@ plain allow". A security review falsified the claim in three ways:
 4. **The real trust model is the compose sheet, and the ADR says so.** The
    primary, non-bypassable control for `device.sms.send` is the platform's own
    confirmation: iOS shows the owner the recipient and the body and does not
-   send without a tap (ADR-0073). Policy's origin escalation is defense in
+   send without a tap (ADR-0080). Policy's origin escalation is defense in
    depth layered on top of it, not the thing that makes the tool safe.
 
 5. **The cross-turn residual is accepted and named.** Because origin trust is
@@ -129,7 +129,7 @@ plain allow". A security review falsified the claim in three ways:
   falsified.
 - **Model the compose-sheet tap as standing authorization.** Rejected: it keeps
   the decision at `REQUIRE_APPROVAL` and satisfies it with evidence, which
-  contradicts ADR-0073's plain statement that policy classifies the tool
+  contradicts ADR-0080's plain statement that policy classifies the tool
   `ALLOW`, and it would create an approval record for an approval that never
   happened in the product.
 - **A durable per-session taint instead of turn-scoped origin trust.**

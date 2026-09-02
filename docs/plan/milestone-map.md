@@ -44,10 +44,14 @@ gained two more on a later pass, all four at Milestone 3.
 fourteenth area, all of them at Milestone 9. [web-access.md](web-access.md)
 declares seven more in a fifteenth area, all at Milestone 10.
 [browser-automation.md](browser-automation.md) adds ten more in a
-sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) declares
-twenty-three Milestone 11 gates in a seventeenth area. The counts throughout
-this document are the corpus as it now stands: two hundred and twenty-one
-declared across seventeen specs, two hundred and twenty-seven registry entries.
+sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) first
+declared twenty-three Milestone 11 gates in a seventeenth area, then five at
+Milestone 19 and six at Milestone 20.
+[adaptive-memory-distillation.md](adaptive-memory-distillation.md) adds
+twenty-four Milestone 21 gates in the existing memory area.
+[persona-surface.md](persona-surface.md) adds fourteen Milestone 22 gates in
+a new `persona` area. The current counts
+are reconciled in the gate table and census below.
 
 ## What this document is responsible for
 
@@ -323,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 26 subject specifications declare 371 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 380
-declarations, 377 registry entries once the 3 aliases are subtracted.
+The 28 subject specifications declare 415 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 424
+declarations, 421 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1269,9 +1273,111 @@ Gate 24 is structural because it inspects the registered tool contract and its
 feature-gated composition. The remaining four are boundary cases over the
 tool pipeline and the schedule application service.
 
+### Calendar recurrence and conversational schedules, six gates
+
+Six gates extend the existing `schedule` area at Milestone 20. They cover the
+new calendar values and algorithms, bounded downtime behavior, the existing
+HTTP control plane's widened union, and approval-gated conversational creation
+and replay for every recurring kind.
+
+```text
+#   id                                                   kind         M
+--  ---------------------------------------------------  -----------  --
+29  gate.schedule.calendar_values                        property     20
+30  gate.schedule.calendar_recurrence                    property     20
+31  gate.schedule.calendar_misfire_bounded               case         20
+32  gate.schedule.calendar_http_roundtrip                case         20
+33  gate.schedule.model_create_recurring                 case         20
+34  gate.schedule.model_create_recurring_validation      case         20
+```
+
+Gates 29 and 30 are properties because canonical calendar values and civil-time
+resolution range over generated selectors, dates, and zones. The remaining
+four are boundary cases over materialization, HTTP, and the ordinary tool
+pipeline.
+
+### Adaptive memory distillation, twenty-four gates
+
+Twenty-four gates extend the existing `memory` area at Milestone 21. Six cover
+the three-stage provider pipeline and its persisted episode input, seven cover
+high-recall grounded formation and accounting, seven cover the separation of
+evidence, use, forgetting, promotion, and rendered uncertainty, and four cover
+corrections, migration, corpus coverage, comparative evidence, and activation.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.memory.distill_versions_frozen             structural   21
+2   gate.memory.episode_integration                 case         21
+3   gate.memory.episode_repository_parity           structural   21
+4   gate.memory.anticipation_blinded                property     21
+5   gate.memory.prediction_error_calls              case         21
+6   gate.memory.distill_fallback                    case         21
+7   gate.memory.direct_high_recall                  case         21
+8   gate.memory.hypothesis_high_recall              case         21
+9   gate.memory.compound_recall                     case         21
+10  gate.memory.candidate_schema                    structural   21
+11  gate.memory.predictability_attributed           case         21
+12  gate.memory.source_grounding                    property     21
+13  gate.memory.formation_reason_telemetry          case         21
+14  gate.memory.evidence_clock                      case         21
+15  gate.memory.usage_clock                         case         21
+16  gate.memory.hypothesis_retirement               case         21
+17  gate.memory.ongoing_retirement                  case         21
+18  gate.memory.evidence_promotion                  case         21
+19  gate.memory.uncertainty_rendered                case         21
+20  gate.memory.correction_durable_v3               case         21
+21  gate.memory.schema_backfill                     structural   21
+22  gate.memory.formation_corpus_v3                 structural   21
+23  gate.memory.comparative_evidence                case         21
+24  gate.memory.distill_activation_bound            property     21
+```
+
+Gates 4, 12, and 24 are properties because causal blinding, source ownership,
+and exact tuple activation quantify over generated prefixes, event identities,
+and tuple differences. Gates 1, 3, 10, 21, and 22 are structural because they
+inspect frozen controls, both repositories against one contract, closed
+schemas, migrations, and the checked-in corpus. The remaining sixteen are
+boundary cases over provider orchestration, formation, lifecycle, retrieval,
+and evidence publication.
+
+### Persona surface, fourteen gates
+
+Fourteen gates open a new `persona` area at Milestone 22. Four cover the
+prefix row — stability, the cap, trust labeling, and revision pinning — two
+cover content safety at write and load, five cover curated promotion —
+human-only writes, closed eligibility, durable decline, linkage, and snapshot
+de-duplication — and three cover the surfaces: exact scopes with the memory
+router still read-only, the revision precondition, and principal scoping.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.persona.prefix_row_stable                  case         22
+2   gate.persona.budget_capped                      case         22
+3   gate.persona.trust_labeled                      case         22
+4   gate.persona.revision_pinned                    case         22
+5   gate.persona.secret_refused                     case         22
+6   gate.persona.injection_scanned                  case         22
+7   gate.persona.promotion_requires_affirmation     case         22
+8   gate.persona.nomination_eligibility             case         22
+9   gate.persona.decline_durable                    case         22
+10  gate.persona.affirmed_linked                    case         22
+11  gate.persona.snapshot_dedup                     case         22
+12  gate.persona.routes_exact_scope                 structural   22
+13  gate.persona.revision_precondition              case         22
+14  gate.persona.principal_scoped                   case         22
+```
+
+Gate 12 is structural because it inspects the mounted routers rather than a
+behavior: the exact scope on every persona route and the continued
+GET-only shape of the memory router are properties of the application object.
+The remaining thirteen are boundary cases over the prefix, the write
+surfaces, and the promotion lifecycle.
+
 ### SMS through the owner's iPhone, twelve gates
 
-Twelve gates extend the existing `device` area at Milestone 20. They cover
+Twelve gates extend the existing `device` area at Milestone 23. They cover
 the first slice of the Section 29 device channel: capability-derived
 registration, the invocation lifecycle and its idempotency, the owner-tap
 send boundary, ingest idempotency and untrusted triage routing, and the
@@ -1281,18 +1387,18 @@ hygiene, and default-off.
 ```text
 #   id                                    kind         M
 --  ------------------------------------  -----------  --
-1   gate.device.capability_registration   structural   20
-2   gate.device.invocation_idempotent     case         20
-3   gate.device.foreign_device_denied     case         20
-4   gate.device.no_send_without_result    property     20
-5   gate.device.offline_outcome           case         20
-6   gate.device.untrusted_output          structural   20
-7   gate.device.presence_revalidated      case         20
-8   gate.device.outbound_secret_scan      case         20
-9   gate.device.ingest_idempotent         case         20
-10  gate.device.untrusted_triage_routing  case         20
-11  gate.device.no_body_in_logs           case         20
-12  gate.device.default_off               case         20
+1   gate.device.capability_registration   structural   23
+2   gate.device.invocation_idempotent     case         23
+3   gate.device.foreign_device_denied     case         23
+4   gate.device.no_send_without_result    property     23
+5   gate.device.offline_outcome           case         23
+6   gate.device.untrusted_output          structural   23
+7   gate.device.presence_revalidated      case         23
+8   gate.device.outbound_secret_scan      case         23
+9   gate.device.ingest_idempotent         case         23
+10  gate.device.untrusted_triage_routing  case         23
+11  gate.device.no_body_in_logs           case         23
+12  gate.device.default_off               case         23
 ```
 
 Gates 1 and 6 are structural because they inspect the registered tool
@@ -1303,7 +1409,7 @@ route, and the triage seeding.
 
 ### The WhatsApp business surface, twelve gates
 
-Twelve gates open the `whatsapp` area at Milestone 21. They cover the
+Twelve gates open the `whatsapp` area at Milestone 24. They cover the
 signed webhook ingress, the handshake, string-id receipt idempotency, the
 inherited surface guarantees — unpaired denial, the scope ceiling,
 chunked and redacted replies, tenant isolation — and the confinement set:
@@ -1313,18 +1419,18 @@ twenty-four-hour template rule, and default-off.
 ```text
 #   id                                    kind         M
 --  ------------------------------------  -----------  --
-1   gate.whatsapp.signature_required      case         21
-2   gate.whatsapp.handshake_confined      case         21
-3   gate.whatsapp.receipt_idempotent      case         21
-4   gate.whatsapp.unpaired_denied         case         21
-5   gate.whatsapp.token_confinement       case         21
-6   gate.whatsapp.transport_confined      structural   21
-7   gate.whatsapp.template_outside_window case         21
-8   gate.whatsapp.reply_chunked_redacted  case         21
-9   gate.whatsapp.scope_ceiling           case         21
-10  gate.whatsapp.loopback_bind           structural   21
-11  gate.whatsapp.persistence_isolated    case         21
-12  gate.whatsapp.default_off             case         21
+1   gate.whatsapp.signature_required      case         24
+2   gate.whatsapp.handshake_confined      case         24
+3   gate.whatsapp.receipt_idempotent      case         24
+4   gate.whatsapp.unpaired_denied         case         24
+5   gate.whatsapp.token_confinement       case         24
+6   gate.whatsapp.transport_confined      structural   24
+7   gate.whatsapp.template_outside_window case         24
+8   gate.whatsapp.reply_chunked_redacted  case         24
+9   gate.whatsapp.scope_ceiling           case         24
+10  gate.whatsapp.loopback_bind           structural   24
+11  gate.whatsapp.persistence_isolated    case         24
+12  gate.whatsapp.default_off             case         24
 ```
 
 Gates 6 and 10 are structural — the egress graph and the bind walk. The
@@ -1422,11 +1528,20 @@ milestone  new gates  cumulative  the earliest of them
 19                 5         353  the model-callable schedule contract,
                                   approval, exact-scope authorization,
                                   time validation, idempotent replay
-20                12         365  capability registration, the
+20                 6         359  monthly and yearly calendar rules,
+                                  bounded catch-up, HTTP union parity,
+                                  recurring conversational creation
+21                24         383  integrated episodes, causal anticipation,
+                                  high-recall direct and hypothesis formation,
+                                  evidence-based forgetting and activation
+22                14         397  the persona row, its cap and pinning,
+                                  human-only promotion, durable decline,
+                                  snapshot de-duplication, exact scopes
+23                12         409  capability registration, the
                                   invocation lifecycle, the owner-tap
                                   send boundary, ingest idempotency,
                                   untrusted triage routing
-21                12         377  the signed webhook ingress, the
+24                12         421  the signed webhook ingress, the
                                   handshake, string-id idempotency,
                                   the template window, the loopback
                                   bind, inherited surface guarantees
@@ -1450,15 +1565,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and seventy-seven gates are green before
+2.  **Forty-one of four hundred and twenty-one gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and seventy-seven, which is every
-registry entry, at Milestone 21. Six of Milestone 10's gates are
+The cumulative column reaches four hundred and twenty-one, which is every
+registry entry, at Milestone 24. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1466,10 +1581,12 @@ Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 `gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, Milestone
 16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
 those specs already shared, Milestone 18's thirteen are `gate.email.*` in
-an area of their own, and Milestone 19's five return to the existing
-`gate.schedule.*` area, and Milestone 20's twelve return to the existing
-`gate.device.*` area, and Milestone 21's twelve open a `gate.whatsapp.*`
-area of their own. Every authorized milestone now has a specification
+an area of their own, Milestone 19's five return to the existing
+`gate.schedule.*` area, Milestone 20 adds six more there, Milestone 21
+adds twenty-four more to `gate.memory.*`, Milestone 22's fourteen are
+`gate.persona.*` in an area of their own, Milestone 23's twelve return to
+the existing `gate.device.*` area, and Milestone 24's twelve open a
+`gate.whatsapp.*` area of their own. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

@@ -359,7 +359,7 @@ def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> Non
     }
 
     migration = next(
-        (ROOT / "migrations" / "versions").glob("*_add_milestone_20_device_channel.py")
+        (ROOT / "migrations" / "versions").glob("*_add_milestone_23_device_channel.py")
     )
     migration_sql = migration.read_text(encoding="utf-8")
     for table in ("device_invocations", "device_ingest_receipts", "device_triage_sessions"):
@@ -418,3 +418,35 @@ def test_delegation_table_encodes_trust_boundaries() -> None:
     assert "ALTER TABLE delegations ENABLE ROW LEVEL SECURITY" in migration_sql
     assert "ALTER TABLE delegations FORCE ROW LEVEL SECURITY" in migration_sql
     assert "delegations_tenant_isolation" in migration_sql
+
+
+def test_persona_tables_encode_versioning_and_open_nomination_uniqueness() -> None:
+    documents = Base.metadata.tables["persona_documents"]
+    assert {column.name for column in documents.primary_key.columns} == {
+        "tenant_id",
+        "principal_id",
+        "version",
+    }
+    assert set(documents.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "version",
+        "entries",
+        "source",
+        "source_nomination_id",
+        "created_at",
+    }
+
+    nominations = Base.metadata.tables["persona_nominations"]
+    open_unique = next(
+        index for index in nominations.indexes if index.name == "ix_persona_nominations_open"
+    )
+    assert open_unique.unique
+    assert [column.name for column in open_unique.columns] == [
+        "tenant_id",
+        "principal_id",
+        "belief_id",
+    ]
+    assert "state = 'nominated'" in str(open_unique.dialect_options["postgresql"]["where"]).replace(
+        '"', ""
+    )

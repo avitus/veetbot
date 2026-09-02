@@ -91,6 +91,8 @@ nav:
       - Operational Hardening: plan/operational-hardening.md
       - Memory Evaluation & Lifecycle: plan/memory-evaluation-and-lifecycle.md
       - Memory Read API & Browser: plan/memory-read-api-and-browser.md
+      - Adaptive Memory Distillation: plan/adaptive-memory-distillation.md
+      - Persona Surface: plan/persona-surface.md
       - Email Integration: plan/email-integration.md
       - Device Channel & SMS: plan/device-channel-and-sms.md
       - WhatsApp Surface: plan/whatsapp-surface.md
@@ -182,7 +184,14 @@ nav:
       - ADR-0070 Milestone 17 memory read API and browser: adr/0070-milestone-17-memory-read-api-and-browser.md
       - ADR-0071 Milestone 18 first-class email integration: adr/0071-milestone-18-email-integration.md
       - ADR-0072 Milestone 19 conversational schedule creation: adr/0072-milestone-19-conversational-schedule-creation.md
-      - ADR-0073 Milestone 20 SMS through the owner's iPhone: adr/0073-milestone-20-sms-device-channel.md
-      - ADR-0074 Milestone 21 WhatsApp business surface: adr/0074-milestone-21-whatsapp-surface.md
-      - ADR-0075 Tool-name-keyed policy rules: adr/0075-tool-name-keyed-policy-rules.md
+      - ADR-0073 Milestone 20 calendar recurrence: adr/0073-milestone-20-calendar-recurrence.md
+      - ADR-0074 Automated macOS TestFlight delivery: adr/0074-automated-macos-testflight-delivery.md
+      - ADR-0075 Native schedule browser: adr/0075-native-schedule-browser.md
+      - ADR-0076 Keenable and weighted web routing: adr/0076-keenable-and-weighted-web-routing.md
+      - ADR-0077 Milestone 21 adaptive memory distillation: adr/0077-milestone-21-adaptive-memory-distillation.md
+      - ADR-0078 Run-limit synthesis reserves: adr/0078-run-limit-synthesis-reserves.md
+      - ADR-0079 Milestone 22 persona surface: adr/0079-milestone-22-persona-surface.md
+      - ADR-0080 Milestone 23 SMS through the owner's iPhone: adr/0080-milestone-23-sms-device-channel.md
+      - ADR-0081 Milestone 24 WhatsApp business surface: adr/0081-milestone-24-whatsapp-surface.md
+      - ADR-0082 Tool-name-keyed policy rules: adr/0082-tool-name-keyed-policy-rules.md
   - Changelog: changelog.md

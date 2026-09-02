@@ -7,6 +7,7 @@ public enum AuthorizationState: Equatable, Sendable {
 
 public enum HTTPMethod: String, Sendable {
     case get = "GET"
+    case put = "PUT"
     case post = "POST"
     case delete = "DELETE"
 }

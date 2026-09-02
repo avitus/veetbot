@@ -25,9 +25,10 @@ from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
-from agent_core.ports.memory import MemoryStore, TraceStore
+from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
+from agent_core.ports.personas import PersonaStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -97,7 +98,9 @@ class UnitOfWorkRepositories:
     skills: SkillRepository
     mcp_servers: MCPServerRepository
     memories: MemoryStore
+    episodes: IntegratedEpisodeStore
     traces: TraceStore
+    personas: PersonaStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
@@ -154,7 +157,9 @@ class MemoryUnitOfWork:
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
         self.memories = repositories.memories
+        self.episodes = repositories.episodes
         self.traces = repositories.traces
+        self.personas = repositories.personas
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules
@@ -267,7 +272,9 @@ class PostgresUnitOfWork:
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
         self.memories = repositories.memories
+        self.episodes = repositories.episodes
         self.traces = repositories.traces
+        self.personas = repositories.personas
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules

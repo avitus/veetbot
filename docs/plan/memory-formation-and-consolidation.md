@@ -243,7 +243,7 @@ same-source shortcut is decided over every related belief before any of them is
 acted on, and re-consolidating a conflicted session is a no-op like any other
 replay. The rule and what a
 conflict then commits are stated in
-[memory-evaluation-and-lifecycle.md:864-889](memory-evaluation-and-lifecycle.md:864-889).
+[memory-evaluation-and-lifecycle.md:903-928](memory-evaluation-and-lifecycle.md:903-928).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".
@@ -352,6 +352,33 @@ what the user asked it to forget.
 
 Rejection rate is also the cheapest formation-quality signal available — corrections
 per hundred rendered beliefs, measured against real usage rather than a rubric.
+
+## Persona nomination and curated promotion
+
+Milestone 22 adds one output to the pipeline and changes nothing about how
+beliefs form. When consolidation commits or reinforces a belief that clears
+the persona bar — `active`, direct rather than hypothesis, a durable type at
+`user` scope, corroborated and confidence-qualified past configured floors,
+sensitivity within bounds, outside every never-auto-store category, and clean
+under the injection and secret scans — the governed service records a
+**persona nomination** carrying the belief's canonical statement. Nothing else
+may nominate: not a tool call, not a model output, not an operator script.
+
+A nomination waits for the owner. **Affirming** it appends the statement to
+the persona document at `USER` authority and marks the source belief promoted,
+linked in both directions; the belief itself is never superseded or deleted by
+promotion, and removing the persona entry later clears the marker.
+**Declining** is durable: the belief is never nominated again, including after
+a full re-derivation, the same standard corrections hold. A nomination whose
+source belief supersedes or retires before review is withdrawn. The
+outstanding set is bounded, so review stays a minute's work rather than a
+queue.
+
+The mechanism — the nomination record, its states, the bounded set, the
+promoted marker, and the gates that watch them — is specified in
+[persona-surface.md](persona-surface.md) and ADR-0079. This document owns only
+the pipeline hook: nomination happens inside the same governed unit of work as
+the commit that qualified the belief, and never on a retry or no-work path.
 
 ## Data-model additions
 

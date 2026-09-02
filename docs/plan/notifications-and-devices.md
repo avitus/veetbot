@@ -45,7 +45,7 @@ durable, content-free notification path to one transport. It includes:
 - exactly six trigger transitions: an approval is requested, a run waits for
   user input, a run fails, a scheduled occurrence's run reaches a terminal
   state, a scheduled occurrence is missed or skipped, and a device
-  invocation is pending (Milestone 20, ADR-0073);
+  invocation is pending (Milestone 23, ADR-0080);
 - content-free payloads that deep-link the Apple client to the session, run,
   approval, or question;
 - device and notification routes with exact scopes, an offline notification
@@ -311,7 +311,7 @@ The client fetches details after the tap, when it is online and authenticated.
 
 Exactly six transitions enqueue, and each is observed where the corpus
 already records it — the sixth, a pending device invocation, arriving with
-Milestone 20 (ADR-0073):
+Milestone 23 (ADR-0080):
 
 ```text
 trigger                                   observed in                            kind
@@ -843,8 +843,8 @@ content, tokens, or the key.
    only non-transition producer and enqueues only the two ops kinds.
    Registered as `gate.notify.trigger_catalog`, case. **M12.**
 
-   Milestone 20 widens the catalog to six with the pending device invocation;
-   the sixth trigger's behavior is gated by that milestone (ADR-0073).
+   Milestone 23 widens the catalog to six with the pending device invocation;
+   the sixth trigger's behavior is gated by that milestone (ADR-0080).
 9. **Repeated triggers deduplicate.** Generated repeats — a retry after an
    unknown commit, a repeated hook invocation, two processes recording one
    transition — produce exactly one outbox row per deduplication key.
@@ -917,6 +917,6 @@ content, tokens, or the key.
    wants it, the kind is added to the closed set and defaults to muted.
 4. `capabilities` and `granted_scopes` from Section 29.6 wait for the device
    channel. Landing them now as empty columns would be speculative.
-   Milestone 20 lands the `capabilities` half (ADR-0073).
+   Milestone 23 lands the `capabilities` half (ADR-0080).
 5. Actionable lock-screen approval is a new authorization layer, not a
    notification feature, and needs its own ADR.

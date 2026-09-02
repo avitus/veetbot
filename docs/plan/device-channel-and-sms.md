@@ -8,7 +8,7 @@ canonical: true
 
 ## Authorization and context
 
-The owner authorized this milestone on 2026-08-26 (ADR-0073) as a parallel
+The owner authorized this milestone on 2026-08-26 (ADR-0080) as a parallel
 workstream on the ADR-0069 terms: its gates become green independently and
 the verified sequential ceiling still advances only in numerical order.
 This document designs the first concrete slice of Section 29's device
@@ -46,7 +46,7 @@ One adapter implements it: push-wake with poll-back.
 1. The worker writes a pending row to `device_invocations` in the same
    transaction that records the tool call, idempotent by invocation id.
 2. A content-free APNs push wakes the device. This is a sixth entry in
-   Milestone 12's trigger catalog, an explicit widening ADR-0073 records;
+   Milestone 12's trigger catalog, an explicit widening ADR-0080 records;
    the payload carries the invocation id and nothing else.
 3. The client fetches pending invocations over the authenticated API and
    posts back exactly one result per invocation:
@@ -71,7 +71,7 @@ Section 29.6 defines and Milestone 12 deferred; this milestone lands it.
 The registry exposes the tool with `ToolSource.DEVICE` while
 the declaring device is registered and unrevoked. The
 [tool-system.md](tool-system.md) sentence closing registration at two
-sources gains the amendment ADR-0073 records.
+sources gains the amendment ADR-0080 records.
 
 Execution: the invocation names a recipient and a body; the push wakes the
 phone; the owner taps the notification; the app presents a prefilled
@@ -84,7 +84,7 @@ the `EXTERNAL_MESSAGE` row for this one tool and leaves it intact for every
 other. The compose-sheet tap is a
 non-bypassable human confirmation, stronger than an in-app approval, so a
 second approval would be duplicate ceremony rather than added safety;
-ADR-0073 records the argument. A turn whose origin is untrusted still
+ADR-0080 records the argument. A turn whose origin is untrusted still
 raises the send to an approval, so an ingested message cannot drive one.
 Hardline rules still apply to the
 arguments: the outbound body passes the secret-exfiltration scan before
@@ -191,43 +191,43 @@ the roadmap or in this document's open questions.
 
 ## Build sequence
 
-1. Port, domain values, and the two migrations, with the contract suite. **M20.**
-2. The push-wake adapter against a fake APNs and a fake device client. **M20.**
-3. Capability-derived registration and the policy classification. **M20.**
-4. The ingest route, digest idempotency, and the triage session seeding. **M20.**
-5. The iOS client work and the App Intent. **M20.**
-6. The owner ceremony document and the end-to-end verification. **M20.**
+1. Port, domain values, and the two migrations, with the contract suite. **M23.**
+2. The push-wake adapter against a fake APNs and a fake device client. **M23.**
+3. Capability-derived registration and the policy classification. **M23.**
+4. The ingest route, digest idempotency, and the triage session seeding. **M23.**
+5. The iOS client work and the App Intent. **M23.**
+6. The owner ceremony document and the end-to-end verification. **M23.**
 
 ## Hard gates
 
 1. **Capability-derived registration.** A device tool is registered with
    `ToolSource.DEVICE` exactly while a registered, unrevoked device
-   declares its capability; revocation or deletion removes it. **M20.**
+   declares its capability; revocation or deletion removes it. **M23.**
 2. **Invocation idempotency.** Replaying an invocation id creates one
-   `device_invocations` row and at most one push. **M20.**
+   `device_invocations` row and at most one push. **M23.**
 3. **Foreign device denied.** A device other than the invocation's target
-   — or a revoked target — can neither fetch nor answer it. **M20.**
+   — or a revoked target — can neither fetch nor answer it. **M23.**
 4. **No send without a device result.** No server code path moves an
-   invocation to `sent`; only a device-posted result does. **M20.**
+   invocation to `sent`; only a device-posted result does. **M23.**
 5. **Offline outcome.** An invocation unanswered at `invocation_timeout`
-   resolves `expired` and surfaces `tool.device_offline`. **M20.**
+   resolves `expired` and surfaces `tool.device_offline`. **M23.**
 6. **Untrusted device output.** Every device tool result carries
-   `EXTERNAL_UNTRUSTED`, forced at registration. **M20.**
+   `EXTERNAL_UNTRUSTED`, forced at registration. **M23.**
 7. **Presence revalidated.** Every device-channel action revalidates
    presence and granted scopes; a revoked device fails on its next
-   action. **M20.**
+   action. **M23.**
 8. **Outbound secret scan.** A `device.sms.send` body matching a hardline
-   secret pattern is refused before any invocation row is written. **M20.**
+   secret pattern is refused before any invocation row is written. **M23.**
 9. **Ingest idempotency.** A replayed `(sender, body, received_at)`
-   digest stores one receipt and seeds one run. **M20.**
+   digest stores one receipt and seeds one run. **M23.**
 10. **Untrusted triage routing.** An ingested message enters the standing
     triage session as device-originated untrusted content and cannot
-    resolve a consequential action to a plain allow. **M20.**
+    resolve a consequential action to a plain allow. **M23.**
 11. **No body in logs.** Message bodies appear in no process log line and
-    no event besides the designated content event. **M20.**
+    no event besides the designated content event. **M23.**
 12. **Default off.** With either flag unset, no device-channel route
     mounts, no capability-derived tool registers, and no invocation push
-    is sent. **M20.**
+    is sent. **M23.**
 
 ## Open questions
 

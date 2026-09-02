@@ -4,10 +4,10 @@
   "corpus_sha256": "a6231758930c9f810cbd1a7f73549a96a80e1cc8480dccf23014cb30c5a0acfe",
   "formation_policy_version": "formation@7",
   "provider_formation_policy_version": "formation@8",
-  "retrieval_policy_version": "retrieval@2",
+  "retrieval_policy_version": "retrieval@3",
   "extractor_name": "deterministic-formation-v2",
-  "build_ref": "3b3c972b3003cdca6881d857b931401999f49545",
-  "recorded_at": "2026-08-23T08:39:14.269277Z",
+  "build_ref": "3faa978ade6db50cc220956f58f015b61db3d5e9",
+  "recorded_at": "2026-08-25T00:32:14.850068Z",
   "metrics": {
     "scenario_count": 16,
     "probe_count": 66,
@@ -20,12 +20,31 @@
     "needed_total": 60,
     "needed_formed": 58,
     "needed_recalled": 57,
+    "recall_by_distance": {
+      "1": {
+        "needed_total": 20,
+        "needed_recalled": 20
+      },
+      "2": {
+        "needed_total": 13,
+        "needed_recalled": 11
+      },
+      "3": {
+        "needed_total": 25,
+        "needed_recalled": 24
+      },
+      "4": {
+        "needed_total": 2,
+        "needed_recalled": 2
+      }
+    },
     "recalled_snapshot_only": 22,
     "recalled_in_turn_only": 4,
     "recalled_both": 31,
     "returned_total": 216,
     "noise_total": 159,
     "dropped_for_budget": 0,
+    "dropped_for_ceiling": 0,
     "blocked_rendered": 0,
     "currency_violations": 0,
     "currency_unformed": 0,

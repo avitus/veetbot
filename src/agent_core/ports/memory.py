@@ -16,6 +16,7 @@ from agent_core.domain.memory import (
     ConsolidationResult,
     ConsolidationRun,
     EpisodeQuery,
+    IntegratedEpisode,
     MemoryAuthority,
     MemoryBrowseQuery,
     MemoryCandidate,
@@ -80,7 +81,7 @@ class MemoryStore(Protocol):
         self,
         principal: Principal,
         *,
-        reinforced_before: datetime,
+        evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
         limit: int,
     ) -> list[MemoryRecord]: ...
@@ -116,6 +117,24 @@ class MemoryStore(Protocol):
     ) -> None: ...
 
     async def expire(self, principal: Principal) -> list[MemoryRecord]: ...
+
+
+class IntegratedEpisodeStore(Protocol):
+    async def put(self, episode: IntegratedEpisode) -> IntegratedEpisode: ...
+
+    async def get(self, episode_id: UUID, principal: Principal) -> IntegratedEpisode: ...
+
+    async def for_session(
+        self,
+        session_id: UUID,
+        principal: Principal,
+        *,
+        limit: int = 100,
+    ) -> list[IntegratedEpisode]: ...
+
+    async def delete_for_session(self, session_id: UUID, principal: Principal) -> int: ...
+
+    async def delete_for_principal(self, principal: Principal) -> int: ...
 
 
 class MemoryConsolidator(Protocol):

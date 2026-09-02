@@ -183,6 +183,17 @@ through the CircleCI deployment context or the downloadable client artifact.
 The terminal client strips C0/C1 and ANSI/OSC control sequences from remote text
 before it writes output or displays an API-provided prompt.
 
+Native macOS publication is a separate privileged supply-chain boundary under
+ADR-0074. CircleCI installs the Apple distribution identity and provisioning
+profile from its managed `veetbot-app-store` signing bundle. A restricted
+`veetbot-apple-testflight` context carries only App Store Connect API-key
+material and the Apple team identifier; it contains no production-host or agent
+credential. The job decodes the private key into a mode-restricted temporary
+file, deletes it on exit, verifies the archived identity and signature before
+upload, and never retains the signed archive as a CircleCI artifact. Access to
+the signing bundle, context, and protected `main` branch is authority to publish
+a trusted Veetbot binary and must be reviewed and rotated accordingly.
+
 Nginx changes are backed up and must pass `nginx -t` before reload. Application
 promotion does not automatically roll back after a migration: reverting code
 across a potentially incompatible schema is an operator decision, not a safe

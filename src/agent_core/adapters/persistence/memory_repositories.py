@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy import (
@@ -22,14 +22,17 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
     ConsolidationWatermarkRow,
+    IntegratedEpisodeRow,
     KnowledgeChunkRow,
     KnowledgeDocumentRow,
     MemoryRejectionRow,
@@ -48,13 +51,18 @@ from agent_core.domain.knowledge import (
     RetrievedPassage,
 )
 from agent_core.domain.memory import (
+    LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
+    IntegratedEpisode,
     MemoryAuthority,
     MemoryBrowseQuery,
+    MemoryClaimKind,
+    MemoryDerivation,
     MemoryEdit,
+    MemoryLongevity,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -120,10 +128,138 @@ def _memory_values(value: MemoryRecord) -> dict[str, Any]:
         "polarity",
         "portability",
         "authority",
+        "claim_kind",
+        "derivation",
+        "longevity",
     ):
         data[key] = data[key].value
     data["conflicts_with"] = [str(item) for item in value.conflicts_with]
     return data
+
+
+def _episode(row: IntegratedEpisodeRow) -> IntegratedEpisode:
+    return IntegratedEpisode(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        session_id=row.session_id,
+        source_event_ids=list(row.source_event_ids),
+        source_started_at=row.source_started_at,
+        source_ended_at=row.source_ended_at,
+        narrative=row.narrative,
+        subjects=list(row.subjects),
+        integration_policy_version=cast(
+            Literal["episode-integration@1"], row.integration_policy_version
+        ),
+        derivation_key=row.derivation_key,
+        created_at=row.created_at,
+    )
+
+
+class PostgresIntegratedEpisodeStore:
+    """Owner-scoped PostgreSQL repository for integrated episodes."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def put(self, episode: IntegratedEpisode) -> IntegratedEpisode:
+        statement = (
+            pg_insert(IntegratedEpisodeRow)
+            .values(**episode.model_dump(mode="python"))
+            .on_conflict_do_nothing(
+                index_elements=[
+                    IntegratedEpisodeRow.tenant_id,
+                    IntegratedEpisodeRow.principal_id,
+                    IntegratedEpisodeRow.derivation_key,
+                ]
+            )
+            .returning(IntegratedEpisodeRow)
+        )
+        try:
+            async with self._session.begin_nested():
+                inserted = (await self._session.scalars(statement)).one_or_none()
+        except IntegrityError as exc:
+            if constraint_name(exc) == "pk_integrated_episodes":
+                raise ConflictError("episode id identifies different content") from exc
+            raise
+        if inserted is not None:
+            return _episode(inserted)
+        existing = (
+            await self._session.scalars(
+                select(IntegratedEpisodeRow).where(
+                    IntegratedEpisodeRow.tenant_id == episode.tenant_id,
+                    IntegratedEpisodeRow.principal_id == episode.principal_id,
+                    IntegratedEpisodeRow.derivation_key == episode.derivation_key,
+                )
+            )
+        ).one()
+        value = _episode(existing)
+        if value.model_dump(exclude={"id", "created_at"}) != episode.model_dump(
+            exclude={"id", "created_at"}
+        ):
+            raise ConflictError("episode derivation identifies different content")
+        return value
+
+    async def get(self, episode_id: UUID, principal: Principal) -> IntegratedEpisode:
+        row = (
+            await self._session.scalars(
+                select(IntegratedEpisodeRow).where(
+                    IntegratedEpisodeRow.id == episode_id,
+                    IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+                    IntegratedEpisodeRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("integrated episode not found")
+        return _episode(row)
+
+    async def for_session(
+        self,
+        session_id: UUID,
+        principal: Principal,
+        *,
+        limit: int = 100,
+    ) -> list[IntegratedEpisode]:
+        if limit < 1:
+            raise ValueError("episode page limit must be positive")
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(IntegratedEpisodeRow)
+                    .where(
+                        IntegratedEpisodeRow.session_id == session_id,
+                        IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+                        IntegratedEpisodeRow.principal_id == principal.principal_id,
+                    )
+                    .order_by(
+                        IntegratedEpisodeRow.source_started_at,
+                        IntegratedEpisodeRow.id,
+                    )
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return [_episode(row) for row in rows]
+
+    async def delete_for_session(self, session_id: UUID, principal: Principal) -> int:
+        result = await self._session.execute(
+            delete(IntegratedEpisodeRow).where(
+                IntegratedEpisodeRow.session_id == session_id,
+                IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+                IntegratedEpisodeRow.principal_id == principal.principal_id,
+            )
+        )
+        return _rowcount(result)
+
+    async def delete_for_principal(self, principal: Principal) -> int:
+        result = await self._session.execute(
+            delete(IntegratedEpisodeRow).where(
+                IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+                IntegratedEpisodeRow.principal_id == principal.principal_id,
+            )
+        )
+        return _rowcount(result)
 
 
 def _memory(row: MemoryRow) -> MemoryRecord:
@@ -146,6 +282,13 @@ def _memory(row: MemoryRow) -> MemoryRecord:
         portability=Portability(row.portability),
         origin_scopes=list(row.origin_scopes),
         corroboration_count=row.corroboration_count,
+        claim_kind=MemoryClaimKind(row.claim_kind),
+        derivation=MemoryDerivation(row.derivation),
+        longevity=MemoryLongevity(row.longevity),
+        last_evidence_at=row.last_evidence_at,
+        last_used_at=row.last_used_at,
+        evidence_count=row.evidence_count,
+        lifecycle_policy_version=row.lifecycle_policy_version,
         last_reinforced_at=row.last_reinforced_at,
         valid_to=row.valid_to,
         superseded_by=row.superseded_by,
@@ -431,7 +574,7 @@ class PostgresMemoryStore:
         self,
         principal: Principal,
         *,
-        reinforced_before: datetime,
+        evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
@@ -439,7 +582,7 @@ class PostgresMemoryStore:
             MemoryRow.tenant_id == principal.tenant_id,
             MemoryRow.principal_id == principal.principal_id,
             MemoryRow.status.in_(_LIVE),
-            MemoryRow.last_reinforced_at <= reinforced_before,
+            MemoryRow.last_evidence_at <= evidence_before,
         ]
         if decay_confidence_ceiling is not None:
             predicates.append(
@@ -453,7 +596,7 @@ class PostgresMemoryStore:
                 await self._session.scalars(
                     select(MemoryRow)
                     .where(*predicates)
-                    .order_by(MemoryRow.last_reinforced_at, MemoryRow.id)
+                    .order_by(MemoryRow.last_evidence_at, MemoryRow.id)
                     .limit(limit)
                 )
             ).all()
@@ -601,7 +744,11 @@ class PostgresMemoryStore:
         for row in rows:
             value = _memory(row).model_copy(
                 update={
-                    "status": MemoryStatus.EXPIRED,
+                    "status": (
+                        MemoryStatus.RETIRED
+                        if row.lifecycle_policy_version == LIFECYCLE_POLICY_VERSION
+                        else MemoryStatus.EXPIRED
+                    ),
                     "valid_to": now,
                     "store_position": await self.next_position(),
                     "updated_at": now,

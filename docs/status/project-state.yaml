@@ -9,10 +9,10 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 21 are independently authorized parallel
-  # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, and 0074; their
-  # gates do not advance the verified ceiling past the sequential work
-  # through 15.
+  # Milestones 16 through 24 are independently authorized parallel
+  # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
+  # 0080, and 0081; their gates do not advance the verified ceiling past
+  # the sequential work through 15.
   authorized_milestones:
     - 0
     - 1
@@ -36,6 +36,9 @@ project:
     - 19
     - 20
     - 21
+    - 22
+    - 23
+    - 24
 
 milestones:
   "0":
@@ -367,7 +370,7 @@ milestones:
       - consolidation and formation audit routes, knowledge documents
   "18":
     title: First-class email integration
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-24
     design: docs/plan/email-integration.md
     adr: docs/adr/0071-milestone-18-email-integration.md
@@ -385,6 +388,44 @@ milestones:
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
+    open_items:
+      - Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    verification:
+      - check: thirteen Milestone 18 gate.email gates
+        outcome: passed_locally
+        detail: >-
+          The thirteen registered entries in evals/gates/email.yaml resolve to
+          thirteen distinct live checks in tests/gates/test_email_m18.py. The
+          complete module passes all eighteen collected cases, including the
+          three-mode contract and roster matrices, property-generated child
+          environments, fixed-endpoint and failure-taxonomy cases, and the
+          in-memory scheduled-triage path through read, parked write approval,
+          content-free notification, approval resolution, and outcome report.
+          The harness continues to report post-ceiling gates as pending while
+          project.current_milestone remains 12, so this focused execution is
+          the local parallel-workstream evidence and does not move the verified
+          gate ceiling.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 589 files and Ruff linting pass, strict mypy
+          reports no issue in 545 source files, the static partition passes
+          1339 tests, the contract partition passes 368 tests, release,
+          rollback, and nginx deployment-script tests pass, and the strict
+          documentation build passes with 188 citations and 353 registry
+          entries reconciled.
+      - check: owner real-mailbox smoke
+        outcome: not_started
+        detail: >-
+          Completion still requires the owner's real-mailbox bootstrap consent,
+          a scheduled triage run, an approval delivered to the phone, and one
+          approved send. No fake-provider result is recorded as a substitute.
+      - check: hosted CI and the dev-to-main review loop
+        outcome: not_started
+        detail: >-
+          Hosted CI and the CodeRabbit review loop have not run on a final
+          dev-to-main head for this workstream.
   "19":
     title: Conversational schedule creation
     status: in_progress
@@ -456,13 +497,207 @@ milestones:
         detail: >-
           pytest -m "not live" passes all 1830 selected tests with the two
           live-model tests deselected.
-
   "20":
+    title: Calendar recurrence and conversational schedules
+    status: in_progress
+    authorized_on: 2026-08-27
+    design: docs/plan/scheduling.md
+    adr: docs/adr/0073-milestone-20-calendar-recurrence.md
+    gates_registered: 6
+    authorized_scope:
+      - daily and multi-day weekly conversational schedule creation
+      - monthly numbered-day and explicit last-day recurrence
+      - yearly month/day recurrence including leap-day skip semantics
+      - IANA-zone civil-time behavior and bounded calendar misfires
+      - HTTP create and update support through the existing cadence union
+      - approval-gated schedule.create reuse with empty delegated scopes
+    deferred_scope:
+      - arbitrary cron or RFC 5545 input and interval multipliers
+      - continuous-session recurrence, dependency graphs, and workflow DAGs
+      - model-callable lifecycle mutation and delegated tool scopes
+      - content-bearing notifications or new delivery transports
+    open_items:
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    evidence:
+      - check: six Milestone 20 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          All six registered Milestone 20 entries in evals/gates/schedule.yaml
+          resolve to live checks in tests/gates/test_schedule_calendar_m20.py.
+          That file's nine test results pass, covering the closed calendar
+          values, deterministic and property-generated recurrence, bounded
+          long-range counting, the widened HTTP union, approval proposals,
+          validation, and idempotent replay.
+      - check: Milestone 20 red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After installing the repository environment, uv run pytest
+          tests/gates/test_schedule_calendar_m20.py -q produced nine expected
+          behavioral failures: the monthly and yearly domain types were
+          absent, the HTTP boundary rejected those recurrence kinds, and the
+          model tool neither proposed recurring approval nor enforced the
+          exclusive at-or-cadence input contract. The environment error from
+          the earlier pre-install attempt was discarded and was not counted
+          as red evidence.
+      - check: deterministic civil-calendar behavior
+        outcome: passed_locally
+        detail: >-
+          Numbered monthly dates skip months that do not contain the date,
+          explicit last-day rules select the actual month end, yearly leap-day
+          rules skip non-leap years, existing gap and fold behavior is reused,
+          and long downtime counting uses bounded calendar arithmetic rather
+          than one recurrence step per missed occurrence.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          uv run pytest -m 'not live' passes 1753 tests with 141 PostgreSQL-
+          gated tests skipped and the two live-model tests deselected. The
+          first run exposed an existing Milestone 13 property-test classifier
+          that omitted requested child budgets at the documented final-
+          synthesis reserve; the assertion was repaired without changing
+          delegation behavior and the complete rerun passed.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 593 files and Ruff linting pass, strict mypy
+          reports no issue in 548 source files, the static partition passes
+          1360 tests, the contract partition passes 368, all deployment-script
+          tests pass, and strict documentation validation reconciles all 359
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          A fresh isolated PostgreSQL 16 database migrated from base through
+          head a9c5e2f7d413, the twenty existing schedule integration tests
+          passed, and make test-integration passed all 156 selected tests. The
+          new PostgreSQL gate round-trips monthly and yearly definitions
+          through the existing JSONB schedule revision without a migration.
+  "21":
+    title: Adaptive memory distillation
+    status: in_progress
+    authorized_on: 2026-08-31
+    design: docs/plan/adaptive-memory-distillation.md
+    adr: docs/adr/0077-milestone-21-adaptive-memory-distillation.md
+    gates_registered: 24
+    authorized_scope:
+      - persisted provenance-complete integrated episodes
+      - three-call Nemori-style formation at formation@9
+      - direct and hypothesis memories across the expanded claim vocabulary
+      - bounded high-recall candidate ranking and decision telemetry
+      - evidence-based lifecycle@2 and uncertainty-aware retrieval@3
+      - comparative formation corpus and exact-tuple activation evidence
+    deferred_scope:
+      - reinforcement learning, fine-tuning, or a learned memory policy
+      - embeddings, pgvector, an external memory provider, or new retrieval arms
+      - temporal entity graphs, persona editing, and global consolidation
+      - a public memory-write API
+    open_items:
+      - Run the three-arm live corpus and publish passing evidence for the production tuple
+      - Complete per-stage cost telemetry required by the comparative gate
+      - Run hosted CI and the CodeRabbit review loop on the final head
+    evidence:
+      - check: local Milestone 21 behavior and contracts
+        outcome: passed_locally
+        detail: >-
+          The formation@9 gate module, integrated-episode store contract,
+          cumulative gate registry, existing memory regressions, corpus schema,
+          comparative scorer, activation binding, deterministic fallback, and
+          authoritative-edit lifecycle cases pass locally. The personal-agent
+          statement forms User is building a personal AI agent as a direct
+          ongoing project and forms software-development experience only as a
+          tentative hypothesis.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issues in
+          558 source files, the static partition passes 1410 tests, the contract
+          partition passes 404 tests, deployment-script tests pass, and the
+          strict documentation build reconciles 383 gates and 187 citations.
+      - check: Apple package test lane
+        outcome: passed_locally
+        detail: >-
+          make test-apple builds the updated memory wire model and detail view,
+          then passes all 165 Swift Testing cases across 18 suites.
+      - check: PostgreSQL Milestone 21 lane
+        outcome: passed_locally
+        detail: >-
+          A fresh isolated PostgreSQL 16 database migrated from base through
+          head c2e0f4a6b831. The lifecycle backfill, history preservation,
+          integrated-episode persistence and erasure gate passed, followed by
+          all 157 integration and resilience tests. The hosted failure's stale
+          citation assertion was reproduced and corrected to require that
+          usage advances last_used_at without advancing last_reinforced_at.
+      - check: comparative live-model evidence
+        outcome: not_run
+        detail: >-
+          agent eval memory-distillation now executes formation@7, formation@8,
+          and formation@9 over the same sixty cases and refuses to overwrite or
+          publish below threshold. RUN_LIVE_MODEL_TESTS was not enabled and no
+          production-tuple activation artifact has been published.
+  "22":
+    title: Persona surface and curated belief promotion
+    status: in_progress
+    authorized_on: 2026-09-01
+    design: docs/plan/persona-surface.md
+    adr: docs/adr/0079-milestone-22-persona-surface.md
+    gates_registered: 14
+    authorized_scope:
+      - owner-edited persona document rendered as a Region A prefix row
+      - revision pinning per context plan and persona_changed epoch rotation
+      - governed nomination, explicit affirmation, durable decline
+      - snapshot de-duplication of promoted beliefs with baseline re-record
+      - persona routes, persona.read/persona.write, AGENT_PERSONA_API_ENABLED
+      - agent persona CLI and the native Apple persona editor
+    deferred_scope:
+      - automatic promotion at any threshold
+      - belief edit, retraction, or deletion over HTTP (per ADR-0070)
+      - per-agent or per-surface persona variants
+      - any change to AgentSpec.instructions
+    open_items:
+      - Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
+    evidence:
+      - check: local Milestone 22 behavior and contracts
+        outcome: passed_locally
+        detail: >-
+          All fourteen gate.persona.* checks are live and pass: the fifty-turn
+          plan drive with a mid-session edit yields exactly two prefix hashes
+          and one persona_changed rotation, an empty persona renders zero
+          bytes, the over-cap persona fails session open naming its class,
+          nominated-but-unaffirmed text never renders, secrets and injection
+          patterns are refused at every write surface, consolidation
+          nominates only closed-eligibility beliefs with durable declines,
+          affirmation links without consuming, the snapshot excludes promoted
+          beliefs and releases them on removal, the persona routes carry
+          exact scopes with /v1/memories still GET-only, writes are
+          revision-guarded, and both stores pass one principal-scoped
+          contract. The deterministic benchmark gates pass unchanged, so the
+          checked-in baseline stands re-verified under ADR-0069 decision 2.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issues,
+          the static and contract partitions pass with the persona suites
+          included, deployment-script tests pass, and the strict
+          documentation build reconciles 397 gates.
+      - check: Apple package test lane
+        outcome: passed_locally
+        detail: >-
+          make test-apple passes 175 Swift Testing cases in 20 suites,
+          including the persona view model's guarded save, conflict
+          retention, affirm refresh, and unavailable degradation, plus the
+          editor's structure pins and wire-model decoding.
+      - check: PostgreSQL Milestone 22 lane
+        outcome: passed_locally
+        detail: >-
+          A local PostgreSQL migrated from c2e0f4a6b831 through head
+          e3a1c5d7f9b2; the persona store parity test and all 159 selected
+          integration and resilience tests pass.
+  "23":
     title: SMS through the owner's iPhone
     status: in_progress
     authorized_on: 2026-08-26
     design: docs/plan/device-channel-and-sms.md
-    adr: docs/adr/0073-milestone-20-sms-device-channel.md
+    adr: docs/adr/0080-milestone-23-sms-device-channel.md
     gates_registered: 12
     authorized_scope:
       - the DeviceChannel port with the push-wake adapter and bounded waits
@@ -481,19 +716,19 @@ milestones:
       - iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
       - Owner end-to-end verification on a physical iPhone
     evidence:
-      - check: twelve Milestone 20 gate.device.* gates
+      - check: twelve Milestone 23 gate.device.* gates
         outcome: passed_locally
         detail: >-
-          The twelve registered Milestone 20 entries in evals/gates/device.yaml
-          all resolve to checks in tests/gates/test_device_channel_m20.py, and
+          The twelve registered Milestone 23 entries in evals/gates/device.yaml
+          all resolve to checks in tests/gates/test_device_channel_m23.py, and
           the file's twelve tests pass locally (2026-09-01, uv run pytest
-          tests/gates/test_device_channel_m20.py). The harness cannot execute
+          tests/gates/test_device_channel_m23.py). The harness cannot execute
           them through agent eval gates yet for the reason Milestones 16, 17,
-          and 19 recorded: --milestone 20 would also activate the still-pending
+          and 19 recorded: --milestone 23 would also activate the still-pending
           Milestone 13 through 15 gates and the registry validator correctly
           refuses. They become executable through the harness when
           project.current_milestone advances past them.
-      - check: Milestone 20 gate-file red and green split
+      - check: Milestone 23 gate-file red and green split
         outcome: passed_locally
         detail: >-
           The first run of the new gate file reported nine passed and three
@@ -508,13 +743,13 @@ milestones:
           device-originated trust the projector honors in domain/events.py,
           which turned its recorded policy decision from require_approval into
           allow and failed the gate.
-      - check: Milestone 20 gate-area red phase
+      - check: Milestone 23 gate-area red phase
         outcome: observed_expected_failure
         detail: >-
           Running pytest tests/gates/test_gate_registry.py::
-          test_device_channel_has_complete_milestone_20_gate_area before the
+          test_device_channel_has_complete_milestone_23_gate_area before the
           registrations failed at its intended assertion because the registry
-          contained zero Milestone 20 entries rather than twelve; this was a
+          contained zero Milestone 23 entries rather than twelve; this was a
           behavioral gate failure rather than an environment, import, or
           fixture error.
       - check: make check
@@ -532,13 +767,12 @@ milestones:
           PostgreSQL 16, with 1837 deselected. This includes the device-channel
           persistence lane and the notification dispatch paths the device wake
           rides on.
-
-  "21":
+  "24":
     title: WhatsApp business surface
     status: authorized
     authorized_on: 2026-08-26
     design: docs/plan/whatsapp-surface.md
-    adr: docs/adr/0074-milestone-21-whatsapp-surface.md
+    adr: docs/adr/0081-milestone-24-whatsapp-surface.md
     gates_registered: 12
     authorized_scope:
       - the signed loopback webhook listener in the surface role behind one Nginx location
@@ -557,13 +791,13 @@ milestones:
     open_items:
       - Implementation start awaits the Milestone 14 surface ports
     evidence:
-      - check: Milestone 21 gate-area red phase
+      - check: Milestone 24 gate-area red phase
         outcome: observed_expected_failure
         detail: >-
           Running pytest tests/gates/test_gate_registry.py::
-          test_whatsapp_surface_has_complete_milestone_21_gate_area before
+          test_whatsapp_surface_has_complete_milestone_24_gate_area before
           the registrations failed at its intended assertion because the
-          registry contained zero Milestone 21 entries rather than twelve;
+          registry contained zero Milestone 24 entries rather than twelve;
           this was a behavioral gate failure rather than an environment,
           import, or fixture error.
 
@@ -621,14 +855,29 @@ readiness:
     new email area. On 2026-08-24 the owner also authorized Milestone 19,
     conversational one-time schedule creation, as a fourth parallel workstream
     (ADR-0072); scheduling.md declares its five `gate.schedule.*` entries.
+    On 2026-08-27 the owner authorized Milestone 20, calendar recurrence and
+    conversational schedules, as a fifth parallel workstream (ADR-0073),
+    promoting the monthly-rule portion of roadmap item B5 and adding yearly
+    recurrence; scheduling.md declares its six `gate.schedule.*` entries.
+    On 2026-08-31 the owner authorized Milestone 21, adaptive memory
+    distillation, as a sixth parallel workstream (ADR-0077), explicitly
+    accepting some provisional false positives in exchange for materially
+    higher useful recall and evidence-based forgetting; adaptive-memory-
+    distillation.md declares its twenty-four `gate.memory.*` entries.
+    On 2026-09-01 the owner authorized Milestone 22, the persona surface and
+    curated belief promotion, as a seventh parallel workstream (ADR-0079),
+    resolving the readiness review's last memory partial: a formed belief
+    reaches the agent's instruction text only through the owner's explicit
+    affirmation; persona-surface.md declares its fourteen `gate.persona.*`
+    entries in a new persona area.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-26T21:56:29Z
+last_updated: 2026-09-01T23:45:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

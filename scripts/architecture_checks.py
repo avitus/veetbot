@@ -450,6 +450,26 @@ def architecture_errors(root: Path) -> list[str]:
                                 "ORM type crosses adapter signature"
                             )
 
+    # Milestone 18 deliberately keeps the first-party Gmail server outside the
+    # platform package. Walk both directions explicitly: neither package may
+    # acquire even a transitive-looking source import of the other.
+    for _module, (path, _tree, imports) in modules.items():
+        for imported in imports:
+            if imported == "gmail_mcp" or imported.startswith("gmail_mcp."):
+                errors.append(
+                    f"{path.relative_to(root)}: agent_core imports isolated package {imported}"
+                )
+    gmail_root = root / "src" / "gmail_mcp"
+    if gmail_root.is_dir():
+        for path in sorted(gmail_root.rglob("*.py")):
+            module = _module_name(root, path)
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for imported in _imports(module, path, tree):
+                if imported == "agent_core" or imported.startswith("agent_core."):
+                    errors.append(
+                        f"{path.relative_to(root)}: gmail_mcp imports isolated package {imported}"
+                    )
+
     dependency_text = (root / "pyproject.toml").read_text(encoding="utf-8").lower()
     for denied in ("dependency-injector", "injector", "punq", "lagom"):
         if re.search(rf"[\"']{re.escape(denied)}(?:[<>=~!\"'])", dependency_text):

@@ -1065,7 +1065,7 @@ async def test_prompt_not_authz() -> None:
 
 
 def test_scope_grammar() -> None:
-    assert len(PLATFORM_SCOPES) == 27
+    assert len(PLATFORM_SCOPES) == 29
     assert {
         "schedule.read",
         "schedule.write",

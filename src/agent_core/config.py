@@ -21,7 +21,10 @@ from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
 from agent_core.domain.browser import normalize_browser_origin
-from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+from agent_core.domain.memory import (
+    MemoryDistillationEvidence,
+    ProviderExtractionEvaluationEvidence,
+)
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 
@@ -50,6 +53,13 @@ class WebProviderKind(StrEnum):
     DISABLED = "disabled"
     TAVILY = "tavily"
     FIRECRAWL = "firecrawl"
+    KEENABLE = "keenable"
+
+
+@dataclass(frozen=True, slots=True)
+class WebProviderAllocation:
+    provider: WebProviderKind
+    weight: int
 
 
 class MemoryProviderExtractionMode(StrEnum):
@@ -93,9 +103,11 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    persona_api_enabled: bool = False
     delegation_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
+    email_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
     apns_key_id: str | None = None
@@ -110,14 +122,22 @@ class Settings:
     sandbox_passthrough: tuple[str, ...] = ()
     execution_service_socket: Path | None = None
     release_id: str | None = None
-    web_search_provider: WebProviderKind = WebProviderKind.DISABLED
-    web_fetch_provider: WebProviderKind = WebProviderKind.DISABLED
+    web_search_providers: tuple[WebProviderAllocation, ...] = ()
+    web_fetch_providers: tuple[WebProviderAllocation, ...] = ()
     browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
     browser_allowed_origins: tuple[str, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
     browser_grant_id: UUID | None = None
     browser_run_purpose: str | None = None
+
+    @property
+    def web_search_provider(self) -> WebProviderKind:
+        return _legacy_web_provider(self.web_search_providers)
+
+    @property
+    def web_fetch_provider(self) -> WebProviderKind:
+        return _legacy_web_provider(self.web_fetch_providers)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -136,7 +156,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 153 operator-reviewable knobs. Metadata such as
+# The design corpus declares 164 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -176,6 +196,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "prefix.ceiling_tokens",
             "classes.platform_policy.max_tokens",
             "classes.agent_instructions.max_tokens",
+            "classes.persona.max_items",
+            "classes.persona.max_tokens",
             "classes.tool_definitions.max_items",
             "classes.tool_definitions.max_tokens",
             "classes.skill_catalog.max_items",
@@ -284,9 +306,18 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "formation.decay.floor_confidence",
             "formation.decay.step",
             "formation.decay.max_per_sweep",
+            "formation.persona_nomination.min_confidence",
+            "formation.persona_nomination.min_corroboration",
+            "formation.persona_nomination.max_open",
             "retrieval.semantic_enabled",
             "retrieval.reciprocal_rank_fusion_k",
             "retrieval.durable_item_share",
+            "retrieval.ranking_weights.match",
+            "retrieval.ranking_weights.confidence",
+            "retrieval.ranking_weights.reinforce",
+            "retrieval.ranking_weights.authority",
+            "retrieval.ranking_weights.scope",
+            "retrieval.ranking_weights.utility",
             "retrieval.lifecycle_weights.active",
             "retrieval.lifecycle_weights.provisional",
             "retrieval.decay_tau_days.fact",
@@ -397,6 +428,57 @@ def _parse_enum[T: StrEnum](enum_type: type[T], value: str, name: str) -> T:
         raise ConfigurationError(f"{name} must be one of: {choices}") from exc
 
 
+def _legacy_web_provider(
+    allocations: tuple[WebProviderAllocation, ...],
+) -> WebProviderKind:
+    if not allocations:
+        return WebProviderKind.DISABLED
+    if len(allocations) == 1 and allocations[0].weight == 100:
+        return allocations[0].provider
+    raise ConfigurationError("weighted web-provider selection has no singular provider")
+
+
+def _parse_web_provider_allocations(
+    values: Mapping[str, str],
+    *,
+    singular_name: str,
+    plural_name: str,
+) -> tuple[WebProviderAllocation, ...]:
+    plural = values.get(plural_name, "").strip()
+    singular = values.get(singular_name, "disabled").strip()
+    if not plural:
+        provider = _parse_enum(WebProviderKind, singular, singular_name)
+        return (
+            () if provider is WebProviderKind.DISABLED else (WebProviderAllocation(provider, 100),)
+        )
+    if singular not in {"", WebProviderKind.DISABLED.value}:
+        raise ConfigurationError(f"{plural_name} cannot be combined with enabled {singular_name}")
+    if plural == WebProviderKind.DISABLED.value:
+        return ()
+
+    allocations: list[WebProviderAllocation] = []
+    for entry in plural.split(","):
+        provider_name, separator, raw_weight = entry.strip().partition(":")
+        if not separator or not provider_name or not raw_weight:
+            raise ConfigurationError(f"{plural_name} entries must use provider:percentage")
+        provider = _parse_enum(WebProviderKind, provider_name, plural_name)
+        if provider is WebProviderKind.DISABLED:
+            raise ConfigurationError(f"{plural_name} cannot weight the disabled provider")
+        try:
+            weight = int(raw_weight)
+        except ValueError as exc:
+            raise ConfigurationError(f"{plural_name} percentages must be integers") from exc
+        if weight <= 0:
+            raise ConfigurationError(f"{plural_name} percentages must be positive")
+        allocations.append(WebProviderAllocation(provider=provider, weight=weight))
+    provider_kinds = [allocation.provider for allocation in allocations]
+    if len(set(provider_kinds)) != len(provider_kinds):
+        raise ConfigurationError(f"{plural_name} cannot contain duplicate providers")
+    if sum(allocation.weight for allocation in allocations) != 100:
+        raise ConfigurationError(f"{plural_name} percentages must sum to 100")
+    return tuple(allocations)
+
+
 def _parse_flag(values: Mapping[str, str], name: str) -> bool:
     raw = values.get(name, "0").strip()
     if raw not in {"0", "1"}:
@@ -432,6 +514,57 @@ def _read_private_credential_file(raw_path: str) -> str:
     if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
         raise ConfigurationError("browser control-plane credential file is invalid")
     return value
+
+
+_GMAIL_CREDENTIAL_FILES = {
+    "gmail_read": (
+        "GMAIL_READ_CREDENTIAL_FILE",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ),
+    "gmail_write": (
+        "GMAIL_WRITE_CREDENTIAL_FILE",
+        "https://www.googleapis.com/auth/gmail.modify",
+    ),
+    "gmail_send": (
+        "GMAIL_SEND_CREDENTIAL_FILE",
+        "https://www.googleapis.com/auth/gmail.send",
+    ),
+}
+
+
+def _read_gmail_credential_file(raw_path: str, name: str, expected_scope: str) -> str:
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or not 1 <= metadata.st_size <= 16_384
+    ):
+        raise ConfigurationError(f"{name} must be a 0600 regular file under 16 KiB")
+    try:
+        loaded: object = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigurationError(f"{name} is not a valid credential document") from exc
+    if not isinstance(loaded, dict) or set(loaded) != {
+        "client_id",
+        "client_secret",
+        "refresh_token",
+        "scope",
+    }:
+        raise ConfigurationError(f"{name} has an invalid credential shape")
+    for field in ("client_id", "client_secret", "refresh_token"):
+        value = loaded.get(field)
+        if not isinstance(value, str) or not value or len(value) > 4096:
+            raise ConfigurationError(f"{name} has an invalid credential shape")
+    if loaded.get("scope") != expected_scope:
+        raise ConfigurationError(f"{name} does not carry its exact Google scope")
+    return json.dumps(loaded, sort_keys=True, separators=(",", ":"))
 
 
 def _validate_private_regular_file(path: Path, name: str) -> None:
@@ -666,6 +799,18 @@ def load_provider_extraction_evidence(
         ) from exc
 
 
+def load_memory_distillation_evidence(path: Path) -> MemoryDistillationEvidence:
+    """Load a passing formation@9 comparative-evaluation artifact."""
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return MemoryDistillationEvidence.model_validate(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        raise ConfigurationError(
+            "adaptive memory distillation evaluation evidence did not pass"
+        ) from exc
+
+
 def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     """Return operator evidence first, followed by immutable release-bundled evidence."""
 
@@ -681,7 +826,10 @@ def _provider_extraction_evidence_is_valid(path: Path) -> bool:
     try:
         load_provider_extraction_evidence(path)
     except ConfigurationError:
-        return False
+        try:
+            load_memory_distillation_evidence(path)
+        except ConfigurationError:
+            return False
     return True
 
 
@@ -719,6 +867,12 @@ def validate_settings(
         raise ConfigurationError(
             "device channel and SMS flags must be enabled or disabled together"
         )
+    gmail_credential_names = set(_GMAIL_CREDENTIAL_FILES)
+    configured_gmail_credentials = gmail_credential_names & set(settings.credentials)
+    if settings.email_enabled and configured_gmail_credentials != gmail_credential_names:
+        raise ConfigurationError("email enablement requires all three Gmail credential files")
+    if not settings.email_enabled and configured_gmail_credentials:
+        raise ConfigurationError("Gmail credentials require AGENT_EMAIL_ENABLED=1")
     apns_values = {
         "APNS_KEY_FILE": settings.apns_key_file,
         "APNS_KEY_ID": settings.apns_key_id,
@@ -946,9 +1100,34 @@ def _load_settings(
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
+    persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
     device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
+    email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
+    configured_gmail_files = {
+        credential_name: (variable, values.get(variable, "").strip(), scope)
+        for credential_name, (variable, scope) in _GMAIL_CREDENTIAL_FILES.items()
+        if values.get(variable, "").strip()
+    }
+    if configured_gmail_files and not email_enabled:
+        raise ConfigurationError("Gmail credential files require AGENT_EMAIL_ENABLED=1")
+    if email_enabled:
+        missing_gmail_files = [
+            variable
+            for credential_name, (variable, _scope) in _GMAIL_CREDENTIAL_FILES.items()
+            if credential_name not in configured_gmail_files
+        ]
+        if missing_gmail_files:
+            raise ConfigurationError(
+                "AGENT_EMAIL_ENABLED=1 requires " + ", ".join(missing_gmail_files)
+            )
+        for credential_name, (variable, raw_path, scope) in configured_gmail_files.items():
+            if credential_name in credentials:
+                raise ConfigurationError(f"duplicate credential source for {credential_name}")
+            credentials[credential_name] = SecretStr(
+                _read_gmail_credential_file(raw_path, variable, scope)
+            )
     push_provider = _parse_enum(
         PushProviderKind,
         values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
@@ -984,15 +1163,15 @@ def _load_settings(
     if execution_service_socket is not None and not execution_service_socket.is_absolute():
         raise ConfigurationError("AGENT_EXECUTION_SERVICE_SOCKET must be an absolute path")
     release_id = values.get("VEETBOT_RELEASE_ID", "").strip() or None
-    web_search_provider = _parse_enum(
-        WebProviderKind,
-        values.get("WEB_SEARCH_PROVIDER", "disabled").strip(),
-        "WEB_SEARCH_PROVIDER",
+    web_search_providers = _parse_web_provider_allocations(
+        values,
+        singular_name="WEB_SEARCH_PROVIDER",
+        plural_name="WEB_SEARCH_PROVIDERS",
     )
-    web_fetch_provider = _parse_enum(
-        WebProviderKind,
-        values.get("WEB_FETCH_PROVIDER", "disabled").strip(),
-        "WEB_FETCH_PROVIDER",
+    web_fetch_providers = _parse_web_provider_allocations(
+        values,
+        singular_name="WEB_FETCH_PROVIDER",
+        plural_name="WEB_FETCH_PROVIDERS",
     )
     browser_provider = _parse_enum(
         BrowserProviderKind,
@@ -1063,9 +1242,11 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        persona_api_enabled=persona_api_enabled,
         delegation_enabled=delegation_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
+        email_enabled=email_enabled,
         push_provider=push_provider,
         apns_key_file=apns_key_file,
         apns_key_id=apns_key_id,
@@ -1080,8 +1261,8 @@ def _load_settings(
         sandbox_passthrough=sandbox_passthrough,
         execution_service_socket=execution_service_socket,
         release_id=release_id,
-        web_search_provider=web_search_provider,
-        web_fetch_provider=web_fetch_provider,
+        web_search_providers=web_search_providers,
+        web_fetch_providers=web_fetch_providers,
         browser_provider=browser_provider,
         browser_allowed_origins=browser_allowed_origins,
         browser_profile_service_url=browser_profile_service_url,

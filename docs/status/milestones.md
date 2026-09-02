@@ -64,9 +64,51 @@ Remaining:
 
 - [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
 
-### Milestone 20 — SMS through the owner's iPhone
+### Milestone 18 — First-class email integration
 
-The fifth parallel workstream. The `DeviceChannel` port with its push-wake
+A parallel workstream providing three least-privilege Gmail MCP servers for
+read and triage, drafts and label mutation, and approval-gated sending. Its
+thirteen gates and full local repository check pass. Remaining:
+
+- [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
+### Milestone 20 — Calendar recurrence and conversational schedules
+
+A fifth parallel workstream extending the existing scheduler with monthly and
+yearly civil-calendar rules and widening `schedule.create` to daily, weekly,
+monthly, and yearly recurrence. Its six gates, complete non-live suite, and
+fresh PostgreSQL integration lane pass locally. Remaining:
+
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
+### Milestone 21 — Adaptive memory distillation
+
+A sixth parallel workstream making memory formation materially less timid.
+Its twenty-four gates cover integrated episodes, the fixed three-call
+prediction-error pipeline, direct and hypothesis recall, evidence-based
+forgetting, persistence, and comparative activation evidence. The local
+implementation, static and contract suites, strict documentation build, Apple
+package tests, and fresh PostgreSQL 16 integration lane pass. Remaining:
+
+- [ ] Run the three-arm live corpus and publish passing evidence for the production tuple
+- [ ] Complete per-stage cost telemetry required by the comparative gate
+- [ ] Run hosted CI and the CodeRabbit review loop on the final head
+
+### Milestone 22 — Persona surface and curated belief promotion
+
+A seventh parallel workstream: an owner-edited persona document rendered as a
+trusted Region A prefix row, with curated promotion — a formed belief reaches
+instruction text only through the owner's explicit affirmation of a governed
+nomination. All fourteen `gate.persona.*` checks, the full local repository
+check, the Apple package lane, and a fresh PostgreSQL lane pass locally.
+Remaining:
+
+- [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
+
+### Milestone 23 — SMS through the owner's iPhone
+
+An eighth parallel workstream. The `DeviceChannel` port with its push-wake
 adapter, capability-derived `device.sms.send` registration, the three
 device-authenticated routes, the SMS ingest path with its standing triage
 session, and the expiry sweep are implemented, and all twelve registered
@@ -84,12 +126,10 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 18 — First-class email integration** — thirteen gates; a
-  parallel workstream whose completion additionally requires the owner's
-  real-mailbox smoke.
-- **Milestone 21 — WhatsApp business surface** — twelve gates; a parallel
+- **Milestone 24 — WhatsApp business surface** — twelve gates; a parallel
   workstream whose documents, gates, and Meta ceremony proceed now and
   whose implementation begins when Milestone 14's surface ports exist.
+
 
 ## Deferred
 
@@ -99,10 +139,10 @@ is authorized until the owner says so and a specification with gates exists
 for it. That roadmap holds, among its items: tenant activation of
 self-authored skills (B1), dynamic model routing and a second provider
 adapter (B2), Slack and email inbound surfaces (B3), email and webhook
-notification transports (B4), scheduling extensions such as cron and monthly
-recurrence (B5), the memory residue after Milestone 16 — the semantic arm,
-`pgvector`, an external memory provider (B6) — presence routing and hand-off
-(the B7 residue after Milestone 20), standing approval grants (B8), the
+notification transports (B4), scheduling residue such as cron, interval
+multipliers, and dependency graphs (B5), the memory residue after Milestone 22 — the semantic arm,
+`pgvector`, an external memory provider, and a learned memory policy (B6) — presence routing and
+hand-off (the B7 residue after Milestone 23), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and
 multi-tenant billing and quotas (B12), and the WhatsApp linked-device

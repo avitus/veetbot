@@ -448,6 +448,55 @@ def test_web_provider_selection_is_per_capability() -> None:
     assert settings.web_fetch_provider is WebProviderKind.FIRECRAWL
 
 
+def test_weighted_web_provider_selection_is_per_capability() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "WEB_SEARCH_PROVIDERS": "tavily:50,keenable:50",
+            "WEB_FETCH_PROVIDERS": "firecrawl:50,keenable:50",
+        }
+    )
+
+    assert [(entry.provider, entry.weight) for entry in settings.web_search_providers] == [
+        (WebProviderKind.TAVILY, 50),
+        (WebProviderKind.KEENABLE, 50),
+    ]
+    assert [(entry.provider, entry.weight) for entry in settings.web_fetch_providers] == [
+        (WebProviderKind.FIRECRAWL, 50),
+        (WebProviderKind.KEENABLE, 50),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("WEB_SEARCH_PROVIDERS", "tavily:60,keenable:30"),
+        ("WEB_SEARCH_PROVIDERS", "tavily:50,tavily:50"),
+        ("WEB_SEARCH_PROVIDERS", "disabled:50,keenable:50"),
+        ("WEB_SEARCH_PROVIDERS", "tavily:zero,keenable:100"),
+        ("WEB_FETCH_PROVIDERS", "firecrawl:0,keenable:100"),
+        ("WEB_FETCH_PROVIDERS", "surprise:50,keenable:50"),
+    ],
+)
+def test_invalid_weighted_web_provider_selection_is_refused(
+    variable: str,
+    value: str,
+) -> None:
+    with pytest.raises(ConfigurationError, match=variable):
+        load_settings({**base_environment(), variable: value})
+
+
+def test_plural_and_enabled_legacy_web_provider_selection_are_ambiguous() -> None:
+    with pytest.raises(ConfigurationError, match="WEB_SEARCH_PROVIDERS"):
+        load_settings(
+            {
+                **base_environment(),
+                "WEB_SEARCH_PROVIDER": "tavily",
+                "WEB_SEARCH_PROVIDERS": "tavily:50,keenable:50",
+            }
+        )
+
+
 def test_unknown_web_provider_is_refused() -> None:
     with pytest.raises(ConfigurationError, match="WEB_SEARCH_PROVIDER"):
         load_settings({**base_environment(), "WEB_SEARCH_PROVIDER": "surprise"})
@@ -876,6 +925,8 @@ def test_token_auth_requires_a_configured_principal() -> None:
 def test_sandbox_overlay_values_are_semantically_validated(
     tmp_path: Path, overlay: str, message: str
 ) -> None:
+    """Sandbox overlays reject values that violate execution invariants."""
+
     path = tmp_path / "sandbox" / "limits.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(overlay, encoding="utf-8")
@@ -883,13 +934,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_153_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_164_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 153
+    assert len(qualified_paths) == 164
     assert {
         "runtime/limits.yaml:device.invocation_timeout_seconds",
         "runtime/limits.yaml:device.ingest_daily_cap",
@@ -945,6 +996,8 @@ def test_delegated_research_defaults_leave_room_for_tool_use_and_synthesis() -> 
 
 
 def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
+    """Return dotted paths for every non-mapping value in a document."""
+
     leaves: set[str] = set()
     for key, value in document.items():
         path = f"{prefix}.{key}" if prefix else str(key)
@@ -956,6 +1009,8 @@ def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
 
 
 def test_memory_profiles_knob_paths_match_document() -> None:
+    """Keep the memory profile registry synchronized with its YAML leaves."""
+
     loaded: object = yaml.safe_load(
         (PACKAGE_ROOT / "memory/profiles.yaml").read_text(encoding="utf-8")
     )
@@ -965,4 +1020,4 @@ def test_memory_profiles_knob_paths_match_document() -> None:
     declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
 
     assert declared == _leaf_paths(document) - {"schema_version"}
-    assert len(declared) == 28
+    assert len(declared) == 37

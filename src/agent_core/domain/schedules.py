@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import UTC, datetime, time
 from decimal import Decimal
 from enum import StrEnum
@@ -19,6 +20,8 @@ class CadenceKind(StrEnum):
     ONCE = "ONCE"
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
 
 
 class OnceCadence(BaseModel):
@@ -81,7 +84,84 @@ class WeeklyCadence(BaseModel):
         return _validate_timezone(value)
 
 
-type Cadence = OnceCadence | DailyCadence | WeeklyCadence
+class MonthlyCadence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal[CadenceKind.MONTHLY] = CadenceKind.MONTHLY
+    local_time: time
+    days_of_month: tuple[int, ...] = ()
+    last_day: bool = False
+    timezone: str
+
+    @field_validator("local_time")
+    @classmethod
+    def local_time_is_civil_second(cls, value: time) -> time:
+        return _validate_local_time(value)
+
+    @field_validator("days_of_month")
+    @classmethod
+    def days_are_unique_calendar_values(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if any(day < 1 or day > 31 for day in value):
+            raise ValueError("days_of_month must contain values 1 through 31")
+        if len(set(value)) != len(value):
+            raise ValueError("days_of_month must be unique")
+        return tuple(sorted(value))
+
+    @field_validator("timezone")
+    @classmethod
+    def timezone_is_iana(cls, value: str) -> str:
+        return _validate_timezone(value)
+
+    @model_validator(mode="after")
+    def selector_is_present(self) -> MonthlyCadence:
+        if not self.days_of_month and not self.last_day:
+            raise ValueError("monthly cadence requires a numbered-day or last-day selector")
+        return self
+
+
+class MonthDay(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    month: int = Field(ge=1, le=12)
+    day: int = Field(ge=1, le=31)
+
+    @model_validator(mode="after")
+    def date_is_possible(self) -> MonthDay:
+        if self.day > monthrange(2000, self.month)[1]:
+            raise ValueError("yearly date must be a possible Gregorian date")
+        return self
+
+
+class YearlyCadence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal[CadenceKind.YEARLY] = CadenceKind.YEARLY
+    local_time: time
+    dates: tuple[MonthDay, ...]
+    timezone: str
+
+    @field_validator("local_time")
+    @classmethod
+    def local_time_is_civil_second(cls, value: time) -> time:
+        return _validate_local_time(value)
+
+    @field_validator("dates")
+    @classmethod
+    def dates_are_unique_and_sorted(cls, value: tuple[MonthDay, ...]) -> tuple[MonthDay, ...]:
+        if not value:
+            raise ValueError("yearly cadence requires at least one date selector")
+        identities = tuple((item.month, item.day) for item in value)
+        if len(set(identities)) != len(identities):
+            raise ValueError("yearly dates must be unique")
+        return tuple(sorted(value, key=lambda item: (item.month, item.day)))
+
+    @field_validator("timezone")
+    @classmethod
+    def timezone_is_iana(cls, value: str) -> str:
+        return _validate_timezone(value)
+
+
+type Cadence = OnceCadence | DailyCadence | WeeklyCadence | MonthlyCadence | YearlyCadence
 
 
 class ScheduleState(StrEnum):

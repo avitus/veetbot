@@ -59,12 +59,15 @@ PRINCIPAL_ID = "local-user"
 SESSION_A = UUID(int=901)
 SESSION_B = UUID(int=902)
 
-# The spec's exposure list, verbatim: twenty-six names that serialize.
+# The spec's exposure list, verbatim: thirty-one names that serialize.
 EXPOSED_FIELDS = (
     "id",
     "subject",
     "statement",
     "belief_type",
+    "claim_kind",
+    "derivation",
+    "longevity",
     "status",
     "polarity",
     "scope",
@@ -84,17 +87,21 @@ EXPOSED_FIELDS = (
     "valid_from",
     "valid_to",
     "expires_at",
+    "last_evidence_at",
+    "last_used_at",
     "last_reinforced_at",
     "created_at",
     "updated_at",
 )
 
-# The spec's withheld list, verbatim: four names that must never appear.
+# The spec's withheld list, verbatim: six names that must never appear.
 WITHHELD_FIELDS = (
     "tenant_id",
     "principal_id",
     "utility",
     "store_position",
+    "evidence_count",
+    "lifecycle_policy_version",
 )
 
 SENSITIVITIES = (
@@ -899,7 +906,7 @@ def test_the_projection_is_exactly_the_exposure_list() -> None:
     """
 
     assert set(MemoryView.model_fields) == set(EXPOSED_FIELDS)
-    assert len(EXPOSED_FIELDS) == 26
+    assert len(EXPOSED_FIELDS) == 31
     assert MemoryView.model_config["extra"] == "forbid"
     assert MemoryView.model_config["frozen"] is True
     assert set(WITHHELD_FIELDS).isdisjoint(MemoryView.model_fields)

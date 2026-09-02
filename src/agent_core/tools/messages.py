@@ -47,6 +47,10 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.auth_unsupported": "The tool server requires an unsupported authorization flow.",
     "tool.web.auth_failed": "The configured web provider rejected its credential.",
     "tool.web.provider_unavailable": "The configured web provider is temporarily unavailable.",
+    "tool.web.quota_exceeded": (
+        "The web provider's usage or billing limit has been reached; "
+        "an operator must restore provider capacity."
+    ),
     "tool.web.provider_rejected": "The configured web provider rejected this request.",
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",

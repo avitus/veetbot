@@ -1,4 +1,4 @@
-"""Milestone 20: capability-derived registration and the device.sms.send tool.
+"""Milestone 23: capability-derived registration and the device.sms.send tool.
 
 Covers the registration lifecycle a declared capability drives, the terminal
 statuses the compose sheet can produce, the offline outcome an unreachable
@@ -487,7 +487,7 @@ async def test_a_credential_shaped_body_is_denied_before_the_tool_rule_is_consul
 
 
 async def test_the_device_tool_is_absent_while_either_flag_is_unset() -> None:
-    # Milestone 20 pairs the two flags at configuration time, so a half-enabled
+    # Milestone 23 pairs the two flags at configuration time, so a half-enabled
     # deployment never composes at all; the tool cannot exist in a graph that
     # was refused before it was built.
     for half_enabled in (

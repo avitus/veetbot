@@ -150,6 +150,8 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "PGSSLMODE=disable" in environment
     assert "WEB_SEARCH_PROVIDER=disabled" in environment
     assert "WEB_FETCH_PROVIDER=disabled" in environment
+    assert "WEB_SEARCH_PROVIDERS=" in environment
+    assert "WEB_FETCH_PROVIDERS=" in environment
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
@@ -167,6 +169,7 @@ def test_production_environment_preserves_process_boundaries() -> None:
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
     assert "FIRECRAWL_API_KEY=" in template_lines
+    assert "KEENABLE_API_KEY=" in template_lines
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
         for line in environment.splitlines()
@@ -357,6 +360,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "ANTHROPIC_API_KEY",
         "TAVILY_API_KEY",
         "FIRECRAWL_API_KEY",
+        "KEENABLE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
     } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
     assert "agent worker --role notify" in notify
@@ -380,6 +384,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "ANTHROPIC_API_KEY",
         "TAVILY_API_KEY",
         "FIRECRAWL_API_KEY",
+        "KEENABLE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
         "SANDBOX_MECHANISM",
         "AGENT_EXECUTION_SERVICE_SOCKET",
@@ -456,6 +461,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
+    writer_stop = 'sudo systemctl stop "${managed_units[@]}"'
+    compatibility_query = "SELECT count(*) FROM schedule_revisions"
+    external_timeout = "timeout --signal=TERM --kill-after=5s 20s"
+    connection_timeout = "--env PGCONNECT_TIMEOUT=5"
+    statement_timeout = "--env 'PGOPTIONS=-c statement_timeout=5000'"
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -476,10 +486,11 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
-    unit_validation_start = manual.index("for unit in \\")
-    unit_validation = manual[unit_validation_start : manual.index("done", unit_validation_start)]
+    unit_list_start = manual.index("managed_units=(")
+    unit_list = manual[unit_list_start : manual.index(")", unit_list_start)]
     for unit in required_units:
-        assert f"  {unit}" in unit_validation
+        assert f"  {unit}" in unit_list
+    assert 'for unit in "${managed_units[@]}"; do' in manual
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
     assert manual.index(image_tag) < manual.index(app_switch)
@@ -488,6 +499,13 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index("flock -w 900 9") < manual.index(writer_stop)
+    assert manual.index(writer_stop) < manual.index(compatibility_query)
+    assert manual.index(compatibility_query) < manual.index(app_switch)
+    assert manual.index(compatibility_query) < manual.index(docs_switch)
+    assert external_timeout in manual
+    assert connection_timeout in manual
+    assert statement_timeout in manual
     restart_position = manual.rindex("sudo systemctl restart")
     validation_position = manual.index(unit_process_validation)
     assert manual.index(app_switch) < restart_position < validation_position
@@ -529,6 +547,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert release.count(": $BROWSER_CONTROL_CREDENTIAL_FILE") == 3
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
+    assert "scripts/check_schedule_database_permissions.py" in release
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
     assert "veetbot-notify" in release
@@ -642,6 +661,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "apple-testflight",
         "live",
         "package-release",
         "deploy-app",
@@ -651,8 +671,10 @@ def test_ci_has_the_required_partitions() -> None:
         if name == "sandbox":
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
-        if name == "apple":
-            assert job["macos"] == {"xcode": "26.6.0"}
+        if name in {"apple", "apple-testflight"}:
+            assert job["macos"]["xcode"] == "26.6.0"
+            if name == "apple":
+                assert job["macos"] == {"xcode": "26.6.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = (
@@ -688,6 +710,37 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-sandbox" in commands["sandbox"]
     assert "make test-apple" in commands["apple"]
     assert "make test-apple-ui" in commands["apple"]
+    testflight_job = jobs["apple-testflight"]
+    assert testflight_job["macos"]["code_signing"] == [
+        "veetbot-app-store",
+        "veetbot-mac-installer",
+    ]
+    assert "install_signing_bundle" in testflight_job["steps"]
+    xcode_project = (
+        ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj"
+    ).read_text(encoding="utf-8")
+    project_team_ids = set(re.findall(r"DEVELOPMENT_TEAM = ([A-Z0-9]{10});", xcode_project))
+    assert len(project_team_ids) == 1
+    testflight_command = "\n".join(commands["apple-testflight"])
+    assert "APPLE_TEAM_ID" not in testflight_command
+    assert "plutil -insert teamID" not in testflight_command
+    assert "DEVELOPMENT_TEAM=" not in testflight_command
+    assert any(
+        'apple_build_number="<< pipeline.number >>"' in command
+        and 'CURRENT_PROJECT_VERSION="$apple_build_number"' in command
+        and '-destination "generic/platform=macOS"' in command
+        and "xcodebuild archive" in command
+        and "codesign --verify --deep --strict" in command
+        for command in commands["apple-testflight"]
+    )
+    assert any(
+        "productbuild" in command
+        and "xcrun altool --upload-app" in command
+        and "APP_STORE_CONNECT_API_KEY_BASE64" in command
+        and "APP_STORE_CONNECT_API_KEY_ID" in command
+        and "APP_STORE_CONNECT_ISSUER_ID" in command
+        for command in commands["apple-testflight"]
+    )
     assert "make test-live" in commands["live"]
     assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
     assert any(
@@ -755,7 +808,12 @@ def test_ci_has_the_required_partitions() -> None:
         for job in verify["jobs"][5:]
         if isinstance(job, dict)
     }
-    assert set(delivery_jobs) == {"package-release", "deploy-app", "deploy-nginx"}
+    assert set(delivery_jobs) == {
+        "package-release",
+        "deploy-app",
+        "deploy-nginx",
+        "apple-testflight",
+    }
     assert delivery_jobs["package-release"]["requires"] == [
         "static",
         "contract",
@@ -773,6 +831,11 @@ def test_ci_has_the_required_partitions() -> None:
     assert delivery_jobs["deploy-nginx"]["serial-group"] == (
         "<< pipeline.project.slug >>/veetbot-production"
     )
+    assert delivery_jobs["apple-testflight"]["requires"] == ["deploy-app"]
+    assert delivery_jobs["apple-testflight"]["context"] == "veetbot-apple-testflight"
+    assert delivery_jobs["apple-testflight"]["serial-group"] == (
+        "<< pipeline.project.slug >>/veetbot-apple-testflight"
+    )
     for name, job in delivery_jobs.items():
         assert job["filters"] == {"branches": {"only": "main"}}, name
     assert workflows["live_manual"]["when"] == "<< pipeline.parameters.run_live >>"
@@ -788,6 +851,70 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    archive_command = next(
+        step["run"]["command"]
+        for step in config["jobs"]["apple-testflight"]["steps"]
+        if isinstance(step, dict)
+        and "run" in step
+        and "xcodebuild archive" in step["run"]["command"]
+    )
+
+    assert "CODE_SIGN_STYLE=Manual" in archive_command
+    assert 'CODE_SIGN_IDENTITY="Apple Distribution"' in archive_command
+    assert 'PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"' in archive_command
+    assert (
+        'security find-certificate -a -c "3rd Party Mac Developer Installer" -Z' in archive_command
+    )
+    assert "awk '/^SHA-1 hash: / {print $3}'" in archive_command
+    assert '[[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]' in archive_command
+
+
+def test_testflight_upload_builds_package_directly_before_using_altool() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    upload_step = next(
+        step["run"]
+        for step in config["jobs"]["apple-testflight"]["steps"]
+        if isinstance(step, dict)
+        and "run" in step
+        and "xcodebuild archive" in step["run"]["command"]
+    )
+
+    upload_command = upload_step["command"]
+    assert "no_output_timeout" not in upload_step
+    assert "xcodebuild -exportArchive" not in upload_command
+    assert "-allowProvisioningUpdates" not in upload_command
+    assert "-authenticationKeyPath" not in upload_command
+    assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in upload_command
+    assert "security list-keychains -d user" in upload_command
+    assert "circleci-signing.keychain-db" in upload_command
+    assert 'security unlock-keychain -p "" "$signing_keychain"' in upload_command
+    assert "security set-key-partition-list -S apple-tool:,apple:,codesign:" in upload_command
+    assert '-s -k "" "$signing_keychain"' in upload_command
+    assert "productbuild \\" in upload_command
+    assert '--sign "$installer_certificate_sha1"' in upload_command
+    assert '--keychain "$signing_keychain"' in upload_command
+    assert '--component "$app_path" /Applications' in upload_command
+    assert 'test -s "$pkg_path"' in upload_command
+    assert 'pkgutil --check-signature "$pkg_path"' in upload_command
+    assert "xcrun altool --upload-app" in upload_command
+    assert upload_command.index("security set-key-partition-list") < upload_command.index(
+        "productbuild"
+    )
+    assert upload_command.index("productbuild") < upload_command.index("pkgutil --check-signature")
+    assert upload_command.index("pkgutil --check-signature") < upload_command.index(
+        "xcrun altool --upload-app"
+    )
+    assert '--file "$pkg_path"' in upload_command
+    assert "--type macos" in upload_command
+    assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
+    assert '--apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"' in upload_command
+    assert '--p8-file-path "$asc_auth_file"' in upload_command
+    assert "--show-progress" in upload_command
+    assert "--verbose" in upload_command
 
 
 def test_mkdocs_site_has_its_public_origin() -> None:
@@ -832,7 +959,10 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
     assert set(project["dependency-groups"]) == {"dev", "test", "docs"}
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/agent_core"]
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
+        "src/agent_core",
+        "src/gmail_mcp",
+    ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"
     )
@@ -1334,13 +1464,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 21 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 24 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(22)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(25)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1363,7 +1493,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 22):
+    for milestone in range(12, 25):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

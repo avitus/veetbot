@@ -38,10 +38,12 @@ from agent_core.domain.errors import (
     ExportRedactionError,
     ExportStateError,
     NotFoundError,
+    PersonaContentError,
 )
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import MemoryEdit, Portability, Sensitivity
 from agent_core.domain.messages import AssistantMessage, TextPart
+from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import (
     ApprovalFilters,
@@ -92,11 +94,13 @@ session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
 approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
+persona_app = typer.Typer(name="persona", no_args_is_help=True)
 app.add_typer(run_app)
 app.add_typer(session_app)
 app.add_typer(eval_app)
 app.add_typer(approval_app)
 app.add_typer(memory_app)
+app.add_typer(persona_app)
 
 
 class _EvalRunnerModule(Protocol):
@@ -137,6 +141,18 @@ class _CapabilityModule(Protocol):
 
 
 class _MemoryFormationEvalModule(Protocol):
+    async def run_live_evaluation(
+        self,
+        repository_root: Path,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> Any | None: ...
+
+
+class _MemoryDistillationEvalModule(Protocol):
     async def run_live_evaluation(
         self,
         repository_root: Path,
@@ -1037,6 +1053,53 @@ def eval_memory_formation(
         raise typer.Exit(1)
 
 
+@eval_app.command("memory-distillation")
+def eval_memory_distillation(
+    model_policy: Annotated[
+        str,
+        typer.Option("--model-policy", help="Evaluate one declared model policy."),
+    ],
+    policy_profile: Annotated[
+        str,
+        typer.Option("--policy-profile", help="Evaluate one policy profile."),
+    ],
+    build_ref: Annotated[
+        str,
+        typer.Option("--build-ref", help="Commit or immutable build identifier."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Write passing formation@9 evidence to this path."),
+    ],
+) -> None:
+    """Compare formation@7, formation@8, and formation@9 on corpus v3."""
+
+    try:
+        module = cast(
+            _MemoryDistillationEvalModule,
+            importlib.import_module("agent_core.evals.memory_distillation"),
+        )
+        result = asyncio.run(
+            module.run_live_evaluation(
+                Path.cwd(),
+                model_policy=model_policy,
+                policy_profile=policy_profile,
+                build_ref=build_ref,
+                output=output,
+            )
+        )
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"memory-distillation evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to evaluate memory distillation")
+        return
+    typer.echo(result.model_dump_json())
+    if not result.passed:
+        typer.echo(f"memory-distillation evaluation failed: {result.failure_summary}", err=True)
+        raise typer.Exit(1)
+
+
 @eval_app.command("memory-benchmark")
 def eval_memory_benchmark(
     deterministic_only: Annotated[
@@ -1163,6 +1226,166 @@ def eval_memory_benchmark(
             typer.echo(line, err=True)
         typer.echo(f"memory-benchmark evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
+
+
+async def _persona_get() -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.persona.get(composition.principal)
+
+
+@persona_app.command("show")
+def persona_show() -> None:
+    """Print the authenticated principal's persona document head."""
+
+    try:
+        view = asyncio.run(_persona_get())
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(view.model_dump_json())
+
+
+async def _persona_edit(expected_version: int, entries: list[str], keep_affirmed: bool) -> Any:
+    async with build(storage="postgres") as composition:
+        drafts: list[PersonaEntryDraft] = []
+        if keep_affirmed:
+            head = await composition.services.persona.get(composition.principal)
+            drafts.extend(
+                PersonaEntryDraft(
+                    text=entry.text,
+                    sensitivity=entry.sensitivity,
+                    source_belief_id=entry.source_belief_id,
+                )
+                for entry in head.entries
+                if entry.source_belief_id is not None
+            )
+        drafts.extend(PersonaEntryDraft(text=text) for text in entries)
+        return await composition.services.persona.update(
+            composition.principal,
+            expected_version=expected_version,
+            entries=drafts,
+        )
+
+
+@persona_app.command("edit")
+def persona_edit(
+    expected_version: Annotated[
+        int, typer.Option("--expected-version", min=0, help="The current head version.")
+    ],
+    entry: Annotated[
+        list[str],
+        typer.Option("--entry", help="One owner-typed persona entry; repeatable."),
+    ],
+    keep_affirmed: Annotated[
+        bool,
+        typer.Option(
+            "--keep-affirmed/--drop-affirmed",
+            help="Carry the head's affirmed entries forward (the default).",
+        ),
+    ] = True,
+) -> None:
+    """Replace the persona's owner-typed entries behind the version guard."""
+
+    try:
+        view = asyncio.run(_persona_edit(expected_version, entry, keep_affirmed))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except PersonaContentError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    except ConflictError as exc:
+        typer.echo(f"version conflict: {exc}", err=True)
+        raise typer.Exit(3) from exc
+    typer.echo(view.model_dump_json())
+
+
+async def _persona_history(limit: int) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.persona.history(composition.principal, limit=limit)
+
+
+@persona_app.command("history")
+def persona_history(limit: Annotated[int, typer.Option(min=1, max=200)] = 20) -> None:
+    """List persona versions, newest first."""
+
+    try:
+        page = asyncio.run(_persona_history(limit))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(json.dumps([row.model_dump(mode="json") for row in page.items], default=str))
+
+
+async def _persona_nominations(state: PersonaNominationState | None) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.persona.nominations(composition.principal, state=state)
+
+
+@persona_app.command("nominations")
+def persona_nominations(
+    state: Annotated[
+        PersonaNominationState | None,
+        typer.Option("--state", help="Filter by nomination state."),
+    ] = None,
+) -> None:
+    """List persona nominations awaiting or past the owner's verdict."""
+
+    try:
+        page = asyncio.run(_persona_nominations(state))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(json.dumps([row.model_dump(mode="json") for row in page.items], default=str))
+
+
+async def _persona_affirm(nomination_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.persona.affirm(composition.principal, nomination_id)
+
+
+@persona_app.command("affirm")
+def persona_affirm(nomination_id: UUID) -> None:
+    """Affirm one nomination into the persona at USER authority."""
+
+    try:
+        view = asyncio.run(_persona_affirm(nomination_id))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except NotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    except PersonaContentError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    except ConflictError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(3) from exc
+    typer.echo(view.model_dump_json())
+
+
+async def _persona_decline(nomination_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.persona.decline(composition.principal, nomination_id)
+
+
+@persona_app.command("decline")
+def persona_decline(nomination_id: UUID) -> None:
+    """Decline one nomination, durably: the belief is never raised again."""
+
+    try:
+        view = asyncio.run(_persona_decline(nomination_id))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except NotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    except ConflictError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(3) from exc
+    typer.echo(view.model_dump_json())
 
 
 def _incomplete_run_diagnostics(live: Any) -> list[str]:

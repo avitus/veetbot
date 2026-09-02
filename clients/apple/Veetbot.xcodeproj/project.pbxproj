@@ -42,6 +42,11 @@
 		100000000000000000000022 /* MemoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* MemoryViewModel.swift */; };
 		100000000000000000000023 /* MemoryBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* MemoryBrowserView.swift */; };
 		100000000000000000000024 /* MemoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* MemoryDetailView.swift */; };
+		100000000000000000000025 /* ScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000026 /* ScheduleViewModel.swift */; };
+		100000000000000000000026 /* ScheduleBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* ScheduleBrowserView.swift */; };
+		100000000000000000000027 /* ScheduleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* ScheduleDetailView.swift */; };
+		100000000000000000000028 /* PersonaViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* PersonaViewModel.swift */; };
+		100000000000000000000029 /* PersonaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* PersonaEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -92,6 +97,11 @@
 		200000000000000000000023 /* MemoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryViewModel.swift; sourceTree = "<group>"; };
 		200000000000000000000024 /* MemoryBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBrowserView.swift; sourceTree = "<group>"; };
 		200000000000000000000025 /* MemoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDetailView.swift; sourceTree = "<group>"; };
+		200000000000000000000026 /* ScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleViewModel.swift; sourceTree = "<group>"; };
+		200000000000000000000027 /* ScheduleBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleBrowserView.swift; sourceTree = "<group>"; };
+		200000000000000000000028 /* ScheduleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleDetailView.swift; sourceTree = "<group>"; };
+		200000000000000000000029 /* PersonaViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaViewModel.swift; sourceTree = "<group>"; };
+		20000000000000000000002A /* PersonaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaEditorView.swift; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A520 /* Veetbot.macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.macOS.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -192,6 +202,8 @@
 			children = (
 				20000000000000000000000F /* ChatViewModel.swift */,
 				200000000000000000000023 /* MemoryViewModel.swift */,
+				200000000000000000000029 /* PersonaViewModel.swift */,
+				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
 			);
 			path = ViewModels;
@@ -209,6 +221,9 @@
 				20000000000000000000001B /* MarkdownContentView.swift */,
 				200000000000000000000024 /* MemoryBrowserView.swift */,
 				200000000000000000000025 /* MemoryDetailView.swift */,
+				20000000000000000000002A /* PersonaEditorView.swift */,
+				200000000000000000000027 /* ScheduleBrowserView.swift */,
+				200000000000000000000028 /* ScheduleDetailView.swift */,
 				200000000000000000000015 /* RootView.swift */,
 			);
 			path = Views;
@@ -357,6 +372,8 @@
 				100000000000000000000020 /* InstallationIdentityStore.swift in Sources */,
 				10000000000000000000000F /* ChatViewModel.swift in Sources */,
 				100000000000000000000022 /* MemoryViewModel.swift in Sources */,
+				100000000000000000000028 /* PersonaViewModel.swift in Sources */,
+				100000000000000000000025 /* ScheduleViewModel.swift in Sources */,
 				100000000000000000000010 /* RunStateReducer.swift in Sources */,
 				100000000000000000000011 /* ActivityViews.swift in Sources */,
 				100000000000000000000012 /* ArtifactViewerView.swift in Sources */,
@@ -367,6 +384,9 @@
 				10000000000000000000001B /* MarkdownContentView.swift in Sources */,
 				100000000000000000000023 /* MemoryBrowserView.swift in Sources */,
 				100000000000000000000024 /* MemoryDetailView.swift in Sources */,
+				100000000000000000000029 /* PersonaEditorView.swift in Sources */,
+				100000000000000000000026 /* ScheduleBrowserView.swift in Sources */,
+				100000000000000000000027 /* ScheduleDetailView.swift in Sources */,
 				100000000000000000000015 /* RootView.swift in Sources */,
 				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */,

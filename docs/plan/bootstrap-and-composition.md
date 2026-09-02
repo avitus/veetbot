@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **153 configuration knobs** across the specifications;
+The corpus now declares **164 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -298,10 +298,12 @@ Milestone 16's memory lifecycle knobs — five decay time constants, two ranking
 penalties, two usage deltas, the established-facts switch, the three decay
 sweep bounds, and the operator trace retention — less the three interactive
 snapshot caps that leave `memory/profiles.yaml` for `context/plan.yaml`, plus
-Milestone 13's thirteen delegation knobs: the four fan-out caps, the five
+Milestone 13's thirteen delegation knobs: the four admission/depth caps, the five
 default child limits, the three final-synthesis reserves, and the summary byte
-ceiling, plus Milestone 20's three device knobs: the invocation timeout, the
-per-device daily ingest cap, and the poll-back interval. The plan originally names **three
+ceiling, plus the six ranking-weight coefficients the post-Milestone-16 tuning
+pass moved out of the ranker's literals into `memory/profiles.yaml`, plus
+Milestone 23's three device knobs: the invocation timeout, the per-device
+daily ingest cap, and the poll-back interval. The plan originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -310,7 +312,7 @@ Milestone 19 reuses the schedule pair: the composition root registers
 work that no materializer will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
-`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 15,000-token
+`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 17,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
 cap. Not one of them differs between two deployments of the same revision.
 They differ between *revisions*, which is another way of saying they belong in
@@ -324,13 +326,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-153 falls out.
+164 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-153 tuning knobs in YAML.
+164 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -338,7 +340,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 153 knobs live, at the values the
+    module that owns it. This is where all 164 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -380,7 +382,7 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, snapshot caps, the 15,000 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 17,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
   memory/profiles.yaml     RRF k, decay and usage knobs
@@ -394,7 +396,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 153. Schema versions, profile names, rule identifiers,
+and asserts the total is 164. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -402,11 +404,11 @@ or invariants rather than knobs and are not counted.
 | --- | ---: |
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
-| `context/plan.yaml` | 26 |
+| `context/plan.yaml` | 28 |
 | `tools/limits.yaml` | 20 |
 | `runtime/limits.yaml` | 52 |
-| `memory/profiles.yaml` | 28 |
-| **Total** | **153** |
+| `memory/profiles.yaml` | 37 |
+| **Total** | **164** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -414,12 +416,17 @@ knobs — decay time constants, ranking penalties, usage deltas, the decay sweep
 bounds, the established-facts switch, and the operator trace retention — arrive,
 and the interactive snapshot caps leave, because the planner already reads that
 ceiling from `context/plan.yaml` and two sources for one number is a bug waiting
-for an overlay. The session idle boundary is deliberately not a knob:
+for an overlay. The six coefficients of the ranking function's additive terms
+arrive after Milestone 16, taking the document to thirty-four: they were
+literals inside the ranker, and the lifecycle specification's own rule — hand
+weights tuned against the evaluation harness — wants them where a tuning pass
+is a reviewed configuration diff. The session idle boundary is deliberately
+not a knob:
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
 keeps it a constant so that two beliefs formed under the same recorded
 formation policy stay comparable.
 
-Milestone 20 adds the three `device` knobs
+Milestone 23 adds the three `device` knobs
 [device-channel-and-sms.md](device-channel-and-sms.md) fixes values for: the
 invocation timeout the push-wake channel waits out, the per-device daily ingest
 cap, and the interval between poll-backs. They are knobs rather than constants
@@ -639,7 +646,7 @@ decisions that can be made from configuration alone, before anything is
 built. Authentication configured or fail. Production refuses the development
 sandbox. Production refuses any policy profile, principal, or tenant name
 beginning with `eval.` or `tenant_eval`. The configured context plan's prefix
-classes sum to at most 15,000 tokens. Nothing has been constructed yet, so
+classes sum to at most 17,000 tokens. Nothing has been constructed yet, so
 nothing has to be torn down, which is the entire reason these checks are
 first rather than convenient.
 
@@ -724,7 +731,7 @@ the probe is built from a `Composition` that has no provider client on it.
 | Production refuses the dev sandbox | ADR-0008 | 1 |
 | Production cannot load an eval identity | eval spec | 1 and 4 |
 | Readiness must not call a provider | plan §16 | 5 |
-| Prefix classes fit the 15,000 ceiling | context spec | 1 and per session |
+| Prefix classes fit the 17,000 ceiling | context spec | 1 and per session |
 | Role-conditional composition | runtime spec | 5 |
 | Migrations upgrade cleanly | plan §25 | not startup |
 | A port with no contract module fails | eval spec | build gate |
@@ -1247,7 +1254,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 153 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 164 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1269,7 +1276,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 153 declared knobs into files and leaves ten fields in
+   sorts all 164 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,

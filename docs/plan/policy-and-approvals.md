@@ -583,7 +583,7 @@ Authoritative, per Section 9.3. This is Section 9.2's matrix, keyed on
 | `NONE` | — | Allow | — |
 | `WORKSPACE_READ` | path inside workspace | Allow | Deny |
 | `WORKSPACE_WRITE` | path inside workspace | Allow | Deny |
-| `NETWORK_READ` | host on the allowlist | Allow | Deny |
+| `NETWORK_READ` | constructed provider target or operator-classified read-only MCP target | Allow | Deny |
 | `CODE_EXECUTION` | `target.isolated` | Allow | Deny |
 | `PACKAGE_INSTALL` | — | Deny | — |
 | `SANDBOX_NETWORK` | — | Deny | — |
@@ -604,7 +604,13 @@ They resolve as follows, without changing any outcome the plan states.
   was always a condition on the argument; the condition column is where it goes.
   [web-access.md](web-access.md) supplies the first constructed predicate: a
   `web_provider` execution target whose actual HTTPS API host is fixed by the
-  composition root. Model-authored URL fields do not satisfy the predicate.
+  composition root. Browser-provider reads use the same constructed-target arm.
+  Milestone 18 adds the MCP arm: an operator-classified `mcp` target satisfies
+  `host_on_allowlist` only when its declared side effect is `NETWORK_READ` and
+  its idempotency is `READ_ONLY`. The stdio command remains operator-owned and
+  the remote package confines its own destinations; no model-authored URL field
+  satisfies either arm. The exact `mcp.{server_id}.use` scope remains an
+  independent prerequisite.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in
@@ -619,10 +625,10 @@ name matches, that row decides for that one tool; every other tool in the class
 still gets the class's decision, so the matrix stays total and nothing about the
 class changes. The section exists for a tool whose own mechanism already carries
 the control the class demands, and it is the seam a milestone uses instead of
-editing a matrix row. Milestone 20's `device.sms.send` is the first and only
+editing a matrix row. Milestone 23's `device.sms.send` is the first and only
 entry: iOS presents the composed message and the owner's Send tap performs the
 send, so the class's approval would duplicate a confirmation the platform
-already enforces (ADR-0073 and ADR-0075, and
+already enforces (ADR-0080 and ADR-0082, and
 [device-channel-and-sms.md](device-channel-and-sms.md)). Hardline rules run
 first and are unaffected, so a credential-shaped body is still refused before
 anything reaches the device. Two entries for one tool name, like a missing

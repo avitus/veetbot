@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.7"
+version: "3.0"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -88,6 +88,49 @@ Version 2.7 (conversational scheduling pass, 2026-08-24):
 - Daily and weekly conversational creation and every model-callable schedule
   mutation remain deferred. Milestone 12's content-free notification trigger
   and payload are unchanged.
+
+Version 2.8 (calendar recurrence pass, 2026-08-27):
+
+- Section 21 gains Milestone 20 — calendar recurrence and conversational
+  schedules — authorized by the repository owner as a parallel workstream and
+  specified by the existing scheduling design with six additional gates
+  (ADR-0073).
+- The closed cadence union gains monthly numbered-day and explicit last-day
+  rules plus yearly month/day rules. Missing numbered dates are skipped,
+  February 29 fires only in leap years, and every rule retains the existing
+  IANA-zone fold and gap semantics.
+- `schedule.create` keeps its compatible one-time `at` input and alternatively
+  accepts one closed daily, weekly, monthly, or yearly cadence object. Approval,
+  exact `schedule.write` scope, empty delegated scopes, bounded execution,
+  idempotency, and content-free outcome notifications are unchanged.
+
+Version 2.9 (native schedule inspection pass, 2026-08-29):
+
+- The native Apple client gains a read-only schedule browser over the existing
+  Milestone 11 list and point-read routes (ADR-0075). This transport-only
+  extension adds no route, scope, feature flag, schedule state, or milestone.
+- The browser pages every schedule retained for the authenticated principal,
+  including terminal records, and shows a bounded instruction preview in the
+  list before using the authorized point read for full detail.
+- Unknown schedule states and cadence kinds degrade to generic text, an older
+  server degrades at the list boundary, and schedule creation and lifecycle
+  mutation remain outside the native surface.
+
+Version 3.0 (adaptive memory distillation pass, 2026-08-31):
+
+- Section 21 gains Milestone 21 — adaptive memory distillation — explicitly
+  authorized by the repository owner as a parallel workstream and specified by
+  a detailed design with twenty-four gates (ADR-0077).
+- Memory formation becomes recall-first: integrated episodes, causally blinded
+  anticipation, prediction-error distillation, direct observations, and
+  explicitly tentative hypotheses expand useful project, goal, skill, role,
+  habit, constraint, and recurring-state coverage.
+- Evidence freshness separates from model use. Supporting user events refresh
+  evidence; citation updates utility and `last_used_at` only. Unsupported
+  hypotheses retire after thirty days and ongoing observations after ninety.
+- The completed `formation@7` and `formation@8` policies remain frozen controls.
+  The new `formation@9`, `retrieval@3`, and `lifecycle@2` policies activate only
+  on comparative evidence from a corpus of at least sixty cases.
 
 ## 1. Mission
 
@@ -2389,7 +2432,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - three hundred and fifty-one gate declarations, comprising three hundred and forty-two across twenty-four detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and forty-eight registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 18; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and forty-eight registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - four hundred gate declarations, comprising three hundred and ninety-one across twenty-six detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and ninety-seven registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 22; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and ninety-seven registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -2849,7 +2892,7 @@ Memory also gets a human surface and injection hardening (v2.2):
 - Injection as a frozen snapshot once per session (the prompt-stability invariant, Section 10.1); mid-session writes persist but do not mutate the cached prefix.
 - Prompt-injection scanning of memory at load, replacing poisoned entries with \[BLOCKED\] placeholders.
 - External semantic memory as a provider behind the memory port (for example Honcho); the builtin store plus at most one external provider.
-- An optional persona/identity surface layered over AgentSpec.instructions. Recorded as ADR-0014.
+- An optional persona/identity surface layered over AgentSpec.instructions. Recorded as ADR-0014. Entered as Milestone 22 on 2026-09-01 (ADR-0079, [persona-surface.md](persona-surface.md)), layered at assembly time rather than by editing the spec.
 
 The write path - how episodes become durable, curated beliefs - is specified in detail in [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md) and ADR-0018. The read path - query formation, hybrid recall, ranking, budgeted injection, and retrieval traces - is specified in [memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md) and ADR-0019.
 
@@ -3500,15 +3543,187 @@ resume, and cancel; arbitrary cron and monthly recurrence; delegated scopes;
 direct reminder payloads; and any content-bearing push remain outside this
 milestone.
 
-### Milestone 20: SMS through the owner's iPhone
+### Milestone 20: Calendar recurrence and conversational schedules
 
-The owner authorized this milestone on 2026-08-26 (ADR-0073) as a parallel
+The owner authorized this milestone on 2026-08-27 (ADR-0073), promoting the
+calendar-recurrence part of roadmap item B5 after identifying daily, weekly,
+monthly, and yearly schedules as core personal-agent behavior. It is a parallel
+workstream and does not advance the verified gate ceiling past unfinished
+Milestones 13 through 15. The detailed design remains
+[scheduling.md](scheduling.md), which declares six additional gates.
+
+Implement:
+
+- `MONTHLY` cadence with one or more numbered days, an explicit last-day rule,
+  or both; and `YEARLY` cadence with one or more unique month/day pairs.
+- Deterministic missing-date behavior: numbered days absent from a month are
+  skipped, last-day is calculated from that month, February 29 fires only in
+  leap years, and impossible yearly dates are rejected.
+- The existing IANA-zone, daylight-saving fold/gap, pure-clock, no-early,
+  bounded-misfire, no-overlap, immutable-revision, and occurrence-ledger
+  semantics for both new cadence kinds.
+- HTTP create and update support for the widened closed cadence union without a
+  new route, table, migration, scheduler, queue, or persistence path.
+- A compatible `schedule.create` input that accepts either the existing exact
+  future `at` instant or exactly one daily, weekly, monthly, or yearly cadence
+  object, with concrete recurrence details in the approval view.
+- The existing least-privilege definition derivation: active agent and policy
+  pinned, finite limits capped, requested scopes empty, approval mandatory, and
+  exact `schedule.write` authorization.
+
+Acceptance criteria:
+
+- Every additional hard gate declared by
+  [scheduling.md](scheduling.md#hard-gates) for Milestone 20 passes.
+- Daily, multi-day weekly, numbered-day and month-end monthly, and multi-date
+  yearly definitions round-trip through the HTTP boundary and materialize on
+  their exact civil calendar instants.
+- A monthly 31st rule skips shorter months; a monthly last-day rule fires at
+  each actual month end; a yearly February 29 rule skips non-leap years without
+  drifting.
+- Calendar lookup and coalesced misfire counting remain bounded across long
+  downtime and do not iterate once per missed occurrence.
+- A direct conversational request for each recurring kind waits for the
+  ordinary approval and creates exactly one revision with no delegated scopes.
+- Both/neither one-time and recurring inputs, invalid zones, duplicate or
+  impossible calendar values, and idempotency-key content mismatches fail
+  closed without duplicate schedule state.
+
+Arbitrary cron or RFC 5545 input; interval multipliers; model-callable list,
+update, pause, resume, and cancel; continuous-session recurrence; dependency
+graphs; workflow DAGs; delegated scopes; and content-bearing notifications
+remain later extensions.
+
+### Milestone 21: Adaptive memory distillation
+
+The owner authorized this milestone on 2026-08-31 after observing that memory
+formation remained dramatically too timid for a personal agent. It is a
+parallel workstream and does not advance the verified sequential ceiling past
+unfinished Milestones 13 through 15. The detailed design is
+[adaptive-memory-distillation.md](adaptive-memory-distillation.md) and
+ADR-0077; it declares twenty-four gates before implementation begins.
+
+Implement:
+
+- Persisted, provenance-complete integrated episodes derived from ordered
+  trusted user events and deleted with their session or principal.
+- `nemori-assisted-v1` at `formation@9`, making exactly three batched provider
+  calls per eligible consolidation: episode integration, causally blinded
+  anticipation from the prefix and existing memory, and prediction-error
+  distillation with exact source spans.
+- Direct observations and tentative hypotheses across ongoing projects, goals,
+  roles, skills, interests, habits, constraints, recurring states,
+  relationships, preferences, resources, and project facts.
+- A ranked ceiling of thirty-two automatic candidates per consolidation and
+  six per source event, with direct claims, future usefulness, and subject and
+  category diversity ahead of lower-value hypotheses and every displacement
+  audited.
+- `lifecycle@2`, separating `last_evidence_at` from `last_used_at`: later
+  supporting user events refresh evidence, while citation changes utility and
+  use time only. Unsupported tentative hypotheses retire after thirty days and
+  ongoing observations after ninety.
+- `retrieval@3`, rendering derivation and longevity on governed context, trace,
+  CLI, and HTTP inspection surfaces and ranking freshness from evidence rather
+  than self-citation.
+- A formation corpus of at least sixty cases and an offline three-policy
+  comparison against the frozen `formation@7` and `formation@8` controls, with
+  version-bound activation evidence.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The statement "I am building a personal AI agent" forms the direct ongoing
+  memory "User is building a personal AI agent" and may form likely software-
+  development experience only as a tentative hypothesis.
+- Direct must-form recall is at least 95 percent, hypothesis must-form recall is
+  at least 80 percent, benign precision is at least 90 percent, and useful
+  recall improves at least fifteen percentage points over `formation@8`.
+- Invalid provenance, assistant-as-user attribution, promoted injection,
+  credential storage, PII storage beyond explicit policy, and cross-principal
+  or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
+  state, or sensitivity permitted by policy alone is not a rejection reason.
+- Every eligible provider consolidation makes exactly three batched calls and
+  every failed or invalid stage falls back deterministically with content-free
+  audit metadata.
+- Repeated recall or citation cannot extend evidence lifetime; later supporting
+  user evidence refreshes and may promote a hypothesis without duplicating the
+  live belief.
+- Corrections, edits, retractions, and deletions remain durable through
+  integration, retry, replay, and policy upgrades.
+- `formation@9` activates only for the exact comparative-evidence tuple; until
+  then automatic composition retains the evidenced `formation@8` behavior.
+
+The milestone does not include reinforcement learning, fine-tuning, embeddings,
+`pgvector`, a temporal entity graph, a persona editor, an external memory
+service, global cross-principal consolidation, new retrieval arms, or a public
+memory-write API.
+
+### Milestone 22: Persona surface and curated belief promotion
+
+The owner authorized this milestone on 2026-09-01, choosing curated promotion
+over automatic promotion and the full edit stack. It is a parallel workstream
+and does not advance the verified sequential ceiling past unfinished
+Milestones 13 through 15. The detailed design is
+[persona-surface.md](persona-surface.md) and ADR-0079, which also records the
+adjustment of roadmap item B6's entry condition for this item; the design
+declares fourteen gates before implementation begins.
+
+Implement:
+
+- A persisted, versioned, principal-scoped persona document: an ordered list
+  of entries, each carrying provenance — owner-typed or affirmed from a named
+  belief — and sensitivity, with `expected_version` optimistic concurrency
+  and version 0 as the real, empty, readable starting state.
+- A new Region A prefix row directly after the agent instructions, rendered
+  un-enveloped at `TRUSTED_CONFIGURATION`, capped at thirty entries and
+  2,000 tokens, never yielding, with the prefix ceiling moving from 15,000
+  to 17,000; an empty persona renders no bytes at all.
+- Revision pinning per context plan and one epoch rotation with reason
+  `persona_changed` at the next plan after an edit — the lifecycle an
+  agent-instruction edit already has.
+- Governed persona nomination inside consolidation over active, direct,
+  durable, corroborated, sensitivity-bounded beliefs, with a bounded
+  outstanding set; explicit owner affirmation appending the statement at
+  `USER` authority with bidirectional belief linkage, durable decline, and
+  withdrawal when a source belief dies before review.
+- Snapshot de-duplication: a promoted belief leaves the session-open
+  snapshot while its persona entry stands and returns when it is removed,
+  with the deterministic benchmark baseline re-recorded in the implementing
+  change under ADR-0069 decision 2.
+- Secret-material refusal at every write surface, injection scanning at
+  load with `[BLOCKED]` replacement, and sensitivity filtering at plan
+  creation.
+- Six `/v1/persona` routes behind `AGENT_PERSONA_API_ENABLED` with the exact
+  scopes `persona.read` and `persona.write`, the `agent persona` CLI group,
+  and a native editor with nomination review on the existing Swift lanes.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- A formed belief reaches the persona only through an owner edit or an
+  explicit affirmation of a named nomination; no pipeline stage, tool call,
+  or model output writes persona text.
+- A mid-session persona edit produces exactly one epoch rotation with reason
+  `persona_changed`, and a session with an empty persona reproduces the
+  pre-Milestone-22 prefix byte-for-byte.
+- Nothing under `/v1/memories` gains a verb; the Milestone 17 read-only walk
+  passes with the persona router mounted.
+- Credential-shaped content is refused at every persona write surface, and a
+  poisoned entry renders as `[BLOCKED]`, never as instruction text.
+
+The milestone does not include automatic promotion at any threshold, belief
+edit, retraction, or deletion over HTTP, per-agent or per-surface persona
+variants, or any change to `AgentSpec.instructions`.
+
+### Milestone 23: SMS through the owner's iPhone
+
+The owner authorized this milestone on 2026-08-26 (ADR-0080) as a parallel
 workstream on the established terms: its gates become green independently
 and the verified gate ceiling still advances only in numerical order. It
 builds the first concrete slice of Section 29's device channel — roadmap
 item B7's device channel and device-scoped tools — with SMS through the
 owner's iPhone as the concrete use case. The detailed design is
-[device-channel-and-sms.md](device-channel-and-sms.md) and ADR-0073; the
+[device-channel-and-sms.md](device-channel-and-sms.md) and ADR-0080; the
 design declares this milestone's twelve gates.
 
 Implement:
@@ -3541,15 +3756,15 @@ websocket device transport, the waiting-on-device suspension kind,
 presence-based routing, or hand-off; the last two remain roadmap item B7's
 residue, and the rest are recorded in the design document's exclusions.
 
-### Milestone 21: WhatsApp business surface
+### Milestone 24: WhatsApp business surface
 
-The owner authorized this milestone on 2026-08-26 (ADR-0074) as a parallel
+The owner authorized this milestone on 2026-08-26 (ADR-0081) as a parallel
 workstream on the established terms. It gives the agent its own WhatsApp
 number through the official Meta Cloud API as an additive channel on the
 Milestone 14 surface seam, and pays the inbound-webhook price — the
 infrastructure ADR-0071 priced as B3 and B4 — deliberately and once. The
 detailed design is [whatsapp-surface.md](whatsapp-surface.md) and
-ADR-0074; the design declares this milestone's twelve gates. Its
+ADR-0081; the design declares this milestone's twelve gates. Its
 implementation begins when Milestone 14's ports exist; its documents,
 gates, and owner ceremony proceed now.
 
@@ -3581,6 +3796,42 @@ The milestone does not include personal-account access (the linked-device
 bridge, roadmap item B13), media intake, group or thread session keys or
 inline-keyboard approvals (B3), or a second business number.
 
+### Native schedule browser
+
+The owner authorized the native schedule browser on 2026-08-29 (ADR-0075) as
+a transport-only Apple client extension over the completed Milestone 11
+control plane. It is not a new milestone and does not reopen Milestone 11 or
+broaden Milestone 20's gates. The detailed display and compatibility contract
+is in [scheduling.md](scheduling.md#native-apple-schedule-browser).
+
+Implement:
+
+- A schedule entry beside Memory in the native sidebar, opening a resizable
+  list/detail browser that reloads authoritative server state when presented.
+- Cursor-paginated summary rows for every schedule retained for the calling
+  principal, with title, text-labeled lifecycle state, cadence, next firing,
+  and bounded instruction preview.
+- Point-read detail containing the full instruction, current revision,
+  cadence, execution bounds, and lifecycle timestamps; the client never treats
+  the list preview as full content.
+- Forward-compatible rendering for unknown states and cadence kinds, and an
+  explicit unavailable state when an older server does not expose the index.
+
+Acceptance criteria:
+
+- The surface makes only the existing schedule GET requests and requests no
+  schedule write or cancellation authority.
+- ACTIVE, PAUSED, COMPLETED, and CANCELLED records can all be inspected, while
+  an unknown future state or cadence still renders without failing the page.
+- Pagination ignores duplicate IDs, stops on a repeated cursor, survives a
+  later-page error without discarding loaded rows, and offers a retry for the
+  failed operation.
+- The iOS in-process UI fixture opens the schedule browser, lists a schedule,
+  follows its point read, and renders the full instruction in detail.
+
+Native creation, update, pause, resume, cancellation, occurrence history, and
+run history remain outside this read-only extension.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3595,15 +3846,15 @@ owner's current ranking, not a schedule.
 | B2 | Dynamic model routing and a second provider adapter (this section, Milestone 10) | An ADR; data residency and evaluation-performance inputs still undesigned |
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
-| B5 | Scheduling extensions: monthly rules, arbitrary cron, continuous-session recurrence, dependency graphs | A separate ADR; not alternate implementations of Milestone 11 |
-| B6 | Memory residue after Milestone 16: the semantic arm and `pgvector`, an external memory provider, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 benchmark evidence per item, per Milestone 9's entry gate |
-| B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 20 on 2026-08-26 (ADR-0073); presence-based routing and hand-off still wait here on a concrete use case |
+| B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
+| B6 | Memory residue after Milestone 22: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation. The persona surface entered as Milestone 22 on 2026-09-01 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
+| B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 23 on 2026-08-26 (ADR-0080); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
-| B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 21 |
+| B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 24 |
 
 ## 22. Security baseline
 
@@ -4153,7 +4404,7 @@ The event log already records every run in full (Section 6.8). This section adds
 
 The platform exposes current public information through provider-neutral,
 read-only tools. The detailed mechanism is specified in
-[web-access.md](web-access.md) and ADR-0054. The repository owner authorized
+[web-access.md](web-access.md), ADR-0054, and ADR-0076. The repository owner authorized
 this tranche on 2026-08-18 independently of scheduling, model-routing changes,
 and general-purpose subagents.
 
@@ -4163,9 +4414,11 @@ and general-purpose subagents.
 - `web.fetch` extracts readable content from one public HTTPS page.
 - Provider-specific request and response fields end at an adapter implementing
   one `WebProvider` port.
-- Search and fetch providers are selected independently. Tavily search plus
-  Firecrawl fetch is the recommended deployment, but either provider may serve
-  either capability without changing the tool names.
+- Search and fetch provider allocations are selected independently. A
+  deployment may bind one provider or a deterministic weighted set without
+  changing the tool names. The initial comparison routes 50 percent of search
+  to Tavily and 50 percent to Keenable, and 50 percent of fetch to Firecrawl
+  and 50 percent to Keenable.
 
 ### 32.2 Security and rollout
 
@@ -4183,9 +4436,11 @@ and general-purpose subagents.
 
 ### 32.3 Acceptance criteria
 
-- Tavily and Firecrawl pass the same search and fetch provider contract.
-- The recommended hybrid and both single-provider configurations compose
-  without changing an agent-visible tool schema.
+- Tavily, Firecrawl, and Keenable pass the same search and fetch provider
+  contract.
+- Single-provider, hybrid, and weighted configurations compose without
+  changing an agent-visible tool schema; a retry of one durable invocation
+  remains pinned to its selected provider.
 - A complete web tool invocation passes validation and policy, persists a
   bounded external-untrusted result, and can be consumed by the next model
   step.

@@ -34,6 +34,23 @@ class LifecycleWeights(_ProfileModel):
     provisional: float = Field(default=0.4, ge=0.0, le=1.0)
 
 
+class RankingWeights(_ProfileModel):
+    """Coefficients of the hand-weighted ranking function's score terms.
+
+    These are the six additive terms of the retrieval specification's scoring
+    formula. They live here rather than as literals in the ranker so a tuning
+    pass argues from a benchmark diff over a reviewed document instead of a
+    code edit; the shipped values are the ones `retrieval@2` was recorded with.
+    """
+
+    match: float = Field(default=0.4, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.2, gt=0.0, le=1.0)
+    reinforce: float = Field(default=0.1, ge=0.0, le=1.0)
+    authority: float = Field(default=0.15, gt=0.0, le=1.0)
+    scope: float = Field(default=0.1, ge=0.0, le=1.0)
+    utility: float = Field(default=0.05, ge=0.0, le=1.0)
+
+
 class DecayTauDays(_ProfileModel):
     """Half-life-shaped time constants, in days, per belief type."""
 
@@ -73,6 +90,7 @@ class RetrievalProfile(_ProfileModel):
     semantic_enabled: bool = False
     reciprocal_rank_fusion_k: int = Field(default=60, ge=1)
     durable_item_share: float = Field(default=0.6666666667, ge=0.0, le=1.0)
+    ranking_weights: RankingWeights = Field(default_factory=RankingWeights)
     lifecycle_weights: LifecycleWeights = Field(default_factory=LifecycleWeights)
     decay_tau_days: DecayTauDays = Field(default_factory=DecayTauDays)
     stale_penalty: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -88,6 +106,14 @@ class DecayProfile(_ProfileModel):
     max_per_sweep: int = Field(default=200, ge=1)
 
 
+class PersonaNominationProfile(_ProfileModel):
+    """The persona bar: when a consolidated belief earns a nomination."""
+
+    min_confidence: float = Field(default=0.75, gt=0.0, le=1.0)
+    min_corroboration: int = Field(default=3, ge=1)
+    max_open: int = Field(default=5, ge=1)
+
+
 class FormationProfile(_ProfileModel):
     """When consolidation runs and which formation behaviors are enabled."""
 
@@ -96,6 +122,7 @@ class FormationProfile(_ProfileModel):
     scheduled_interval_seconds: int = Field(default=86_400, ge=1)
     established_facts_enabled: bool = True
     decay: DecayProfile = Field(default_factory=DecayProfile)
+    persona_nomination: PersonaNominationProfile = Field(default_factory=PersonaNominationProfile)
 
 
 class SnapshotProfile(_ProfileModel):

@@ -261,7 +261,7 @@
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
-  statement: "**Citing a belief resists decay and never raises confidence.** A belief whose short identifier appears in a completed run's final message is marked cited on its trace, gains utility and a fresh reinforcement instant, and keeps its confidence exactly; a returned-but-uncited belief loses utility; repeating the completion changes nothing."
+  statement: "**Citing a belief records usage without manufacturing evidence.** A belief whose short identifier appears in a completed run's final message is marked cited on its trace, gains utility and a fresh usage instant while its evidence and confidence stay fixed; a returned-but-uncited belief loses utility; repeating the completion changes nothing."
   check: tests/gates/test_memory_m16.py::test_usage_feedback_marks_cited_and_never_raises_confidence
 - id: gate.memory.recall_delta
   milestone: 16
@@ -359,3 +359,147 @@
   spec: docs/plan/memory-read-api-and-browser.md#hard-gates
   statement: "**Every error is a member of the closed vocabulary.** Across missing and malformed parameters, absent and insufficient credentials, unknown identifiers, and above-ceiling reads, every response either succeeds or carries one of `malformed_request`, `authentication_error`, `authorization_error`, or `not_found` with its documented status."
   check: tests/gates/test_memory_read_api_m17.py::test_every_error_is_a_member_of_the_closed_vocabulary
+- id: gate.memory.distill_versions_frozen
+  milestone: 21
+  kind: structural
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Completed policy controls are frozen.** The recorded formation@7 and formation@8 fixtures retain byte-identical normalized outputs while formation@9 identifies nemori-assisted-v1."
+  check: tests/gates/test_memory_m21.py::test_completed_policy_controls_are_frozen
+- id: gate.memory.episode_integration
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Integrated episodes are coherent and grounded.** Multi-turn narratives preserve ordered owned provenance and unsupported or foreign citations are rejected."
+  check: tests/gates/test_memory_m21.py::test_integrated_episodes_are_coherent_and_grounded
+- id: gate.memory.episode_repository_parity
+  milestone: 21
+  kind: structural
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Both episode stores obey one contract.** Idempotency, scoped reads, deletion, and erasure behave identically in memory and PostgreSQL."
+  check: tests/contract/test_integrated_episode_store_contract.py::test_integrated_episode_repository_contract_is_registered
+- id: gate.memory.anticipation_blinded
+  milestone: 21
+  kind: property
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Anticipation is causally blinded.** The request contains only the causal cue and prior memories, never current or future evidence, assistant answers, or gold labels."
+  check: tests/gates/test_memory_m21.py::test_anticipation_is_causally_blinded
+- id: gate.memory.prediction_error_calls
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**One consolidation makes exactly three batched provider calls.** Candidate and event count never adds a provider call."
+  check: tests/gates/test_memory_m21.py::test_one_consolidation_makes_exactly_three_batched_calls
+- id: gate.memory.distill_fallback
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Every provider stage has an audited deterministic fallback.** Failures record normalized metadata and never partly trust invalid output."
+  check: tests/gates/test_memory_m21.py::test_every_provider_stage_has_an_audited_deterministic_fallback
+- id: gate.memory.direct_high_recall
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Direct ongoing projects form at high recall.** The personal-agent statement forms a direct ongoing-project memory with exact user provenance."
+  check: tests/gates/test_memory_m21.py::test_personal_agent_project_forms_as_direct_ongoing_memory
+- id: gate.memory.hypothesis_high_recall
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Useful hypotheses form as hypotheses.** The personal-agent cue may form likely software-development experience only as tentative, never as a direct occupation."
+  check: tests/gates/test_memory_m21.py::test_software_development_cue_forms_only_as_tentative_hypothesis
+- id: gate.memory.compound_recall
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Compound formation is bounded and diverse.** Directness, usefulness, and subject diversity govern the six-per-source and thirty-two-global ceilings with every displacement counted."
+  check: tests/gates/test_memory_m21.py::test_compound_formation_is_bounded_diverse_and_accounted
+- id: gate.memory.candidate_schema
+  milestone: 21
+  kind: structural
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**The candidate language is closed and complete.** Claim kind, derivation, longevity, and exact evidence spans validate as a closed schema."
+  check: tests/gates/test_memory_m21.py::test_candidate_language_is_closed_and_complete
+- id: gate.memory.predictability_attributed
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Predictability suppresses only attributable redundancy.** General model expectation cannot suppress a direct observation."
+  check: tests/gates/test_memory_m21.py::test_predictability_suppresses_only_attributable_redundancy
+- id: gate.memory.source_grounding
+  milestone: 21
+  kind: property
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Every automatic claim is source-grounded.** Exact spans resolve only to owned trusted user events."
+  check: tests/gates/test_memory_m21.py::test_every_automatic_claim_is_source_grounded
+- id: gate.memory.formation_reason_telemetry
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Decision telemetry accounts for every proposal.** Terminal reason counts reconcile without content in telemetry."
+  check: tests/gates/test_memory_m21.py::test_decision_telemetry_accounts_for_every_proposal
+- id: gate.memory.evidence_clock
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Only later evidence refreshes the evidence clock.** Supporting user events advance evidence time and counters exactly once; replay and citation do not."
+  check: tests/gates/test_memory_m21.py::test_only_later_evidence_refreshes_the_evidence_clock
+- id: gate.memory.usage_clock
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Usage has its own clock.** Citation changes last-used time and utility only and completion replay is idempotent."
+  check: tests/gates/test_memory_m21.py::test_usage_has_its_own_clock
+- id: gate.memory.hypothesis_retirement
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Unsupported hypotheses retire after thirty days.** Retrieval and citation cannot extend the boundary."
+  check: tests/gates/test_memory_m21.py::test_unsupported_hypotheses_retire_after_thirty_days
+- id: gate.memory.ongoing_retirement
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Unsupported ongoing observations retire after ninety days.** Self-use cannot extend the boundary."
+  check: tests/gates/test_memory_m21.py::test_unsupported_ongoing_observations_retire_after_ninety_days
+- id: gate.memory.evidence_promotion
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Later evidence promotes rather than duplicates.** Direct support promotes the existing hypothesis and preserves combined provenance."
+  check: tests/gates/test_memory_m21.py::test_later_evidence_promotes_instead_of_duplicating
+- id: gate.memory.uncertainty_rendered
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Recall renders uncertainty faithfully.** Derivation and longevity appear on governed context, trace, CLI, and API views without raw model scores."
+  check: tests/gates/test_memory_m21.py::test_recall_renders_uncertainty_faithfully
+- id: gate.memory.correction_durable_v3
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Corrections remain durable through the new pipeline.** Integration, retry, replay, and policy upgrades cannot recreate a corrected memory."
+  check: tests/gates/test_memory_m21.py::test_corrections_remain_durable_through_distillation
+- id: gate.memory.schema_backfill
+  milestone: 21
+  kind: structural
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**The schema migration and backfill preserve history.** Conservative derived values retain old statement, provenance, authority, and formation version and erasure removes new rows."
+  check: tests/integration/test_memory_distillation_postgres_m21.py::test_schema_backfill_preserves_history_and_erasure
+- id: gate.memory.formation_corpus_v3
+  milestone: 21
+  kind: structural
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Corpus v3 has the declared coverage.** At least sixty cases, seventy percent positive, every category, and all six core scenarios validate."
+  check: tests/gates/test_memory_m21.py::test_formation_corpus_v3_has_declared_coverage
+- id: gate.memory.comparative_evidence
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Comparative evidence proves marked useful-recall lift.** One run compares formation@7, formation@8, and formation@9 and publishes only at every declared threshold."
+  check: tests/gates/test_memory_m21.py::test_comparative_evidence_proves_marked_useful_recall_lift
+- id: gate.memory.distill_activation_bound
+  milestone: 21
+  kind: property
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Activation is exact and evidence-bound.** Formation@9 activates only for the exact artifact tuple; auto keeps the older evidenced policy and required refuses otherwise."
+  check: tests/gates/test_memory_m21.py::test_distillation_activation_is_exact_and_evidence_bound

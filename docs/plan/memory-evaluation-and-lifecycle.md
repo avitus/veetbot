@@ -20,25 +20,25 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:687).
+scenarios (memory-retrieval-and-ranking.md:773), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:714).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:284), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:815-818),
 the recall delta and its correction lines over a frozen snapshot
-(memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:714) are
+(memory-retrieval-and-ranking.md:96), conflicts surfaced rather than silently
+resolved at read time (memory-retrieval-and-ranking.md:810), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:741) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
 lifecycle second, so that every lifecycle change is a measured change and the
 plan's standing rule that a capability enters on evaluation evidence rather
-than on argument (engineering-plan.md:2840) has something to read.
+than on argument (engineering-plan.md:2883) has something to read.
 
 Milestone 16 is authorized as a parallel workstream alongside Milestones 12
 through 15. Its gates may become green independently, but the verified gate
@@ -71,6 +71,10 @@ former; session history or artifacts as retrieval sources; vendored copies of
 the public datasets; or a model judge anywhere in scoring. Each of those is
 roadmap item B6's residue or an exclusion the memory specifications already
 carry, and each is unlocked by benchmark evidence rather than by argument.
+Two have since entered on their own terms: the read half of the HTTP surface
+as Milestone 17 (ADR-0070), and the persona surface as Milestone 22
+(ADR-0079), whose entry-condition adjustment is recorded in that ADR rather
+than silently assumed here.
 
 ## The boundary: the yardstick is built before the thing it measures moves
 
@@ -379,9 +383,17 @@ needed_formed              needed labels with a live match at probe time
 needed_recalled            needed labels matched by the snapshot trace or by
                            any in-turn trace, attributed snapshot-only,
                            in-turn-only, or both
+needed_by_distance         the same recall, binned by how many sessions back
+                           the needed label is stated — the last session is
+                           distance one — so long-range degradation is visible
+                           when the overall count holds steady
 returned_*                 distinct beliefs in trace.returned, per moment and
                            as a union; recall counts returned items only
 dropped_for_budget         counted separately from returned
+dropped_for_ceiling        proposals over the automatic-candidate commit
+                           ceiling, summed over the run's consolidations, so a
+                           formation-recall gap can be attributed to the
+                           ceiling or acquitted of it
 noise_*                    returned beliefs matching no needed label
 end_to_end_recall          needed_recalled / needed_total
 retrieval_recall_given_formed
@@ -430,9 +442,13 @@ drift          the corpus digest, the benchmark version, a policy version, the
 regressions    a higher-is-better count fell — supported beliefs, needed
                formed, needed recalled, completed probe runs — or a
                lower-is-better count rose — fabricated, stale live, noise,
-               dropped for budget, blocked, currency violations, abstention
-               leaks, false transfers, run policy failures, distinct
-               prefixes — or any per-probe row's needed_recalled fell.
+               dropped for budget, dropped for the candidate ceiling, blocked,
+               currency violations, abstention leaks, false transfers, run
+               policy failures, distinct prefixes — or any per-probe row's
+               needed_recalled fell, or a distance bin's recall fell. A
+               distance bin's population is a function of the corpus and the
+               session mapping, so a moved population is drift, like the
+               structural counts it derives from.
 improvements   the mirror image, reported and never required.
 shifts         an attribution count moved. The three partition needed
                recalled by the moment that found the belief, so a move says
@@ -608,6 +624,8 @@ models behind it:
 ```text
 RetrievalProfile   semantic_enabled | reciprocal_rank_fusion_k
                    durable_item_share
+                   ranking_weights{match, confidence, reinforce,
+                                   authority, scope, utility}
                    lifecycle_weights{active, provisional}
                    decay_tau_days{fact, preference, relationship,
                                   user_model_attr, procedure_pointer}
@@ -629,6 +647,23 @@ knobs and adds fourteen, taking the memory profile document from seventeen
 knobs to twenty-eight and the shipped operator-reviewable inventory from 126 to
 137; the derivation paragraph and the table in
 [bootstrap-and-composition.md](bootstrap-and-composition.md) move with it.
+
+`ranking_weights` arrives after this milestone, in the tuning pass the ranking
+section below anticipates: the six additive coefficients of the retrieval
+scoring formula were literals inside `_score`, which meant retuning them was a
+code edit rather than a reviewed configuration diff. Moving them here follows
+the precedent this milestone set with `stale_penalty` and
+`near_duplicate_penalty` — ranking-shaping values live in the profile document
+at the values the recorded baseline was measured under — and takes the document
+to thirty-four knobs. At that point the six additions took the milestone-era
+inventory from 137 to 143; later authorized configuration additions take the
+current repository-wide operator inventory to 156, as derived in
+[bootstrap-and-composition.md](bootstrap-and-composition.md). The shipped values
+are identical to the former literals, so the deterministic benchmark baseline
+is unchanged by the move itself; a change to any of the six is a ranking change
+and re-records the baseline like any other. The `confidence` and `authority`
+weights remain strictly positive so an overlay cannot flatten the required
+lifecycle or provenance ordering.
 
 `SESSION_IDLE_SECONDS` stays a constant and does not become a knob. The idle
 boundary is part of the formation policy that a belief's
@@ -707,7 +742,7 @@ fix that lets the benchmark's harness path retire.
 
 Decay is a sweep, not a read-time discount. `GovernedMemoryService.decay()`
 selects live beliefs that are `PROVISIONAL` or below the maximum inferred
-confidence, whose `last_reinforced_at` is at least `decay_tau_days` for their
+confidence, whose `last_evidence_at` is at least `decay_tau_days` for their
 belief type in the past, and whose `updated_at` is older than one sweep
 interval, which is the guard against decaying the same belief twice in a
 window. Each selected belief loses `decay.step` of confidence; a belief that
@@ -721,8 +756,8 @@ next turn would report a change nobody made — while a retirement is exactly th
 change the correction lines below select on. Explicit user statements are
 `ACTIVE` at high confidence and are never eligible.
 
-`MemoryStore` gains `list_idle(principal, reinforced_before, limit)` — live
-beliefs last reinforced at or before an instant, least recently reinforced
+`MemoryStore` gains `list_idle(principal, evidence_before, limit)` — live
+beliefs last evidenced at or before an instant, least recently evidenced
 first — and the sweep reads its window through it, cut at the shortest time
 constant any belief type carries and bounded by `decay.max_per_sweep`. The
 ordering is the point: a window ordered newest-first would refill with the rows
@@ -736,8 +771,9 @@ Ranking gains the time term the decay design implies. The reinforcement
 contribution becomes
 
 ```text
-reinforce = min(1, log1p(citations) / log(11)) * exp(-age_days / tau[type])
-age_days  = max(0, (now - last_reinforced_at).days)
+C_max     = 10
+reinforce = min(1, log1p(evidence_count) / log1p(C_max)) * exp(-age_days / tau[type])
+age_days  = max(0, (now - last_evidence_at).days)
 ```
 
 with `now` taken once per recall from the query's `as_of` or the clock, and
@@ -757,9 +793,11 @@ and noise must not rise across that re-record.
 
 ## Usage feedback
 
-A belief that gets cited should resist decay; a belief that keeps winning the
-ranking and never matters should stop winning it. Both are one hook on run
-completion.
+A belief that gets cited has demonstrated utility, not renewed truth; a belief
+that keeps winning the ranking and never matters should stop winning it. Both
+are one hook on run completion. Milestone 21 supersedes the older reinforcement
+clock here with the evidence and usage clocks defined by
+[adaptive memory distillation](adaptive-memory-distillation.md).
 
 `TraceStore` gains `mark_cited(trace_id, principal, cited)`, which unions the
 cited set into the trace under a row lock, is principal-scoped, and is
@@ -773,11 +811,12 @@ and is counted as ambiguous, because the deterministic identifiers the
 evaluation harness issues render every belief the same way and a citing live
 arm would otherwise credit whatever it recalled. A cited belief's `utility`
 rises by
-`usage.cited_utility_delta` to a ceiling of 1 and its `last_reinforced_at`
-moves to now; a returned-but-uncited belief's `utility` falls by
+`usage.cited_utility_delta` to a ceiling of 1 and its `last_used_at`
+moves to now; `last_evidence_at` and the compatibility-only
+`last_reinforced_at` do not move. A returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:797): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:815-818): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -791,7 +830,7 @@ units of work with no external call inside a transaction.
 The snapshot is frozen at session open, so a belief formed or corrected later
 is invisible to it and a belief inside it that has since been superseded goes
 on being rendered until the next session. The retrieval specification already
-describes the fix (memory-retrieval-and-ranking.md:93) and names its two parts.
+describes the fix (memory-retrieval-and-ranking.md:96) and names its two parts.
 
 `MemoryStore` gains `head_position(principal)`, the newest store position that
 principal has written whatever its status — a retirement moves the head, or the
@@ -816,7 +855,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:221): the delta is issued for what the
+context engine caps (context-engine.md:241): the delta is issued for what the
 base block left of that budget and is not issued at all when the base block
 spent it, so a session with a frozen snapshot cannot carry twice the recall a
 session without one may. Only the base and delta blocks are droppable under
@@ -897,7 +936,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:714), so it is a command and it demands
+(memory-formation-and-consolidation.md:741), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the
@@ -982,8 +1021,9 @@ Metrics carry no belief statement, no secret, and no local dataset path.
    query-former paths. **M16.**
 8. Time-decayed reinforcement, the stale and near-duplicate penalties, and the
    decay sweep, at `retrieval@2`. **M16.**
-9. Usage feedback: the cited-trace mark, utility movement, and the completion
-   hook. **M16.**
+9. Usage feedback: the cited-trace mark, utility movement, separate usage
+   clock, and the completion hook; citations do not refresh evidence. **M16,
+   superseded in clock semantics by M21.**
 10. The recall delta and the correction lines, including the head-position
     watermark and the minimum-position query. **M16.**
 11. Established facts into formation at `AFFIRMED`, at `formation@7` and

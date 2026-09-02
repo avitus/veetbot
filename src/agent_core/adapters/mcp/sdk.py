@@ -80,6 +80,11 @@ def _unauthorized(exc: BaseException) -> bool:
         seen.add(id(current))
         if getattr(current, "status_code", None) == 401:
             return True
+        if str(current).strip().endswith("gmail.credential_rejected"):
+            # A first-party stdio server validates its refresh grant during
+            # MCP initialization. This content-free code is the only signal
+            # available across that process boundary.
+            return True
         response = getattr(current, "response", None)
         if getattr(response, "status_code", None) == 401:
             return True

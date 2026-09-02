@@ -3,13 +3,13 @@
   milestone: 10
   kind: case
   spec: docs/plan/web-access.md#hard-gates
-  statement: "**Provider contract** — Tavily and Firecrawl both pass the complete shared search-and-fetch contract and normalize to the same domain shapes."
+  statement: "**Provider contract** — Tavily, Firecrawl, and Keenable pass the complete shared search-and-fetch contract and normalize to the same domain shapes."
   check: tests/gates/test_web_m10.py::test_provider_contract
 - id: gate.web.capability_routing
   milestone: 10
   kind: case
   spec: docs/plan/web-access.md#hard-gates
-  statement: "**Capability routing** — the recommended hybrid and both single-provider configurations bind the requested capabilities without changing either agent-visible tool schema."
+  statement: "**Capability routing** — single-provider, hybrid, and weighted configurations bind the requested capabilities without changing either agent-visible tool schema, and a durable invocation stays pinned to its selected provider."
   check: tests/gates/test_web_m10.py::test_capability_routing
 - id: gate.web.default_off
   milestone: 10
