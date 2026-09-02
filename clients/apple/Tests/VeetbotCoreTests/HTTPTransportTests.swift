@@ -751,15 +751,17 @@ import Testing
             platform: "ios",
             appBundleID: "com.veetbot.apple",
             pushToken: "00abff",
-            pushEnvironment: .sandbox
+            pushEnvironment: .sandbox,
+            capabilities: ["device.sms.send"]
         )
 
-        #expect(
-            try await client.registerDevice(
-                registration,
-                idempotencyKey: "installation"
-            ).id == deviceID
+        let registered = try await client.registerDevice(
+            registration,
+            idempotencyKey: "installation"
         )
+        #expect(registered.id == deviceID)
+        // deviceJSON has no "capabilities" key: an older server response still parses.
+        #expect(registered.capabilities == [])
         #expect(try await client.listDevices(limit: 500, cursor: "next").items.count == 1)
         let revoked = try await client.revokeDevice(deviceID)
         #expect(revoked.status == .revoked)
@@ -772,6 +774,7 @@ import Testing
         let registrationJSON = try requestJSONObject(captured[0])
         #expect(registrationJSON["client_device_id"] as? String == "installation")
         #expect(registrationJSON["push_token"] as? String == "00abff")
+        #expect(registrationJSON["capabilities"] as? [String] == ["device.sms.send"])
         #expect(captured[1].url?.query?.contains("limit=200") == true)
         #expect(captured[1].url?.query?.contains("cursor=next") == true)
         #expect(captured[2].url?.path == "/v1/devices/\(deviceID.uuidString)/revoke")

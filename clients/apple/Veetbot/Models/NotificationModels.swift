@@ -46,6 +46,7 @@ public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
     public let pushToken: String
     public let pushEnvironment: PushEnvironment
     public let mutedKinds: [NotificationKind]
+    public let capabilities: [String]
 
     public init(
         clientDeviceID: String,
@@ -56,7 +57,8 @@ public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
         pushProvider: PushProvider = .apns,
         pushToken: String,
         pushEnvironment: PushEnvironment,
-        mutedKinds: [NotificationKind] = []
+        mutedKinds: [NotificationKind] = [],
+        capabilities: [String] = []
     ) {
         self.clientDeviceID = clientDeviceID
         self.name = name
@@ -67,10 +69,11 @@ public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
         self.pushToken = pushToken
         self.pushEnvironment = pushEnvironment
         self.mutedKinds = mutedKinds
+        self.capabilities = capabilities
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, kind, platform
+        case name, kind, platform, capabilities
         case clientDeviceID = "client_device_id"
         case appBundleID = "app_bundle_id"
         case pushProvider = "push_provider"
@@ -93,6 +96,7 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
     public let pushTokenUpdatedAt: Date?
     public let pushTokenInvalidatedAt: Date?
     public let mutedKinds: Set<NotificationKind>
+    public let capabilities: [String]
     public let status: DeviceStatus
     public let revokedAt: Date?
     public let lastSeenAt: Date
@@ -112,6 +116,7 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
         pushTokenUpdatedAt: Date?,
         pushTokenInvalidatedAt: Date?,
         mutedKinds: Set<NotificationKind>,
+        capabilities: [String],
         status: DeviceStatus,
         revokedAt: Date?,
         lastSeenAt: Date,
@@ -130,6 +135,7 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
         self.pushTokenUpdatedAt = pushTokenUpdatedAt
         self.pushTokenInvalidatedAt = pushTokenInvalidatedAt
         self.mutedKinds = mutedKinds
+        self.capabilities = capabilities
         self.status = status
         self.revokedAt = revokedAt
         self.lastSeenAt = lastSeenAt
@@ -137,8 +143,39 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
         self.updatedAt = updatedAt
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        clientDeviceID = try container.decode(String.self, forKey: .clientDeviceID)
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decode(DeviceKind.self, forKey: .kind)
+        platform = try container.decode(String.self, forKey: .platform)
+        appBundleID = try container.decodeIfPresent(String.self, forKey: .appBundleID)
+        pushProvider = try container.decodeIfPresent(PushProvider.self, forKey: .pushProvider)
+        pushEnvironment = try container.decodeIfPresent(
+            PushEnvironment.self,
+            forKey: .pushEnvironment
+        )
+        pushTokenFingerprint = try container.decodeIfPresent(
+            String.self,
+            forKey: .pushTokenFingerprint
+        )
+        pushTokenUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .pushTokenUpdatedAt)
+        pushTokenInvalidatedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .pushTokenInvalidatedAt
+        )
+        mutedKinds = try container.decode(Set<NotificationKind>.self, forKey: .mutedKinds)
+        capabilities = try container.decodeIfPresent([String].self, forKey: .capabilities) ?? []
+        status = try container.decode(DeviceStatus.self, forKey: .status)
+        revokedAt = try container.decodeIfPresent(Date.self, forKey: .revokedAt)
+        lastSeenAt = try container.decode(Date.self, forKey: .lastSeenAt)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, platform, status
+        case id, name, kind, platform, status, capabilities
         case clientDeviceID = "client_device_id"
         case appBundleID = "app_bundle_id"
         case pushProvider = "push_provider"

@@ -24,19 +24,22 @@ public struct AppleDeviceDescriptor: Equatable, Sendable {
     public let platform: String
     public let bundleID: String
     public let environment: PushEnvironment
+    public let capabilities: [String]
 
     public init(
         name: String,
         kind: DeviceKind,
         platform: String,
         bundleID: String,
-        environment: PushEnvironment
+        environment: PushEnvironment,
+        capabilities: [String] = []
     ) {
         self.name = name
         self.kind = kind
         self.platform = platform
         self.bundleID = bundleID
         self.environment = environment
+        self.capabilities = capabilities
     }
 
     @MainActor
@@ -99,7 +102,8 @@ public actor DeviceRegistrationCoordinator {
             platform: descriptor.platform,
             appBundleID: descriptor.bundleID,
             pushToken: deviceToken.map { String(format: "%02x", $0) }.joined(),
-            pushEnvironment: descriptor.environment
+            pushEnvironment: descriptor.environment,
+            capabilities: descriptor.capabilities
         )
         do {
             let device = try await api.registerDevice(
