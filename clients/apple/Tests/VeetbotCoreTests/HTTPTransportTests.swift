@@ -781,6 +781,156 @@ import Testing
     }
 
     @Test
+    func testDeviceChannelRoutesUseExactWireContract() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let deviceID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000801")
+        )
+        let invocationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000802")
+        )
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000803")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000804")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let path = request.url?.path ?? ""
+            let body: String
+            let statusCode: Int
+            switch (request.httpMethod, path) {
+            case ("GET", "/v1/devices/\(deviceID.uuidString)/invocations"):
+                statusCode = 200
+                body = """
+                    {"invocations":[{"id":"\(invocationID.uuidString)","tool_name":"send_sms","arguments":{"to":"+15551234567"},"created_at":"2026-08-31T00:00:00Z","expires_at":"2026-08-31T00:05:00Z"}]}
+                    """
+            case (
+                "POST",
+                "/v1/devices/\(deviceID.uuidString)/invocations/\(invocationID.uuidString)/result"
+            ):
+                statusCode = 200
+                body = """
+                    {"id":"\(invocationID.uuidString)","status":"sent","resolved_at":"2026-08-31T00:01:00Z"}
+                    """
+            case ("POST", "/v1/devices/\(deviceID.uuidString)/messages"):
+                statusCode = 202
+                body = """
+                    {"duplicate":false,"session_id":"\(sessionID.uuidString)","run_id":"\(runID.uuidString)"}
+                    """
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "") \(path)")
+                statusCode = 500
+                body = "{}"
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: statusCode,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        let pending = try await client.pendingInvocations(deviceID: deviceID)
+        #expect(pending.invocations.count == 1)
+        #expect(pending.invocations[0].id == invocationID)
+        #expect(pending.invocations[0].toolName == "send_sms")
+        #expect(pending.invocations[0].arguments["to"]?.stringValue == "+15551234567")
+
+        let resultView = try await client.postInvocationResult(
+            deviceID: deviceID,
+            invocationID: invocationID,
+            result: .sent
+        )
+        #expect(resultView.id == invocationID)
+        #expect(resultView.status == "sent")
+        #expect(resultView.resolvedAt != nil)
+
+        let receivedAt = Date(timeIntervalSince1970: 1_798_675_200)
+        let ingestResult = try await client.postDeviceMessage(
+            deviceID: deviceID,
+            channel: "sms",
+            sender: "+15550001111",
+            body: "hello",
+            receivedAt: receivedAt
+        )
+        #expect(ingestResult.duplicate == false)
+        #expect(ingestResult.sessionId == sessionID)
+        #expect(ingestResult.runId == runID)
+
+        let captured = lock.withLock { requests }
+        #expect(captured.map(\.httpMethod) == ["GET", "POST", "POST"])
+        #expect(captured[0].url?.path == "/v1/devices/\(deviceID.uuidString)/invocations")
+        #expect(
+            captured[1].url?.path
+                == "/v1/devices/\(deviceID.uuidString)/invocations/\(invocationID.uuidString)/result"
+        )
+        // The result body encodes exactly the one wire field the server accepts.
+        let resultJSON = try requestJSONObject(captured[1])
+        #expect(resultJSON as? [String: String] == ["status": "sent"])
+
+        #expect(captured[2].url?.path == "/v1/devices/\(deviceID.uuidString)/messages")
+        let messageJSON = try requestJSONObject(captured[2])
+        #expect(messageJSON["channel"] as? String == "sms")
+        #expect(messageJSON["sender"] as? String == "+15550001111")
+        #expect(messageJSON["body"] as? String == "hello")
+        let receivedAtString = try #require(messageJSON["received_at"] as? String)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        #expect(receivedAtString == formatter.string(from: receivedAt))
+    }
+
+    @Test
+    func testInvocationResultConflictIsATerminalErrorCallersMustNotRetry() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let deviceID = UUID()
+        let invocationID = UUID()
+        let lock = NSLock()
+        var requestCount = 0
+        StubURLProtocol.handler = { request in
+            lock.withLock { requestCount += 1 }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 409, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"conflict","message":"Invocation already resolved.","details":{},"request_id":"req-409"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        // Server contract: a 409 on the result post means the invocation row
+        // is already terminally settled server-side. Callers must never
+        // retry this route — that is why postInvocationResult takes no
+        // retryAttempts, unlike the digest-idempotent ingest post.
+        do {
+            _ = try await client.postInvocationResult(
+                deviceID: deviceID,
+                invocationID: invocationID,
+                result: .sent
+            )
+            Issue.record("expected a settled invocation to surface a conflict")
+        } catch HTTPTransportError.api(let apiError) {
+            #expect(apiError.code == .conflict)
+            #expect(apiError.statusCode == 409)
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+        #expect(lock.withLock { requestCount } == 1)
+    }
+
+    @Test
     func testListMemoriesSendsTheCeilingAndEachRepeatableFilterExactlyOnce() async throws {
         defer { StubURLProtocol.handler = nil }
         let sessionID = try #require(

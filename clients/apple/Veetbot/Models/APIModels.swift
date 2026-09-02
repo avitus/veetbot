@@ -914,3 +914,68 @@ public struct UpdatePersonaBody: Codable, Equatable, Sendable {
         self.entries = entries
     }
 }
+
+/// One pending device-scoped call, as the device's fetch route returns it
+/// (device-channel-and-sms.md). Mirrors the server's `DeviceInvocationView`.
+public struct DeviceInvocationView: Codable, Sendable, Equatable {
+    public let id: UUID
+    public let toolName: String
+    public let arguments: [String: JSONValue]
+    public let createdAt: Date
+    public let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, arguments
+        case toolName = "tool_name"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+}
+
+/// Everything one device still owes an answer for, oldest first. A device's
+/// pending queue is bounded by the invocation timeout rather than a page
+/// size, so this is a whole answer rather than a keyset page.
+public struct DeviceInvocationList: Codable, Sendable {
+    public let invocations: [DeviceInvocationView]
+}
+
+/// The recorded terminal state of one device-scoped call, as the server
+/// returns it after `postInvocationResult`. `status` stays a raw string here
+/// (not `DeviceInvocationResult`) so a value this client does not yet know
+/// about still decodes.
+public struct DeviceInvocationResultView: Codable, Sendable {
+    public let id: UUID
+    public let status: String
+    public let resolvedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case resolvedAt = "resolved_at"
+    }
+}
+
+/// Where one ingested device message was routed, and whether it was a
+/// replay of a message already seen (the ingest route is digest-idempotent).
+public struct DeviceIngestResult: Codable, Sendable {
+    public let duplicate: Bool
+    public let sessionId: UUID
+    public let runId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case duplicate
+        case sessionId = "session_id"
+        case runId = "run_id"
+    }
+}
+
+/// The single terminal outcome a device may post for one invocation. Four
+/// tokens, not three, and frozen: a client that watched its own deadline
+/// pass reports `expired` rather than inventing a `failed` the owner never
+/// saw. A 409 posting this means the invocation is already terminally
+/// settled server-side — callers must never retry.
+public enum DeviceInvocationResult: String, Codable, Sendable {
+    case sent
+    case cancelled
+    case failed
+    case expired
+}
