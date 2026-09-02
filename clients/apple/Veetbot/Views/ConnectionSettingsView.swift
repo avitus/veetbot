@@ -3,10 +3,21 @@ import SwiftUI
 enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case connection
     case websiteAccess
+    case smsIntegration
     case appearance
     case dataAndPrivacy
 
     var id: String { rawValue }
+
+    /// The sections this platform offers. Sending a text rides the phone's own
+    /// compose sheet, so the SMS integration exists only where that sheet does.
+    static var visibleCases: [ConnectionSettingsSection] {
+        #if os(iOS)
+        return allCases
+        #else
+        return allCases.filter { $0 != .smsIntegration }
+        #endif
+    }
 }
 
 struct ClientBuildIdentity: Equatable {
@@ -32,6 +43,9 @@ public struct ConnectionSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appearance: AppearancePreferences
+    #if os(iOS)
+    @EnvironmentObject private var smsIntegration: SmsIntegrationPreferences
+    #endif
     @State private var baseURL = ""
     @State private var token = ""
     @State private var isSaving = false
@@ -54,7 +68,7 @@ public struct ConnectionSettingsView: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    ForEach(ConnectionSettingsSection.allCases) { section in
+                    ForEach(ConnectionSettingsSection.visibleCases) { section in
                         sectionView(section)
                     }
                 }
@@ -276,6 +290,9 @@ public struct ConnectionSettingsView: View {
                 }
             }
 
+        case .smsIntegration:
+            smsIntegrationSection
+
         case .appearance:
             SettingsCard(
                 title: "Appearance",
@@ -363,6 +380,47 @@ public struct ConnectionSettingsView: View {
                 }
             }
         }
+    }
+
+    /// The owner's switch for the device SMS integration. Off by default, and
+    /// off means the device never declares the capability, so the tool never
+    /// registers (docs/plan/device-channel-and-sms.md).
+    @ViewBuilder
+    private var smsIntegrationSection: some View {
+        #if os(iOS)
+        SettingsCard(
+            title: "SMS Integration",
+            summary: "Let Veetbot prepare texts you send from this iPhone.",
+            systemImage: "message",
+            tint: AppTheme.turquoise
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                settingsField(
+                    title: "Send texts from this iPhone",
+                    help:
+                        "Veetbot opens the Messages compose sheet with the text prepared. Nothing is sent until you tap Send."
+                ) {
+                    Toggle(
+                        "Send texts from this iPhone",
+                        isOn: $smsIntegration.integrationEnabled
+                    )
+                    .labelsHidden()
+                    .accessibilityIdentifier("sms-integration.enabled")
+                    .onChange(of: smsIntegration.integrationEnabled) { _ in
+                        model.requestDeviceCapabilityRegistration()
+                    }
+                }
+                SettingsInfoRow(
+                    icon: "hand.tap.fill",
+                    title: "You approve every message",
+                    detail:
+                        "The recipient and the text appear in the system compose sheet before anything is sent."
+                )
+            }
+        }
+        #else
+        EmptyView()
+        #endif
     }
 
     private func settingsField<Content: View>(

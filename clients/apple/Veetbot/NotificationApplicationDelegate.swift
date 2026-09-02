@@ -9,8 +9,16 @@ import AppKit
 #endif
 
 @MainActor
-class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotificationCenterDelegate {
+class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotificationCenterDelegate,
+    PushRegistrationRequesting
+{
+    /// The category a `device_invocation` push carries. It registers no
+    /// actions: the owner opens the app and the compose sheet, and the send
+    /// itself is the system's own confirmation.
+    static let deviceInvocationCategoryIdentifier = "DEVICE_INVOCATION"
+
     private weak var model: ChatViewModel?
+    private var smsPreferences: SmsIntegrationPreferences?
     private var configuredSubscription: AnyCancellable?
     private var requestedServer: URL?
     private var pendingResponsePayloads: [NotificationPushPayload] = []
@@ -30,7 +38,12 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
         super.init()
     }
 
-    func attach(to model: ChatViewModel) {
+    func attach(
+        to model: ChatViewModel,
+        smsPreferences: SmsIntegrationPreferences? = nil
+    ) {
+        if let smsPreferences { self.smsPreferences = smsPreferences }
+        model.pushRegistrar = self
         guard self.model !== model else { return }
         self.model = model
         let pending = pendingResponsePayloads
@@ -56,6 +69,16 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
         guard remoteRegistrationEnabled else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        #if os(iOS)
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Self.deviceInvocationCategoryIdentifier,
+                actions: [],
+                intentIdentifiers: [],
+                options: []
+            )
+        ])
+        #endif
         Task { [weak self] in
             do {
                 let granted = try await center.requestAuthorization(
@@ -77,9 +100,23 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
         #endif
     }
 
+    /// Asks the operating system for the push token again. The owner flipping
+    /// a capability lands here, and the redelivered token re-registers the
+    /// device with the capability set it now declares.
+    func requestPushRegistration() {
+        guard remoteRegistrationEnabled else { return }
+        registerWithOperatingSystem()
+    }
+
+    /// This device as the next registration will describe it, including the
+    /// capabilities the owner has switched on.
+    func registrationDescriptor() -> AppleDeviceDescriptor {
+        AppleDeviceDescriptor.current(capabilities: smsPreferences?.declaredCapabilities ?? [])
+    }
+
     func received(deviceToken: Data) {
         guard let model else { return }
-        let descriptor = AppleDeviceDescriptor.current
+        let descriptor = registrationDescriptor()
         Task {
             await model.registerRemoteNotifications(
                 deviceToken: deviceToken,

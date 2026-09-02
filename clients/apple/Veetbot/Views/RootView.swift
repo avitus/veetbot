@@ -7,10 +7,12 @@ import AppKit
 struct VeetbotSceneRoot: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject var appearance: AppearancePreferences
+    @ObservedObject var smsIntegration: SmsIntegrationPreferences
 
     var body: some View {
         RootView(model: model)
             .environmentObject(appearance)
+            .environmentObject(smsIntegration)
             .appTypography(appearance)
             .tint(AppTheme.turquoise)
         #if os(macOS)
@@ -27,6 +29,9 @@ public struct RootView: View {
     #endif
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appearance: AppearancePreferences
+    #if os(iOS)
+    @EnvironmentObject private var smsIntegration: SmsIntegrationPreferences
+    #endif
     #if os(macOS)
     @StateObject private var settingsWindowPresenter = SettingsWindowPresenter()
     #endif
@@ -46,6 +51,32 @@ public struct RootView: View {
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
             ConnectionSettingsView(model: model, embedded: false)
+        }
+        #endif
+        #if os(iOS)
+        .sheet(item: composedInvocation) { invocation in
+            SmsComposeSheet(invocation: invocation) { result in
+                Task {
+                    await model.completeSmsInvocation(
+                        invocation,
+                        with: DeviceInvocationResult(composeResult: result)
+                    )
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: model.pendingSmsInvocation) { invocation in
+            guard
+                case .unsupported(let unsupported) = SmsInvocationDisposition.resolve(
+                    invocation,
+                    canSendText: SmsComposeSheet.canSend
+                )
+            else { return }
+            Task { await model.completeSmsInvocation(unsupported, with: .failed) }
+        }
+        .task(id: smsRecoveryKey) {
+            guard scenePhase == .active, smsIntegration.integrationEnabled else { return }
+            await model.refreshPendingSmsInvocations()
         }
         #endif
         .onChange(of: model.requiresReauthentication) { required in
@@ -122,6 +153,45 @@ public struct RootView: View {
         horizontalSizeClass == .regular
         #endif
     }
+
+    #if os(iOS)
+    /// The invocation the compose sheet should show. Dismissing the sheet by
+    /// hand never reaches the compose delegate, so that path posts the
+    /// cancellation the server is still waiting for.
+    private var composedInvocation: Binding<SmsInvocation?> {
+        Binding(
+            get: {
+                guard
+                    case .compose(let invocation) = SmsInvocationDisposition.resolve(
+                        model.pendingSmsInvocation,
+                        canSendText: SmsComposeSheet.canSend
+                    )
+                else { return nil }
+                return invocation
+            },
+            set: { newValue in
+                guard newValue == nil, let presented = model.pendingSmsInvocation else { return }
+                Task { await model.completeSmsInvocation(presented, with: .cancelled) }
+            }
+        )
+    }
+
+    /// Re-runs the recovery fetch when the app comes forward, when the owner
+    /// switches the integration on, and once this device knows its own id.
+    private struct SmsRecoveryKey: Equatable {
+        let deviceID: UUID?
+        let isActive: Bool
+        let isEnabled: Bool
+    }
+
+    private var smsRecoveryKey: SmsRecoveryKey {
+        SmsRecoveryKey(
+            deviceID: model.registeredDeviceID,
+            isActive: scenePhase == .active,
+            isEnabled: smsIntegration.integrationEnabled
+        )
+    }
+    #endif
 }
 
 enum SessionSidebarDestination: Hashable, Sendable {

@@ -42,8 +42,12 @@ public struct AppleDeviceDescriptor: Equatable, Sendable {
         self.capabilities = capabilities
     }
 
+    /// This device as the server should see it, declaring whichever
+    /// device-scoped capabilities the owner has switched on. The capability
+    /// set rides into the registration digest, so a change re-registers rather
+    /// than replaying the previous body.
     @MainActor
-    public static var current: AppleDeviceDescriptor {
+    public static func current(capabilities: [String] = []) -> AppleDeviceDescriptor {
         #if os(iOS)
         let name = UIDevice.current.name
         let kind = DeviceKind.mobile
@@ -63,7 +67,8 @@ public struct AppleDeviceDescriptor: Equatable, Sendable {
             kind: kind,
             platform: platform,
             bundleID: Bundle.main.bundleIdentifier ?? "com.veetbot.apple",
-            environment: environment
+            environment: environment,
+            capabilities: capabilities
         )
     }
 }

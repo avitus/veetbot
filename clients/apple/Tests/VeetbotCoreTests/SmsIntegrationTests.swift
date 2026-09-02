@@ -87,6 +87,84 @@ import Testing
         #expect(reloaded.integrationEnabled == true)
         #expect(reloaded.declaredCapabilities == ["device.sms.send"])
     }
+
+    @Test
+    func testTheLiveRegistrationDeclaresWhicheverCapabilitiesTheOwnerEnabled() throws {
+        let preferences = try isolatedPreferences()
+        let model = try unconfiguredModel()
+        let delegate = NotificationApplicationDelegateBase(remoteRegistrationEnabled: false)
+
+        delegate.attach(to: model, smsPreferences: preferences)
+
+        #expect(delegate.registrationDescriptor().capabilities == [])
+        preferences.integrationEnabled = true
+        #expect(delegate.registrationDescriptor().capabilities == ["device.sms.send"])
+        #expect(model.pushRegistrar === delegate)
+    }
+
+    @Test
+    func testFlippingTheSettingAsksForAFreshTokenSoRegistrationRepeats() throws {
+        let model = try unconfiguredModel()
+        let registrar = RecordingPushRegistrar()
+        model.pushRegistrar = registrar
+
+        model.requestDeviceCapabilityRegistration()
+        model.requestDeviceCapabilityRegistration()
+
+        #expect(registrar.requestCount == 2)
+    }
+
+    @Test
+    func testTheSettingsToggleAndComposeSheetAreWiredIntoTheOwnersSurfaces() throws {
+        let settings = try clientSource("Veetbot/Views/ConnectionSettingsView.swift")
+        let root = try clientSource("Veetbot/Views/RootView.swift")
+
+        #expect(settings.contains("Toggle("))
+        #expect(settings.contains("isOn: $smsIntegration.integrationEnabled"))
+        #expect(settings.contains(#".accessibilityIdentifier("sms-integration.enabled")"#))
+        #expect(settings.contains("model.requestDeviceCapabilityRegistration()"))
+        #expect(root.contains("SmsComposeSheet(invocation:"))
+        #expect(root.contains("await model.completeSmsInvocation("))
+        #expect(root.contains("await model.refreshPendingSmsInvocations()"))
+    }
+
+    private func isolatedPreferences() throws -> SmsIntegrationPreferences {
+        let suiteName = "SmsIntegrationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return SmsIntegrationPreferences(defaults: defaults)
+    }
+
+    private func unconfiguredModel() throws -> ChatViewModel {
+        let suiteName = "SmsIntegrationTests.model.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore()
+        )
+    }
+
+    private func clientSource(_ relativePath: String) throws -> String {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: packageRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+}
+
+@MainActor
+private final class RecordingPushRegistrar: PushRegistrationRequesting {
+    private(set) var requestCount = 0
+
+    func requestPushRegistration() {
+        requestCount += 1
+    }
 }
 
 private actor CapturingDeviceRegistrationAPI: DeviceRegistrationAPI {
