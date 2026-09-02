@@ -661,6 +661,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "apple-signing-smoke",
         "apple-testflight",
         "live",
         "package-release",
@@ -671,7 +672,7 @@ def test_ci_has_the_required_partitions() -> None:
         if name == "sandbox":
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
-        if name in {"apple", "apple-testflight"}:
+        if name in {"apple", "apple-signing-smoke", "apple-testflight"}:
             assert job["macos"]["xcode"] == "26.6.0"
             if name == "apple":
                 assert job["macos"] == {"xcode": "26.6.0"}
@@ -711,10 +712,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple" in commands["apple"]
     assert "make test-apple-ui" in commands["apple"]
     testflight_job = jobs["apple-testflight"]
-    assert testflight_job["macos"]["code_signing"] == [
-        "veetbot-app-store",
-        "veetbot-mac-installer",
-    ]
+    assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
     xcode_project = (
         ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj"
@@ -726,16 +724,12 @@ def test_ci_has_the_required_partitions() -> None:
     assert "plutil -insert teamID" not in testflight_command
     assert "DEVELOPMENT_TEAM=" not in testflight_command
     assert any(
-        'apple_build_number="<< pipeline.number >>"' in command
-        and 'CURRENT_PROJECT_VERSION="$apple_build_number"' in command
-        and '-destination "generic/platform=macOS"' in command
-        and "xcodebuild archive" in command
-        and "codesign --verify --deep --strict" in command
+        'APPLE_BUILD_NUMBER="<< pipeline.number >>"' in command
+        and "scripts/build_macos_testflight_package.sh" in command
         for command in commands["apple-testflight"]
     )
     assert any(
-        "productbuild" in command
-        and "xcrun altool --upload-app" in command
+        "xcrun altool --upload-app" in command
         and "APP_STORE_CONNECT_API_KEY_BASE64" in command
         and "APP_STORE_CONNECT_API_KEY_ID" in command
         and "APP_STORE_CONNECT_ISSUER_ID" in command
@@ -803,9 +797,15 @@ def test_ci_has_the_required_partitions() -> None:
     verify = workflows["verify"]
     assert verify["unless"] == "<< pipeline.parameters.run_live >>"
     assert verify["jobs"][:5] == ["static", "contract", "integration", "sandbox", "apple"]
+    assert verify["jobs"][5] == {
+        "apple-signing-smoke": {
+            "context": "veetbot-apple-signing",
+            "filters": {"branches": {"only": "dev"}},
+        }
+    }
     delivery_jobs = {
         next(iter(job)): next(iter(job.values()))
-        for job in verify["jobs"][5:]
+        for job in verify["jobs"][6:]
         if isinstance(job, dict)
     }
     assert set(delivery_jobs) == {
@@ -832,7 +832,10 @@ def test_ci_has_the_required_partitions() -> None:
         "<< pipeline.project.slug >>/veetbot-production"
     )
     assert delivery_jobs["apple-testflight"]["requires"] == ["deploy-app"]
-    assert delivery_jobs["apple-testflight"]["context"] == "veetbot-apple-testflight"
+    assert delivery_jobs["apple-testflight"]["context"] == [
+        "veetbot-apple-signing",
+        "veetbot-apple-testflight",
+    ]
     assert delivery_jobs["apple-testflight"]["serial-group"] == (
         "<< pipeline.project.slug >>/veetbot-apple-testflight"
     )
@@ -854,13 +857,8 @@ def test_ci_has_the_required_partitions() -> None:
 
 
 def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
-    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
-    archive_command = next(
-        step["run"]["command"]
-        for step in config["jobs"]["apple-testflight"]["steps"]
-        if isinstance(step, dict)
-        and "run" in step
-        and "xcodebuild archive" in step["run"]["command"]
+    archive_command = (ROOT / "scripts" / "build_macos_testflight_package.sh").read_text(
+        encoding="utf-8"
     )
 
     assert "CODE_SIGN_STYLE=Manual" in archive_command
@@ -875,30 +873,62 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
 
 def test_testflight_upload_builds_package_directly_before_using_altool() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    package_command = (ROOT / "scripts" / "build_macos_testflight_package.sh").read_text(
+        encoding="utf-8"
+    )
+    package_step = next(
+        step["run"]
+        for step in config["jobs"]["apple-testflight"]["steps"]
+        if isinstance(step, dict)
+        and "run" in step
+        and "scripts/build_macos_testflight_package.sh" in step["run"]["command"]
+    )
     upload_step = next(
         step["run"]
         for step in config["jobs"]["apple-testflight"]["steps"]
         if isinstance(step, dict)
         and "run" in step
-        and "xcodebuild archive" in step["run"]["command"]
+        and "xcrun altool --upload-app" in step["run"]["command"]
     )
 
     upload_command = upload_step["command"]
+    assert "no_output_timeout" not in package_step
     assert "no_output_timeout" not in upload_step
-    assert "xcodebuild -exportArchive" not in upload_command
-    assert "-allowProvisioningUpdates" not in upload_command
-    assert "-authenticationKeyPath" not in upload_command
-    assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in upload_command
-    assert "productbuild \\" in upload_command
-    assert '--sign "$installer_certificate_sha1"' in upload_command
-    assert '--component "$app_path" /Applications' in upload_command
+    assert "xcodebuild -exportArchive" not in package_command
+    assert "-allowProvisioningUpdates" not in package_command
+    assert "-authenticationKeyPath" not in package_command
+    assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in package_command
+    assert "APPLE_INSTALLER_CERTIFICATE_BASE64:?" in package_command
+    assert "APPLE_INSTALLER_CERTIFICATE_PASSWORD:?" in package_command
+    assert 'installer_certificate="$packaging_root/installer.p12"' in package_command
+    assert "printf '%s' \"$APPLE_INSTALLER_CERTIFICATE_BASE64\"" in package_command
+    assert 'base64 --decode > "$installer_certificate"' in package_command
+    assert "security list-keychains -d user" not in package_command
+    assert "circleci-signing.keychain-db" not in package_command
+    assert "security export" not in package_command
+    assert "security create-keychain" in package_command
+    assert "security import" in package_command
+    assert '-P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD"' in package_command
+    assert "unset APPLE_INSTALLER_CERTIFICATE_BASE64" in package_command
+    assert "unset APPLE_INSTALLER_CERTIFICATE_PASSWORD" in package_command
+    assert "security set-key-partition-list -S apple-tool:,apple:,codesign:" in package_command
+    assert '-s -k "$packaging_keychain_passphrase" "$packaging_keychain"' in package_command
+    assert "security delete-keychain" in package_command
+    assert 'rm -f -- "$installer_certificate" "$packaging_keychain"' in package_command
+    assert "productbuild \\" in package_command
+    assert '--sign "$installer_certificate_sha1"' in package_command
+    assert '--keychain "$packaging_keychain"' in package_command
+    assert '--component "$app_path" /Applications' in package_command
+    assert 'test -s "$pkg_path"' in package_command
+    assert 'pkgutil --check-signature "$pkg_path"' in package_command
+    assert "xcrun altool --upload-app" not in package_command
+    assert 'pkg_path="build/testflight/Veetbot.pkg"' in upload_command
     assert 'test -s "$pkg_path"' in upload_command
-    assert 'pkgutil --check-signature "$pkg_path"' in upload_command
+    assert "$testflight_dir" not in upload_command
     assert "xcrun altool --upload-app" in upload_command
-    assert upload_command.index("productbuild") < upload_command.index("pkgutil --check-signature")
-    assert upload_command.index("pkgutil --check-signature") < upload_command.index(
-        "xcrun altool --upload-app"
-    )
+    productbuild_index = package_command.rindex("\nproductbuild \\")
+    assert package_command.index("security set-key-partition-list") < productbuild_index
+    assert productbuild_index < package_command.index("pkgutil --check-signature")
     assert '--file "$pkg_path"' in upload_command
     assert "--type macos" in upload_command
     assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
@@ -906,6 +936,63 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert '--p8-file-path "$asc_auth_file"' in upload_command
     assert "--show-progress" in upload_command
     assert "--verbose" in upload_command
+
+
+def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    jobs = config["jobs"]
+    smoke_job = jobs["apple-signing-smoke"]
+
+    assert smoke_job["macos"] == {
+        "xcode": "26.6.0",
+        "code_signing": ["veetbot-app-store"],
+    }
+    assert smoke_job["resource_class"] == "m4pro.medium"
+    assert "install_signing_bundle" in smoke_job["steps"]
+    smoke_command = "\n".join(
+        step["run"]["command"]
+        for step in smoke_job["steps"]
+        if isinstance(step, dict) and "run" in step
+    )
+    assert 'APPLE_BUILD_NUMBER="<< pipeline.number >>"' in smoke_command
+    assert "scripts/build_macos_testflight_package.sh" in smoke_command
+    assert "APP_STORE_CONNECT" not in smoke_command
+    assert "altool" not in smoke_command
+
+    verify_jobs = config["workflows"]["verify"]["jobs"]
+    smoke_invocation = next(
+        invocation["apple-signing-smoke"]
+        for invocation in verify_jobs
+        if isinstance(invocation, dict) and "apple-signing-smoke" in invocation
+    )
+    assert smoke_invocation == {
+        "context": "veetbot-apple-signing",
+        "filters": {"branches": {"only": "dev"}},
+    }
+    assert "Diagnose the managed signing handoff" not in {
+        step["run"]["name"]
+        for step in smoke_job["steps"]
+        if isinstance(step, dict) and "run" in step
+    }
+
+    production_command = "\n".join(
+        step["run"]["command"]
+        for step in jobs["apple-testflight"]["steps"]
+        if isinstance(step, dict) and "run" in step
+    )
+    assert "scripts/build_macos_testflight_package.sh" in production_command
+    assert "xcrun altool --upload-app" in production_command
+
+    package_script_path = ROOT / "scripts" / "build_macos_testflight_package.sh"
+    assert os.access(package_script_path, os.X_OK)
+    subprocess.run(["bash", "-n", package_script_path], check=True)
+    package_script = package_script_path.read_text(encoding="utf-8")
+    assert "xcodebuild archive" in package_script
+    assert "security set-key-partition-list" in package_script
+    assert "productbuild" in package_script
+    assert "pkgutil --check-signature" in package_script
+    assert "APP_STORE_CONNECT" not in package_script
+    assert "altool" not in package_script
 
 
 def test_mkdocs_site_has_its_public_origin() -> None:

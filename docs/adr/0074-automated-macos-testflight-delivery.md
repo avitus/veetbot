@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-26
+- **Amended:** 2026-09-01 — isolate the installer identity after the managed
+  signing keychain proved unusable by headless `productbuild`
 - **Related:** ADR-0025, ADR-0035, ADR-0048, ADR-0049, ADR-0062
 - **User authorization:** add a CircleCI archive and upload job after enabling
   the macOS build in TestFlight
@@ -43,14 +45,21 @@ shared with an Apple publication job.
    number to equal the pipeline number and the bundle identifier to equal
    `com.veetbot.apple`, and verifies the code signature. Any mismatch fails
    before external publication.
-4. CircleCI's managed signing facility owns the `Apple Distribution` identity
-   and macOS App Store provisioning profile in a signing bundle named
-   `veetbot-app-store`, plus the `Mac Installer Distribution` identity required
-   to sign the App Store package in `veetbot-mac-installer`. The job invokes
-   `install_signing_bundle` for both; certificate and profile bytes never become
-   repository variables or workspace artifacts.
+4. CircleCI's managed signing facility owns only the `Apple Distribution`
+   identity and macOS App Store provisioning profile in a signing bundle named
+   `veetbot-app-store`. A dedicated restricted context,
+   `veetbot-apple-signing`, owns the password-protected `Mac Installer
+   Distribution` PKCS#12 and its password. Both signing jobs decode that
+   identity only into a mode-restricted temporary directory, import it into a
+   fresh random-password keychain, grant the imported private key the
+   `apple-tool:`, `apple:`, and `codesign:` partitions, and delete the decoded
+   PKCS#12 and keychain on every exit. `productbuild` receives that exact
+   keychain explicitly. This replaces the managed installer bundle because
+   CircleCI exposes neither the managed keychain password nor the source
+   PKCS#12, and macOS blocks both `productbuild` key access and identity export
+   behind an unavailable GUI prompt.
 5. The non-secret Apple team ID remains authoritative in the checked-in Xcode
-   project. The archive uses that Release build setting. A separate restricted
+   project. The archive uses that Release build setting. A second restricted
    context, `veetbot-apple-testflight`, supplies only the App Store Connect API
    key's base64-encoded private key, key ID, and issuer ID. The private key is
    decoded under a process-local temporary directory with mode-restricting
@@ -69,7 +78,17 @@ shared with an Apple publication job.
 7. Apple delivery has its own CircleCI serial group. A newer `main` pipeline
    cannot race an older upload, and the Apple signing authority is not coupled
    to the production host's serial group or context.
-8. The owner must configure automatic distribution for the intended TestFlight
+8. A non-publishing `apple-signing-smoke` job runs only on the trusted `dev`
+   branch before the final release pull request. It installs the application
+   signing bundle, receives `veetbot-apple-signing`, and invokes the same
+   repository-owned archive and package script as `apple-testflight`, including
+   application and package signature verification. It receives no App Store
+   Connect context or API key, invokes no upload tool, and retains no artifact.
+   A passing smoke therefore proves the real managed application-signing,
+   isolated installer-keychain, and `productbuild` path without granting Apple
+   API publication authority; `dev` write access remains signing authority and
+   must be restricted accordingly.
+9. The owner must configure automatic distribution for the intended TestFlight
    group and enable automatic updates in TestFlight on each Mac. Those user and
    App Store Connect settings are prerequisites outside the repository; the app
    cannot force them.
@@ -92,9 +111,16 @@ gate.
   must inspect App Store Connect rather than publishing a different untested
   identity from that rerun.
 - Context access, signing-bundle access, branch protection, and review of this
-  job are release-signing security controls. Compromise of either Apple
-  credential boundary can publish a trusted binary even though it grants no
-  production-host or agent credential.
+  job are release-signing security controls. The installer context is restricted
+  to this project, `dev` or `main`, non-SSH jobs, and version-controlled
+  configuration; the App Store Connect context remains restricted to the
+  `main` publication path. Compromise of either Apple credential boundary can
+  publish a trusted binary even though it grants no production-host or agent
+  credential.
+- The trusted `dev` branch can exercise the distribution identities before
+  merge, but cannot upload through the smoke job. This is a deliberate expansion
+  of signing-key exposure that replaces production deployments as the first
+  integration test of the managed keychain.
 - External setup is intentionally fail-closed. Until the signing bundle and
   restricted context exist, the `main` delivery workflow cannot report success.
 
@@ -102,9 +128,11 @@ gate.
 
 - **Continue manual Organizer uploads:** rejected because it does not connect a
   tested `main` revision to the build installed by TestFlight.
-- **Store the distribution certificate and provisioning profile as ordinary
-  environment variables:** rejected in favor of CircleCI's managed, ephemeral
-  signing bundle.
+- **Store both distribution identities in ordinary project variables or one
+  publication context:** rejected. The application identity and profile remain
+  in CircleCI's managed signing bundle; the installer identity uses its own
+  project-, branch-, SSH-, and configuration-source-restricted context because
+  only that job-owned import permits deterministic headless key access.
 - **Use Xcode Cloud:** viable, but rejected because it creates a second CI
   authority beside the repository's required CircleCI workflow.
 - **Add Fastlane:** rejected because Apple's native `xcodebuild`, `productbuild`,
