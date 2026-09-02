@@ -55,13 +55,16 @@ shared with an Apple publication job.
    `veetbot-apple-testflight`, supplies only the App Store Connect API key's
    base64-encoded private key, key ID, and issuer ID. The private key is decoded
    under a process-local temporary directory with mode-restricting umask,
-   passed directly to `xcodebuild`, and deleted on every shell exit. The archive
+   passed directly to `altool`, and deleted on every shell exit. The archive
    is not stored as a CircleCI artifact.
-6. `xcodebuild -exportArchive` uses `app-store-connect` with `destination=upload`
-   and API-key authentication. Xcode's accepted upload is the CI success
-   boundary. Apple's later processing, TestFlight group assignment, and device
-   installation remain observable external states rather than claims made by
-   this job.
+6. `xcodebuild -exportArchive` uses `app-store-connect` with
+   `destination=export` to create exactly one non-empty signed installer
+   package without an App Store Connect session. The job then invokes the
+   Xcode-bundled `xcrun altool --upload-app` with the package, API key ID,
+   issuer ID, and temporary private-key file. `altool` upload acceptance is the
+   CI success boundary. Apple's later processing, TestFlight group assignment,
+   and device installation remain observable external states rather than
+   claims made by this job.
 7. Apple delivery has its own CircleCI serial group. A newer `main` pipeline
    cannot race an older upload, and the Apple signing authority is not coupled
    to the production host's serial group or context.
@@ -104,7 +107,8 @@ gate.
 - **Use Xcode Cloud:** viable, but rejected because it creates a second CI
   authority beside the repository's required CircleCI workflow.
 - **Add Fastlane:** rejected because native `xcodebuild` and CircleCI signing
-  satisfy this delivery without a new runtime or package dependency.
+  plus Apple's Xcode-bundled `altool` satisfy this delivery without a new
+  runtime or package dependency.
 - **Upload before the server deploys:** rejected because automatic installation
   could expose a client that expects an API revision not yet active.
 - **Path-filter Apple uploads:** deferred. The existing production delivery is

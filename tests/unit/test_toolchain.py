@@ -884,7 +884,7 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
     assert "Veetbot Mac App Store" in archive_command
 
 
-def test_testflight_upload_allows_for_app_store_connect_processing() -> None:
+def test_testflight_upload_exports_package_before_using_altool() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
     upload_step = next(
         step["run"]
@@ -894,7 +894,21 @@ def test_testflight_upload_allows_for_app_store_connect_processing() -> None:
         and "xcodebuild -exportArchive" in step["run"]["command"]
     )
 
-    assert upload_step["no_output_timeout"] == "30m"
+    upload_command = upload_step["command"]
+    assert "no_output_timeout" not in upload_step
+    assert 'plutil -insert destination -string export "$export_options"' in upload_command
+    assert "-allowProvisioningUpdates" not in upload_command
+    assert "-authenticationKeyPath" not in upload_command
+    assert 'packages=("$export_path"/*.pkg)' in upload_command
+    assert 'test "${#packages[@]}" -eq 1' in upload_command
+    assert "xcrun altool --upload-app" in upload_command
+    assert '--file "$pkg_path"' in upload_command
+    assert "--type macos" in upload_command
+    assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
+    assert '--apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"' in upload_command
+    assert '--p8-file-path "$asc_auth_file"' in upload_command
+    assert "--show-progress" in upload_command
+    assert "--verbose" in upload_command
 
 
 def test_mkdocs_site_has_its_public_origin() -> None:
