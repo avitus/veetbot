@@ -958,13 +958,13 @@ public struct DeviceInvocationResultView: Codable, Sendable {
 /// replay of a message already seen (the ingest route is digest-idempotent).
 public struct DeviceIngestResult: Codable, Sendable {
     public let duplicate: Bool
-    public let sessionId: UUID
-    public let runId: UUID
+    public let sessionID: UUID
+    public let runID: UUID
 
     enum CodingKeys: String, CodingKey {
         case duplicate
-        case sessionId = "session_id"
-        case runId = "run_id"
+        case sessionID = "session_id"
+        case runID = "run_id"
     }
 }
 

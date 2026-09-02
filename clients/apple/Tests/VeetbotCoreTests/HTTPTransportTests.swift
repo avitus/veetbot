@@ -862,8 +862,8 @@ import Testing
             receivedAt: receivedAt
         )
         #expect(ingestResult.duplicate == false)
-        #expect(ingestResult.sessionId == sessionID)
-        #expect(ingestResult.runId == runID)
+        #expect(ingestResult.sessionID == sessionID)
+        #expect(ingestResult.runID == runID)
 
         let captured = lock.withLock { requests }
         #expect(captured.map(\.httpMethod) == ["GET", "POST", "POST"])
