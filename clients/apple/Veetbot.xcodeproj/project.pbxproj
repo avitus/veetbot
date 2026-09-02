@@ -50,6 +50,7 @@
 		10000000000000000000002A /* SmsIntegrationPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SmsIntegrationPreferences.swift */; };
 		10000000000000000000002B /* DeviceInvocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* DeviceInvocationService.swift */; };
 		10000000000000000000002C /* SmsComposeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* SmsComposeSheet.swift */; };
+		10000000000000000000002D /* ForwardMessageIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* ForwardMessageIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +109,7 @@
 		20000000000000000000002B /* SmsIntegrationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsIntegrationPreferences.swift; sourceTree = "<group>"; };
 		20000000000000000000002C /* DeviceInvocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInvocationService.swift; sourceTree = "<group>"; };
 		20000000000000000000002D /* SmsComposeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsComposeSheet.swift; sourceTree = "<group>"; };
+		20000000000000000000002E /* ForwardMessageIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardMessageIntent.swift; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A520 /* Veetbot.macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.macOS.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -153,6 +155,7 @@
 				400000000000000000000009 /* Resources */,
 				200000000000000000000022 /* NotificationApplicationDelegate.swift */,
 				20000000000000000000001C /* ConversationNavigationUITestFixture.swift */,
+				20000000000000000000002E /* ForwardMessageIntent.swift */,
 				200000000000000000000016 /* VeetbotApp.swift */,
 			);
 			path = Veetbot;
@@ -402,6 +405,7 @@
 				100000000000000000000015 /* RootView.swift in Sources */,
 				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */,
+				10000000000000000000002D /* ForwardMessageIntent.swift in Sources */,
 				100000000000000000000016 /* VeetbotApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
