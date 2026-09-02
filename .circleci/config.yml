@@ -114,7 +114,6 @@ jobs:
       xcode: "26.6.0"
       code_signing:
         - veetbot-app-store
-        - veetbot-mac-installer
     resource_class: m4pro.medium
     steps:
       - install_signing_bundle
@@ -163,24 +162,10 @@ jobs:
       xcode: "26.6.0"
       code_signing:
         - veetbot-app-store
-        - veetbot-mac-installer
     resource_class: m4pro.medium
     steps:
       - install_signing_bundle
       - checkout
-      - run:
-          name: Diagnose the managed signing handoff
-          command: |
-            set -euo pipefail
-            echo "Signing-related exported variable names:"
-            compgen -e \
-              | LC_ALL=C sort \
-              | grep -Ei '(^|_)(CERT|KEYCHAIN|P12|SIGNING)(_|$)' \
-              || echo "(none)"
-            echo "Temporary PKCS#12 file paths:"
-            find /tmp "${TMPDIR:-/tmp}" -type f -iname '*.p12' -print 2>/dev/null \
-              | LC_ALL=C sort -u \
-              || true
       - run:
           name: Build and verify the signed macOS TestFlight package
           command: |
@@ -413,6 +398,7 @@ workflows:
       - sandbox
       - apple
       - apple-signing-smoke:
+          context: veetbot-apple-signing
           filters:
             branches:
               only: dev
@@ -443,7 +429,9 @@ workflows:
             branches:
               only: main
       - apple-testflight:
-          context: veetbot-apple-testflight
+          context:
+            - veetbot-apple-signing
+            - veetbot-apple-testflight
           serial-group: << pipeline.project.slug >>/veetbot-apple-testflight
           requires:
             - deploy-app

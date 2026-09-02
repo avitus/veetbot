@@ -712,10 +712,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple" in commands["apple"]
     assert "make test-apple-ui" in commands["apple"]
     testflight_job = jobs["apple-testflight"]
-    assert testflight_job["macos"]["code_signing"] == [
-        "veetbot-app-store",
-        "veetbot-mac-installer",
-    ]
+    assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
     xcode_project = (
         ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj"
@@ -800,7 +797,12 @@ def test_ci_has_the_required_partitions() -> None:
     verify = workflows["verify"]
     assert verify["unless"] == "<< pipeline.parameters.run_live >>"
     assert verify["jobs"][:5] == ["static", "contract", "integration", "sandbox", "apple"]
-    assert verify["jobs"][5] == {"apple-signing-smoke": {"filters": {"branches": {"only": "dev"}}}}
+    assert verify["jobs"][5] == {
+        "apple-signing-smoke": {
+            "context": "veetbot-apple-signing",
+            "filters": {"branches": {"only": "dev"}},
+        }
+    }
     delivery_jobs = {
         next(iter(job)): next(iter(job.values()))
         for job in verify["jobs"][6:]
@@ -830,7 +832,10 @@ def test_ci_has_the_required_partitions() -> None:
         "<< pipeline.project.slug >>/veetbot-production"
     )
     assert delivery_jobs["apple-testflight"]["requires"] == ["deploy-app"]
-    assert delivery_jobs["apple-testflight"]["context"] == "veetbot-apple-testflight"
+    assert delivery_jobs["apple-testflight"]["context"] == [
+        "veetbot-apple-signing",
+        "veetbot-apple-testflight",
+    ]
     assert delivery_jobs["apple-testflight"]["serial-group"] == (
         "<< pipeline.project.slug >>/veetbot-apple-testflight"
     )
@@ -893,15 +898,23 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert "-allowProvisioningUpdates" not in package_command
     assert "-authenticationKeyPath" not in package_command
     assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in package_command
-    assert "security list-keychains -d user" in package_command
-    assert "circleci-signing.keychain-db" in package_command
-    assert "security export" in package_command
-    assert "-t identities -f pkcs12" in package_command
+    assert "APPLE_INSTALLER_CERTIFICATE_BASE64:?" in package_command
+    assert "APPLE_INSTALLER_CERTIFICATE_PASSWORD:?" in package_command
+    assert 'installer_certificate="$packaging_root/installer.p12"' in package_command
+    assert "printf '%s' \"$APPLE_INSTALLER_CERTIFICATE_BASE64\"" in package_command
+    assert 'base64 --decode > "$installer_certificate"' in package_command
+    assert "security list-keychains -d user" not in package_command
+    assert "circleci-signing.keychain-db" not in package_command
+    assert "security export" not in package_command
     assert "security create-keychain" in package_command
     assert "security import" in package_command
+    assert '-P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD"' in package_command
+    assert "unset APPLE_INSTALLER_CERTIFICATE_BASE64" in package_command
+    assert "unset APPLE_INSTALLER_CERTIFICATE_PASSWORD" in package_command
     assert "security set-key-partition-list -S apple-tool:,apple:,codesign:" in package_command
-    assert '-s -k "$packaging_keychain_password" "$packaging_keychain"' in package_command
+    assert '-s -k "$packaging_keychain_passphrase" "$packaging_keychain"' in package_command
     assert "security delete-keychain" in package_command
+    assert 'rm -f -- "$installer_certificate" "$packaging_keychain"' in package_command
     assert "productbuild \\" in package_command
     assert '--sign "$installer_certificate_sha1"' in package_command
     assert '--keychain "$packaging_keychain"' in package_command
@@ -932,7 +945,7 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
 
     assert smoke_job["macos"] == {
         "xcode": "26.6.0",
-        "code_signing": ["veetbot-app-store", "veetbot-mac-installer"],
+        "code_signing": ["veetbot-app-store"],
     }
     assert smoke_job["resource_class"] == "m4pro.medium"
     assert "install_signing_bundle" in smoke_job["steps"]
@@ -952,8 +965,15 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
         for invocation in verify_jobs
         if isinstance(invocation, dict) and "apple-signing-smoke" in invocation
     )
-    assert smoke_invocation == {"filters": {"branches": {"only": "dev"}}}
-    assert "context" not in smoke_invocation
+    assert smoke_invocation == {
+        "context": "veetbot-apple-signing",
+        "filters": {"branches": {"only": "dev"}},
+    }
+    assert "Diagnose the managed signing handoff" not in {
+        step["run"]["name"]
+        for step in smoke_job["steps"]
+        if isinstance(step, dict) and "run" in step
+    }
 
     production_command = "\n".join(
         step["run"]["command"]

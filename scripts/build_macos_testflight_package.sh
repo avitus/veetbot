@@ -3,6 +3,8 @@
 set -euo pipefail
 
 : "${APPLE_BUILD_NUMBER:?set APPLE_BUILD_NUMBER to the positive CircleCI pipeline number}"
+: "${APPLE_INSTALLER_CERTIFICATE_BASE64:?set APPLE_INSTALLER_CERTIFICATE_BASE64 in the veetbot-apple-signing context}"
+: "${APPLE_INSTALLER_CERTIFICATE_PASSWORD:?set APPLE_INSTALLER_CERTIFICATE_PASSWORD in the veetbot-apple-signing context}"
 [[ "$APPLE_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,17 +14,6 @@ testflight_dir="build/testflight"
 archive_path="$testflight_dir/Veetbot-macOS.xcarchive"
 pkg_path="$testflight_dir/Veetbot.pkg"
 mkdir -p "$testflight_dir"
-
-echo "Locating CircleCI's ephemeral signing keychain."
-signing_keychain="$(
-  security list-keychains -d user \
-    | tr -d '"' \
-    | awk '/\/circleci-signing\.keychain-db$/ {
-        sub(/^[[:space:]]+/, ""); print
-      }'
-)"
-[[ "$signing_keychain" == "$HOME/Library/Keychains/circleci-signing.keychain-db" ]]
-test -f "$signing_keychain"
 
 echo "Archiving macOS build $APPLE_BUILD_NUMBER with App Store distribution signing."
 xcodebuild archive \
@@ -50,59 +41,34 @@ codesign --verify --deep --strict --verbose=2 "$app_path"
 
 temporary_root="${TMPDIR:-/tmp}"
 packaging_root="$(mktemp -d "${temporary_root%/}/veetbot-package-signing.XXXXXX")"
-transferred_identities="$packaging_root/identities.p12"
+installer_certificate="$packaging_root/installer.p12"
 packaging_keychain="$packaging_root/veetbot-productbuild.keychain-db"
-transfer_password="$(uuidgen)$(uuidgen)"
-packaging_keychain_password="$(uuidgen)$(uuidgen)"
+packaging_keychain_passphrase="$(uuidgen)$(uuidgen)"
 cleanup_packaging_keychain() {
   security delete-keychain "$packaging_keychain" 2>/dev/null || true
-  rm -f -- "$transferred_identities" "$packaging_keychain"
+  rm -f -- "$installer_certificate" "$packaging_keychain"
   rmdir "$packaging_root" 2>/dev/null || true
 }
 trap cleanup_packaging_keychain EXIT
 umask 077
 
-export_identities_with_deadline() {
-  security export \
-    -k "$signing_keychain" \
-    -t identities -f pkcs12 \
-    -P "$transfer_password" \
-    -o "$transferred_identities" &
-  local export_pid=$!
-
-  local attempt
-  for attempt in {1..12}; do
-    if ! kill -0 "$export_pid" 2>/dev/null; then
-      wait "$export_pid"
-      return
-    fi
-    echo "Waiting for managed signing identity export (${attempt}/12)."
-    sleep 5
-  done
-
-  if kill -0 "$export_pid" 2>/dev/null; then
-    kill "$export_pid" 2>/dev/null || true
-    wait "$export_pid" 2>/dev/null || true
-    echo "Managed signing identity export required interaction after 60 seconds." >&2
-    return 1
-  fi
-  wait "$export_pid"
-}
-
-echo "Transferring the managed identities into an isolated packaging keychain."
-export_identities_with_deadline
-test -s "$transferred_identities"
-security create-keychain -p "$packaging_keychain_password" "$packaging_keychain"
+echo "Importing the installer identity into an isolated packaging keychain."
+printf '%s' "$APPLE_INSTALLER_CERTIFICATE_BASE64" \
+  | base64 --decode > "$installer_certificate"
+test -s "$installer_certificate"
+security create-keychain -p "$packaging_keychain_passphrase" "$packaging_keychain"
 security set-keychain-settings -lut 3600 "$packaging_keychain"
-security unlock-keychain -p "$packaging_keychain_password" "$packaging_keychain"
-security import "$transferred_identities" \
+security unlock-keychain -p "$packaging_keychain_passphrase" "$packaging_keychain"
+security import "$installer_certificate" \
   -k "$packaging_keychain" \
-  -P "$transfer_password" \
+  -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" \
   -T /usr/bin/codesign \
   -T /usr/bin/productbuild \
   -T /usr/bin/security
+unset APPLE_INSTALLER_CERTIFICATE_BASE64
+unset APPLE_INSTALLER_CERTIFICATE_PASSWORD
 security set-key-partition-list -S apple-tool:,apple:,codesign: \
-  -s -k "$packaging_keychain_password" "$packaging_keychain"
+  -s -k "$packaging_keychain_passphrase" "$packaging_keychain"
 
 installer_certificate_sha1="$(
   security find-certificate -a -c "3rd Party Mac Developer Installer" -Z \

@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-01 — TestFlight installer signing isolated
+
+- Replaced the unusable managed installer-signing bundle path with a dedicated,
+  project- and branch-restricted CircleCI context. Both the `dev` signing smoke
+  and `main` delivery import the password-protected installer identity into a
+  fresh random-password keychain, grant headless signing access to that key
+  only, verify the resulting package, and delete the decoded credential and
+  keychain on exit. App signing remains in CircleCI's managed
+  `veetbot-app-store` bundle, while App Store Connect upload authority remains
+  isolated in `veetbot-apple-testflight`.
+
 ## 2026-09-01 — Milestone 22 specified: the persona surface
 
 - Authorized and specified Milestone 22, the persona surface and curated

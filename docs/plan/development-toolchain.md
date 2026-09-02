@@ -320,20 +320,23 @@ selection, switching, and new-conversation navigation without a live server or
 credential. Release packaging depends on both additional gates.
 
 Job 7 is a pre-merge signing smoke, not a verification partition and not part of
-`make check`. On trusted `dev` pushes it installs the same two CircleCI signing
-bundles and runs the same repository-owned archive, application-signature,
-installer-package, and package-signature path that production uses. It receives
-no App Store Connect context, contains no API key handling or `altool` call, and
-cannot upload the package it creates. This job is the live proof that the
-managed macOS keychain is usable by the headless Apple packaging tools before a
-release reaches `main`; the package is discarded with the executor.
+`make check`. On trusted `dev` pushes it installs the CircleCI-managed
+`veetbot-app-store` application-signing bundle and receives the separately
+restricted `veetbot-apple-signing` installer context. It runs the same
+repository-owned archive, application-signature, installer-package, and
+package-signature path that production uses. It receives no App Store Connect
+context, contains no API key handling or `altool` call, and cannot upload the
+package it creates. This job is the live proof that both signing boundaries and
+the headless Apple packaging tools work before a release reaches `main`; the
+package and isolated installer keychain are discarded with the executor.
 
 Job 8 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
-CircleCI-managed `veetbot-app-store` and `veetbot-mac-installer` signing
-bundles, archives the generic macOS destination with `pipeline.number` as
-`CFBundleVersion`, verifies that number, the bundle identifier, and the
-signature, and uploads through Xcode with the restricted
+CircleCI-managed `veetbot-app-store` signing bundle, imports the installer
+identity from the restricted `veetbot-apple-signing` context into a fresh
+random-password keychain, archives the generic macOS destination with
+`pipeline.number` as `CFBundleVersion`, verifies that number, the bundle
+identifier, and both signatures, and uploads through Xcode with the restricted
 `veetbot-apple-testflight` context. Xcode's independent
 build-number management is disabled so the value the job inspects is the value
 Apple receives. The archive uses the checked-in Xcode project's Apple team and
@@ -341,9 +344,12 @@ export defaults to the team recorded in that archive, avoiding a duplicate
 CircleCI setting for the non-secret identifier. The base64-encoded private key
 is supplied through the job's
 restricted CircleCI context; the decoded `.p8` exists only in a mode-restricted
-temporary file that the exit trap deletes, and the signed archive is not
-retained as an artifact. ADR-0074 defines the credential boundary,
-serialization, and external App Store Connect prerequisites.
+temporary file that the exit trap deletes. The installer PKCS#12 is likewise
+decoded only under the job's mode-restricted temporary directory, imported
+into that job-owned keychain with explicit non-interactive signing access, and
+deleted on exit. The signed archive is not retained as an artifact. ADR-0074
+defines the credential boundaries, serialization, and external App Store
+Connect prerequisites.
 
 Job 1 also runs the reading-lane floor first:
 `python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git
