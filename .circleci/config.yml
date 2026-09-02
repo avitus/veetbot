@@ -121,7 +121,6 @@ jobs:
       - checkout
       - run:
           name: Archive and upload the macOS client to TestFlight
-          no_output_timeout: 30m
           command: |
             set -euo pipefail
             : "${APP_STORE_CONNECT_API_KEY_BASE64:?set APP_STORE_CONNECT_API_KEY_BASE64 in the veetbot-apple-testflight context}"
@@ -152,7 +151,7 @@ jobs:
             test -s "$asc_auth_file"
 
             plutil -create xml1 "$export_options"
-            plutil -insert destination -string upload "$export_options"
+            plutil -insert destination -string export "$export_options"
             plutil -insert method -string app-store-connect "$export_options"
             plutil -insert signingStyle -string manual "$export_options"
             plutil -insert signingCertificate -string "Apple Distribution" "$export_options"
@@ -191,11 +190,22 @@ jobs:
             xcodebuild -exportArchive \
               -archivePath "$archive_path" \
               -exportPath "$export_path" \
-              -exportOptionsPlist "$export_options" \
-              -allowProvisioningUpdates \
-              -authenticationKeyPath "$asc_auth_file" \
-              -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" \
-              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+              -exportOptionsPlist "$export_options"
+
+            shopt -s nullglob
+            packages=("$export_path"/*.pkg)
+            test "${#packages[@]}" -eq 1
+            pkg_path="${packages[0]}"
+            test -s "$pkg_path"
+
+            xcrun altool --upload-app \
+              --file "$pkg_path" \
+              --type macos \
+              --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
+              --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+              --p8-file-path "$asc_auth_file" \
+              --show-progress \
+              --verbose
 
   live:
     docker:

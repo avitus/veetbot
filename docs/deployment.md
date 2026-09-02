@@ -496,9 +496,10 @@ five required verification lanes pass:
   probe because the newer release remains authoritative; and
 - `apple-testflight` follows a successful application release in a separate
   serial group, archives and verifies the macOS application with
-  `pipeline.number` as its build number, and uploads it to App Store Connect.
-  Xcode can remain silent while App Store Connect processes the upload, so this
-  step permits up to 30 minutes without output before CircleCI terminates it.
+  `pipeline.number` as its build number, exports the signed installer package
+  locally, and uploads that package to App Store Connect with `altool` and
+  progress logging. Keeping Xcode's archive export offline separates signing
+  and packaging failures from Apple API delivery failures.
 
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and
