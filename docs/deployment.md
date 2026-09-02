@@ -613,7 +613,14 @@ surfacing an error on the owner's phone. There is no retry and no alert when
 a text is silently dropped; the only signal is the absence of the triage
 session update step 3 above confirms. Re-run step 3 after an iOS upgrade, or
 whenever inbound capture seems to have gone quiet, to confirm it is still
-live.
+live. The send side has its own fragility: invocation expiry is judged
+against the device's own clock, so a phone whose clock is materially fast
+can silently expire a still-live request before the owner ever sees it.
+And a result the app could not post to the server survives only in that
+process's memory, so a crash or force-quit between the owner's Send tap
+and a successful result post can re-present an already-sent message the
+next time the app fetches, bounded by the server's five-minute invocation
+expiry.
 
 ## Manual rollback
 

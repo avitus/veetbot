@@ -212,17 +212,25 @@ public struct SmsInvocationQueue: Equatable, Sendable {
 
 /// What this device can do with the invocation currently at the head of the
 /// queue. A device without messaging (a Mac, an iPad without an SMS-capable
-/// account) reports `failed` instead of showing a sheet that cannot send.
+/// account) reports `failed` instead of showing a sheet that cannot send. A
+/// head whose deadline has already passed — because it queued up behind a
+/// sheet the owner sat on long enough for this one to lapse — reports
+/// `expired` the same way: the server has already given up on the row, and a
+/// compose sheet built on it would end in a send whose result the server can
+/// only refuse.
 public enum SmsInvocationDisposition: Equatable, Sendable {
     case idle
     case compose(SmsInvocation)
     case unsupported(SmsInvocation)
+    case expired(SmsInvocation)
 
     public static func resolve(
         _ invocation: SmsInvocation?,
-        canSendText: Bool
+        canSendText: Bool,
+        now: Date = Date()
     ) -> SmsInvocationDisposition {
         guard let invocation else { return .idle }
+        guard invocation.expiresAt > now else { return .expired(invocation) }
         return canSendText ? .compose(invocation) : .unsupported(invocation)
     }
 }

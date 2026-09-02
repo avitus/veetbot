@@ -173,7 +173,10 @@ public struct RootView: View {
 
     /// Shows the next unanswered invocation once nothing is on screen. A
     /// device that cannot send text reports the failure instead of presenting
-    /// a sheet the owner could not use.
+    /// a sheet the owner could not use, and a head whose deadline has already
+    /// passed — because it queued up behind a sheet the owner sat on for too
+    /// long — reports expired the same way, rather than presenting a sheet
+    /// whose eventual send the server can only refuse.
     private func presentNextSmsInvocation() {
         guard composingInvocation == nil else { return }
         switch SmsInvocationDisposition.resolve(
@@ -188,6 +191,9 @@ public struct RootView: View {
         case .unsupported(let invocation):
             guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
             answerSmsInvocation(invocation, with: .failed)
+        case .expired(let invocation):
+            guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
+            answerSmsInvocation(invocation, with: .expired)
         }
     }
 

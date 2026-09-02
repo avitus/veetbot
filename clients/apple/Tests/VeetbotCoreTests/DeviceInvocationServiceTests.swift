@@ -261,14 +261,61 @@ import Testing
         )
 
         #expect(
-            SmsInvocationDisposition.resolve(invocation, canSendText: true)
+            SmsInvocationDisposition.resolve(invocation, canSendText: true, now: Self.now)
                 == .compose(invocation)
         )
         #expect(
-            SmsInvocationDisposition.resolve(invocation, canSendText: false)
+            SmsInvocationDisposition.resolve(invocation, canSendText: false, now: Self.now)
                 == .unsupported(invocation)
         )
-        #expect(SmsInvocationDisposition.resolve(nil, canSendText: true) == .idle)
+        #expect(SmsInvocationDisposition.resolve(nil, canSendText: true, now: Self.now) == .idle)
+    }
+
+    @Test
+    func testALapsedQueueHeadIsExpiredRatherThanComposedWhileALiveHeadStillPresents() throws {
+        let first = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000052"))
+        let second = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000053"))
+        let firstInvocation = SmsInvocation(
+            id: first,
+            recipient: "+15550001111",
+            body: "first",
+            expiresAt: Self.now.addingTimeInterval(300)
+        )
+        // Queued behind the first invocation, and already expired by the time
+        // the owner finally gets to it.
+        let secondInvocation = SmsInvocation(
+            id: second,
+            recipient: "+15550002222",
+            body: "second",
+            expiresAt: Self.now.addingTimeInterval(60)
+        )
+        var queue = SmsInvocationQueue()
+        queue.merge([firstInvocation, secondInvocation])
+        #expect(queue.presented == firstInvocation)
+
+        // The owner sits on the first sheet past the second invocation's
+        // deadline before finally answering it.
+        let pastSecondDeadline = Self.now.addingTimeInterval(120)
+        let settledFirst = queue.settle(first)
+        #expect(settledFirst)
+        #expect(queue.presented == secondInvocation)
+
+        // The lapsed head is settled expired instead of surfacing as the
+        // composing invocation.
+        #expect(
+            SmsInvocationDisposition.resolve(
+                queue.presented,
+                canSendText: true,
+                now: pastSecondDeadline
+            ) == .expired(secondInvocation)
+        )
+
+        // A head that is still live at the moment of presentation composes
+        // normally.
+        #expect(
+            SmsInvocationDisposition.resolve(firstInvocation, canSendText: true, now: Self.now)
+                == .compose(firstInvocation)
+        )
     }
 
     fileprivate static func pendingRow(
