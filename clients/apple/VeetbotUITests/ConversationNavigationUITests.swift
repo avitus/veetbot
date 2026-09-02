@@ -95,9 +95,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testMemoryBrowserListsAndOpensDetail() {
-        let memoryButton = app.buttons["sidebar.memory"]
-        XCTAssertTrue(memoryButton.waitForExistence(timeout: 10))
-        memoryButton.tap()
+        openSidebarDestination(identifier: "sidebar.memory")
 
         XCTAssertTrue(
             app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5)
@@ -118,9 +116,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testScheduleBrowserListsAndOpensPointReadDetail() {
-        let scheduleButton = app.buttons["sidebar.schedules"]
-        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 10))
-        scheduleButton.tap()
+        openSidebarDestination(identifier: "sidebar.schedules")
 
         XCTAssertTrue(
             app.descendants(matching: .any)["schedule.browser"].waitForExistence(timeout: 5)
@@ -140,10 +136,16 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
     }
 
+    func testOverflowMenuOpensPersonaEditor() {
+        openSidebarDestination(identifier: "sidebar.persona")
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["persona.editor"].waitForExistence(timeout: 5)
+        )
+    }
+
     func testWebsiteAccessCreatesARecoverableBrowserHandoff() {
-        let settingsButton = app.buttons["Settings"]
-        XCTAssertTrue(settingsButton.waitForExistence(timeout: 10))
-        settingsButton.tap()
+        openSidebarDestination(identifier: "sidebar.settings")
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
 
         let websiteAccess = app.staticTexts["Website Access"]
@@ -249,6 +251,18 @@ final class ConversationNavigationUITests: XCTestCase {
     #endif
 
     #if os(iOS)
+    private func openSidebarDestination(identifier: String) {
+        let moreButton = app.buttons["sidebar.more"]
+        XCTAssertTrue(moreButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(moreButton.isHittable)
+        moreButton.tap()
+
+        let destination = app.buttons[identifier]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        XCTAssertTrue(destination.isHittable)
+        destination.tap()
+    }
+
     private func revealSidebarIfNeeded(for row: XCUIElement) {
         guard !row.isHittable else { return }
         let backButton = app.navigationBars.buttons.element(boundBy: 0)
