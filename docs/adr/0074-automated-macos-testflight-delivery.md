@@ -57,8 +57,9 @@ shared with an Apple publication job.
    umask, passed directly to `altool`, and deleted on every shell exit. The
    archive is not stored as a CircleCI artifact.
 6. Apple's `productbuild` creates one non-empty installer package directly from
-   the verified archived app, installs it under `/Applications`, and signs it
-   with the exact installed `3rd Party Mac Developer Installer` certificate.
+   the verified archived app, sets `/Applications` as the package's install
+   location, and signs it with the exact installed
+   `3rd Party Mac Developer Installer` certificate.
    `pkgutil` verifies that package signature before the job invokes the
    Xcode-bundled `xcrun altool --upload-app` with the package, API key ID,
    issuer ID, and temporary private-key file. `altool` upload acceptance is the
