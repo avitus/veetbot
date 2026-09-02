@@ -309,6 +309,13 @@ outside that equality, because it reads git range state `make check`
 does not assume. No check appears in both jobs, and a developer who
 runs `make check` locally has run both jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
+Job 1 uses a two-vCPU CircleCI executor and runs only `test-static` with two
+processes and load-scope scheduling; the local Makefile target remains serial,
+so the optimization does not change the developer contract. Its Makefile
+targets are separate CircleCI steps so timing data identifies the remaining
+bottleneck. Jobs 1 through 3 and job 5 publish their pytest JUnit XML through
+CircleCI's test-results collector so failed and slow tests are visible without
+searching raw logs.
 Job 6 is an additional native-client gate outside `make check`; it runs
 `make test-apple` under full Xcode because Command Line Tools can compile a
 Swift Testing bundle without executing it, then runs `make test-apple-ui` on
@@ -317,7 +324,10 @@ real SwiftUI window, terminates the application, and asserts that its size is
 restored after relaunch. The simulator cases use a debug-only in-process
 fixture to exercise historical-transcript
 selection, switching, and new-conversation navigation without a live server or
-credential. Release packaging depends on both additional gates.
+credential. The simulator test products are built once, then the iPhone and
+iPad destinations run concurrently without rebuilding. Each platform writes a
+distinct result bundle, and CircleCI retains those bundles for diagnosis.
+Release packaging depends on both additional gates.
 
 Job 7 is a pre-merge signing smoke, not a verification partition and not part of
 `make check`. On trusted `dev` pushes it installs the CircleCI-managed
@@ -387,7 +397,10 @@ Three workflow-level facts complete the definition:
     Production delivery begins only after all five `verify` jobs pass. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
-    live-model pipelines.
+    live-model pipelines. The
+    CircleCI project cancels redundant workflows on non-default branches when a
+    newer commit arrives; CircleCI leaves `main` workflows running, preserving
+    every production-delivery attempt.
 2.  **Python version.** A single version, 3.12, not a matrix. The
     project pins `requires-python >=3.12` and runs one deployment; a
     matrix here would test a configuration nothing runs.

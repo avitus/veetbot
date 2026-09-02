@@ -71,10 +71,14 @@ test-apple-ui:
 		echo 'test-apple-ui requires a full Xcode installation.' >&2; \
 		exit 1; \
 	fi; \
+	apple_results_root="$${APPLE_TEST_RESULTS_DIR:-$${TMPDIR:-/tmp}/veetbot-apple-test-results}"; \
+	apple_results_run_dir="$$apple_results_root/run-$$(date -u +%Y%m%d-%H%M%S)-$$$$"; \
+	mkdir -p "$$apple_results_run_dir"; \
 	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test -quiet \
 		-project clients/apple/Veetbot.xcodeproj \
 		-scheme Veetbot \
 		-destination 'platform=macOS' \
+		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM= || exit $$?; \
@@ -86,13 +90,36 @@ test-apple-ui:
 		echo 'test-apple-ui requires available iPhone and iPad simulator runtimes.' >&2; \
 		exit 1; \
 	fi; \
-	for device_id in "$$iphone_device_id" "$$ipad_device_id"; do \
-		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test -quiet \
+	apple_ui_tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/veetbot-apple-ui.XXXXXX"); \
+	trap 'rm -rf -- "$$apple_ui_tmp"' EXIT; \
+	test_products_path="$$apple_ui_tmp/VeetbotUITests.xctestproducts"; \
+	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild build-for-testing -quiet \
+		-project clients/apple/Veetbot.xcodeproj \
+		-scheme Veetbot \
+		-destination "platform=iOS Simulator,id=$$iphone_device_id" \
+		-testProductsPath "$$test_products_path" \
+		-only-testing:VeetbotUITests || exit $$?; \
+	run_ios_ui_tests() { \
+		device_label="$$1"; \
+		device_id="$$2"; \
+		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test-without-building -quiet \
 			-project clients/apple/Veetbot.xcodeproj \
 			-scheme Veetbot \
 			-destination "platform=iOS Simulator,id=$$device_id" \
-			-only-testing:VeetbotUITests || exit $$?; \
-	done
+			-testProductsPath "$$test_products_path" \
+			-resultBundlePath "$$apple_results_run_dir/$$device_label.xcresult" \
+			-only-testing:VeetbotUITests; \
+	}; \
+	run_ios_ui_tests iphone "$$iphone_device_id" & \
+	iphone_pid=$$!; \
+	run_ios_ui_tests ipad "$$ipad_device_id" & \
+	ipad_pid=$$!; \
+	wait "$$iphone_pid"; iphone_status=$$?; \
+	wait "$$ipad_pid"; ipad_status=$$?; \
+	if test "$$iphone_status" -ne 0 -o "$$ipad_status" -ne 0; then \
+		echo "Apple simulator UI tests failed (iPhone=$$iphone_status, iPad=$$ipad_status)." >&2; \
+		exit 1; \
+	fi
 
 test-deploy:
 	deploy/app/release.test.sh

@@ -683,6 +683,8 @@ def test_ci_has_the_required_partitions() -> None:
         )
         assert job["docker"][0]["image"] == expected_image
 
+    assert jobs["static"]["resource_class"] == "medium"
+
     postgres = jobs["integration"]["docker"][1]
     assert postgres == {
         "image": "postgres:16-alpine",
@@ -700,17 +702,19 @@ def test_ci_has_the_required_partitions() -> None:
             for step in job["steps"]
             if isinstance(step, dict) and "run" in step
         ]
-    assert "make lint typecheck test-static test-deploy docs-check" in commands["static"]
+    for target in ("lint", "typecheck", "test-static", "test-deploy", "docs-check"):
+        assert any(f"make {target}" in command for command in commands["static"])
     assert "make client-build" in commands["static"]
     assert any(
         "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command
         for command in commands["static"]
     )
-    assert "make test-contract" in commands["contract"]
-    assert "make migrate test-integration" in commands["integration"]
-    assert "make test-sandbox" in commands["sandbox"]
+    assert any("make test-contract" in command for command in commands["contract"])
+    assert "make migrate" in commands["integration"]
+    assert any("make test-integration" in command for command in commands["integration"])
+    assert any("make test-sandbox" in command for command in commands["sandbox"])
     assert "make test-apple" in commands["apple"]
-    assert "make test-apple-ui" in commands["apple"]
+    assert any("make test-apple-ui" in command for command in commands["apple"])
     testflight_job = jobs["apple-testflight"]
     assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
@@ -854,6 +858,53 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    jobs = config["jobs"]
+
+    expected_python_lanes = {
+        "static": "test-static",
+        "contract": "test-contract",
+        "integration": "test-integration",
+        "sandbox": "test-sandbox",
+    }
+    for job_name, target in expected_python_lanes.items():
+        commands = [
+            step["run"]["command"]
+            for step in jobs[job_name]["steps"]
+            if isinstance(step, dict) and "run" in step
+        ]
+        test_command = next(command for command in commands if f"make {target}" in command)
+        assert f"--junitxml=test-results/{job_name}/results.xml" in test_command
+        assert {"store_test_results": {"path": f"test-results/{job_name}"}} in jobs[job_name][
+            "steps"
+        ]
+
+    static_command = next(
+        step["run"]["command"]
+        for step in jobs["static"]["steps"]
+        if isinstance(step, dict) and "run" in step and "make test-static" in step["run"]["command"]
+    )
+    assert "-n 2" in static_command
+    assert "--dist loadscope" in static_command
+
+    apple_commands = [
+        step["run"]["command"]
+        for step in jobs["apple"]["steps"]
+        if isinstance(step, dict) and "run" in step
+    ]
+    assert any(
+        "APPLE_TEST_RESULTS_DIR" in command and "make test-apple-ui" in command
+        for command in apple_commands
+    )
+    assert {
+        "store_artifacts": {
+            "path": "build/apple-test-results",
+            "destination": "apple-test-results",
+        }
+    } in jobs["apple"]["steps"]
 
 
 def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
@@ -1037,6 +1088,9 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
     assert set(project["dependency-groups"]) == {"dev", "test", "docs"}
+    assert any(
+        dependency.startswith("pytest-xdist") for dependency in project["dependency-groups"]["test"]
+    )
     assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
         "src/agent_core",
         "src/gmail_mcp",
@@ -1729,6 +1783,24 @@ def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
         "DEVELOPMENT_TEAM=",
     ):
         assert override in invocation_tail, f"macOS UI-test arm is missing {override}"
+
+
+def test_apple_ui_builds_once_and_runs_phone_and_tablet_concurrently() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+
+    assert "APPLE_TEST_RESULTS_DIR" in recipe
+    assert "-resultBundlePath" in recipe
+    assert recipe.count("xcodebuild build-for-testing") == 1
+    assert "-testProductsPath" in recipe
+    assert recipe.count("xcodebuild test-without-building") == 1
+    assert "run_ios_ui_tests" in recipe
+    assert 'run_ios_ui_tests iphone "$$iphone_device_id" &' in recipe
+    assert 'run_ios_ui_tests ipad "$$ipad_device_id" &' in recipe
+    assert "iphone_pid=$$!" in recipe
+    assert "ipad_pid=$$!" in recipe
+    assert 'wait "$$iphone_pid"' in recipe
+    assert 'wait "$$ipad_pid"' in recipe
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
