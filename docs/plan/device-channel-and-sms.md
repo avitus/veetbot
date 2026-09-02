@@ -132,7 +132,8 @@ silently disable the automation, and ingest is best-effort.
 
 ## Persistence
 
-Two tables, both carrying the tenant RLS policy:
+Two content tables and the triage mapping row, all carrying the tenant RLS
+policy:
 
 ```text
 device_invocations
@@ -155,6 +156,13 @@ device_ingest_receipts
   session_id UUID NULL REFERENCES sessions(id) ON DELETE SET NULL
   run_id UUID NULL REFERENCES runs(id) ON DELETE SET NULL
   PRIMARY KEY (device_id, channel, digest)
+
+device_triage_sessions
+  device_id UUID NOT NULL REFERENCES devices(id)
+  channel TEXT NOT NULL
+  tenant_id UUID NOT NULL
+  session_id UUID NOT NULL REFERENCES sessions(id)
+  PRIMARY KEY (device_id, channel)
 ```
 
 ## Configuration and flags

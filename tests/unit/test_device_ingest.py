@@ -9,7 +9,7 @@ a `USER`-trusted message and finding none.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import cast
 from uuid import UUID
 
@@ -175,6 +175,36 @@ async def test_a_replayed_message_reports_the_duplicate_and_seeds_one_run() -> N
     assert second == first.model_copy(update={"duplicate": True})
     assert len([event for event in events if event.event_type == "run.queued"]) == 1
     assert len([event for event in events if event.event_type == "user.message.created"]) == 1
+
+
+async def test_the_same_instant_spelled_with_an_offset_and_as_utc_is_one_duplicate() -> None:
+    """`ingest_digest` normalizes to UTC before hashing, so a re-spelled offset
+    of the same instant is a replay, not a second message.
+
+    Before the fix, `ingest_digest` hashed `received_at.isoformat()` verbatim:
+    the same instant spelled `+01:00` and `Z`/UTC produced two digests, two
+    receipts, and two triage runs.
+    """
+    offset_spelling = NOW.astimezone(timezone(timedelta(hours=1)))
+    utc_spelling = NOW.astimezone(UTC)
+
+    async with build(
+        settings=_settings(),
+        script=_replies(4),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+    ) as composition:
+        await _seed_device(composition)
+
+        first = await _ingest(composition, received_at=offset_spelling)
+        second = await _ingest(composition, received_at=utc_spelling)
+        events = await _session_events(composition, first.session_id)
+
+    assert first.duplicate is False
+    assert second.duplicate is True
+    assert second.session_id == first.session_id
+    assert second.run_id == first.run_id
+    assert len([event for event in events if event.event_type == "run.queued"]) == 1
 
 
 async def test_an_idle_standing_session_takes_the_next_message_as_a_new_run() -> None:

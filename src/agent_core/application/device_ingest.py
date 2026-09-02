@@ -71,9 +71,14 @@ class DeviceInputDelivery(Protocol):
 
 
 def ingest_digest(sender: str, body: str, received_at: datetime) -> str:
-    """Identify one captured message by its content, never by a client-minted id."""
+    """Identify one captured message by its content, never by a client-minted id.
 
-    return hashlib.sha256(f"{sender}\n{body}\n{received_at.isoformat()}".encode()).hexdigest()
+    `received_at` is normalized to UTC before hashing so the same instant
+    spelled with a different offset (`+01:00` vs `Z`) still yields one digest.
+    """
+
+    normalized = received_at.astimezone(UTC).isoformat()
+    return hashlib.sha256(f"{sender}\n{body}\n{normalized}".encode()).hexdigest()
 
 
 class DeviceMessageIngestService:
