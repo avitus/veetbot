@@ -134,8 +134,7 @@ jobs:
 
             testflight_dir="build/testflight"
             archive_path="$testflight_dir/Veetbot-macOS.xcarchive"
-            export_path="$testflight_dir/export"
-            export_options="$testflight_dir/ExportOptions.plist"
+            pkg_path="$testflight_dir/Veetbot.pkg"
             temporary_root="${TMPDIR:-/tmp}"
             asc_auth_dir="$(mktemp -d "${temporary_root%/}/veetbot-app-store-key.XXXXXX")"
             asc_auth_file="$asc_auth_dir/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
@@ -145,24 +144,16 @@ jobs:
             }
             trap cleanup_asc_auth EXIT
             umask 077
-            mkdir -p "$testflight_dir" "$export_path"
+            mkdir -p "$testflight_dir"
             printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" \
               | base64 --decode > "$asc_auth_file"
             test -s "$asc_auth_file"
 
-            plutil -create xml1 "$export_options"
-            plutil -insert destination -string export "$export_options"
-            plutil -insert method -string app-store-connect "$export_options"
-            plutil -insert signingStyle -string manual "$export_options"
-            plutil -insert signingCertificate -string "Apple Distribution" "$export_options"
             installer_certificate_sha1="$(
               security find-certificate -a -c "3rd Party Mac Developer Installer" -Z \
                 | awk '/^SHA-1 hash: / {print $3}'
             )"
             [[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]
-            plutil -insert installerSigningCertificate -string "$installer_certificate_sha1" "$export_options"
-            plutil -insert provisioningProfiles -xml '<dict><key>com.veetbot.apple</key><string>Veetbot Mac App Store</string></dict>' "$export_options"
-            plutil -insert manageAppVersionAndBuildNumber -bool false "$export_options"
 
             xcodebuild archive \
               -project clients/apple/Veetbot.xcodeproj \
@@ -187,16 +178,12 @@ jobs:
             test "$archived_bundle_id" = "com.veetbot.apple"
             codesign --verify --deep --strict --verbose=2 "$app_path"
 
-            xcodebuild -exportArchive \
-              -archivePath "$archive_path" \
-              -exportPath "$export_path" \
-              -exportOptionsPlist "$export_options"
-
-            shopt -s nullglob
-            packages=("$export_path"/*.pkg)
-            test "${#packages[@]}" -eq 1
-            pkg_path="${packages[0]}"
+            productbuild \
+              --sign "$installer_certificate_sha1" \
+              --component "$app_path" /Applications \
+              "$pkg_path"
             test -s "$pkg_path"
+            pkgutil --check-signature "$pkg_path"
 
             xcrun altool --upload-app \
               --file "$pkg_path" \

@@ -423,8 +423,8 @@ First, upload an active Apple distribution signing identity and the macOS App
 Store provisioning profile for `com.veetbot.apple` to CircleCI's code-signing
 store, then create a signing bundle named `veetbot-app-store`. Upload an active
 Mac Installer Distribution identity separately and create
-`veetbot-mac-installer`; Xcode requires that second identity when exporting the
-signed archive as an App Store installer package. The profile must carry the
+`veetbot-mac-installer`; `productbuild` requires that second identity when
+signing the App Store installer package. The profile must carry the
 production entitlements used by the Release target, including APNs. CircleCI's
 supported setup flow accepts each password-protected `.p12` identity and the
 `.provisionprofile` once, installs them into a temporary keychain for the job,
@@ -434,13 +434,12 @@ profile, because CircleCI rejects profiles for that certificate type. Do not
 place any of those binaries in the repository, a context variable, a cache, a
 workspace, or an artifact.
 
-The export options select `Apple Distribution` for the app signature. For the
+The archive selects `Apple Distribution` for the app signature. For the
 installer package, the job discovers the single installed
 `3rd Party Mac Developer Installer` certificate and selects its SHA-1
-fingerprint explicitly; Xcode 26 does not resolve that legacy certificate name
-through its generic `Mac Installer Distribution` selector. Keep those roles
-separate: the App Store provisioning profile contains the app distribution
-certificate, not the installer certificate.
+fingerprint explicitly for `productbuild`. Keep those roles separate: the App
+Store provisioning profile contains the app distribution certificate, not the
+installer certificate.
 
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
@@ -451,9 +450,8 @@ Second, create a restricted context named `veetbot-apple-testflight` with:
 | `APP_STORE_CONNECT_API_KEY_BASE64` | Base64 encoding of the downloaded `.p8` private key |
 
 The non-secret Apple team identifier remains authoritative in the checked-in
-Xcode project. The archive uses that Release build setting, and export defaults
-to the team recorded in the archive; do not duplicate the identifier in the
-restricted context.
+Xcode project. The archive uses that Release build setting; do not duplicate
+the identifier in the restricted context.
 
 Encode the private key without creating another plaintext copy:
 
@@ -496,10 +494,10 @@ five required verification lanes pass:
   probe because the newer release remains authoritative; and
 - `apple-testflight` follows a successful application release in a separate
   serial group, archives and verifies the macOS application with
-  `pipeline.number` as its build number, exports the signed installer package
-  locally, and uploads that package to App Store Connect with `altool` and
-  progress logging. Keeping Xcode's archive export offline separates signing
-  and packaging failures from Apple API delivery failures.
+  `pipeline.number` as its build number, creates the signed installer package
+  directly with `productbuild`, verifies the package signature, and uploads it
+  to App Store Connect with `altool` and progress logging. This keeps signing
+  and packaging separate from Apple API delivery.
 
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and

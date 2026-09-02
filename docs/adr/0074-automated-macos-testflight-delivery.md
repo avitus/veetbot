@@ -37,8 +37,8 @@ shared with an Apple publication job.
 2. The job archives only the native macOS destination from the exact checked-out
    commit. It overrides `CURRENT_PROJECT_VERSION` with CircleCI's
    project-scoped `pipeline.number`; it does not edit or commit the Xcode project.
-   Export disables Xcode's independent build-number management so the archived,
-   inspected, and uploaded values remain identical.
+   The package is built from that inspected archive, so the archived and uploaded
+   values remain identical.
 3. Before upload, the job reads the archived `Info.plist`, requires the build
    number to equal the pipeline number and the bundle identifier to equal
    `com.veetbot.apple`, and verifies the code signature. Any mismatch fails
@@ -46,20 +46,21 @@ shared with an Apple publication job.
 4. CircleCI's managed signing facility owns the `Apple Distribution` identity
    and macOS App Store provisioning profile in a signing bundle named
    `veetbot-app-store`, plus the `Mac Installer Distribution` identity required
-   for App Store package export in `veetbot-mac-installer`. The job invokes
+   to sign the App Store package in `veetbot-mac-installer`. The job invokes
    `install_signing_bundle` for both; certificate and profile bytes never become
    repository variables or workspace artifacts.
 5. The non-secret Apple team ID remains authoritative in the checked-in Xcode
-   project. The archive uses that Release build setting, and export defaults to
-   the team recorded in the archive. A separate restricted context,
-   `veetbot-apple-testflight`, supplies only the App Store Connect API key's
-   base64-encoded private key, key ID, and issuer ID. The private key is decoded
-   under a process-local temporary directory with mode-restricting umask,
-   passed directly to `altool`, and deleted on every shell exit. The archive
-   is not stored as a CircleCI artifact.
-6. `xcodebuild -exportArchive` uses `app-store-connect` with
-   `destination=export` to create exactly one non-empty signed installer
-   package without an App Store Connect session. The job then invokes the
+   project. The archive uses that Release build setting. A separate restricted
+   context, `veetbot-apple-testflight`, supplies only the App Store Connect API
+   key's base64-encoded private key, key ID, and issuer ID. The private key is
+   decoded under a process-local temporary directory with mode-restricting
+   umask, passed directly to `altool`, and deleted on every shell exit. The
+   archive is not stored as a CircleCI artifact.
+6. Apple's `productbuild` creates one non-empty installer package directly from
+   the verified archived app, sets `/Applications` as the package's install
+   location, and signs it with the exact installed
+   `3rd Party Mac Developer Installer` certificate.
+   `pkgutil` verifies that package signature before the job invokes the
    Xcode-bundled `xcrun altool --upload-app` with the package, API key ID,
    issuer ID, and temporary private-key file. `altool` upload acceptance is the
    CI success boundary. Apple's later processing, TestFlight group assignment,
@@ -106,9 +107,9 @@ gate.
   signing bundle.
 - **Use Xcode Cloud:** viable, but rejected because it creates a second CI
   authority beside the repository's required CircleCI workflow.
-- **Add Fastlane:** rejected because native `xcodebuild` and CircleCI signing
-  plus Apple's Xcode-bundled `altool` satisfy this delivery without a new
-  runtime or package dependency.
+- **Add Fastlane:** rejected because Apple's native `xcodebuild`, `productbuild`,
+  and Xcode-bundled `altool`, plus CircleCI signing, satisfy this delivery
+  without a new runtime or package dependency.
 - **Upload before the server deploys:** rejected because automatic installation
   could expose a client that expects an API revision not yet active.
 - **Path-filter Apple uploads:** deferred. The existing production delivery is

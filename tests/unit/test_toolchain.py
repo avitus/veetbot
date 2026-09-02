@@ -734,8 +734,8 @@ def test_ci_has_the_required_partitions() -> None:
         for command in commands["apple-testflight"]
     )
     assert any(
-        "xcodebuild -exportArchive" in command
-        and "plutil -insert manageAppVersionAndBuildNumber -bool false" in command
+        "productbuild" in command
+        and "xcrun altool --upload-app" in command
         and "APP_STORE_CONNECT_API_KEY_BASE64" in command
         and "APP_STORE_CONNECT_API_KEY_ID" in command
         and "APP_STORE_CONNECT_ISSUER_ID" in command
@@ -866,42 +866,39 @@ def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
     assert "CODE_SIGN_STYLE=Manual" in archive_command
     assert 'CODE_SIGN_IDENTITY="Apple Distribution"' in archive_command
     assert 'PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"' in archive_command
-    assert 'plutil -insert signingStyle -string manual "$export_options"' in archive_command
-    assert (
-        'plutil -insert signingCertificate -string "Apple Distribution" "$export_options"'
-    ) in archive_command
     assert (
         'security find-certificate -a -c "3rd Party Mac Developer Installer" -Z' in archive_command
     )
     assert "awk '/^SHA-1 hash: / {print $3}'" in archive_command
     assert '[[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]' in archive_command
-    assert (
-        "plutil -insert installerSigningCertificate -string "
-        '"$installer_certificate_sha1" "$export_options"'
-    ) in archive_command
-    assert "plutil -insert provisioningProfiles -xml" in archive_command
-    assert "com.veetbot.apple" in archive_command
-    assert "Veetbot Mac App Store" in archive_command
 
 
-def test_testflight_upload_exports_package_before_using_altool() -> None:
+def test_testflight_upload_builds_package_directly_before_using_altool() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
     upload_step = next(
         step["run"]
         for step in config["jobs"]["apple-testflight"]["steps"]
         if isinstance(step, dict)
         and "run" in step
-        and "xcodebuild -exportArchive" in step["run"]["command"]
+        and "xcodebuild archive" in step["run"]["command"]
     )
 
     upload_command = upload_step["command"]
     assert "no_output_timeout" not in upload_step
-    assert 'plutil -insert destination -string export "$export_options"' in upload_command
+    assert "xcodebuild -exportArchive" not in upload_command
     assert "-allowProvisioningUpdates" not in upload_command
     assert "-authenticationKeyPath" not in upload_command
-    assert 'packages=("$export_path"/*.pkg)' in upload_command
-    assert 'test "${#packages[@]}" -eq 1' in upload_command
+    assert 'pkg_path="$testflight_dir/Veetbot.pkg"' in upload_command
+    assert "productbuild \\" in upload_command
+    assert '--sign "$installer_certificate_sha1"' in upload_command
+    assert '--component "$app_path" /Applications' in upload_command
+    assert 'test -s "$pkg_path"' in upload_command
+    assert 'pkgutil --check-signature "$pkg_path"' in upload_command
     assert "xcrun altool --upload-app" in upload_command
+    assert upload_command.index("productbuild") < upload_command.index("pkgutil --check-signature")
+    assert upload_command.index("pkgutil --check-signature") < upload_command.index(
+        "xcrun altool --upload-app"
+    )
     assert '--file "$pkg_path"' in upload_command
     assert "--type macos" in upload_command
     assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
