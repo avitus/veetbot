@@ -66,10 +66,12 @@ Remaining:
 
 ### Milestone 20 — SMS through the owner's iPhone
 
-The fifth parallel workstream, now under construction: the Section 29
-device channel with `device.sms.send` and the SMS ingest path. Remaining:
+The fifth parallel workstream. The `DeviceChannel` port with its push-wake
+adapter, capability-derived `device.sms.send` registration, the three
+device-authenticated routes, the SMS ingest path with its standing triage
+session, and the expiry sweep are implemented, and all twelve registered
+gates pass locally. Remaining:
 
-- [ ] Server implementation of the twelve registered gates
 - [ ] iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
 - [ ] Owner end-to-end verification on a physical iPhone
 

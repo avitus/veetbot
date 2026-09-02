@@ -478,10 +478,36 @@ milestones:
       - presence-based routing and hand-off (B7 residue)
       - Android capture and any second device-scoped tool
     open_items:
-      - Server implementation of the twelve registered gates
       - iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
       - Owner end-to-end verification on a physical iPhone
     evidence:
+      - check: twelve Milestone 20 gate.device.* gates
+        outcome: passed_locally
+        detail: >-
+          The twelve registered Milestone 20 entries in evals/gates/device.yaml
+          all resolve to checks in tests/gates/test_device_channel_m20.py, and
+          the file's twelve tests pass locally (2026-09-01, uv run pytest
+          tests/gates/test_device_channel_m20.py). The harness cannot execute
+          them through agent eval gates yet for the reason Milestones 16, 17,
+          and 19 recorded: --milestone 20 would also activate the still-pending
+          Milestone 13 through 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
+      - check: Milestone 20 gate-file red and green split
+        outcome: passed_locally
+        detail: >-
+          The first run of the new gate file reported nine passed and three
+          failed. Nine gates were green on arrival because the port, the tool,
+          the routes, the ingest service, and the policy rule each landed with
+          their own unit and contract coverage before this file existed. The
+          three failures — gate.device.untrusted_output,
+          gate.device.untrusted_triage_routing, and gate.device.no_body_in_logs
+          — were defects in the new assertions rather than absent server
+          behavior, so no production change was needed to green them. The
+          triage-routing gate was then confirmed non-vacuous by reverting the
+          device-originated trust the projector honors in domain/events.py,
+          which turned its recorded policy decision from require_approval into
+          allow and failed the gate.
       - check: Milestone 20 gate-area red phase
         outcome: observed_expected_failure
         detail: >-
@@ -491,6 +517,21 @@ milestones:
           contained zero Milestone 20 entries rather than twelve; this was a
           behavioral gate failure rather than an environment, import, or
           fixture error.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 604 files and Ruff linting pass, strict mypy
+          reports no issue in 554 source files, the static partition passes
+          1444 tests, the contract partition passes 381, all deployment-script
+          tests pass, and strict documentation validation reconciles all 377
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          make test-integration passes all 162 selected tests against isolated
+          PostgreSQL 16, with 1837 deselected. This includes the device-channel
+          persistence lane and the notification dispatch paths the device wake
+          rides on.
 
   "21":
     title: WhatsApp business surface
