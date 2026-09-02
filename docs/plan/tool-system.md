@@ -356,8 +356,10 @@ The first segment is the **domain**, and domains are partitioned:
 The control annotation is on the two domains that hold nothing else.
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
-`schedule` holds the Milestone 19 one-time `schedule.create` capability; its
-registration remains conditional on the scheduling deployment flags.
+`schedule` holds `schedule.create` plus Milestone 23's summary-only
+`schedule.list` and approval-gated `schedule.pause`, `schedule.resume`, and
+`schedule.cancel` capabilities; their registration remains conditional on the
+scheduling deployment flags.
 `web` holds the read-only `web.search` and `web.fetch` capabilities designed in
 [web-access.md](web-access.md). Their `web_provider` target is valid only with
 `NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any

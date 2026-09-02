@@ -306,8 +306,9 @@ originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
-Milestone 19 reuses the schedule pair: the composition root registers
-`schedule.create` only when both are enabled, so it cannot create
+Milestones 19 and 23 reuse the schedule pair: the composition root registers
+`schedule.create`, `schedule.list`, `schedule.pause`, `schedule.resume`, and
+`schedule.cancel` only when both are enabled, so it cannot create or reactivate
 work that no materializer will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
@@ -519,7 +520,7 @@ AGENT_CONFIG_DIR=
 
 # Scheduled task control plane and materializer. Both default off and
 # production activation requires changing them together. New sessions expose
-# schedule.create only while both are enabled.
+# all five schedule.* model tools only while both are enabled.
 AGENT_SCHEDULE_API_ENABLED=0
 AGENT_SCHEDULE_WORKER_ENABLED=0
 

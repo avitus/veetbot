@@ -40,7 +40,10 @@ title: Current Milestone
   promotion — is specified by [persona-surface.md](persona-surface.md) with
   fourteen gates and is a seventh parallel workstream, adding an owner-edited
   trusted prefix row that a formed belief reaches only through explicit
-  owner affirmation.
+  owner affirmation. Milestone 23 — conversational schedule lifecycle — is
+  specified by [scheduling.md](scheduling.md) with seven gates and is an eighth
+  parallel workstream, adding summary-only discovery and approval-gated pause,
+  resume, and terminal cancellation through the existing schedule service.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -59,7 +62,8 @@ title: Current Milestone
   was authorized on 2026-08-31 as a sixth (ADR-0077) on the same terms.
   Milestone 22, the persona surface and curated belief promotion, was
   authorized on 2026-09-01 as a seventh (ADR-0079), again without advancing
-  the verified ceiling.
+  the verified ceiling. Milestone 23, conversational schedule lifecycle, was
+  authorized on 2026-09-02 as an eighth (ADR-0080) on the same terms.
 - **Deferred:** New model-routing behavior and everything still listed in the
   engineering plan's roadmap subsection. Milestone 21 removes only adaptive
   memory distillation from that residue and Milestone 22 removes only the
@@ -149,7 +153,9 @@ title: Current Milestone
   registered gates passing locally: the persona document, its trusted
   prefix row, curated promotion, the routes, the CLI, and the native editor
   are implemented, with only hosted CI and the final CodeRabbit review
-  outstanding. Each in-progress
+  outstanding. Milestone 23, the eighth parallel workstream, is in progress
+  with seven registered gates for summary-only discovery and approved pause,
+  resume, and terminal cancellation. Each in-progress
   milestone's remaining work is itemized on the
   [milestones page](../status/milestones.md), which `make docs-check`
   reconciles against the project state.

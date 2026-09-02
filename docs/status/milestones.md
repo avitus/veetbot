@@ -106,6 +106,16 @@ Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
 
+### Milestone 23 — Conversational schedule lifecycle
+
+An eighth parallel workstream adding bounded summary discovery and
+approval-gated pause, resume, and terminal cancellation through the existing
+schedule service. Its seven `gate.schedule.*` checks pass locally, including
+no-backfill resume, audit-preserving cancellation, exact-scope denial,
+fail-closed revision handling, and idempotent retry. Remaining:
+
+- [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.

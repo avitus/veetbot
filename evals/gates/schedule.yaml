@@ -205,3 +205,45 @@
   spec: docs/plan/scheduling.md#hard-gates
   statement: "**Conversational calendar validation and replay fail closed.** Invalid exactly-one-of and calendar inputs leave no state, identical retries replay, and changed recurrence content conflicts."
   check: tests/gates/test_schedule_calendar_m20.py::test_schedule_create_calendar_validation_and_replay_fail_closed
+- id: gate.schedule.model_lifecycle_contract
+  milestone: 23
+  kind: structural
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational lifecycle tools are feature-gated and honestly classified.** The schedule flag pair registers and advertises exactly `schedule.list`, `schedule.pause`, `schedule.resume`, and `schedule.cancel` beside creation, with the declared effects, risks, idempotency, scopes, and parallelism."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_lifecycle_tools_are_feature_gated_and_classified
+- id: gate.schedule.model_lifecycle_discovery
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational discovery is bounded and summary-only.** A principal-scoped list returns no more than fifty canonical summaries with stable IDs and revisions, paginates by opaque cursor, and exposes no instruction or authority fields."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_list_is_bounded_paginated_and_summary_only
+- id: gate.schedule.model_pause_resume
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational pause and resume use the ordinary approval pipeline.** A named schedule is discovered, paused after one approval, then resumed after one approval at its first strictly future occurrence without backfill."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_pause_and_resume_run_through_approval_without_backfill
+- id: gate.schedule.model_cancel
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational delete is terminal schedule cancellation.** An approved `schedule.cancel` stops future occurrences, preserves the record and ledger, and leaves an already materialized run unchanged."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_cancel_runs_through_approval_and_preserves_history
+- id: gate.schedule.model_lifecycle_authorization
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Every conversational lifecycle operation has exact authority.** Listing requires only `schedule.read`, pause and resume require `schedule.write`, and cancel requires `schedule.cancel`; a missing scope is denied before execution or approval and leaves state unchanged."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_lifecycle_tools_require_exact_scopes_before_execution
+- id: gate.schedule.model_lifecycle_validation
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Lifecycle selection and validation fail closed.** Invalid identifiers or revisions, unknown schedules, stale revisions, and illegal terminal transitions return stable failures without mutating the selected or any other schedule."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_lifecycle_validation_and_conflicts_fail_closed
+- id: gate.schedule.model_lifecycle_retry
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational lifecycle retries are state-idempotent.** Replaying an identical authorized invocation cannot duplicate a transition event or move a schedule beyond the requested legal state."
+  check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_lifecycle_retries_are_state_idempotent

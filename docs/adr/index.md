@@ -88,3 +88,4 @@ implementation without one.
 - [ADR-0077 — Milestone 21 adaptive memory distillation (Proposed)](0077-milestone-21-adaptive-memory-distillation.md)
 - [ADR-0078 — Run-limit synthesis reserves](0078-run-limit-synthesis-reserves.md)
 - [ADR-0079 — Milestone 22 persona surface and curated belief promotion (Proposed)](0079-milestone-22-persona-surface.md)
+- [ADR-0080 — Milestone 23 conversational schedule lifecycle (Proposed)](0080-milestone-23-conversational-schedule-lifecycle.md)
