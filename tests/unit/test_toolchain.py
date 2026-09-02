@@ -907,6 +907,7 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert "xcrun altool --upload-app" not in package_command
     assert 'pkg_path="build/testflight/Veetbot.pkg"' in upload_command
     assert 'test -s "$pkg_path"' in upload_command
+    assert "$testflight_dir" not in upload_command
     assert "xcrun altool --upload-app" in upload_command
     assert package_command.index("security set-key-partition-list") < package_command.index(
         "productbuild"
