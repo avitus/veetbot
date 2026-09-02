@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-01 — Code blocks copy to the clipboard
+
+- Added a labeled Copy action to every fenced and indented code block in the
+  native Apple conversation renderer. Code snippets and shell or CLI blocks
+  now copy their exact contents through the platform clipboard on iOS and
+  macOS and display an accessible confirmation.
+
 ## 2026-09-01 — TestFlight installer signing isolated
 
 - Replaced the unusable managed installer-signing bundle path with a dedicated,
