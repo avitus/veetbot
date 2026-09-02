@@ -1,4 +1,4 @@
-"""Milestone 23 device-capability admission, identity, and exposure."""
+"""Milestone 24 device-capability admission, identity, and exposure."""
 
 from __future__ import annotations
 

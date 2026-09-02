@@ -1,4 +1,4 @@
-"""PostgreSQL contracts for Milestone 23 device-channel persistence."""
+"""PostgreSQL contracts for Milestone 24 device-channel persistence."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ async def _seed(uow: Any) -> None:
         await uow.devices.upsert(
             device(
                 device_id=device_id,
-                client_device_id=f"m23-contract-device-{index}",
+                client_device_id=f"m24-contract-device-{index}",
                 token=None,
             ),
             principal(),

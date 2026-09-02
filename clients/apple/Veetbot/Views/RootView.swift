@@ -270,12 +270,14 @@ private struct SessionSidebar: View {
             )
         }
         .toolbar {
+            #if os(macOS)
             ToolbarItem(placement: .automatic) {
                 Button(action: openSettings) {
                     Image(systemName: "gearshape")
                         .foregroundColor(AppTheme.orange)
                 }
                 .accessibilityLabel("Settings")
+                .accessibilityIdentifier("sidebar.settings")
             }
             ToolbarItem(placement: .automatic) {
                 Button {
@@ -307,6 +309,45 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Schedules")
                 .accessibilityIdentifier("sidebar.schedules")
             }
+            #else
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    Button {
+                        showingMemoryBrowser = true
+                    } label: {
+                        Label("Memory", systemImage: "brain.head.profile")
+                    }
+                    .accessibilityIdentifier("sidebar.memory")
+
+                    Button {
+                        showingScheduleBrowser = true
+                    } label: {
+                        Label("Schedules", systemImage: "calendar")
+                    }
+                    .accessibilityIdentifier("sidebar.schedules")
+
+                    Button {
+                        showingPersonaEditor = true
+                    } label: {
+                        Label("Persona", systemImage: "person.crop.circle")
+                    }
+                    .accessibilityIdentifier("sidebar.persona")
+
+                    Divider()
+
+                    Button(action: openSettings) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .accessibilityIdentifier("sidebar.settings")
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("More")
+                .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
+                .accessibilityIdentifier("sidebar.more")
+            }
+            #endif
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)

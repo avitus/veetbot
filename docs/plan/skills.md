@@ -264,7 +264,7 @@ References are strings, and the grammar is two forms.
 ```
 
 `AgentSpec.enabled_skills` is a list of these, which is why that field
-could already exist at `engineering-plan.md:539` with no design behind
+could already exist at `engineering-plan.md:553` with no design behind
 it and still be right. A floating reference is what an operator wants
 for a skill they maintain; a pinned reference is what an operator
 wants after a bad revision, and it is also the whole of the rollback
@@ -915,7 +915,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:4341` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:4405` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
@@ -930,7 +930,7 @@ tool acts on the run. `skill_manage` acts on durable tenant state
 that outlives the run.** It is a capability tool, and it was never in
 `tool-system.md`'s control-tool table — that table has four entries
 and `skill_manage` is not one of them. The table was right and the
-sentence was wrong, and `tool-system.md:1351` carries the corrected
+sentence was wrong, and `tool-system.md:1353` carries the corrected
 sentence now.
 
 ```text
@@ -1013,7 +1013,7 @@ It retries by reading the new current revision and deciding again.
 ### The scope is `skill.write`
 
 An earlier draft used the `skills:write` scope. The current contract at
-`tool-system.md:1355` requires `skill.write`. The earlier string was wrong in
+`tool-system.md:1357` requires `skill.write`. The earlier string was wrong in
 two ways against
 [http-api-and-streaming.md](http-api-and-streaming.md), which
 enumerates the scope vocabulary as dotted `resource.action` strings
@@ -1247,7 +1247,7 @@ something.
 1  skill_manage called a control tool a capability tool
 2  skill_manage NON_IDEMPOTENT        CONDITIONALLY_IDEMPOTENT
 3  the scope spelled skills:write     skill.write, enumerated
-4  "skills have no design at all"     tool-system.md:1309-1357
+4  "skills have no design at all"     tool-system.md:1311-1358
 5  Milestone 8 had zero gates         ten, a new `skill` area
 6  Milestone 10 had zero gates        six, in the same area
 7  no harness case names a skill      case 27, Milestone 8
@@ -1266,8 +1266,8 @@ above, under the heading that calls `skill_manage`
 Row 4 is a correction to a verdict rather than to a design.
 `readiness.md` says skills have no specification at all and that no
 document outside the plan and ADR-0013 mentions `SKILL.md`. The
-second half is true. The first is not: `tool-system.md:1309-1357` is
-forty-nine lines of real design that settles four questions, and
+second half is true. The first is not: `tool-system.md:1311-1358` is
+forty-eight lines of real design that settles four questions, and
 this document had to be written to fit inside it rather than on top
 of it. The verdict is corrected where it is stated.
 
@@ -1278,7 +1278,7 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:391` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:738-744` cites `engineering-plan.md:2834`, the
+`readiness.md:741-743` cites `engineering-plan.md:2848`, the
 version-pinning acceptance criterion; its earlier target was an MCP
 trust-labelling bullet. The ADR and the questions file are
 historical records and are not edited. The two live statements are.

@@ -429,6 +429,13 @@ from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
+from agent_core.tools.schedule_lifecycle import (
+    SCHEDULE_LIFECYCLE_TOOL_NAMES,
+    ScheduleCancelTool,
+    ScheduleListTool,
+    SchedulePauseTool,
+    ScheduleResumeTool,
+)
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
     LegacySkillLoadTool,
@@ -1478,6 +1485,10 @@ async def _compose(
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
         registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
+        registry.register(ScheduleListTool(schedule_service))
+        registry.register(SchedulePauseTool(schedule_service))
+        registry.register(ScheduleResumeTool(schedule_service))
+        registry.register(ScheduleCancelTool(schedule_service))
 
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
@@ -2800,7 +2811,7 @@ async def build(
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
         *(
-            [SCHEDULE_CREATE_TOOL_NAME]
+            [SCHEDULE_CREATE_TOOL_NAME, *SCHEDULE_LIFECYCLE_TOOL_NAMES]
             if effective_settings.schedule_api_enabled
             and effective_settings.schedule_worker_enabled
             else []

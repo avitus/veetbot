@@ -421,18 +421,12 @@ deliberately separate from `veetbot-production`.
 
 First, upload an active Apple distribution signing identity and the macOS App
 Store provisioning profile for `com.veetbot.apple` to CircleCI's code-signing
-store, then create a signing bundle named `veetbot-app-store`. Upload an active
-Mac Installer Distribution identity separately and create
-`veetbot-mac-installer`; `productbuild` requires that second identity when
-signing the App Store installer package. The profile must carry the
-production entitlements used by the Release target, including APNs. CircleCI's
-supported setup flow accepts each password-protected `.p12` identity and the
-`.provisionprofile` once, installs them into a temporary keychain for the job,
-and removes them afterward. Only `veetbot-app-store` carries the provisioning
-profile; `veetbot-mac-installer` contains the installer identity with no
-profile, because CircleCI rejects profiles for that certificate type. Do not
-place any of those binaries in the repository, a context variable, a cache, a
-workspace, or an artifact.
+store, then create a signing bundle named `veetbot-app-store`. The profile must
+carry the production entitlements used by the Release target, including APNs.
+CircleCI installs that identity and profile into its temporary managed
+keychain. Do not add the installer identity to this bundle: CircleCI exposes
+neither the keychain password nor the source PKCS#12, so `productbuild` cannot
+receive non-interactive access to its private key.
 
 The archive selects `Apple Distribution` for the app signature. For the
 installer package, the job discovers the single installed
@@ -441,12 +435,35 @@ fingerprint explicitly for `productbuild`. Keep those roles separate: the App
 Store provisioning profile contains the app distribution certificate, not the
 installer certificate.
 
-After CircleCI installs both bundles, the job requires its ephemeral
-`circleci-signing.keychain-db`, unlocks that CI-only keychain's null password,
-and grants its signing keys the `apple-tool:`, `apple:`, and `codesign:`
-partitions. This runner-local access control lets Apple's command-line signing
-tools use the installer private key without opening a headless keychain prompt;
-it does not alter the stored certificate or outlive the job.
+Create a second restricted context named `veetbot-apple-signing` with:
+
+| Variable | Value |
+| --- | --- |
+| `APPLE_INSTALLER_CERTIFICATE_BASE64` | Single-line base64 of a password-protected PKCS#12 containing the Mac Installer Distribution private key, leaf certificate, and Apple WWDR G3 intermediate |
+| `APPLE_INSTALLER_CERTIFICATE_PASSWORD` | The strong, unique PKCS#12 password |
+
+Restrict this context to the Veetbot project and the expression
+`(pipeline.git.branch == "main" or pipeline.git.branch == "dev") and not
+job.ssh.enabled and not (pipeline.config_source starts-with "api")`. The job
+decodes the PKCS#12 under a mode-restricted temporary directory, imports it into
+a fresh random-password keychain, grants only that imported key the
+`apple-tool:`, `apple:`, and `codesign:` partitions, passes the exact keychain to
+`productbuild`, and deletes both files on every exit. Keep the original private
+key in the owner's protected credential store only if certificate recovery is
+required; never place the PKCS#12, password, or decoded key in the repository,
+a project variable, cache, workspace, artifact, or log.
+
+The `apple-signing-smoke` job proves this complete signing path on trusted
+`dev` pushes before a release pull request is opened. It runs the same
+repository-owned archive and package script as `apple-testflight`, including
+the archived identity checks, application-signature verification,
+`productbuild`, and `pkgutil` verification. It receives neither the
+`veetbot-apple-testflight` context nor an App Store Connect API key, does not
+invoke `altool`, persists no artifact, and therefore cannot publish its package.
+It does receive `veetbot-apple-signing`, so access to `dev` and changes to the
+CircleCI workflow are nevertheless release-signing security boundaries. Keep
+`dev` restricted to trusted maintainers and require the smoke job to pass on the
+exact revision proposed for `main`.
 
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
@@ -469,10 +486,11 @@ base64 -i "AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -o -
 
 Paste that output as the context value. Add a CircleCI project restriction for
 this repository to the context and restrict it to the protected `main` delivery
-path. Treat the organization-level signing bundle and any CircleCI role that can
-reference or replace it as publication authority. The API key needs only the App
-Store Connect role and resource access required to upload Veetbot and manage its
-signing; it grants no server, model-provider, database, or Veetbot API authority.
+path. Treat the managed signing bundle, both Apple contexts, and any CircleCI
+role that can reference or replace them as publication authority. The API key
+needs only the App Store Connect role and resource access required to upload
+Veetbot and manage its signing; it grants no server, model-provider, database,
+or Veetbot API authority.
 Keep the original `.p8` in the owner's protected credential store because App
 Store Connect does not offer it for download a second time.
 
@@ -485,8 +503,9 @@ that counter.
 
 ## Automatic delivery
 
-An ordinary branch or pull request runs verification only. On `main`, after all
-five required verification lanes pass:
+An ordinary branch or pull request runs verification only. A `dev` push also
+runs the non-publishing Apple signing smoke described above. On `main`, after
+all five required verification lanes pass:
 
 - `package-release` archives the exact tested commit, builds MkDocs in strict
   mode, and records both artifacts' SHA-256 values;
@@ -559,7 +578,7 @@ all application units return.
 
 ## The SMS capture ceremony
 
-Milestone 23 ([device-channel-and-sms.md](plan/device-channel-and-sms.md)) lets
+Milestone 24 ([device-channel-and-sms.md](plan/device-channel-and-sms.md)) lets
 the owner's iPhone act as a Veetbot SMS channel: outbound texts ride the
 system compose sheet, and inbound texts reach Veetbot only because the owner
 wires a Shortcuts personal automation to the app's "Forward Message to

@@ -68,7 +68,7 @@ WriteProbe = Callable[[str], None]
 # A child run seeds at USER trust, so anything a child may call is reachable
 # from whatever authored the brief. `device.sms.send` composes a text on the
 # owner's phone; drafting a reply is a triage-session behavior, never a
-# child-run behavior (ADR-0082).
+# child-run behavior (ADR-0083).
 FORBIDDEN_CHILD_TOOLS = frozenset({"delegate.run", "skill.manage", "device.sms.send"})
 # json.dumps escapes neither < nor >, so a brief naming the envelope tag could
 # read to the child model as closing the untrusted-data boundary.

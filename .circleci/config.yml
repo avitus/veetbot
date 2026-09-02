@@ -31,7 +31,7 @@ jobs:
   static:
     docker:
       - image: cimg/python:3.12
-    resource_class: small
+    resource_class: medium
     steps:
       - checkout
       - install_uv
@@ -44,8 +44,25 @@ jobs:
           name: Install Pandoc
           command: sudo apt-get update && sudo apt-get install -y pandoc
       - run:
-          name: Static checks
-          command: make lint typecheck test-static test-deploy docs-check
+          name: Lint
+          command: make lint
+      - run:
+          name: Type check
+          command: make typecheck
+      - run:
+          name: Static tests
+          command: |
+            mkdir -p test-results/static
+            PYTEST_ADDOPTS="-n 2 --dist loadscope --junitxml=test-results/static/results.xml" \
+              make test-static
+      - store_test_results:
+          path: test-results/static
+      - run:
+          name: Deployment tests
+          command: make test-deploy
+      - run:
+          name: Documentation checks
+          command: make docs-check
       - run:
           name: Build downloadable client
           command: make client-build
@@ -62,7 +79,12 @@ jobs:
       - install_uv
       - run:
           name: Contract tests
-          command: make test-contract
+          command: |
+            mkdir -p test-results/contract
+            PYTEST_ADDOPTS="--junitxml=test-results/contract/results.xml" \
+              make test-contract
+      - store_test_results:
+          path: test-results/contract
 
   integration:
     docker:
@@ -82,8 +104,16 @@ jobs:
           name: Wait for PostgreSQL
           command: dockerize -wait tcp://localhost:5432 -timeout 60s
       - run:
-          name: Migrations and integration tests
-          command: make migrate test-integration
+          name: Migrations
+          command: make migrate
+      - run:
+          name: Integration tests
+          command: |
+            mkdir -p test-results/integration
+            PYTEST_ADDOPTS="--junitxml=test-results/integration/results.xml" \
+              make test-integration
+      - store_test_results:
+          path: test-results/integration
 
   sandbox:
     machine:
@@ -94,7 +124,12 @@ jobs:
       - install_uv
       - run:
           name: Real-runtime sandbox security gates
-          command: make test-sandbox
+          command: |
+            mkdir -p test-results/sandbox
+            PYTEST_ADDOPTS="--junitxml=test-results/sandbox/results.xml" \
+              make test-sandbox
+      - store_test_results:
+          path: test-results/sandbox
 
   apple:
     macos:
@@ -107,20 +142,27 @@ jobs:
           command: make test-apple
       - run:
           name: Apple client UI tests
-          command: make test-apple-ui
+          command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui
+      - store_artifacts:
+          path: build/apple-test-results
+          destination: apple-test-results
 
   apple-testflight:
     macos:
       xcode: "26.6.0"
       code_signing:
         - veetbot-app-store
-        - veetbot-mac-installer
     resource_class: m4pro.medium
     steps:
       - install_signing_bundle
       - checkout
       - run:
-          name: Archive and upload the macOS client to TestFlight
+          name: Build and verify the signed macOS TestFlight package
+          command: |
+            APPLE_BUILD_NUMBER="<< pipeline.number >>" \
+              scripts/build_macos_testflight_package.sh
+      - run:
+          name: Upload the macOS client to TestFlight
           command: |
             set -euo pipefail
             : "${APP_STORE_CONNECT_API_KEY_BASE64:?set APP_STORE_CONNECT_API_KEY_BASE64 in the veetbot-apple-testflight context}"
@@ -129,12 +171,8 @@ jobs:
             [[ "$APP_STORE_CONNECT_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]
             [[ "$APP_STORE_CONNECT_ISSUER_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
 
-            apple_build_number="<< pipeline.number >>"
-            [[ "$apple_build_number" =~ ^[1-9][0-9]*$ ]]
-
-            testflight_dir="build/testflight"
-            archive_path="$testflight_dir/Veetbot-macOS.xcarchive"
-            pkg_path="$testflight_dir/Veetbot.pkg"
+            pkg_path="build/testflight/Veetbot.pkg"
+            test -s "$pkg_path"
             temporary_root="${TMPDIR:-/tmp}"
             asc_auth_dir="$(mktemp -d "${temporary_root%/}/veetbot-app-store-key.XXXXXX")"
             asc_auth_file="$asc_auth_dir/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
@@ -144,61 +182,9 @@ jobs:
             }
             trap cleanup_asc_auth EXIT
             umask 077
-            mkdir -p "$testflight_dir"
             printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" \
               | base64 --decode > "$asc_auth_file"
             test -s "$asc_auth_file"
-
-            signing_keychain="$(
-              security list-keychains -d user \
-                | tr -d '"' \
-                | awk '/\/circleci-signing\.keychain-db$/ {
-                    sub(/^[[:space:]]+/, ""); print
-                  }'
-            )"
-            [[ "$signing_keychain" == "$HOME/Library/Keychains/circleci-signing.keychain-db" ]]
-            test -f "$signing_keychain"
-            security unlock-keychain -p "" "$signing_keychain"
-            security set-key-partition-list -S apple-tool:,apple:,codesign: \
-              -s -k "" "$signing_keychain"
-
-            installer_certificate_sha1="$(
-              security find-certificate -a -c "3rd Party Mac Developer Installer" -Z \
-                "$signing_keychain" \
-                | awk '/^SHA-1 hash: / {print $3}'
-            )"
-            [[ "$installer_certificate_sha1" =~ ^[A-F0-9]{40}$ ]]
-
-            xcodebuild archive \
-              -project clients/apple/Veetbot.xcodeproj \
-              -scheme Veetbot \
-              -configuration Release \
-              -destination "generic/platform=macOS" \
-              -archivePath "$archive_path" \
-              CURRENT_PROJECT_VERSION="$apple_build_number" \
-              CODE_SIGN_STYLE=Manual \
-              CODE_SIGN_IDENTITY="Apple Distribution" \
-              PROVISIONING_PROFILE_SPECIFIER="Veetbot Mac App Store"
-
-            app_path="$archive_path/Products/Applications/Veetbot.app"
-            app_info="$app_path/Contents/Info.plist"
-            archived_build_number="$(
-              /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info"
-            )"
-            archived_bundle_id="$(
-              /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info"
-            )"
-            test "$archived_build_number" = "$apple_build_number"
-            test "$archived_bundle_id" = "com.veetbot.apple"
-            codesign --verify --deep --strict --verbose=2 "$app_path"
-
-            productbuild \
-              --sign "$installer_certificate_sha1" \
-              --keychain "$signing_keychain" \
-              --component "$app_path" /Applications \
-              "$pkg_path"
-            test -s "$pkg_path"
-            pkgutil --check-signature "$pkg_path"
 
             xcrun altool --upload-app \
               --file "$pkg_path" \
@@ -208,6 +194,21 @@ jobs:
               --p8-file-path "$asc_auth_file" \
               --show-progress \
               --verbose
+
+  apple-signing-smoke:
+    macos:
+      xcode: "26.6.0"
+      code_signing:
+        - veetbot-app-store
+    resource_class: m4pro.medium
+    steps:
+      - install_signing_bundle
+      - checkout
+      - run:
+          name: Build and verify the signed macOS TestFlight package
+          command: |
+            APPLE_BUILD_NUMBER="<< pipeline.number >>" \
+              scripts/build_macos_testflight_package.sh
 
   live:
     docker:
@@ -434,6 +435,11 @@ workflows:
       - integration
       - sandbox
       - apple
+      - apple-signing-smoke:
+          context: veetbot-apple-signing
+          filters:
+            branches:
+              only: dev
       - package-release:
           requires:
             - static
@@ -461,7 +467,9 @@ workflows:
             branches:
               only: main
       - apple-testflight:
-          context: veetbot-apple-testflight
+          context:
+            - veetbot-apple-signing
+            - veetbot-apple-testflight
           serial-group: << pipeline.project.slug >>/veetbot-apple-testflight
           requires:
             - deploy-app

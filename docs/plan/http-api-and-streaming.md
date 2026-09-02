@@ -534,7 +534,7 @@ fourteen gates. The routes use this document's error envelope and closed code
 vocabulary unchanged; the scope vocabulary block gains the pair when the
 implementation lands, as the Milestone 14 scopes did.
 
-### The Milestone 23 device-channel extension
+### The Milestone 24 device-channel extension
 
 [device-channel-and-sms.md](device-channel-and-sms.md) adds three routes and no
 scopes: the phone fetches and answers its own invocations under the existing

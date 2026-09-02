@@ -1,4 +1,4 @@
-# ADR-0080: Milestone 23 SMS through the owner's iPhone
+# ADR-0081: Milestone 24 SMS through the owner's iPhone
 
 - Status: Proposed
 - Date: 2026-08-26
@@ -22,7 +22,7 @@ device-channel-and-sms.md is the specification, with twelve gates.
 
 ## Proposed decisions
 
-1. **Parallel workstream.** Milestone 23 is authorized as a parallel
+1. **Parallel workstream.** Milestone 24 is authorized as a parallel
    workstream on the ADR-0069 terms: its gates become green independently,
    and the verified gate ceiling still advances only in numerical order,
    so nothing here moves the ceiling past 15. The milestone touches three
@@ -57,7 +57,7 @@ device-channel-and-sms.md is the specification, with twelve gates.
    `AGENT_DEVICE_SMS_ENABLED` default off and change together at release
    validation. This follows the schedule and notification routers exactly.
 8. **Twelve gates extend the existing `device` area.** Registered at
-   Milestone 23 against the design's hard-gates section.
+   Milestone 24 against the design's hard-gates section.
 
 ## Consequences
 

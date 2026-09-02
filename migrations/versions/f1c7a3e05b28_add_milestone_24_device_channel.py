@@ -1,4 +1,4 @@
-"""Add Milestone 23 — device capabilities, invocations, ingest, and triage sessions.
+"""Add Milestone 24 — device capabilities, invocations, ingest, and triage sessions.
 
 Revision ID: f1c7a3e05b28
 Revises: e3a1c5d7f9b2

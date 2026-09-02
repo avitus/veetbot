@@ -1,4 +1,4 @@
-"""Milestone 23: DEVICE_INVOCATION as the sixth notification trigger.
+"""Milestone 24: DEVICE_INVOCATION as the sixth notification trigger.
 
 Covers the closed payload vocabulary for the new kind, its dedupe key, the
 producer's enqueue-once behavior, and the dispatcher's device narrowing.

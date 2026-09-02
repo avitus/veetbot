@@ -98,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 421
+    assert len(entries) == 428
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -169,8 +169,9 @@ def test_census_is_derived() -> None:
         20: 6,
         21: 24,
         22: 14,
-        23: 12,
+        23: 7,
         24: 12,
+        25: 12,
     }
 
 
@@ -287,10 +288,10 @@ def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> No
 
 
 def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> None:
-    """Milestone 24 is authorized; the registry admits it and stops there."""
+    """Milestone 25 is authorized; the registry admits it and stops there."""
     import scripts.gate_registry as gate_registry
 
-    assert getattr(gate_registry, "MAX_MILESTONE", None) == 24
+    assert getattr(gate_registry, "MAX_MILESTONE", None) == 25
 
     gates = tmp_path / "evals" / "gates"
     gates.mkdir(parents=True)
@@ -300,8 +301,8 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         (plan_dir / filename).write_text("## Hard gates\n", encoding="utf-8")
     (plan_dir / "milestone-map.md").write_text(
         "## The gate table\n\n```text\n"
-        "gate.schedule.roadmap_probe   case   24\n"
-        "gate.schedule.beyond_probe    case   25\n"
+        "gate.schedule.roadmap_probe   case   25\n"
+        "gate.schedule.beyond_probe    case   26\n"
         "```\n\n## The census\n\n```text\n```\n",
         encoding="utf-8",
     )
@@ -317,12 +318,12 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         }
 
     (gates / "schedule.yaml").write_text(
-        yaml.safe_dump([entry("roadmap_probe", 24), entry("beyond_probe", 25)]),
+        yaml.safe_dump([entry("roadmap_probe", 25), entry("beyond_probe", 26)]),
         encoding="utf-8",
     )
     errors = registry_errors(tmp_path)
-    assert "gate.schedule.roadmap_probe has invalid milestone 24" not in errors
-    assert "gate.schedule.beyond_probe has invalid milestone 25" in errors
+    assert "gate.schedule.roadmap_probe has invalid milestone 25" not in errors
+    assert "gate.schedule.beyond_probe has invalid milestone 26" in errors
 
 
 def test_notifications_and_devices_have_complete_milestone_12_gate_areas() -> None:
@@ -455,10 +456,21 @@ def test_persona_has_complete_milestone_22_gate_area() -> None:
     assert all(GATE_ID.fullmatch(entry.id) for entry in persona_entries)
 
 
-def test_device_channel_has_complete_milestone_23_gate_area() -> None:
+def test_schedule_lifecycle_has_complete_milestone_23_gate_area() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    device_entries = [entry for entry in entries if entry.milestone == 23]
+    schedule_entries = [entry for entry in entries if entry.milestone == 23]
+
+    assert len(schedule_entries) == 7
+    assert all(entry.id.startswith("gate.schedule.model_") for entry in schedule_entries)
+    assert all(entry.spec == "docs/plan/scheduling.md#hard-gates" for entry in schedule_entries)
+    assert all(GATE_ID.fullmatch(entry.id) for entry in schedule_entries)
+
+
+def test_device_channel_has_complete_milestone_24_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    device_entries = [entry for entry in entries if entry.milestone == 24]
 
     assert len(device_entries) == 12
     assert all(entry.id.startswith("gate.device.") for entry in device_entries)
@@ -468,10 +480,10 @@ def test_device_channel_has_complete_milestone_23_gate_area() -> None:
     assert all(GATE_ID.fullmatch(entry.id) for entry in device_entries)
 
 
-def test_whatsapp_surface_has_complete_milestone_24_gate_area() -> None:
+def test_whatsapp_surface_has_complete_milestone_25_gate_area() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    whatsapp_entries = [entry for entry in entries if entry.milestone == 24]
+    whatsapp_entries = [entry for entry in entries if entry.milestone == 25]
 
     assert len(whatsapp_entries) == 12
     assert all(entry.id.startswith("gate.whatsapp.") for entry in whatsapp_entries)

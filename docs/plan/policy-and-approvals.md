@@ -316,8 +316,13 @@ write covers create, update, pause, and resume, and cancel covers the terminal
 schedule transition. That was the complete Milestone 11 surface. Milestone 19
 also gives the one-time model tool `schedule.create` exactly `schedule.write`;
 its `EXTERNAL_WRITE`/`HIGH` classification makes approval mandatory under the
-existing matrix. Exact matching, MCP namespace isolation, and every other rule
-in this section are unchanged.
+existing matrix. Milestone 23 gives `schedule.list` exactly `schedule.read`,
+`schedule.pause` and `schedule.resume` exactly `schedule.write`, and
+`schedule.cancel` exactly `schedule.cancel`. The read is
+`NONE`/`LOW`; the two state writes are `EXTERNAL_WRITE`/`HIGH`; terminal
+cancellation is `EXTERNAL_DELETE`/`HIGH`. The existing matrix therefore allows
+the read and requires approval for every mutation. Exact matching, MCP
+namespace isolation, and every other rule in this section are unchanged.
 
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`
 for the device and notification routes in
@@ -347,7 +352,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1222` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1224` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -625,10 +630,10 @@ name matches, that row decides for that one tool; every other tool in the class
 still gets the class's decision, so the matrix stays total and nothing about the
 class changes. The section exists for a tool whose own mechanism already carries
 the control the class demands, and it is the seam a milestone uses instead of
-editing a matrix row. Milestone 23's `device.sms.send` is the first and only
+editing a matrix row. Milestone 24's `device.sms.send` is the first and only
 entry: iOS presents the composed message and the owner's Send tap performs the
 send, so the class's approval would duplicate a confirmation the platform
-already enforces (ADR-0080 and ADR-0082, and
+already enforces (ADR-0081 and ADR-0083, and
 [device-channel-and-sms.md](device-channel-and-sms.md)). Hardline rules run
 first and are unaffected, so a credential-shaped body is still refused before
 anything reaches the device. Two entries for one tool name, like a missing

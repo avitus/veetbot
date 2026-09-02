@@ -6,14 +6,15 @@ canonical: true
 
 # Scheduled runs
 
-This document specifies Milestones 11, 19, and 20 and the authorized native
+This document specifies Milestones 11, 19, 20, and 23 and the authorized native
 schedule browser. The engineering plan states the requirement; this document states the mechanism. It is subordinate to
 [engineering-plan.md](engineering-plan.md), and it reuses rather than replaces
 the durable run queue, run loop, policy engine, event log, and HTTP boundary.
 [ADR-0059](../adr/0059-milestone-11-scheduled-runs.md) records the architectural
 decisions for the control plane, ADR-0072 records the original one-time
-conversational bridge, ADR-0073 records the calendar-recurrence extension, and
-ADR-0075 records the transport-only Apple inspection surface.
+conversational bridge, ADR-0073 records the calendar-recurrence extension,
+ADR-0075 records the transport-only Apple inspection surface, and ADR-0080
+records the conversational lifecycle extension.
 
 The scheduling entry condition is satisfied: PostgreSQL-backed on-demand runs,
 leases, fencing, checkpoints, recovery, cancellation, and the public run API
@@ -49,8 +50,12 @@ model-callable creation surface specified below without changing the Milestone
 on 2026-08-27 and recorded in ADR-0073, adds monthly and yearly calendar rules
 and widens conversational creation to daily, weekly, monthly, and yearly
 schedules. Arbitrary cron or RFC 5545 input, interval multipliers, dependency
-graphs, workflow DAGs, continuous-session recurrence, and model-callable
-lifecycle mutation remain outside the closed extension.
+graphs, workflow DAGs, and continuous-session recurrence remain outside the
+closed extension. Milestone 23, authorized by the owner on 2026-09-02 and
+recorded in ADR-0080, brings the existing list, pause, resume, and cancel
+service operations into the governed model-tool pipeline. Schedule content and
+cadence update, occurrence and run listing, and hard deletion remain outside
+that extension.
 
 The owner authorized a native Apple schedule browser on 2026-08-29. It reuses
 the existing Milestone 11 list and point-read routes and therefore adds no
@@ -851,6 +856,67 @@ generic content-free `schedule_run_finished` notification. The push does not
 contain the title or instruction and can arrive after the nominal instant by
 the duration of the scheduled run.
 
+## Model-callable lifecycle
+
+Milestone 23 closes the remaining operational gap between a conversational
+schedule and its lifecycle. Four builtin capabilities are registered beside
+`schedule.create`:
+
+```text
+name              side_effect      risk  idempotency  scope            parallel
+----------------  ---------------  ----  -----------  ---------------  --------
+schedule.list     none             low   read_only    schedule.read     true
+schedule.pause    external_write   high  idempotent   schedule.write    false
+schedule.resume   external_write   high  idempotent   schedule.write    false
+schedule.cancel   external_delete  high  idempotent   schedule.cancel   false
+```
+
+All four use `target_kind: in_process`, `output_trust: internal_tool`, and a
+15-second timeout. Discovery has a 524,288-byte output ceiling so the bounded
+fifty-record page remains valid even when every record carries the largest
+legal yearly selector; one mutation has a 4,096-byte ceiling. They register and
+enter the default-agent roster only while both schedule deployment flags are
+enabled.
+
+`schedule.list` accepts an optional `limit` from 1 through 50, defaulting to
+50, and an optional opaque `cursor`. It returns `items` and `next_cursor`.
+Each item is a summary allow-list containing `schedule_id`, `title`, `state`,
+`pause_reason`, `current_revision`, `next_fire_at`, and the canonical
+`cadence`. It never returns the instruction, policy profile, requested scopes,
+limits, principal identity, or persistence cursor internals. The model uses
+these summaries to resolve a user's reference. If no record or more than one
+record plausibly matches, it asks the user instead of selecting one by guess.
+
+Each mutation has the same closed input:
+
+```json
+{
+  "schedule_id": "66af9c8d-d71c-4b36-bb06-cd44d4800bad",
+  "expected_revision": 3
+}
+```
+
+The stable UUID identifies the schedule; the positive revision guards the
+selection against concurrent changes. A title is never a mutation key. The
+approval view names the action, exact identifier, and expected revision. The
+ordinary pipeline checks the exact scope before approval, and the existing
+default policy requires approval for every lifecycle mutation. Execution marks
+the effect boundary and calls the matching `ScheduleService` method directly
+with `ToolExecutionContext.principal`.
+
+Successful mutation output contains the stable ID, current revision, state,
+pause reason, and next firing. Repeating the same valid transition returns the
+same legal state without another transition event. A malformed ID or revision,
+unknown schedule, stale revision, illegal terminal transition, or recurrence
+with no future instant returns a stable non-retryable argument/not-found
+failure and never changes another schedule.
+
+Conversational “delete” is deliberately implemented by `schedule.cancel`.
+Cancellation is terminal, preserves the schedule and occurrence ledger for
+audit, stops future occurrences, and does not cancel an occurrence's already
+materialized run. Resume preserves the existing no-backfill rule: it chooses
+the first occurrence strictly after the current instant.
+
 ## Build sequence
 
 1. Add the domain values, recurrence calculator, and deterministic civil-time
@@ -887,6 +953,16 @@ the duration of the scheduled run.
 15. Run the six Milestone 20 gates, every scheduling partition, the complete
     non-live suite, PostgreSQL integration, hosted CI, and the CodeRabbit loop
     on the final head. **M20.**
+16. Add the summary-only `schedule.list` schema and the three revision-guarded
+    lifecycle schemas, classifications, approval views, and direct
+    application-service adapters. **M23.**
+17. Register all four tools under the existing schedule flag pair, add them to
+    the default agent on the same condition, and prove exact-scope denial,
+    ambiguity-safe discovery, conflict behavior, approval, and retry safety
+    through the ordinary pipeline. **M23.**
+18. Run the seven Milestone 23 gates, every scheduling partition, the complete
+    non-live suite, PostgreSQL integration, hosted CI, and the CodeRabbit loop
+    on the final head. **M23.**
 
 ## Hard gates
 
@@ -1045,6 +1121,39 @@ the duration of the scheduled run.
     with different recurrence content create no duplicate state, while an
     identical retry returns the original schedule. Registered as
     `gate.schedule.model_create_recurring_validation`, case. **M20.**
+35. **Conversational lifecycle tools are feature-gated and honestly
+    classified.** The schedule flag pair registers and advertises exactly
+    `schedule.list`, `schedule.pause`, `schedule.resume`, and
+    `schedule.cancel` beside creation, with the declared effects, risks,
+    idempotency, scopes, and parallelism. Registered as
+    `gate.schedule.model_lifecycle_contract`, structural. **M23.**
+36. **Conversational discovery is bounded and summary-only.** A
+    principal-scoped list returns no more than fifty canonical summaries with
+    stable IDs and revisions, paginates by opaque cursor, and exposes no
+    instruction or authority fields. Registered as
+    `gate.schedule.model_lifecycle_discovery`, case. **M23.**
+37. **Conversational pause and resume use the ordinary approval pipeline.** A
+    named schedule is discovered, paused after one approval, then resumed
+    after one approval at its first strictly future occurrence without
+    backfill. Registered as `gate.schedule.model_pause_resume`, case. **M23.**
+38. **Conversational delete is terminal schedule cancellation.** An approved
+    `schedule.cancel` stops future occurrences, preserves the record and
+    ledger, and leaves an already materialized run unchanged. Registered as
+    `gate.schedule.model_cancel`, case. **M23.**
+39. **Every conversational lifecycle operation has exact authority.** Listing
+    requires only `schedule.read`, pause and resume require
+    `schedule.write`, and cancel requires `schedule.cancel`; a missing scope is
+    denied before execution or approval and leaves state unchanged. Registered
+    as `gate.schedule.model_lifecycle_authorization`, case. **M23.**
+40. **Lifecycle selection and validation fail closed.** Invalid identifiers or
+    revisions, unknown schedules, stale revisions, and illegal terminal
+    transitions return stable failures without mutating the selected or any
+    other schedule. Registered as
+    `gate.schedule.model_lifecycle_validation`, case. **M23.**
+41. **Conversational lifecycle retries are state-idempotent.** Replaying an
+    identical authorized invocation cannot duplicate a transition event or
+    move a schedule beyond the requested legal state. Registered as
+    `gate.schedule.model_lifecycle_retry`, case. **M23.**
 
 ## Open questions
 

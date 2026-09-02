@@ -106,9 +106,19 @@ Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
 
-### Milestone 23 — SMS through the owner's iPhone
+### Milestone 23 — Conversational schedule lifecycle
 
-An eighth parallel workstream. The `DeviceChannel` port with its push-wake
+An eighth parallel workstream adding bounded summary discovery and
+approval-gated pause, resume, and terminal cancellation through the existing
+schedule service. Its seven `gate.schedule.*` checks pass locally, including
+no-backfill resume, audit-preserving cancellation, exact-scope denial,
+fail-closed revision handling, and idempotent retry. Remaining:
+
+- [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
+
+### Milestone 24 — SMS through the owner's iPhone
+
+A ninth parallel workstream. The `DeviceChannel` port with its push-wake
 adapter, capability-derived `device.sms.send` registration, the three
 device-authenticated routes, the SMS ingest path with its standing triage
 session, and the expiry sweep are implemented, all twelve registered
@@ -128,7 +138,7 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 24 — WhatsApp business surface** — twelve gates; a parallel
+- **Milestone 25 — WhatsApp business surface** — twelve gates; a parallel
   workstream whose documents, gates, and Meta ceremony proceed now and
   whose implementation begins when Milestone 14's surface ports exist.
 
@@ -144,7 +154,7 @@ adapter (B2), Slack and email inbound surfaces (B3), email and webhook
 notification transports (B4), scheduling residue such as cron, interval
 multipliers, and dependency graphs (B5), the memory residue after Milestone 22 — the semantic arm,
 `pgvector`, an external memory provider, and a learned memory policy (B6) — presence routing and
-hand-off (the B7 residue after Milestone 23), standing approval grants (B8), the
+hand-off (the B7 residue after Milestone 24), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and
 multi-tenant billing and quotas (B12), and the WhatsApp linked-device

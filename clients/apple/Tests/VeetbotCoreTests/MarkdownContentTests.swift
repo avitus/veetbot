@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import VeetbotCore
@@ -218,6 +219,45 @@ import Testing
                 .thematicBreak,
                 .codeBlock(language: nil, code: "indented()"),
             ]
+        )
+    }
+
+    @Test
+    func testEveryRenderedCodeBlockOffersAnAccessibleExactCopyAction() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Veetbot/Views/MarkdownContentView.swift"
+            ),
+            encoding: .utf8
+        )
+        let codeBlockStart = try #require(
+            source.range(of: "private struct MarkdownCodeBlockView: View")
+        )
+        let tableStart = try #require(
+            source.range(
+                of: "private struct MarkdownTableView: View",
+                range: codeBlockStart.upperBound..<source.endIndex
+            )
+        )
+        let codeBlockSource = source[codeBlockStart.lowerBound..<tableStart.lowerBound]
+
+        #expect(codeBlockSource.contains("SystemClipboard.copy(code)"))
+        #expect(codeBlockSource.contains("Text(language ?? \"Code\")"))
+        #expect(codeBlockSource.contains("Label(\"Copy\", systemImage: \"doc.on.doc\")"))
+        #expect(codeBlockSource.contains("UIPasteboard.general.string = text"))
+        #expect(
+            codeBlockSource.contains(
+                "NSPasteboard.general.setString(text, forType: .string)"
+            )
+        )
+        #expect(
+            codeBlockSource.contains(
+                ".accessibilityIdentifier(\"markdown.code.copy\")"
+            )
         )
     }
 

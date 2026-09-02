@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "3.0"
+version: "3.1"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -131,6 +131,20 @@ Version 3.0 (adaptive memory distillation pass, 2026-08-31):
 - The completed `formation@7` and `formation@8` policies remain frozen controls.
   The new `formation@9`, `retrieval@3`, and `lifecycle@2` policies activate only
   on comparative evidence from a corpus of at least sixty cases.
+
+Version 3.1 (conversational schedule lifecycle pass, 2026-09-02):
+
+- Section 21 gains Milestone 23 — conversational schedule lifecycle —
+  explicitly authorized by the repository owner as an eighth parallel
+  workstream and specified by the scheduling design with seven additional
+  gates (ADR-0080).
+- The model gains bounded, summary-only `schedule.list` discovery and
+  approval-gated `schedule.pause`, `schedule.resume`, and `schedule.cancel`
+  mutations over the existing principal-scoped application service.
+- Conversational “delete” maps to terminal cancellation: audit history is
+  retained, future occurrences stop, and an already materialized run remains
+  separate. Every mutation requires a stable schedule ID, an expected
+  revision, its exact scope, and ordinary approval.
 
 ## 1. Mission
 
@@ -3589,10 +3603,11 @@ Acceptance criteria:
   impossible calendar values, and idempotency-key content mismatches fail
   closed without duplicate schedule state.
 
-Arbitrary cron or RFC 5545 input; interval multipliers; model-callable list,
-update, pause, resume, and cancel; continuous-session recurrence; dependency
-graphs; workflow DAGs; delegated scopes; and content-bearing notifications
-remain later extensions.
+Arbitrary cron or RFC 5545 input; interval multipliers; model-callable update,
+continuous-session recurrence; dependency graphs; workflow DAGs; delegated
+scopes; and content-bearing notifications remain later extensions.
+Model-callable list, pause, resume, and cancel entered Milestone 23 on
+2026-09-02.
 
 ### Milestone 21: Adaptive memory distillation
 
@@ -3715,15 +3730,64 @@ The milestone does not include automatic promotion at any threshold, belief
 edit, retraction, or deletion over HTTP, per-agent or per-surface persona
 variants, or any change to `AgentSpec.instructions`.
 
-### Milestone 23: SMS through the owner's iPhone
+### Milestone 23: Conversational schedule lifecycle
 
-The owner authorized this milestone on 2026-08-26 (ADR-0080) as a parallel
+The owner authorized this milestone on 2026-09-02 after a failed scheduled
+briefing auto-paused and the conversational agent correctly reported that it
+had no scheduling tool with which to resume it. This is an eighth parallel
+workstream and does not advance the verified sequential ceiling past unfinished
+Milestones 13 through 15. The detailed design is
+[scheduling.md](scheduling.md#model-callable-lifecycle) and ADR-0080; it
+declares seven gates before implementation begins.
+
+Implement:
+
+- A bounded, summary-only `schedule.list` builtin capability behind the
+  existing schedule deployment flag pair, requiring exactly `schedule.read`
+  and returning stable IDs, current revisions, state, cadence, and next firing
+  without instructions, limits, policy, scopes, or principal data.
+- Approval-gated `schedule.pause` and `schedule.resume` capabilities requiring
+  exactly `schedule.write`, plus approval-gated `schedule.cancel` requiring
+  exactly `schedule.cancel`.
+- Closed mutation inputs containing only a stable `schedule_id` and positive
+  `expected_revision`; title matching happens in conversation, ambiguity asks
+  the owner, and no mutation selects by title.
+- Direct reuse of the existing principal-explicit `ScheduleService` lifecycle,
+  optimistic concurrency, audit events, no-backfill resume, and schedule/run
+  cancellation separation.
+- Registration and default-agent advertisement of all four tools only when
+  both `AGENT_SCHEDULE_API_ENABLED` and `AGENT_SCHEDULE_WORKER_ENABLED` are
+  enabled.
+
+Acceptance criteria:
+
+- Every additional hard gate declared by
+  [scheduling.md](scheduling.md#hard-gates) for Milestone 23 passes.
+- A user can identify a unique paused briefing by conversational description,
+  approve its resume, and observe one ACTIVE schedule whose next firing is the
+  first cadence instant strictly after the current time.
+- Pause, resume, and conversational delete each wait for a concrete ordinary
+  approval and use the exact write or cancellation scope.
+- Conversational delete invokes terminal schedule cancellation, preserves the
+  retained schedule and occurrence ledger, and never cancels an already
+  materialized run.
+- Missing authority, malformed or unknown identifiers, stale revisions,
+  ambiguous discovery, illegal terminal transitions, and identical retries
+  fail closed without changing the wrong schedule or duplicating an effect.
+
+The milestone does not include model-callable content or cadence update,
+occurrence or run history tools, hard deletion, delegated scheduled-run scopes,
+new cadence kinds, new notification payloads, or native lifecycle controls.
+
+### Milestone 24: SMS through the owner's iPhone
+
+The owner authorized this milestone on 2026-08-26 (ADR-0081) as a parallel
 workstream on the established terms: its gates become green independently
 and the verified gate ceiling still advances only in numerical order. It
 builds the first concrete slice of Section 29's device channel — roadmap
 item B7's device channel and device-scoped tools — with SMS through the
 owner's iPhone as the concrete use case. The detailed design is
-[device-channel-and-sms.md](device-channel-and-sms.md) and ADR-0080; the
+[device-channel-and-sms.md](device-channel-and-sms.md) and ADR-0081; the
 design declares this milestone's twelve gates.
 
 Implement:
@@ -3756,15 +3820,15 @@ websocket device transport, the waiting-on-device suspension kind,
 presence-based routing, or hand-off; the last two remain roadmap item B7's
 residue, and the rest are recorded in the design document's exclusions.
 
-### Milestone 24: WhatsApp business surface
+### Milestone 25: WhatsApp business surface
 
-The owner authorized this milestone on 2026-08-26 (ADR-0081) as a parallel
+The owner authorized this milestone on 2026-08-26 (ADR-0082) as a parallel
 workstream on the established terms. It gives the agent its own WhatsApp
 number through the official Meta Cloud API as an additive channel on the
 Milestone 14 surface seam, and pays the inbound-webhook price — the
 infrastructure ADR-0071 priced as B3 and B4 — deliberately and once. The
 detailed design is [whatsapp-surface.md](whatsapp-surface.md) and
-ADR-0081; the design declares this milestone's twelve gates. Its
+ADR-0082; the design declares this milestone's twelve gates. Its
 implementation begins when Milestone 14's ports exist; its documents,
 gates, and owner ceremony proceed now.
 
@@ -3848,13 +3912,13 @@ owner's current ranking, not a schedule.
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
 | B6 | Memory residue after Milestone 22: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation. The persona surface entered as Milestone 22 on 2026-09-01 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
-| B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 23 on 2026-08-26 (ADR-0080); presence-based routing and hand-off still wait here on a concrete use case |
+| B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 24 on 2026-08-26 (ADR-0081); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
-| B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 24 |
+| B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 25 |
 
 ## 22. Security baseline
 

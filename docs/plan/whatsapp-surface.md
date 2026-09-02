@@ -8,7 +8,7 @@ canonical: true
 
 ## Authorization and context
 
-The owner authorized this milestone on 2026-08-26 (ADR-0081) as a parallel
+The owner authorized this milestone on 2026-08-26 (ADR-0082) as a parallel
 workstream on the established terms. It gives the agent its own WhatsApp
 number through the official Meta WhatsApp Business Cloud API, as an
 additive channel on the Milestone 14 surface seam — the extension
@@ -84,7 +84,7 @@ transports already follow.
   limit matches the existing chunk size.
 - Inbound idempotency keys on Meta's string message id through the
   generalized `external_update_id TEXT` receipt key (the
-  inbound-surfaces amendment ADR-0081 records). Loss recovery leans on
+  inbound-surfaces amendment ADR-0082 records). Loss recovery leans on
   Meta's multi-day webhook retry plus receipt dedupe; the Telegram
   poll-offset resume does not apply to a webhook transport.
 
@@ -125,46 +125,46 @@ number or multi-tenant pairing UI.
 ## Build sequence
 
 1. The owner ceremony: business account, number, WABA, token, and the
-   utility template through Meta review. **M24.**
+   utility template through Meta review. **M25.**
 2. The listener with handshake and signature verification against a fake
-   Meta signing real payloads. **M24.**
+   Meta signing real payloads. **M25.**
 3. The adapter over the Milestone 14 ports behind the flag, with the
-   provider member and the generalized receipt key. **M24.**
-4. The window clock and template-only enforcement. **M24.**
+   provider member and the generalized receipt key. **M25.**
+4. The window clock and template-only enforcement. **M25.**
 5. The Nginx location, the systemd environment, and the end-to-end
-   verification against the live number. **M24.**
+   verification against the live number. **M25.**
 
 ## Hard gates
 
 1. **Signature required.** A webhook body whose `X-Hub-Signature-256`
    is missing or wrong is rejected content-free before parsing; nothing
-   content-bearing is stored. **M24.**
+   content-bearing is stored. **M25.**
 2. **Handshake confined.** The subscription challenge is echoed only on
-   a constant-time verify-token match. **M24.**
+   a constant-time verify-token match. **M25.**
 3. **Receipt idempotency.** A replayed Meta message id processes once
-   through the `external_update_id` receipt key. **M24.**
+   through the `external_update_id` receipt key. **M25.**
 4. **Unpaired denied.** An unpaired WhatsApp sender yields the rejected
-   disposition and a content-free receipt, and creates nothing else. **M24.**
+   disposition and a content-free receipt, and creates nothing else. **M25.**
 5. **Token confinement.** The three WhatsApp secrets appear in no event,
    result, log, or export; their rule families cover scanner and
-   redaction. **M24.**
+   redaction. **M25.**
 6. **Transport confined.** Adapter egress reaches only the fixed Meta
-   Graph origin over HTTPS with no redirects and bounded bodies. **M24.**
+   Graph origin over HTTPS with no redirects and bounded bodies. **M25.**
 7. **Template outside the window.** A send on a channel idle past
    twenty-four hours goes only through the approved template path;
-   freeform is refused with a closed reason code. **M24.**
+   freeform is refused with a closed reason code. **M25.**
 8. **Replies chunked and redacted.** Outbound replies pass the surface
    redaction families and the 4096-character chunking with per-chunk
-   receipts. **M24.**
+   receipts. **M25.**
 9. **Scope ceiling.** Every message resolves the pairing's granted
-   scopes intersected with the principal's current scopes, fresh. **M24.**
+   scopes intersected with the principal's current scopes, fresh. **M25.**
 10. **Loopback bind.** The listener binds loopback only; the structural
     check walks the bind the way the operational-hardening gate
-    does. **M24.**
+    does. **M25.**
 11. **Persistence isolated.** WhatsApp rows ride the surface tables'
-    tenant RLS; a second tenant sees nothing. **M24.**
+    tenant RLS; a second tenant sees nothing. **M25.**
 12. **Default off.** With the flag unset, no listener starts, no
-    adapter or provider registers, and no route is proxied. **M24.**
+    adapter or provider registers, and no route is proxied. **M25.**
 
 ## Open questions
 

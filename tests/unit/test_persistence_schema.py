@@ -359,7 +359,7 @@ def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> Non
     }
 
     migration = next(
-        (ROOT / "migrations" / "versions").glob("*_add_milestone_23_device_channel.py")
+        (ROOT / "migrations" / "versions").glob("*_add_milestone_24_device_channel.py")
     )
     migration_sql = migration.read_text(encoding="utf-8")
     for table in ("device_invocations", "device_ingest_receipts", "device_triage_sessions"):

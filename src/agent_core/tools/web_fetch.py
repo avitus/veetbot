@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from agent_core.domain.messages import TextPart
@@ -13,6 +14,7 @@ from agent_core.tools.web_search import (
     _coerce_web_provider_router,
     _failure,
     _provider_failure,
+    _provider_timeout_seconds,
 )
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -53,7 +55,7 @@ class WebFetchTool:
         side_effect=SideEffectClass.NETWORK_READ,
         risk=RiskLevel.LOW,
         idempotency=IdempotencyClass.READ_ONLY,
-        timeout_seconds=30,
+        timeout_seconds=60,
         maximum_output_bytes=1_048_576,
         allow_parallel=True,
         target_kind="web_provider",
@@ -74,10 +76,24 @@ class WebFetchTool:
             )
         provider = self._router.select(routing_key=f"web.fetch:{context.invocation_id}")
         try:
-            page = await provider.fetch(url)
+            # Provider clients apply their own 30-second connect/read/write
+            # limits. The larger tool budget allows a progressing extraction
+            # to complete while retaining a hard total deadline.
+            async with asyncio.timeout(_provider_timeout_seconds(context.timeout_seconds)):
+                page = await provider.fetch(url)
+        except TimeoutError:
+            return _provider_failure(
+                WebProviderError("tool.web.provider_unavailable", retryable=True),
+                provider_name=provider.name,
+            )
         except WebProviderError as error:
             return _provider_failure(error, provider_name=provider.name)
-        content = _bounded_utf8(page.content, self.spec.maximum_output_bytes)
+        attribution = f"Provider: {provider.name}\n\n"
+        content_budget = max(
+            0,
+            self.spec.maximum_output_bytes - len(attribution.encode("utf-8")),
+        )
+        content = _bounded_utf8(page.content, content_budget)
         structured = {
             "provider": provider.name,
             "url": page.url,
@@ -86,7 +102,7 @@ class WebFetchTool:
         }
         return ToolResult(
             ok=True,
-            content=[TextPart(text=content)],
+            content=[TextPart(text=attribution + content)],
             structured=structured,
             output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
         )

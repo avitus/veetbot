@@ -1,4 +1,4 @@
-"""Milestone 23: the push-wake device channel and its expiry sweep.
+"""Milestone 24: the push-wake device channel and its expiry sweep.
 
 Covers presence revalidation, the atomic row-and-wake transaction, the bounded
 poll, the offline outcome an unanswered invocation produces, and the

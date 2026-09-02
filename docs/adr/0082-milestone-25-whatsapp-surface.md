@@ -1,4 +1,4 @@
-# ADR-0081: Milestone 24 WhatsApp business surface
+# ADR-0082: Milestone 25 WhatsApp business surface
 
 - Status: Proposed
 - Date: 2026-08-26
@@ -25,7 +25,7 @@ gates in a new `whatsapp` area.
 ## Proposed decisions
 
 1. **Parallel workstream with a stated implementation dependency.**
-   Milestone 24 is authorized on the established terms — independent
+   Milestone 25 is authorized on the established terms — independent
    gates, the ceiling advances only in numerical order. Unlike the prior
    parallel workstreams its implementation cannot begin immediately: the
    listener and adapter live inside Milestone 14 deliverables. The
@@ -60,7 +60,7 @@ gates in a new `whatsapp` area.
 7. **Default off.** `AGENT_SURFACE_WHATSAPP_ENABLED` gates listener,
    adapter, and provider registration together. This follows the
    schedule and notification routers exactly.
-8. **Twelve gates open the `whatsapp` area**, registered at Milestone 24
+8. **Twelve gates open the `whatsapp` area**, registered at Milestone 25
    against the design's hard-gates section; the gate-identifier grammar
    gains the area.
 

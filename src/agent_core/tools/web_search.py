@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -16,7 +17,7 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSpec,
 )
-from agent_core.domain.web import WebProviderError, WebSearchRequest
+from agent_core.domain.web import WebProviderError, WebSearchRequest, WebSearchResult
 from agent_core.ports.web import WebProvider, WebProviderRouter
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -68,15 +69,28 @@ def _failure(
     reason_code: str,
     *,
     retryable: bool,
+    provider_name: str | None = None,
 ) -> ToolResult:
+    provider_data = (
+        None
+        if provider_name is None
+        else json.dumps(
+            {"provider": provider_name},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
     return ToolResult(
         ok=False,
         content=[],
+        structured=None if provider_name is None else {"provider": provider_name},
         failure=ToolFailure(
             kind=kind,
             reason_code=reason_code,
             detail="web access failed at a platform-controlled boundary",
             retryable=retryable,
+            external_text=provider_data,
         ),
         output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
     )
@@ -91,8 +105,38 @@ def _provider_failure(error: WebProviderError, *, provider_name: str) -> ToolRes
         kind = ToolFailureKind.TRANSPORT
     else:
         kind = ToolFailureKind.UPSTREAM_ERROR
-    result = _failure(kind, error.reason_code, retryable=error.retryable)
-    return result.model_copy(update={"structured": {"provider": provider_name}}, deep=True)
+    return _failure(
+        kind,
+        error.reason_code,
+        retryable=error.retryable,
+        provider_name=provider_name,
+    )
+
+
+def _provider_timeout_seconds(effective_timeout_seconds: float) -> float:
+    margin = min(0.25, effective_timeout_seconds * 0.1)
+    return max(0.0, effective_timeout_seconds - margin)
+
+
+async def _provider_search(
+    provider: WebProvider,
+    request: WebSearchRequest,
+    context: ToolExecutionContext,
+) -> tuple[WebSearchResult, ...] | ToolResult:
+    # Finish slightly before the pipeline's outer deadline so the selected
+    # provider survives in the normalized failure instead of being replaced
+    # by an unattributed generic tool timeout.
+    timeout_seconds = _provider_timeout_seconds(context.timeout_seconds)
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            return await provider.search(request)
+    except TimeoutError:
+        return _provider_failure(
+            WebProviderError("tool.web.provider_unavailable", retryable=True),
+            provider_name=provider.name,
+        )
+    except WebProviderError as error:
+        return _provider_failure(error, provider_name=provider.name)
 
 
 class _FixedWebProviderRouter:
@@ -144,10 +188,10 @@ class WebSearchTool:
                 retryable=False,
             )
         provider = self._router.select(routing_key=f"web.search:{context.invocation_id}")
-        try:
-            results = await provider.search(request)
-        except WebProviderError as error:
-            return _provider_failure(error, provider_name=provider.name)
+        provider_result = await _provider_search(provider, request, context)
+        if isinstance(provider_result, ToolResult):
+            return provider_result
+        results = provider_result
         records = [result.model_dump(mode="json") for result in results[: request.max_results]]
         # The declared output limit is a platform contract; a full page of
         # maximal results can exceed it, so drop trailing results until the
