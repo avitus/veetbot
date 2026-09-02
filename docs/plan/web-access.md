@@ -50,7 +50,11 @@ of the routing key. Retries and crash recovery reuse the invocation identifier
 and therefore remain pinned to the same provider; the router does not fail over
 after a provider error, because doing so would hide comparative failures and
 change retry semantics. Successful output and a provider-dispatched failure's
-durable `structured_result` name the selected provider.
+durable `structured_result` name the selected provider. Model-facing results
+name it too: search includes `provider` in its normalized JSON, fetch prefixes
+the extracted page with a provider line, and a provider-dispatched failure
+appends a content-free `provider` object as external-untrusted data after the
+stable platform outcome.
 
 Search-result URLs are held to a looser standard than fetch targets: a result
 may use plain HTTP or a non-standard port because providers index such pages,
@@ -177,6 +181,15 @@ output limit, and `web.search` drops trailing results until its rendered
 output fits the declared limit, so one schema-bounded result always returns
 inline. Redirect following is disabled for provider API calls so a bearer
 credential cannot be forwarded to another host.
+
+Search has a 30-second total tool deadline. Fetch has a 60-second total tool
+deadline so an extraction that continues to make bounded read progress is not
+cut off by the provider clients' 30-second per-I/O limits. Both tools place a
+provider-attribution deadline just inside the effective pipeline deadline; an
+expiry is therefore normalized as a retryable provider-unavailable result that
+names the already-selected provider instead of falling through to an
+unattributed generic tool timeout. Cancellation from outside the deadline
+continues to propagate.
 
 The adapter never returns upstream response text. Stable failures distinguish
 credential rejection, provider quota exhaustion, temporary provider

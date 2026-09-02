@@ -163,6 +163,9 @@ async def test_web_search_runs_through_policy_and_persists_untrusted_result() ->
     assert invocations[0].status is ToolInvocationStatus.SUCCEEDED
     assert invocations[0].result_item is not None
     assert invocations[0].result_item.trust is TrustLevel.EXTERNAL_UNTRUSTED
+    [search_content] = invocations[0].result_item.content
+    assert isinstance(search_content, TextPart)
+    assert '"provider":"fake-web"' in search_content.text
 
 
 async def test_retryable_web_provider_outage_does_not_advise_argument_changes() -> None:
@@ -201,6 +204,12 @@ async def test_retryable_web_provider_outage_does_not_advise_argument_changes() 
     assert invocations[0].outcome.status.value == "unavailable"
     assert invocations[0].outcome.retryable is True
     assert invocations[0].outcome.remediation == "none"
+    assert invocations[0].structured_result == {"provider": "fake-web"}
+    assert invocations[0].result_item is not None
+    [outcome_content, provider_content] = invocations[0].result_item.content
+    assert isinstance(outcome_content, TextPart)
+    assert isinstance(provider_content, TextPart)
+    assert provider_content.text == '{"provider":"fake-web"}'
 
 
 async def test_web_search_quota_failure_reports_operator_action() -> None:
