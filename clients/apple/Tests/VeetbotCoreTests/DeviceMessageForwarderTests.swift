@@ -80,6 +80,53 @@ import Testing
     }
 }
 
+/// The intent shell's ordering fix: the owner's setting must be checked
+/// before any of the Keychain/network work `attemptForward` stands in for.
+@Suite struct ForwardMessageRunnerTests {
+    @Test
+    func testDisabledIntegrationNeverInvokesAttemptForward() async throws {
+        let spy = AttemptForwardSpy()
+        let runner = ForwardMessageRunner {
+            await spy.recordCall()
+        }
+
+        await runner.run(integrationEnabled: false)
+
+        #expect(await spy.callCount == 0)
+    }
+
+    @Test
+    func testEnabledIntegrationInvokesAttemptForwardExactlyOnce() async throws {
+        let spy = AttemptForwardSpy()
+        let runner = ForwardMessageRunner {
+            await spy.recordCall()
+        }
+
+        await runner.run(integrationEnabled: true)
+
+        #expect(await spy.callCount == 1)
+    }
+
+    @Test
+    func testAFailureInAttemptForwardIsSwallowedRatherThanPropagated() async throws {
+        struct BoomError: Error {}
+        let runner = ForwardMessageRunner {
+            throw BoomError()
+        }
+
+        // Must not throw: the run() call itself has no `try`.
+        await runner.run(integrationEnabled: true)
+    }
+}
+
+private actor AttemptForwardSpy {
+    private(set) var callCount = 0
+
+    func recordCall() {
+        callCount += 1
+    }
+}
+
 private actor FakeDeviceMessageAPI: DeviceMessageAPI {
     struct PostedMessage: Equatable, Sendable {
         let deviceID: UUID

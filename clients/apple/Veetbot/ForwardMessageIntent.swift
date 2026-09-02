@@ -68,6 +68,26 @@ public struct DeviceMessageForwarder: Sendable {
     }
 }
 
+/// `perform()`'s full body, pulled out from AppIntents specifics and kept
+/// platform-neutral, so the one thing that actually matters about the
+/// ordering — nothing below runs at all when the owner's SMS-capture
+/// setting is off — is directly testable without the AppIntents framework.
+/// `attemptForward` is everything after the enabled check: resolving this
+/// installation's device id (a Keychain read, then a `/v1/devices` round
+/// trip) and posting the forward. With the setting off, `attemptForward` is
+/// never invoked, so none of that Keychain or network work happens.
+struct ForwardMessageRunner: Sendable {
+    let attemptForward: @Sendable () async throws -> Void
+
+    func run(integrationEnabled: Bool) async {
+        guard integrationEnabled else { return }
+        // Capture is best-effort glue: any failure here — the app never
+        // having been configured, the device not (yet) registered, a
+        // network error — is swallowed the same way `perform()` swallows it.
+        try? await attemptForward()
+    }
+}
+
 #if os(iOS)
 /// The Shortcuts-facing half of SMS capture
 /// (docs/plan/device-channel-and-sms.md, "The iOS client and the owner
@@ -86,16 +106,16 @@ struct ForwardMessageToVeetbotIntent: AppIntent {
 
     /// Never throws: a Shortcuts automation must never surface an error
     /// dialog on the owner's phone over what is deliberately a best-effort
-    /// capture. Every failure below — the integration being off, the app
-    /// never having been configured, the device not (yet) registered, a
-    /// network error — ends the same way: `.result()`.
+    /// capture. The owner's setting is read once and checked first, before
+    /// any configuration, Keychain, or network work — see
+    /// `ForwardMessageRunner`, which owns and tests that ordering.
     func perform() async -> some IntentResult {
-        do {
-            let integrationEnabled = await MainActor.run {
-                SmsIntegrationPreferences().integrationEnabled
-            }
+        let integrationEnabled = await MainActor.run {
+            SmsIntegrationPreferences().integrationEnabled
+        }
+        let runner = ForwardMessageRunner {
             guard let configuration = await ConnectionConfigurationStore().load() else {
-                return .result()
+                return
             }
             let api = VeetbotAPIClient(
                 transport: HTTPTransport(
@@ -111,7 +131,7 @@ struct ForwardMessageToVeetbotIntent: AppIntent {
                     using: api
                 )
             else {
-                return .result()
+                return
             }
             let forwarder = DeviceMessageForwarder(
                 api: api,
@@ -119,9 +139,8 @@ struct ForwardMessageToVeetbotIntent: AppIntent {
                 enabled: { integrationEnabled }
             )
             _ = try await forwarder.forward(sender: sender, body: body)
-        } catch {
-            // Capture is best-effort glue; see the doc comment above.
         }
+        await runner.run(integrationEnabled: integrationEnabled)
         return .result()
     }
 
