@@ -128,7 +128,11 @@ compose-sheet flow; the App Intent; pending-invocation fetch and result
 post. The Shortcuts automation setup is a documented owner ceremony with a
 verification step (send a test message end to end), on the Milestone 18
 bootstrap-ceremony precedent, and its fragility is stated: iOS can
-silently disable the automation, and ingest is best-effort.
+silently disable the automation, and ingest is best-effort. The ceremony
+itself is documented in
+[deployment.md](../deployment.md#the-sms-capture-ceremony), "The SMS
+capture ceremony," on the same operational-runbook footing as the macOS
+TestFlight delivery ceremony.
 
 ## Persistence
 

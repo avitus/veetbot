@@ -713,7 +713,6 @@ milestones:
       - presence-based routing and hand-off (B7 residue)
       - Android capture and any second device-scoped tool
     open_items:
-      - iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
       - Owner end-to-end verification on a physical iPhone
     evidence:
       - check: twelve Milestone 23 gate.device.* gates

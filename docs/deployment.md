@@ -557,6 +557,64 @@ completes it with a real provider, and run one generated-code task through
 `runsc`. Reboot once and confirm PostgreSQL, Nginx, the execution service, and
 all application units return.
 
+## The SMS capture ceremony
+
+Milestone 23 ([device-channel-and-sms.md](plan/device-channel-and-sms.md)) lets
+the owner's iPhone act as a Veetbot SMS channel: outbound texts ride the
+system compose sheet, and inbound texts reach Veetbot only because the owner
+wires a Shortcuts personal automation to the app's "Forward Message to
+Veetbot" App Intent. Nothing enables this by default. The owner completes the
+following one-time, per-device ceremony after the app is installed and paired
+([apple-client.md](apple-client.md)), on the Milestone 18 bootstrap-ceremony
+precedent (`plan/email-integration.md`, "Credentials and the bootstrap
+ceremony"): a documented, owner-run, one-time setup step with its own
+verification, rather than something CI or the server can perform for them.
+
+1. Confirm prerequisites on the owner's iPhone: iOS 17 or later — the
+   Shortcuts "When I get a message" personal automation trigger requires it;
+   the device already paired to Veetbot and push-verified through
+   `POST /v1/devices` and the authenticated
+   `POST /v1/devices/{device_id}/test-notification` route; and, in the app's
+   connection settings, the "SMS Integration" toggle
+   (`sms-integration.enabled`) turned on. That one toggle both opens the
+   compose-sheet send path and adds `device.sms.send` to this device's
+   registered capabilities — turning it off later removes the capability and
+   the App Intent silently stops forwarding.
+2. In the Shortcuts app: Automation tab → the add control → Create Personal
+   Automation → "When I get a message" → set the automation to run
+   immediately, not "Ask Before Running" (it must fire unattended) → add the
+   "Forward Message to Veetbot" action → map the trigger's Sender variable to
+   the action's Sender parameter and its Content variable to the action's
+   Message parameter → finish and confirm the automation is enabled.
+3. Verify end to end: from a second phone, send the owner's number a short,
+   distinctive test text, then confirm capture actually happened —
+   - In Shortcuts, open the automation's run history and confirm it ran
+     without a logged failure. This is what catches iOS having silently
+     disabled the automation before the message ever reached the app.
+   - In Veetbot, confirm the standing SMS triage session shows the forwarded
+     message (device-channel-and-sms.md, "SMS ingest," which routes each
+     message into one standing session per device and channel): a new
+     conversation is seeded, or the existing standing `(device, sms)` session
+     continues, with content matching the test text sent rather than an
+     empty or truncated body.
+
+   Only a forwarded message with its real sender and body confirms, on this
+   owner's specific iOS version, the design's two open questions: that the
+   automation actually delivers both sender and body to the App Intent, and
+   that the App Intent's Keychain read succeeds with the app backgrounded,
+   which an immediately-run automation leaves it. Treat the ceremony as
+   incomplete until this step passes.
+
+Capture is deliberately best-effort, exactly as designed: iOS can silently
+disable a personal automation with no notice to the owner or to Veetbot, and
+the App Intent swallows every forwarding failure — the integration toggled
+off, the device unresolved, a network error — into a silent no-op rather than
+surfacing an error on the owner's phone. There is no retry and no alert when
+a text is silently dropped; the only signal is the absence of the triage
+session update step 3 above confirms. Re-run step 3 after an iOS upgrade, or
+whenever inbound capture seems to have gone quiet, to confirm it is still
+live.
+
 ## Manual rollback
 
 Schema-head equality is not enough for versioned JSONB discriminators: once any

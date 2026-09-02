@@ -111,10 +111,12 @@ Remaining:
 An eighth parallel workstream. The `DeviceChannel` port with its push-wake
 adapter, capability-derived `device.sms.send` registration, the three
 device-authenticated routes, the SMS ingest path with its standing triage
-session, and the expiry sweep are implemented, and all twelve registered
-gates pass locally. Remaining:
+session, and the expiry sweep are implemented, all twelve registered
+gates pass locally, and the iOS client's SMS integration setting,
+compose-sheet send flow, "Forward Message to Veetbot" App Intent, and ingest
+forwarding are built with the owner capture ceremony documented
+([deployment.md](../deployment.md#the-sms-capture-ceremony)). Remaining:
 
-- [ ] iOS client capability, compose-sheet flow, App Intent, and ingest forwarding
 - [ ] Owner end-to-end verification on a physical iPhone
 
 ## Authorized
