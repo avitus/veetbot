@@ -123,6 +123,7 @@ class Settings:
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
     email_enabled: bool = False
+    email_account_ids: tuple[str, ...] = ()
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
     apns_key_id: str | None = None
@@ -548,9 +549,27 @@ _GMAIL_CREDENTIAL_FILES = {
         "https://www.googleapis.com/auth/gmail.send",
     ),
 }
+_GMAIL_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_GMAIL_ACCOUNT_LIMIT = 8
+_GMAIL_MANIFEST_FIELDS = frozenset({"version", "default_account", "accounts"})
+_GMAIL_ACCOUNT_FIELDS = frozenset(
+    {
+        "account_id",
+        "read_credential_file",
+        "write_credential_file",
+        "send_credential_file",
+    }
+)
+_GMAIL_NAMED_CREDENTIAL = re.compile(r"^gmail_[a-z][a-z0-9_]{0,31}_(?:read|write|send)$")
 
 
-def _read_gmail_credential_file(raw_path: str, name: str, expected_scope: str) -> str:
+def _read_gmail_credential_file(
+    raw_path: str,
+    name: str,
+    expected_scope: str,
+    *,
+    expected_account_id: str | None = None,
+) -> str:
     path = Path(raw_path)
     if not path.is_absolute() or path.is_symlink():
         raise ConfigurationError(f"{name} must be an absolute private regular file")
@@ -569,12 +588,15 @@ def _read_gmail_credential_file(raw_path: str, name: str, expected_scope: str) -
         loaded: object = json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ConfigurationError(f"{name} is not a valid credential document") from exc
-    if not isinstance(loaded, dict) or set(loaded) != {
+    expected_fields = {
         "client_id",
         "client_secret",
         "refresh_token",
         "scope",
-    }:
+    }
+    if expected_account_id is not None:
+        expected_fields.add("account_id")
+    if not isinstance(loaded, dict) or set(loaded) != expected_fields:
         raise ConfigurationError(f"{name} has an invalid credential shape")
     for field in ("client_id", "client_secret", "refresh_token"):
         value = loaded.get(field)
@@ -582,7 +604,77 @@ def _read_gmail_credential_file(raw_path: str, name: str, expected_scope: str) -
             raise ConfigurationError(f"{name} has an invalid credential shape")
     if loaded.get("scope") != expected_scope:
         raise ConfigurationError(f"{name} does not carry its exact Google scope")
+    if expected_account_id is not None and loaded.get("account_id") != expected_account_id:
+        raise ConfigurationError(f"{name} does not carry its configured account id")
     return json.dumps(loaded, sort_keys=True, separators=(",", ":"))
+
+
+def _gmail_server_id(account_id: str, mode: str, *, is_default: bool) -> str:
+    return f"gmail_{mode}" if is_default else f"gmail_{account_id}_{mode}"
+
+
+def _read_gmail_accounts_file(raw_path: str) -> tuple[tuple[str, ...], dict[str, str]]:
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE must be an absolute regular file")
+    try:
+        metadata = path.stat()
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_mode & 0o022
+        or not 1 <= metadata.st_size <= 65_536
+    ):
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE is invalid")
+    try:
+        loaded: object = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE is invalid") from exc
+    if not isinstance(loaded, dict) or set(loaded) != _GMAIL_MANIFEST_FIELDS:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an invalid shape")
+    version = loaded.get("version")
+    default_account = loaded.get("default_account")
+    accounts = loaded.get("accounts")
+    if type(version) is not int or version != 1:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an unsupported version")
+    if not isinstance(default_account, str) or _GMAIL_ACCOUNT_ID.fullmatch(default_account) is None:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an invalid default account")
+    if not isinstance(accounts, list) or not 1 <= len(accounts) <= _GMAIL_ACCOUNT_LIMIT:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE must declare one through eight accounts")
+
+    by_id: dict[str, dict[str, object]] = {}
+    for account in accounts:
+        if not isinstance(account, dict) or set(account) != _GMAIL_ACCOUNT_FIELDS:
+            raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an invalid account shape")
+        account_id = account.get("account_id")
+        if not isinstance(account_id, str) or _GMAIL_ACCOUNT_ID.fullmatch(account_id) is None:
+            raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an invalid account id")
+        if account_id in by_id:
+            raise ConfigurationError("GMAIL_ACCOUNTS_FILE has a duplicate account id")
+        by_id[account_id] = account
+    if default_account not in by_id:
+        raise ConfigurationError("GMAIL_ACCOUNTS_FILE default account is not declared")
+
+    account_ids = (default_account, *sorted(set(by_id) - {default_account}))
+    credentials: dict[str, str] = {}
+    for index, account_id in enumerate(account_ids):
+        account = by_id[account_id]
+        for credential_name, (_legacy_variable, scope) in _GMAIL_CREDENTIAL_FILES.items():
+            mode = credential_name.removeprefix("gmail_")
+            field = f"{mode}_credential_file"
+            raw_credential_path = account.get(field)
+            if not isinstance(raw_credential_path, str) or not raw_credential_path:
+                raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an invalid account shape")
+            server_id = _gmail_server_id(account_id, mode, is_default=index == 0)
+            credentials[server_id] = _read_gmail_credential_file(
+                raw_credential_path,
+                f"GMAIL_ACCOUNTS_FILE account {account_id} {mode}",
+                scope,
+                expected_account_id=account_id,
+            )
+    return account_ids, credentials
 
 
 def _validate_private_regular_file(path: Path, name: str) -> None:
@@ -916,12 +1008,34 @@ def validate_settings(
         raise ConfigurationError(
             "device channel and SMS flags must be enabled or disabled together"
         )
-    gmail_credential_names = set(_GMAIL_CREDENTIAL_FILES)
-    configured_gmail_credentials = gmail_credential_names & set(settings.credentials)
-    if settings.email_enabled and configured_gmail_credentials != gmail_credential_names:
-        raise ConfigurationError("email enablement requires all three Gmail credential files")
+    if settings.email_account_ids and (
+        not 1 <= len(settings.email_account_ids) <= _GMAIL_ACCOUNT_LIMIT
+        or len(set(settings.email_account_ids)) != len(settings.email_account_ids)
+        or any(
+            _GMAIL_ACCOUNT_ID.fullmatch(account_id) is None
+            for account_id in settings.email_account_ids
+        )
+    ):
+        raise ConfigurationError("Gmail account ids are invalid")
+    if settings.email_account_ids:
+        expected_gmail_credentials = {
+            _gmail_server_id(account_id, mode, is_default=index == 0)
+            for index, account_id in enumerate(settings.email_account_ids)
+            for mode in ("read", "write", "send")
+        }
+    else:
+        expected_gmail_credentials = set(_GMAIL_CREDENTIAL_FILES)
+    configured_gmail_credentials = {
+        name
+        for name in settings.credentials
+        if name in _GMAIL_CREDENTIAL_FILES or _GMAIL_NAMED_CREDENTIAL.fullmatch(name)
+    }
+    if settings.email_enabled and configured_gmail_credentials != expected_gmail_credentials:
+        raise ConfigurationError("email enablement requires every configured Gmail credential")
     if not settings.email_enabled and configured_gmail_credentials:
         raise ConfigurationError("Gmail credentials require AGENT_EMAIL_ENABLED=1")
+    if not settings.email_enabled and settings.email_account_ids:
+        raise ConfigurationError("Gmail accounts require AGENT_EMAIL_ENABLED=1")
     apns_values = {
         "APNS_KEY_FILE": settings.apns_key_file,
         "APNS_KEY_ID": settings.apns_key_id,
@@ -1160,29 +1274,42 @@ def _load_settings(
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
     device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
+    gmail_accounts_file = values.get("GMAIL_ACCOUNTS_FILE", "").strip()
     configured_gmail_files = {
         credential_name: (variable, values.get(variable, "").strip(), scope)
         for credential_name, (variable, scope) in _GMAIL_CREDENTIAL_FILES.items()
         if values.get(variable, "").strip()
     }
-    if configured_gmail_files and not email_enabled:
+    if (configured_gmail_files or gmail_accounts_file) and not email_enabled:
         raise ConfigurationError("Gmail credential files require AGENT_EMAIL_ENABLED=1")
+    if configured_gmail_files and gmail_accounts_file:
+        raise ConfigurationError(
+            "GMAIL_ACCOUNTS_FILE and legacy Gmail credential files are mutually exclusive"
+        )
+    email_account_ids: tuple[str, ...] = ()
     if email_enabled:
-        missing_gmail_files = [
-            variable
-            for credential_name, (variable, _scope) in _GMAIL_CREDENTIAL_FILES.items()
-            if credential_name not in configured_gmail_files
-        ]
-        if missing_gmail_files:
-            raise ConfigurationError(
-                "AGENT_EMAIL_ENABLED=1 requires " + ", ".join(missing_gmail_files)
-            )
-        for credential_name, (variable, raw_path, scope) in configured_gmail_files.items():
-            if credential_name in credentials:
-                raise ConfigurationError(f"duplicate credential source for {credential_name}")
-            credentials[credential_name] = SecretStr(
-                _read_gmail_credential_file(raw_path, variable, scope)
-            )
+        if gmail_accounts_file:
+            email_account_ids, account_credentials = _read_gmail_accounts_file(gmail_accounts_file)
+            for credential_name, credential in account_credentials.items():
+                if credential_name in credentials:
+                    raise ConfigurationError(f"duplicate credential source for {credential_name}")
+                credentials[credential_name] = SecretStr(credential)
+        else:
+            missing_gmail_files = [
+                variable
+                for credential_name, (variable, _scope) in _GMAIL_CREDENTIAL_FILES.items()
+                if credential_name not in configured_gmail_files
+            ]
+            if missing_gmail_files:
+                raise ConfigurationError(
+                    "AGENT_EMAIL_ENABLED=1 requires " + ", ".join(missing_gmail_files)
+                )
+            for credential_name, (variable, raw_path, scope) in configured_gmail_files.items():
+                if credential_name in credentials:
+                    raise ConfigurationError(f"duplicate credential source for {credential_name}")
+                credentials[credential_name] = SecretStr(
+                    _read_gmail_credential_file(raw_path, variable, scope)
+                )
     push_provider = _parse_enum(
         PushProviderKind,
         values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
@@ -1303,6 +1430,7 @@ def _load_settings(
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
         email_enabled=email_enabled,
+        email_account_ids=email_account_ids,
         push_provider=push_provider,
         apns_key_file=apns_key_file,
         apns_key_id=apns_key_id,

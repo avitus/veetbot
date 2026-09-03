@@ -343,8 +343,8 @@ from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import (
-    EMAIL_SERVER_IDS,
     email_server_configs,
+    is_email_server_id,
     validate_mcp_config,
 )
 from agent_core.mcp.runtime import MCPRuntime
@@ -2680,7 +2680,7 @@ async def build(
             scopes=set(effective_settings.auth_scopes),
         )
     supplied_email_rows = tuple(
-        config for config in mcp_servers if config.server_id in EMAIL_SERVER_IDS
+        config for config in mcp_servers if is_email_server_id(config.server_id)
     )
     if supplied_email_rows:
         raise ConfigurationError(
@@ -2689,6 +2689,7 @@ async def build(
     composed_email_rows = email_server_configs(
         effective_principal.tenant_id,
         enabled=effective_settings.email_enabled,
+        account_ids=effective_settings.email_account_ids,
     )
     effective_mcp_servers = (*mcp_servers, *composed_email_rows)
     if composed_email_rows:

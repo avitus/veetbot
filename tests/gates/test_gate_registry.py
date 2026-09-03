@@ -98,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 433
+    assert len(entries) == 437
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -164,7 +164,7 @@ def test_census_is_derived() -> None:
         15: 16,
         16: 20,
         17: 10,
-        18: 13,
+        18: 17,
         19: 5,
         20: 6,
         21: 29,
@@ -417,7 +417,7 @@ def test_email_integration_has_complete_milestone_18_gate_area() -> None:
     assert errors == []
     email_entries = [entry for entry in entries if entry.milestone == 18]
 
-    assert len(email_entries) == 13
+    assert len(email_entries) == 17
     assert all(entry.id.startswith("gate.email.") for entry in email_entries)
     assert all(entry.spec == "docs/plan/email-integration.md#hard-gates" for entry in email_entries)
     assert all(GATE_ID.fullmatch(entry.id) for entry in email_entries)

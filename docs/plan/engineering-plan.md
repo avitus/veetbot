@@ -3466,7 +3466,7 @@ that addition, carried entirely by the Milestone 8 MCP adapter, the
 Milestone 4 approval lifecycle, the Milestone 11 scheduler, and the
 Milestone 12 notification outbox. The detailed design is
 [email-integration.md](email-integration.md) and ADR-0071; the design
-declares this milestone's thirteen gates.
+declares this milestone's seventeen gates.
 
 Implement:
 
@@ -3483,6 +3483,11 @@ Implement:
 - A one-time operator consent ceremony, `python -m gmail_mcp bootstrap`,
   writing owner-only credential files that enter the broker through
   file-backed settings references.
+- Operator-managed named accounts: the existing credential-file variables
+  remain the backward-compatible single-account form, while a bounded,
+  versioned `GMAIL_ACCOUNTS_FILE` composes one isolated read/write/send server
+  triplet per account. The default retains the existing server ids and every
+  additional account is explicit in its server and tool names.
 - An MCP arm on the deterministic `host_on_allowlist` condition: it holds
   for an `mcp` target when the executing tool's specification declares
   `NETWORK_READ` and `READ_ONLY`, landed in the same change as the
@@ -3504,13 +3509,18 @@ Acceptance criteria:
   constructed environment, and no token material or upstream text appears
   in `argv`, tool results, events, or logs.
 - With the flag unset the servers, tools, and scope grants are absent.
+- A two-account configuration advertises both account rosters, routes each
+  mode only to its matching account-bound credential, retains the legacy tool
+  names for the default account, and rejects partial, mixed, duplicate,
+  mismatched, or over-bound configuration before any server starts.
 - A daily triage schedule produces reads without approvals, writes with
   them, and content-free notifications.
 
 The milestone does not include calendar; permanent deletion; attachments;
 Gmail push; interval or cron recurrence (B5); the email inbound Surface (B3)
-or the email notification transport (B4); a second provider or account; or
-any auto-approval or standing-grant mechanism (B8).
+or the email notification transport (B4); a second provider; public
+self-service OAuth or per-principal mailbox configuration; or any
+auto-approval or standing-grant mechanism (B8).
 
 ### Milestone 19: Conversational schedule creation
 

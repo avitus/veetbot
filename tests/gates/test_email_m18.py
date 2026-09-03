@@ -29,7 +29,14 @@ import gmail_mcp.__main__ as gmail_main
 import gmail_mcp.client as gmail_client_module
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.bootstrap import build
-from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings, load_settings
+from agent_core.config import (
+    AuthMode,
+    ConfigurationError,
+    DeploymentMode,
+    SandboxMechanism,
+    Settings,
+    load_settings,
+)
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.credentials import CredentialRef, SecretValue
@@ -463,6 +470,291 @@ def _credential_files(tmp_path: Path) -> dict[str, str]:
     return result
 
 
+def _account_credential_files(tmp_path: Path, account_id: str) -> dict[str, str]:
+    directory = tmp_path / account_id
+    directory.mkdir(parents=True, exist_ok=True)
+    result: dict[str, str] = {}
+    for mode in ("read", "write", "send"):
+        document = json.loads(_credential(mode).as_json())
+        document["account_id"] = account_id
+        path = directory / f"gmail-{mode}.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        path.chmod(0o600)
+        result[f"{mode}_credential_file"] = str(path)
+    return result
+
+
+def _accounts_manifest(
+    tmp_path: Path,
+    *,
+    account_ids: tuple[str, ...] = ("personal", "work"),
+    default_account: str = "personal",
+) -> Path:
+    manifest = {
+        "version": 1,
+        "default_account": default_account,
+        "accounts": [
+            {
+                "account_id": account_id,
+                **_account_credential_files(tmp_path, account_id),
+            }
+            for account_id in account_ids
+        ],
+    }
+    path = tmp_path / "gmail-accounts.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    return path
+
+
+async def test_named_accounts_compose_isolated_server_triplets(tmp_path: Path) -> None:
+    manifest = _accounts_manifest(tmp_path)
+    settings = load_settings(
+        {
+            **_base_environment(),
+            "AGENT_EMAIL_ENABLED": "1",
+            "GMAIL_ACCOUNTS_FILE": str(manifest),
+        }
+    )
+
+    assert settings.email_account_ids == ("personal", "work")
+    assert set(settings.credentials) == {
+        "gmail_read",
+        "gmail_write",
+        "gmail_send",
+        "gmail_work_read",
+        "gmail_work_write",
+        "gmail_work_send",
+    }
+    rows = email_server_configs(
+        "local",
+        enabled=settings.email_enabled,
+        account_ids=settings.email_account_ids,
+    )
+    assert {row.server_id for row in rows} == set(settings.credentials)
+    assert len(rows) == 6
+    for row in rows:
+        assert row.credential_ref == row.server_id
+        assert row.required_scopes == {f"mcp.{row.server_id}.use"}
+        if row.server_id in {"gmail_read", "gmail_write", "gmail_send"}:
+            assert "--account-id personal" in row.endpoint
+        else:
+            assert "--account-id work" in row.endpoint
+        mode = row.server_id.rsplit("_", maxsplit=1)[-1]
+        report = map_discovered_tools(row, _discovery(mode).tools)
+        assert {mapped.remote_name for mapped in report.accepted} == set(ROSTERS[mode])
+        validate_mcp_config(row, destination_allowed=lambda _url: True)
+
+    scripts = {
+        row.server_id: ScriptedMCPServer(
+            name=row.server_id,
+            discovery=_discovery(row.server_id.rsplit("_", maxsplit=1)[-1]),
+        )
+        for row in rows
+    }
+    async with build(
+        settings=settings,
+        sequential_ids=True,
+        mcp_client_factory=ScriptedMCPClientFactory(scripts),
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            stored = await uow.mcp_servers.list_enabled("local")
+        assert {row.server_id for row in stored} == set(settings.credentials)
+        assert {
+            scope for scope in composition.principal.scopes if scope.startswith("mcp.gmail_")
+        } == {f"mcp.{server_id}.use" for server_id in settings.credentials}
+
+
+@hypothesis_settings(max_examples=24)
+@given(
+    account_ids=st.lists(
+        st.from_regex(r"[a-z][a-z0-9_]{0,15}", fullmatch=True),
+        min_size=1,
+        max_size=5,
+        unique=True,
+    ),
+    credential=st.text(
+        alphabet=st.characters(min_codepoint=33, max_codepoint=126),
+        min_size=1,
+        max_size=64,
+    ),
+)
+def test_named_account_credentials_cross_only_their_server_environment(
+    account_ids: list[str],
+    credential: str,
+) -> None:
+    rows = email_server_configs("tenant-email", account_ids=tuple(account_ids))
+    assert len(rows) == len(account_ids) * 3
+    assert len({row.server_id for row in rows}) == len(rows)
+    assert len({row.credential_ref for row in rows}) == len(rows)
+    for row in rows:
+        opaque = f"ACCOUNT::{row.server_id}::{credential}::END"
+        environment = build_stdio_environment(row, SecretValue(opaque))
+        assert environment["GMAIL_MCP_CREDENTIAL"] == opaque
+        assert [value for value in environment.values() if value == opaque] == [opaque]
+        assert opaque not in row.endpoint
+        assert opaque not in repr(row)
+
+
+async def test_account_bound_bootstrap_tags_and_validates_credentials(tmp_path: Path) -> None:
+    bootstrap_arguments = gmail_main._parser().parse_args(["bootstrap", "--account-id", "work"])
+    assert bootstrap_arguments.bootstrap_account_id == "work"
+    server_arguments = gmail_main._parser().parse_args(["--mode", "read", "--account-id", "work"])
+    assert server_arguments.account_id == "work"
+
+    def authorize(mode: str, _url: str) -> str:
+        return f"authorization-code-{mode}"
+
+    async def token_exchange(request: httpx.Request) -> httpx.Response:
+        form = parse_qs(request.content.decode())
+        mode = form["code"][0].removeprefix("authorization-code-")
+        return httpx.Response(
+            200,
+            json={
+                "refresh_token": f"refresh-{mode}",
+                "scope": GOOGLE_SCOPES[mode],
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(token_exchange))
+    oauth_client_secret = "-".join(("oauth", "client", "secret"))
+    paths = await bootstrap_credentials(
+        client_id="oauth-client-id",
+        client_secret=oauth_client_secret,
+        account_id="work",
+        output_directory=tmp_path,
+        authorize=authorize,
+        http_client=client,
+    )
+
+    for mode, path in zip(("read", "write", "send"), paths, strict=True):
+        parsed = GmailCredential.parse(
+            path.read_text(),
+            expected_scope=GOOGLE_SCOPES[mode],
+            expected_account_id="work",
+        )
+        assert parsed.account_id == "work"
+        with pytest.raises(GmailError, match=r"gmail\.credential_rejected"):
+            GmailCredential.parse(
+                path.read_text(),
+                expected_scope=GOOGLE_SCOPES[mode],
+                expected_account_id="personal",
+            )
+
+    legacy = _credential("read").as_json()
+    GmailCredential.parse(legacy, expected_scope=GOOGLE_SCOPES["read"])
+    with pytest.raises(GmailError, match=r"gmail\.credential_rejected"):
+        GmailCredential.parse(
+            legacy,
+            expected_scope=GOOGLE_SCOPES["read"],
+            expected_account_id="work",
+        )
+
+
+def test_multi_account_manifest_rejects_every_invalid_boundary(tmp_path: Path) -> None:
+    def assert_rejected(manifest: object, *, extra_values: dict[str, str] | None = None) -> None:
+        path = tmp_path / "candidate.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(ConfigurationError):
+            load_settings(
+                {
+                    **_base_environment(),
+                    "AGENT_EMAIL_ENABLED": "1",
+                    "GMAIL_ACCOUNTS_FILE": str(path),
+                    **(extra_values or {}),
+                }
+            )
+
+    valid_path = _accounts_manifest(tmp_path)
+    valid = json.loads(valid_path.read_text())
+    invalid_documents: list[object] = [
+        {**valid, "version": 2},
+        {**valid, "unknown": True},
+        {**valid, "accounts": []},
+        {
+            **valid,
+            "accounts": [
+                {
+                    "account_id": f"account{index}",
+                    **_account_credential_files(tmp_path, f"a{index}"),
+                }
+                for index in range(9)
+            ],
+            "default_account": "account0",
+        },
+        {**valid, "accounts": [valid["accounts"][0], valid["accounts"][0]]},
+        {**valid, "default_account": "missing"},
+        {
+            **valid,
+            "accounts": [{**valid["accounts"][0], "account_id": "Work"}],
+            "default_account": "Work",
+        },
+        {
+            **valid,
+            "accounts": [{**valid["accounts"][0], "unknown": "field"}],
+        },
+        {
+            **valid,
+            "accounts": [{**valid["accounts"][0], "read_credential_file": "relative.json"}],
+        },
+        {
+            **valid,
+            "accounts": [
+                {
+                    key: value
+                    for key, value in valid["accounts"][0].items()
+                    if key != "send_credential_file"
+                }
+            ],
+        },
+    ]
+    for document in invalid_documents:
+        assert_rejected(document)
+
+    insecure = Path(valid["accounts"][0]["read_credential_file"])
+    insecure.chmod(0o644)
+    assert_rejected(valid)
+    insecure.chmod(0o600)
+
+    assert_rejected(
+        valid,
+        extra_values={"GMAIL_READ_CREDENTIAL_FILE": valid["accounts"][0]["read_credential_file"]},
+    )
+
+    with pytest.raises(ConfigurationError):
+        load_settings(
+            {
+                **_base_environment(),
+                "GMAIL_ACCOUNTS_FILE": str(valid_path),
+            }
+        )
+
+    eight_root = tmp_path / "eight"
+    eight_path = _accounts_manifest(
+        eight_root,
+        account_ids=tuple(f"account{index}" for index in range(8)),
+        default_account="account0",
+    )
+    eight_settings = load_settings(
+        {
+            **_base_environment(),
+            "AGENT_EMAIL_ENABLED": "1",
+            "GMAIL_ACCOUNTS_FILE": str(eight_path),
+        }
+    )
+    assert len(eight_settings.email_account_ids) == 8
+    assert len(eight_settings.credentials) == 24
+
+    eight_path.chmod(0o666)
+    with pytest.raises(ConfigurationError):
+        load_settings(
+            {
+                **_base_environment(),
+                "AGENT_EMAIL_ENABLED": "1",
+                "GMAIL_ACCOUNTS_FILE": str(eight_path),
+            }
+        )
+
+
 def test_registered_gmail_specs_have_exact_classification_and_trust() -> None:
     expected = {
         "gmail_read": (SideEffectClass.NETWORK_READ, RiskLevel.LOW, IdempotencyClass.READ_ONLY),
@@ -600,6 +892,48 @@ def test_default_policy_allows_reads_and_requires_write_and_send_approval() -> N
         "send": PolicyDecisionType.REQUIRE_APPROVAL,
     }
 
+    named_scopes = {
+        "mcp.gmail_work_read.use",
+        "mcp.gmail_work_write.use",
+        "mcp.gmail_work_send.use",
+    }
+    named_principal = _principal().model_copy(
+        update={"scopes": {*_principal().scopes, *named_scopes}}, deep=True
+    )
+    named_run = _run().model_copy(
+        update={"principal_scopes": {*_run().principal_scopes, *named_scopes}}, deep=True
+    )
+    assert (
+        evaluate_deterministic(
+            _action(
+                server_id="gmail_work_read",
+                side_effect=SideEffectClass.NETWORK_READ,
+                idempotency=IdempotencyClass.READ_ONLY,
+            ),
+            named_principal,
+            named_run,
+            _ruleset(),
+        ).decision
+        is PolicyDecisionType.ALLOW
+    )
+    for server_id, side_effect in (
+        ("gmail_work_write", SideEffectClass.EXTERNAL_WRITE),
+        ("gmail_work_send", SideEffectClass.EXTERNAL_MESSAGE),
+    ):
+        assert (
+            evaluate_deterministic(
+                _action(
+                    server_id=server_id,
+                    side_effect=side_effect,
+                    idempotency=IdempotencyClass.NON_IDEMPOTENT,
+                ),
+                named_principal,
+                named_run,
+                _ruleset(),
+            ).decision
+            is PolicyDecisionType.REQUIRE_APPROVAL
+        )
+
 
 def test_untrusted_mail_can_never_plain_allow_a_send() -> None:
     permissive = _ruleset()
@@ -622,6 +956,42 @@ def test_untrusted_mail_can_never_plain_allow_a_send() -> None:
         permissive,
     )
     assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+
+def test_named_account_policy_profile_cannot_autoapprove_mutations() -> None:
+    permissive = _ruleset()
+    permissive = permissive.model_copy(
+        update={
+            "rules": tuple(
+                rule.model_copy(update={"decision": PolicyDecisionType.ALLOW})
+                if rule.side_effect
+                in {SideEffectClass.EXTERNAL_WRITE, SideEffectClass.EXTERNAL_MESSAGE}
+                else rule
+                for rule in permissive.rules
+            )
+        }
+    )
+    scopes = {
+        "mcp.gmail_work_write.use",
+        "mcp.gmail_work_send.use",
+    }
+    principal = _principal().model_copy(update={"scopes": scopes}, deep=True)
+    run = _run().model_copy(update={"principal_scopes": scopes}, deep=True)
+    for server_id, side_effect in (
+        ("gmail_work_write", SideEffectClass.EXTERNAL_WRITE),
+        ("gmail_work_send", SideEffectClass.EXTERNAL_MESSAGE),
+    ):
+        decision = evaluate_deterministic(
+            _action(
+                server_id=server_id,
+                side_effect=side_effect,
+                idempotency=IdempotencyClass.NON_IDEMPOTENT,
+            ),
+            principal,
+            run,
+            permissive,
+        )
+        assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
 @hypothesis_settings(max_examples=24)

@@ -25,6 +25,7 @@ from gmail_mcp.errors import GmailError
 
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"[ \t\r\f\v]+")
+_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _THREAD_FANOUT_CONCURRENCY = 5
 _THREAD_FANOUT_TIMEOUT_SECONDS = 30.0
 type _QueryScalar = str | int | float | bool | None
@@ -39,19 +40,29 @@ class GmailCredential:
     client_secret: str
     refresh_token: str
     scope: str
+    account_id: str | None = None
 
     @classmethod
-    def parse(cls, value: str, *, expected_scope: str) -> GmailCredential:
+    def parse(
+        cls,
+        value: str,
+        *,
+        expected_scope: str,
+        expected_account_id: str | None = None,
+    ) -> GmailCredential:
         try:
             loaded: object = json.loads(value)
         except (json.JSONDecodeError, UnicodeError) as exc:
             raise GmailError("gmail.credential_rejected") from exc
-        if not isinstance(loaded, dict) or set(loaded) != {
+        expected_fields = {
             "client_id",
             "client_secret",
             "refresh_token",
             "scope",
-        }:
+        }
+        if expected_account_id is not None:
+            expected_fields.add("account_id")
+        if not isinstance(loaded, dict) or set(loaded) != expected_fields:
             raise GmailError("gmail.credential_rejected")
         client_id = loaded.get("client_id")
         client_secret = loaded.get("client_secret")
@@ -65,24 +76,29 @@ class GmailCredential:
         scope = loaded.get("scope")
         if scope != expected_scope:
             raise GmailError("gmail.credential_rejected")
+        account_id = loaded.get("account_id")
+        if expected_account_id is not None and (
+            _ACCOUNT_ID.fullmatch(expected_account_id) is None or account_id != expected_account_id
+        ):
+            raise GmailError("gmail.credential_rejected")
         return cls(
             client_id=client_id,
             client_secret=client_secret,
             refresh_token=refresh_token,
             scope=expected_scope,
+            account_id=expected_account_id,
         )
 
     def as_json(self) -> str:
-        return json.dumps(
-            {
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "refresh_token": self.refresh_token,
-                "scope": self.scope,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        document = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "refresh_token": self.refresh_token,
+            "scope": self.scope,
+        }
+        if self.account_id is not None:
+            document["account_id"] = self.account_id
+        return json.dumps(document, sort_keys=True, separators=(",", ":"))
 
 
 class GmailClient:

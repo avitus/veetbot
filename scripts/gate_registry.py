@@ -59,7 +59,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "memory-read-api-and-browser.md": (10, 0),
     "adaptive-memory-distillation.md": (29, 0),
     "persona-surface.md": (14, 0),
-    "email-integration.md": (13, 0),
+    "email-integration.md": (17, 0),
     "device-channel-and-sms.md": (12, 0),
     "whatsapp-surface.md": (12, 0),
     "milestone-map.md": (7, 0),

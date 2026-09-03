@@ -266,7 +266,7 @@ folded into `tool` even though every one of its tools crosses the MCP
 adapter the tool system owns, because its gates are statements about the
 Gmail servers, their rosters, their credential ceremony, and their policy
 posture rather than about the adapter that carries them — the same argument
-that kept `web` and `browser` out of `tool`. One spec owns all thirteen, as
+that kept `web` and `browser` out of `tool`. One spec owns all seventeen, as
 `sandbox` and `ops` were owned.
 
 Every identifier in the tables below is written in full. Thirteen rows
@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 28 subject specifications declare 427 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 436
-declarations, 433 registry entries once the 3 aliases are subtracted.
+The 28 subject specifications declare 431 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 440
+declarations, 437 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1217,16 +1217,18 @@ declared methods and scopes, the adapters against one contract suite, and a
 serialized model against its exposure list. The remaining six are boundary
 cases over the two routes.
 
-### Email integration, thirteen gates
+### Email integration, seventeen gates
 
-Thirteen gates, all new, in the new `email` area and all at Milestone 18.
+Seventeen gates, all in the `email` area and all at Milestone 18.
 Five are statements about the servers themselves — the package boundary, the
 shared contract, the rosters, the declared classifications, and the failure
 taxonomy — five are statements about credentials and configuration — the
 constructed environment, token confinement, the default-off flag, scope
 confinement, and the bootstrap ceremony — and three are statements about
 policy and composition in use: the read-allows-write-approves split, the
-untrusted-origin send, and the monitoring recipe.
+untrusted-origin send, and the monitoring recipe. Four further gates cover
+the owner-authorized multi-account extension: named composition, per-account
+credential isolation, account-bound bootstrap, and bounded manifest parsing.
 
 ```text
 #   id                                              kind         M
@@ -1244,13 +1246,18 @@ untrusted-origin send, and the monitoring recipe.
 11  gate.email.bootstrap_consent                    case         18
 12  gate.email.failure_taxonomy                     case         18
 13  gate.email.monitoring_recipe                    case         18
+14  gate.email.named_account_composition            case         18
+15  gate.email.account_credential_isolation         property     18
+16  gate.email.account_bound_bootstrap              case         18
+17  gate.email.multi_account_configuration_bounds   case         18
 ```
 
-Gate 7 is a property because the credential claim is over generated server
-configurations rather than one arrangement; gates 1 and 3 are structural
-because they inspect the import graph and the advertised rosters rather than
-a behavior. The remaining ten are boundary cases over the three servers, the
-policy engine, the composition root, and the bootstrap command.
+Gates 7 and 15 are properties because their credential claims are over
+generated server configurations rather than one arrangement; gates 1 and 3
+are structural because they inspect the import graph and the advertised
+rosters rather than a behavior. The remaining thirteen are boundary cases
+over the server triplets, the policy engine, the composition root, the
+manifest, and the bootstrap command.
 
 ### Conversational schedule creation, five gates
 
@@ -1552,33 +1559,33 @@ milestone  new gates  cumulative  the earliest of them
                                   filter, principal isolation, keyset
                                   paging, the read-only router, the
                                   exposure list
-18                13         348  the package boundary, the server
+18                17         352  the package boundary, the server
                                   contract, honest classification,
                                   credential and token confinement,
-                                  the bootstrap ceremony, the
-                                  monitoring recipe
-19                 5         353  the model-callable schedule contract,
+                                  the bootstrap ceremony, named-account
+                                  isolation, the monitoring recipe
+19                 5         357  the model-callable schedule contract,
                                   approval, exact-scope authorization,
                                   time validation, idempotent replay
-20                 6         359  monthly and yearly calendar rules,
+20                 6         363  monthly and yearly calendar rules,
                                   bounded catch-up, HTTP union parity,
                                   recurring conversational creation
-21                29         388  integrated episodes, causal anticipation,
+21                29         392  integrated episodes, causal anticipation,
                                   high-recall direct and hypothesis formation,
                                   evidence-based forgetting and activation,
                                   honest scoring, seeded evaluation, fallback
                                   restraint, verified coverage, segmentation
-22                14         402  the persona row, its cap and pinning,
+22                14         406  the persona row, its cap and pinning,
                                   human-only promotion, durable decline,
                                   snapshot de-duplication, exact scopes
-23                 7         409  summary-only schedule discovery,
+23                 7         413  summary-only schedule discovery,
                                   approved lifecycle mutation, exact scopes,
                                   conflict handling, idempotent retry
-24                12         421  capability registration, the
+24                12         425  capability registration, the
                                   invocation lifecycle, the owner-tap
                                   send boundary, ingest idempotency,
                                   untrusted triage routing
-25                12         433  the signed webhook ingress, the
+25                12         437  the signed webhook ingress, the
                                   handshake, string-id idempotency,
                                   the template window, the loopback
                                   bind, inherited surface guarantees
@@ -1602,14 +1609,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of four hundred and thirty-three gates are green before
+2.  **Forty-one of four hundred and thirty-seven gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches four hundred and thirty-three, which is every
+The cumulative column reaches four hundred and thirty-seven, which is every
 registry entry, at Milestone 25. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
@@ -1617,7 +1624,7 @@ Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
 Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 `gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, Milestone
 16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
-those specs already shared, Milestone 18's thirteen are `gate.email.*` in
+those specs already shared, Milestone 18's seventeen are `gate.email.*` in
 an area of their own, Milestone 19's five return to the existing
 `gate.schedule.*` area, Milestone 20 adds six more there, Milestone 21
 adds twenty-nine more to `gate.memory.*`, and Milestone 22's fourteen are

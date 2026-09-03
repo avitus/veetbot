@@ -66,12 +66,20 @@ Remaining:
 
 ### Milestone 18 — First-class email integration
 
-A parallel workstream providing three least-privilege Gmail MCP servers for
-read and triage, drafts and label mutation, and approval-gated sending. Its
-thirteen gates and full local repository check pass. Remaining:
+A parallel workstream providing one isolated triplet of least-privilege Gmail
+MCP servers per operator-managed account for read and triage, drafts and label
+mutation, and approval-gated sending. All seventeen gates and the full local
+repository check pass; ADR-0085 owns the four multi-account additions. The
+final head of
+[pull request 73](https://github.com/avitus/veetbot/pull/73) passed hosted CI,
+GitGuardian, and CodeRabbit with every review thread resolved before merge
+([Glen review](https://app.tryglen.com/avitus/veetbot/pull/73)). Follow the
+[Gmail integration runbook](../gmail-integration-runbook.md) for the remaining
+owner-controlled work. Remaining:
 
 - [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
-- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+- [ ] Work-account bootstrap, production manifest activation, and work-only draft smoke
+- [ ] Hosted CI and the CodeRabbit review loop for the multi-account extension
 
 ### Milestone 20 — Calendar recurrence and conversational schedules
 
