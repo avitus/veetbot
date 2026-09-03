@@ -431,7 +431,11 @@ class MemoryDistillationEvidence(BaseModel):
     # The share of gold-evidence clauses the provider formed or represented
     # rather than labelled away as transient, unsafe, or not memory.
     evidence_disposition_precision: float = Field(ge=0.75, le=1)
-    provider_calls_per_consolidation: Literal[3] = 3
+    # Three batched calls per planned segment, and the measured totals behind
+    # that claim: a consolidation over several segments makes three per segment.
+    provider_calls_per_segment: Literal[3] = 3
+    provider_calls_measured: int = Field(ge=3)
+    consolidations_measured: int = Field(ge=1)
     provider_cost_usd: str = Field(pattern=r"^\d+(?:\.\d+)?$")
     boundary_failures: Literal[0] = 0
     comparative_policies: tuple[
@@ -447,6 +451,12 @@ class MemoryDistillationEvidence(BaseModel):
             raise ValueError("distillation evidence is less than seventy percent positive")
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
             raise ValueError("distillation evidence time must be timezone-aware")
+        if self.provider_calls_measured % self.provider_calls_per_segment:
+            raise ValueError("measured provider calls are not a whole number of segments")
+        if self.provider_calls_measured < self.provider_calls_per_segment * (
+            self.consolidations_measured
+        ):
+            raise ValueError("measured provider calls fall short of one segment per consolidation")
         return self
 
 

@@ -26,7 +26,8 @@ populated store: 100 percent direct and hypothesis must-form recall, 96.2
 percent useful recall, 98.7 percent benign precision, 100 percent
 evidence-disposition precision, a 73.1 percentage-point useful-recall lift over
 the leniently scored `formation@8` control, exactly three provider calls per
-consolidation, zero boundary failures, and USD 1.07 of provider cost.
+segment (183 calls over 61 eligible consolidations), zero boundary failures,
+and USD 1.07 of provider cost.
 Automatic selection activates it for that exact tuple.
 
 The artifact published on 2026-09-02 was withdrawn on 2026-09-03 because its

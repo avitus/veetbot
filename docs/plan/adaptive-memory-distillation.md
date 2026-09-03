@@ -178,7 +178,9 @@ not to decide whether it is novel.
 
 The cue is the source prefix before each new evidence unit, plus relevant live
 memories selected at the prior store position. The call sees the cue and those
-memories only. It does not see the current evidence span, the integrated
+memories only, and only memories at or below internal sensitivity: a sensitive
+or restricted belief never leaves the platform as a cue, so it can neither be
+predicted from nor cited as redundancy. It does not see the current evidence span, the integrated
 narrative that includes that span, later events, assistant answers, or a gold
 memory label.
 
@@ -497,7 +499,8 @@ Publication requires:
   or verifiably represented rather than labelled transient, unsafe, or not
   memory;
 - at least one positive case ran against a populated store;
-- every eligible consolidation made exactly three calls per planned segment;
+- every eligible consolidation made exactly three calls per planned segment,
+  and the artifact records the measured call and consolidation totals;
 - all lifecycle timing, promotion, and self-citation checks pass, and the
   measured provider cost is recorded;
 - the exact version and provider tuple matches the artifact.

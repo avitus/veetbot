@@ -66,6 +66,9 @@ DISTILLATION_TIMEOUT_SECONDS = 120.0
 # a handful of claims; segmentation below keeps a batch inside it.
 DISTILLATION_MAXIMUM_OUTPUT_TOKENS = 16_384
 DISTILLATION_CALLS_PER_SEGMENT = 3
+# Only beliefs at or below internal sensitivity may leave the platform as
+# anticipation cues; sensitive and restricted beliefs never reach a provider.
+PROVIDER_EGRESS_SENSITIVITIES = frozenset({Sensitivity.PUBLIC, Sensitivity.INTERNAL})
 # A coverage disposition costs roughly thirty output tokens and a candidate
 # roughly one hundred and ten. Ninety clauses with one candidate each stay
 # under eighty percent of the output ceiling.
@@ -887,7 +890,15 @@ class NemoriAssistedCandidateExtractor:
             return deterministic
 
         async with self._uow_factory() as uow:
-            prior_memories = await uow.memories.list_memories(principal, limit=50)
+            live_memories = await uow.memories.list_memories(principal, limit=50)
+        # Anticipation is provider egress: a sensitive or restricted belief
+        # stays out of the request, so it can neither be predicted from nor
+        # attributed as redundancy.
+        prior_memories = [
+            memory
+            for memory in live_memories
+            if memory.sensitivity in PROVIDER_EGRESS_SENSITIVITIES
+        ]
 
         calls = 0
         fallbacks: list[StageName] = []

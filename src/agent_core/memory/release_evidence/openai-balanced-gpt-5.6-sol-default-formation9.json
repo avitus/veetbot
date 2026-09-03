@@ -7,6 +7,7 @@
     "formation@8",
     "formation@9"
   ],
+  "consolidations_measured": 61,
   "corpus_sha256": "ee672fbcf908631894e430a1d0d1d7daa36513b2bb071075b9ed95c601573ac6",
   "correction_rate_per_hundred": 0.0,
   "direct_must_form_recall": 1.0,
@@ -21,7 +22,8 @@
   "policy_version": "default@8905b6f85895+hb03f69cf",
   "positive_case_count": 53,
   "provider": "openai",
-  "provider_calls_per_consolidation": 3,
+  "provider_calls_measured": 183,
+  "provider_calls_per_segment": 3,
   "provider_cost_usd": "1.072035",
   "sample_count": 66,
   "schema_version": 2,

@@ -33,6 +33,7 @@ from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     MemoryLongevity,
 )
+from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT
 from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
     is_generic_subject,
@@ -758,7 +759,13 @@ async def run_live_evaluation(
                 "useful_recall_lift_percentage_points": lift,
                 "correction_rate_per_hundred": correction_rate,
                 "evidence_disposition_precision": current.evidence_disposition_precision,
-                "provider_calls_per_consolidation": _calls_per_consolidation(results),
+                "provider_calls_per_segment": _calls_per_segment(results),
+                "provider_calls_measured": sum(
+                    result.arms["formation@9"].provider_calls for result in results
+                ),
+                "consolidations_measured": sum(
+                    bool(result.arms["formation@9"].expected_provider_calls) for result in results
+                ),
                 "provider_cost_usd": current.provider_cost_usd,
                 "seeded_case_count": sum(
                     result.arms["formation@9"].seeded_beliefs > 0 for result in results
@@ -789,8 +796,13 @@ def _correction_rate(
     return correction_predictions * 100 / max(1, current.predicted)
 
 
-def _calls_per_consolidation(results: list[DistillationCaseResult]) -> int:
-    """The measured provider calls per eligible single-segment consolidation."""
+def _calls_per_segment(results: list[DistillationCaseResult]) -> int:
+    """Three calls per planned segment, verified on every eligible consolidation.
+
+    A consolidation that spans several segments makes three calls per segment,
+    so the published literal is per segment and the artifact also carries the
+    measured call and consolidation totals behind it.
+    """
 
     eligible = [
         result.arms["formation@9"]
@@ -799,10 +811,9 @@ def _calls_per_consolidation(results: list[DistillationCaseResult]) -> int:
     ]
     if not eligible:
         raise ValueError("no eligible consolidation measured provider calls")
-    per_segment = {arm.provider_calls * 3 // arm.expected_provider_calls for arm in eligible}
-    if per_segment != {3}:
+    if any(arm.provider_calls != arm.expected_provider_calls for arm in eligible):
         raise ValueError("provider calls per consolidation were not exactly three per segment")
-    return 3
+    return DISTILLATION_CALLS_PER_SEGMENT
 
 
 def evaluate_publication_gates(

@@ -2280,6 +2280,9 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         useful_recall_lift_percentage_points=90,
         correction_rate_per_hundred=0,
         evidence_disposition_precision=0.9,
+        provider_calls_per_segment=3,
+        provider_calls_measured=183,
+        consolidations_measured=61,
         provider_cost_usd="2.5",
         evaluated_at=NOW,
     )

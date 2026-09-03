@@ -29,6 +29,7 @@ from agent_core.domain.memory import (
     MemoryRecord,
     MemoryStatus,
     RejectionKind,
+    Sensitivity,
 )
 from agent_core.domain.messages import (
     FakeModelScript,
@@ -2064,7 +2065,9 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         useful_recall_lift_percentage_points=18,
         correction_rate_per_hundred=4,
         evidence_disposition_precision=0.9,
-        provider_calls_per_consolidation=3,
+        provider_calls_per_segment=3,
+        provider_calls_measured=183,
+        consolidations_measured=61,
         provider_cost_usd="1.25",
         boundary_failures=0,
         evaluated_at=NOW,
@@ -2151,7 +2154,9 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "benign_precision": 0.89,
         "useful_recall_lift_percentage_points": 14.9,
         "correction_rate_per_hundred": 10.1,
-        "provider_calls_per_consolidation": 2,
+        "provider_calls_per_segment": 2,
+        "provider_calls_measured": 182,
+        "consolidations_measured": 0,
         "boundary_failures": 1,
         "evidence_disposition_precision": 0.74,
         "seeded_case_count": 0,
@@ -2724,3 +2729,76 @@ async def test_anticipation_prefix_stops_before_the_earliest_episode() -> None:
     assert "EARLIER_CONTEXT" in prompt
     assert "FIRST_EPISODE" not in prompt
     assert "SECOND_EPISODE" not in prompt
+
+
+async def test_anticipation_never_sends_sensitive_or_restricted_memories() -> None:
+    """Provider egress carries only beliefs at or below internal sensitivity."""
+
+    clock, factory, baseline, _retriever = await formation_stack()
+    await user_event(factory, "I prefer concise answers.")
+    await baseline.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers.",
+        subject="answer style",
+        scope="general",
+        belief_type=BeliefType.PREFERENCE,
+        sensitivity=Sensitivity.INTERNAL,
+    )
+    await user_event(factory, "My daughter starts college next year.")
+    await baseline.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User has a daughter named DAUGHTER_SENTINEL.",
+        subject="daughter",
+        scope="general",
+        belief_type=BeliefType.RELATIONSHIP,
+        sensitivity=Sensitivity.SENSITIVE,
+    )
+    await user_event(factory, "My passport number is on file.")
+    await baseline.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User's passport is RESTRICTED_SENTINEL.",
+        subject="passport",
+        scope="general",
+        belief_type=BeliefType.FACT,
+        sensitivity=Sensitivity.RESTRICTED,
+    )
+    new_source = await user_event(factory, "I swim three mornings each week.")
+    provider = FakeModelProvider(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    text=_scripted_episode([new_source], ["I swim three mornings each week."])
+                ),
+                ScriptedTurn(text='{"predictions":[]}'),
+                ScriptedTurn(text=_empty_distillation(new_source)),
+            ]
+        ),
+        clock,
+    )
+    extractor = NemoriAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=_resolved_model(),
+        uow_factory=factory,
+        clock=clock,
+        ids=baseline._ids,
+    )
+    new_events = [event for event in await session_events(factory) if event.sequence == new_source]
+
+    await extractor.extract(new_events, principal=principal(), scope="general")
+
+    anticipation = provider.requests[1].conversation[1]
+    assert isinstance(anticipation, UserMessage)
+    part = anticipation.content[0]
+    assert isinstance(part, TextPart)
+    assert "User prefers concise answers." in part.text
+    assert "DAUGHTER_SENTINEL" not in part.text
+    assert "RESTRICTED_SENTINEL" not in part.text
+    for request in provider.requests:
+        for message in request.conversation:
+            for content in getattr(message, "content", []):
+                if isinstance(content, TextPart):
+                    assert "DAUGHTER_SENTINEL" not in content.text
+                    assert "RESTRICTED_SENTINEL" not in content.text
