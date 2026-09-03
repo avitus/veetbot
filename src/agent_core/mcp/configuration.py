@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import sys
 from collections.abc import Callable, Mapping
@@ -16,58 +17,84 @@ from agent_core.policy.scopes import validate_required_scopes
 type DestinationAllowed = Callable[[str], bool]
 
 _EMAIL_CLASSIFICATIONS = {
-    "gmail_read": (
+    "read": (
         SideEffectClass.NETWORK_READ,
         RiskLevel.LOW,
         IdempotencyClass.READ_ONLY,
     ),
-    "gmail_write": (
+    "write": (
         SideEffectClass.EXTERNAL_WRITE,
         RiskLevel.MEDIUM,
         IdempotencyClass.NON_IDEMPOTENT,
     ),
-    "gmail_send": (
+    "send": (
         SideEffectClass.EXTERNAL_MESSAGE,
         RiskLevel.HIGH,
         IdempotencyClass.NON_IDEMPOTENT,
     ),
 }
-EMAIL_SERVER_IDS = frozenset(_EMAIL_CLASSIFICATIONS)
-MUTATING_EMAIL_SERVER_IDS = frozenset(
-    server_id
-    for server_id, (_side_effect, _risk, idempotency) in _EMAIL_CLASSIFICATIONS.items()
-    if idempotency not in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
-)
+_EMAIL_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_EMAIL_SERVER_ID = re.compile(r"^gmail_(?:[a-z][a-z0-9_]{0,31}_)?(?:read|write|send)$")
+EMAIL_SERVER_IDS = frozenset(f"gmail_{mode}" for mode in _EMAIL_CLASSIFICATIONS)
+MUTATING_EMAIL_SERVER_IDS = frozenset({"gmail_write", "gmail_send"})
+
+
+def is_email_server_id(server_id: str | None) -> bool:
+    """Return whether an id belongs to a first-party Gmail mode triplet."""
+
+    return server_id is not None and _EMAIL_SERVER_ID.fullmatch(server_id) is not None
+
+
+def is_mutating_email_server_id(server_id: str | None) -> bool:
+    """Keep ADR-0071's approval floor for every named Gmail account."""
+
+    return (
+        is_email_server_id(server_id)
+        and server_id is not None
+        and server_id.endswith(("_write", "_send"))
+    )
 
 
 def email_server_configs(
     tenant_id: str,
     *,
     enabled: bool = True,
+    account_ids: tuple[str, ...] = (),
 ) -> tuple[MCPServerConfig, ...]:
     """Return the operator-owned first-party email server rows when enabled."""
 
     if not enabled:
         return ()
+    if account_ids and (
+        len(account_ids) > 8
+        or len(set(account_ids)) != len(account_ids)
+        or any(_EMAIL_ACCOUNT_ID.fullmatch(account_id) is None for account_id in account_ids)
+    ):
+        raise ValueError("Gmail account ids are invalid")
     rows: list[MCPServerConfig] = []
-    for server_id, (side_effect, risk, idempotency) in _EMAIL_CLASSIFICATIONS.items():
-        mode = server_id.removeprefix("gmail_")
-        rows.append(
-            MCPServerConfig(
-                tenant_id=tenant_id,
-                server_id=server_id,
-                transport=MCPTransport.STDIO,
-                endpoint=shlex.join((sys.executable, "-m", "gmail_mcp", "--mode", mode)),
-                operator_configured=True,
-                auth_scheme=MCPAuthScheme.ENV,
-                auth_name="GMAIL_MCP_CREDENTIAL",
-                credential_ref=server_id,
-                side_effect=side_effect,
-                risk=risk,
-                idempotency=idempotency,
-                required_scopes=frozenset({f"mcp.{server_id}.use"}),
+    accounts: tuple[str | None, ...] = account_ids or (None,)
+    for account_index, account_id in enumerate(accounts):
+        for mode, (side_effect, risk, idempotency) in _EMAIL_CLASSIFICATIONS.items():
+            server_id = f"gmail_{mode}" if account_index == 0 else f"gmail_{account_id}_{mode}"
+            command = [sys.executable, "-m", "gmail_mcp", "--mode", mode]
+            if account_id is not None:
+                command.extend(("--account-id", account_id))
+            rows.append(
+                MCPServerConfig(
+                    tenant_id=tenant_id,
+                    server_id=server_id,
+                    transport=MCPTransport.STDIO,
+                    endpoint=shlex.join(command),
+                    operator_configured=True,
+                    auth_scheme=MCPAuthScheme.ENV,
+                    auth_name="GMAIL_MCP_CREDENTIAL",
+                    credential_ref=server_id,
+                    side_effect=side_effect,
+                    risk=risk,
+                    idempotency=idempotency,
+                    required_scopes=frozenset({f"mcp.{server_id}.use"}),
+                )
             )
-        )
     return tuple(rows)
 
 
@@ -93,7 +120,7 @@ def validate_mcp_config(
         if token_endpoint.scheme != "https" or token_endpoint.hostname is None:
             raise ValueError("MCP OAuth token endpoints require HTTPS")
     validate_required_scopes(set(config.required_scopes), mcp_server_id=config.server_id)
-    if config.server_id in EMAIL_SERVER_IDS and config.required_scopes != {
+    if is_email_server_id(config.server_id) and config.required_scopes != {
         f"mcp.{config.server_id}.use"
     }:
         raise ValueError("a Gmail MCP server requires exactly its use scope")

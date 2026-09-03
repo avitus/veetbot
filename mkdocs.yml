@@ -106,6 +106,7 @@ nav:
       - Apple Client: apple-client.md
   - Security: security.md
   - Production Deployment: deployment.md
+  - Gmail Integration Runbook: gmail-integration-runbook.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md
@@ -196,4 +197,5 @@ nav:
       - ADR-0082 Milestone 25 WhatsApp business surface: adr/0082-milestone-25-whatsapp-surface.md
       - ADR-0083 Tool-name-keyed policy rules: adr/0083-tool-name-keyed-policy-rules.md
       - ADR-0084 Atomic public website publication: adr/0084-public-website-and-oauth-policy-pages.md
+      - ADR-0085 Operator-managed multi-account Gmail: adr/0085-operator-managed-multi-account-gmail.md
   - Changelog: changelog.md

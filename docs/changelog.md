@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-03 — Operator-managed Gmail accounts
+
+- Extended Milestone 18 under ADR-0085 so one Veetbot principal can use up to
+  eight operator-managed Gmail accounts concurrently. A versioned manifest
+  composes one separately credentialed read/write/send MCP triplet per account;
+  the default keeps the existing tool names and additional accounts are
+  explicit in names such as `mcp.gmail_work_read.search_threads`.
+- Added account-tagged bootstrap credentials, fail-closed manifest validation,
+  per-account credential and scope isolation, dynamic Gmail approval-floor
+  enforcement, four registry-backed gates, and deployment/runbook guidance.
+  Legacy single-account configuration remains unchanged.
+
 ## 2026-09-01 — Code blocks copy to the clipboard
 
 - Added a labeled Copy action to every fenced and indented code block in the

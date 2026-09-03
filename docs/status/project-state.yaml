@@ -375,7 +375,7 @@ milestones:
     authorized_on: 2026-08-24
     design: docs/plan/email-integration.md
     adr: docs/adr/0071-milestone-18-email-integration.md
-    gates_registered: 13
+    gates_registered: 17
     authorized_scope:
       - three first-party stdio Gmail MCP servers split by side effect
       - read and triage, drafts and batch labels, approval-gated send
@@ -383,22 +383,27 @@ milestones:
       - broker-held env-scheme credentials and the bootstrap consent ceremony
       - the read-only MCP arm of the host_on_allowlist condition
       - default-off composition behind AGENT_EMAIL_ENABLED
+      - operator-managed named Gmail accounts with one isolated server triplet per account
+      - backward-compatible default-account tools and explicit additional-account tools
+      - versioned bounded account manifest and account-bound bootstrap credentials
       - a monitoring recipe over existing schedules and notifications
     deferred_scope:
-      - calendar, attachments, Gmail push, a second provider or account
+      - calendar, attachments, Gmail push, and a second provider
+      - public self-service OAuth and per-principal mailbox lifecycle
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
     open_items:
       - Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
-      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+      - Work-account bootstrap, production manifest activation, and work-only draft smoke
+      - Hosted CI and the CodeRabbit review loop for the multi-account extension
     verification:
-      - check: thirteen Milestone 18 gate.email gates
+      - check: thirteen original Milestone 18 gate.email gates
         outcome: passed_locally
         detail: >-
-          The thirteen registered entries in evals/gates/email.yaml resolve to
-          thirteen distinct live checks in tests/gates/test_email_m18.py. The
-          complete module passes all eighteen collected cases, including the
+          The thirteen original entries in evals/gates/email.yaml still resolve
+          to distinct live checks in tests/gates/test_email_m18.py. The
+          complete module now passes all twenty-seven collected cases, including the
           three-mode contract and roster matrices, property-generated child
           environments, fixed-endpoint and failure-taxonomy cases, and the
           in-memory scheduled-triage path through read, parked write approval,
@@ -407,14 +412,26 @@ milestones:
           project.current_milestone remains 12, so this focused execution is
           the local parallel-workstream evidence and does not move the verified
           gate ceiling.
+      - check: four multi-account Milestone 18 gate.email gates
+        outcome: passed_locally
+        detail: >-
+          ADR-0085 authorizes named operator-managed Gmail accounts and adds
+          gates for named composition, account credential isolation,
+          account-bound bootstrap, and bounded manifest configuration. The
+          focused red command over those four node ids failed on the absent
+          GMAIL_ACCOUNTS_FILE parser, account_ids composition argument,
+          account_id bootstrap argument, and disabled-manifest refusal. The
+          same command now passes all four; the complete Milestone 18 module
+          passes twenty-seven cases, including dynamic-account approval floors
+          and composition-root persistence of all account server rows.
       - check: make check
         outcome: passed_locally
         detail: >-
-          Ruff formatting over 589 files and Ruff linting pass, strict mypy
-          reports no issue in 545 source files, the static partition passes
-          1339 tests, the contract partition passes 368 tests, release,
+          Ruff formatting over 648 files and Ruff linting pass, strict mypy
+          reports no issue in 591 source files, the static partition passes
+          1690 tests, the contract partition passes 436 tests, release,
           rollback, and nginx deployment-script tests pass, and the strict
-          documentation build passes with 188 citations and 353 registry
+          documentation build passes with 192 citations and 437 registry
           entries reconciled.
       - check: owner real-mailbox smoke
         outcome: not_started
@@ -423,10 +440,17 @@ milestones:
           a scheduled triage run, an approval delivered to the phone, and one
           approved send. No fake-provider result is recorded as a substitute.
       - check: hosted CI and the dev-to-main review loop
-        outcome: not_started
+        outcome: passed
         detail: >-
-          Hosted CI and the CodeRabbit review loop have not run on a final
-          dev-to-main head for this workstream.
+          Pull request 73 merged the Gmail implementation to main on 2026-08-27
+          at commit c46595f4741c482eafaeb2fbc5974818c76cdcf2. On its final head
+          0adf2d07524f6b4489e8c0cdd70abe56a3d7a1e1, CodeRabbit, GitGuardian,
+          and the CircleCI static, contract, integration, sandbox, and Apple
+          jobs passed, and all nine review conversations are resolved. The
+          current production release 20260903-043405-b6f003f contains that
+          merge and reports the same identity across API, documentation, and
+          public website. The owner real-mailbox smoke remains independently
+          required.
   "19":
     title: Conversational schedule creation
     status: in_progress
@@ -631,21 +655,18 @@ milestones:
       - check: comparative live-model evidence
         outcome: passed
         detail: >-
-          The 2026-09-03 production-tuple run under distillation-scorer@2
-          executed all three policies over 66 cases, five of them against a
-          populated store, and published the exact-tuple formation@9 artifact
-          bound to commit 9013d20. It reached 100 percent direct and hypothesis
-          must-form recall, 96.2 percent useful recall, 98.7 percent benign
-          precision, 100 percent evidence-disposition precision, a 73.1
-          percentage-point useful-recall lift over the leniently scored
-          formation@8 control, exactly three provider calls per consolidation,
-          a zero correction rate, zero boundary failures, and USD 1.07 of
-          provider cost. Two earlier runs under the same scorer refused
-          publication at 0.927 direct recall and 0.863 precision; the misses
-          were a local rejection of statements beginning "The user" and
-          redundant merges, not model omissions. The 2026-09-02 artifact was
-          withdrawn because its scorer, corpus, empty store, and build
-          reference could not support the numbers it carried.
+          The 2026-09-03 production-tuple run under distillation-scorer@2 executed
+          all three policies over 66 cases, five against a populated store, and
+          published the exact-tuple formation@9 artifact bound to the deployed
+          main head a904417 and its compiled policy default@19be675c1b3c+hb03f69cf.
+          It reached 97.7 percent direct and 100 percent hypothesis must-form
+          recall, 94.8 percent benign precision, 100 percent evidence-disposition
+          precision, a 65.4 percentage-point useful-recall lift over the leniently
+          scored formation@8 control, three provider calls per segment, zero
+          boundary failures, and USD 0.99 of provider cost. An earlier artifact
+          evaluated at 9013d20 was replaced because the Milestone 24 device policy
+          rules changed the compiled policy version, so activation correctly
+          refused the stale tuple in production.
       - check: rich-conversation regression, fallback honesty, and stage telemetry
         outcome: passed_locally
         detail: >-
@@ -933,8 +954,9 @@ readiness:
     authorized Milestone 18,
     first-class email integration, as a third parallel workstream (ADR-0071),
     meeting roadmap item B11's entry condition for its email half; it is
-    specified by email-integration.md with thirteen registered gates in a
-    new email area. On 2026-08-24 the owner also authorized Milestone 19,
+    specified by email-integration.md with seventeen registered gates in the
+    email area after the owner authorized operator-managed multi-account Gmail
+    on 2026-09-03 under ADR-0085. On 2026-08-24 the owner also authorized Milestone 19,
     conversational one-time schedule creation, as a fourth parallel workstream
     (ADR-0072); scheduling.md declares its five `gate.schedule.*` entries.
     On 2026-08-27 the owner authorized Milestone 20, calendar recurrence and

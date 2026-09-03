@@ -23,9 +23,10 @@ title: Current Milestone
   gates and completed as a second parallel workstream on 2026-08-24 without
   advancing the verified sequential ceiling.
   Milestone 18 — first-class email integration — is specified by
-  [email-integration.md](email-integration.md) with thirteen gates and is a
-  third parallel workstream on the same terms, its two shared-file touches
-  named in ADR-0071. Milestone 19 — conversational schedule creation — is
+  [email-integration.md](email-integration.md) with seventeen gates and is a
+  third parallel workstream on the same terms, its original shared-file
+  touches named in ADR-0071 and its operator-managed multi-account extension
+  in ADR-0085. Milestone 19 — conversational schedule creation — is
   specified by [scheduling.md](scheduling.md) with five gates and is a fourth
   parallel workstream, limited to one-time creation through the model.
   Milestone 20 — calendar recurrence and conversational schedules — is
@@ -152,9 +153,11 @@ title: Current Milestone
   browser coverage later passing the same hosted gates in merge `07c8bdf`.
   Milestone 18, the third parallel workstream, has its first-party Gmail MCP
   package, composition, policy, bootstrap ceremony, and monitoring recipe
-  implemented, with all thirteen registered gates passing locally; the
-  owner's real-mailbox smoke, hosted CI, and the final CodeRabbit review remain
-  outstanding. Milestone 19, the fourth parallel workstream, is in progress with
+  implemented, with all seventeen registered gates passing locally, including
+  the four operator-managed multi-account gates added under ADR-0085. Hosted
+  verification of that extension and the owner's work-account smoke remain
+  outstanding. Milestone
+  19, the fourth parallel workstream, is in progress with
   five registered gates; its one-time model tool, clarification-to-approval
   regression, complete non-live suite, and PostgreSQL lane pass locally, with
   only hosted CI and the final CodeRabbit review outstanding. Milestone 20,
@@ -220,7 +223,8 @@ landed on the same day as that milestone's authorization, adding ten more
 `gate.memory.*` entries to the same area. Milestone 18's
 [email-integration.md](email-integration.md) and ADR-0071 landed the same
 way on 2026-08-24, adding thirteen `gate.email.*` entries in a new area of
-their own. Milestone 19 reuses [scheduling.md](scheduling.md) and the existing
+their own; ADR-0085 adds four more for operator-managed multi-account Gmail.
+Milestone 19 reuses [scheduling.md](scheduling.md) and the existing
 `schedule` area under ADR-0072, adding five gates for the deliberately narrow
 one-time creation bridge.
 Milestone 20 reuses the same design and gate area under ADR-0073, adding six
@@ -318,7 +322,7 @@ moves it. Milestone 17's contract is its ten `gate.memory.*` entries —
 `read_api_view_projection`, and `read_api_error_vocabulary` — plus the plan's
 acceptance criteria and the
 [memory-read-api-and-browser design](memory-read-api-and-browser.md).
-Milestone 18's contract is its thirteen `gate.email.*` entries plus the
+Milestone 18's contract is its seventeen `gate.email.*` entries plus the
 plan's acceptance criteria and the
 [email-integration design](email-integration.md). Milestone 19's contract is
 its five new `gate.schedule.*` entries plus the plan's acceptance criteria and

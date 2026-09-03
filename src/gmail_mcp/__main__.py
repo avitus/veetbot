@@ -92,6 +92,7 @@ def _authorize_via_loopback(_mode: str, authorization_url: str) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m gmail_mcp")
     parser.add_argument("--mode", choices=tuple(GOOGLE_SCOPES))
+    parser.add_argument("--account-id")
     subcommands = parser.add_subparsers(dest="command")
     bootstrap = subcommands.add_parser("bootstrap")
     client_file = os.environ.get("GMAIL_OAUTH_CLIENT_FILE")
@@ -110,6 +111,7 @@ def _parser() -> argparse.ArgumentParser:
             )
         ),
     )
+    bootstrap.add_argument("--account-id", dest="bootstrap_account_id")
     return parser
 
 
@@ -126,6 +128,7 @@ def main(argv: list[str] | None = None) -> None:
                 bootstrap_credentials(
                     client_id=client_id,
                     client_secret=client_secret,
+                    account_id=arguments.bootstrap_account_id,
                     output_directory=arguments.output_directory.expanduser().resolve(),
                     authorize=_authorize_via_loopback,
                 )
@@ -142,6 +145,7 @@ def main(argv: list[str] | None = None) -> None:
         credential = GmailCredential.parse(
             credential_value,
             expected_scope=GOOGLE_SCOPES[arguments.mode],
+            expected_account_id=arguments.account_id,
         )
     except GmailError as exc:
         raise SystemExit(exc.code) from None

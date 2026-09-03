@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 from collections.abc import Callable
 from contextlib import suppress
@@ -26,6 +27,9 @@ from gmail_mcp.constants import (
 
 class BootstrapError(RuntimeError):
     """A content-free consent-ceremony failure."""
+
+
+_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
 def _challenge(verifier: str) -> str:
@@ -62,6 +66,7 @@ async def bootstrap_credentials(
     *,
     client_id: str,
     client_secret: str,
+    account_id: str | None = None,
     output_directory: Path,
     authorize: Callable[[str, str], str],
     http_client: httpx.AsyncClient | None = None,
@@ -70,6 +75,8 @@ async def bootstrap_credentials(
 
     if not client_id or not client_secret:
         raise BootstrapError("OAuth client configuration is incomplete")
+    if account_id is not None and _ACCOUNT_ID.fullmatch(account_id) is None:
+        raise BootstrapError("account id is invalid")
     output_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not output_directory.is_dir() or output_directory.is_symlink():
         raise BootstrapError("credential output directory is invalid")
@@ -130,6 +137,7 @@ async def bootstrap_credentials(
                     client_secret=client_secret,
                     refresh_token=refresh_token,
                     scope=scope,
+                    account_id=account_id,
                 )
             )
     finally:

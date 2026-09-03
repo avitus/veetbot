@@ -8,15 +8,18 @@ canonical: true
 
 This specification expands the engineering plan's Milestone 18 and roadmap
 item B11's email half, and records the mechanism selected by
-[ADR-0071](../adr/0071-milestone-18-email-integration.md): the owner's Gmail
-mailbox reaches the agent as three first-party MCP servers, operator-configured
-over stdio, carried entirely by the Milestone 8 adapter. The platform gains no
-builtin email tool, no provider port, and no Gmail type inside `agent_core`.
+[ADR-0071](../adr/0071-milestone-18-email-integration.md) and extended by
+[ADR-0085](../adr/0085-operator-managed-multi-account-gmail.md): the owner's
+operator-managed Gmail accounts reach the agent as isolated first-party MCP
+server triplets, configured over stdio and carried entirely by the Milestone 8
+adapter. The platform gains no builtin email tool, no provider port, and no
+Gmail type inside `agent_core`.
 
 ## Scope
 
-The milestone delivers four capabilities over one mailbox, the owner's Gmail
-account, through eight tools on three servers:
+The milestone delivers four capabilities over one or more operator-managed
+mailboxes belonging to the configured principal, through eight tools on three
+servers per account:
 
 | Capability | Served by |
 | --- | --- |
@@ -31,8 +34,9 @@ notifications, not new runtime.
 Out of scope: calendar; permanent deletion (`users.messages.delete` appears in
 no roster); attachment download or upload; Gmail push and Pub/Sub; interval or
 cron recurrence (roadmap B5); the email inbound Surface (B3) and the email
-notification transport (B4); a second mail provider; multiple accounts; and
-any auto-approval or standing-grant mechanism (B8).
+notification transport (B4); a second mail provider; public self-service OAuth
+and per-principal mailbox lifecycle; and any auto-approval or standing-grant
+mechanism (B8).
 
 ## The three servers
 
@@ -60,10 +64,13 @@ technically send — so token separation is partial and deliberate: each
 server's token is consented to the smallest Google scope that serves its
 roster, and the platform-side classification remains the control that counts.
 
-Each server declares exactly one required platform scope, `mcp.gmail_read.use`,
-`mcp.gmail_write.use`, or `mcp.gmail_send.use`, granted to the configured
-principal. Tools register under the adapter's ordinary names:
-`mcp.gmail_read.search_threads` and so on.
+Each server declares exactly one required platform scope,
+`mcp.{server_id}.use`, granted to the configured principal. The default
+account retains `gmail_read`, `gmail_write`, and `gmail_send`, so its tools
+remain `mcp.gmail_read.search_threads` and so on. An additional account uses
+the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
+`gmail_{account_id}_send`; the `work` read tool is therefore
+`mcp.gmail_work_read.search_threads`.
 
 ## Tool roster
 
@@ -109,7 +116,8 @@ as that one variable in a constructed child environment — never `argv`, never
 an inherited environment, never an event or a log.
 
 The resolved value is a JSON document: `client_id`, `client_secret`,
-`refresh_token`, and the granted Google scope. The server exchanges the
+`refresh_token`, the granted Google scope, and, for manifest-configured
+accounts, the non-secret operator `account_id`. The server exchanges the
 refresh token for access tokens against Google's fixed HTTPS token endpoint
 inside its own process — a package constant, over authenticated TLS with
 CA-chain validation and hostname verification, with redirects never
@@ -120,7 +128,8 @@ platform never learns the credential is OAuth. A refresh token Google refuses
 surfaces as the adapter's ordinary `tool.server_unauthorized`, terminal at
 connect and laddered mid-session, exactly as for any MCP server.
 
-Initial consent is a one-time operator ceremony:
+Initial consent is a one-time operator ceremony. The legacy single-account
+form remains:
 
 ```text
 python -m gmail_mcp bootstrap
@@ -136,6 +145,18 @@ publishing status (ADR-0071 decision 6), so refresh tokens do not expire on
 the testing-status seven-day clock; if Google revokes one anyway, recovery is
 re-running the ceremony.
 
+For a manifest account the operator supplies its durable routing label:
+
+```text
+python -m gmail_mcp bootstrap --account-id work --output-directory /private/path/work
+```
+
+The label is written into all three documents. It does not verify the Google
+address selected in the browser, so the operator selects the same account for
+all three consents and confirms it with the real-mailbox smoke. At runtime the
+server receives the label as non-secret configuration and rejects an absent or
+mismatched label before any Gmail request.
+
 ## Configuration and composition
 
 Email is disabled by default. The environment layer owns:
@@ -145,18 +166,52 @@ AGENT_EMAIL_ENABLED            default off
 GMAIL_READ_CREDENTIAL_FILE     path to the read server's credential JSON
 GMAIL_WRITE_CREDENTIAL_FILE    path to the write server's credential JSON
 GMAIL_SEND_CREDENTIAL_FILE     path to the send server's credential JSON
+GMAIL_ACCOUNTS_FILE            path to the versioned multi-account manifest
 ```
 
-When the flag is set, the composition root synthesizes three operator-tier
-stdio server rows — command, mode flag, `env` auth scheme, per-server
-credential reference, classification, and single required scope as declared
-above — and hands them to the MCP adapter with every other configured server.
+When the flag is set, exactly one configuration form is accepted. The legacy
+form requires all three credential-file variables and synthesizes the original
+three rows. The manifest form rejects every legacy Gmail credential-file
+variable and reads this bounded, non-secret schema:
+
+```json
+{
+  "version": 1,
+  "default_account": "personal",
+  "accounts": [
+    {
+      "account_id": "personal",
+      "read_credential_file": "/etc/veetbot/gmail/personal/gmail-read.json",
+      "write_credential_file": "/etc/veetbot/gmail/personal/gmail-write.json",
+      "send_credential_file": "/etc/veetbot/gmail/personal/gmail-send.json"
+    },
+    {
+      "account_id": "work",
+      "read_credential_file": "/etc/veetbot/gmail/work/gmail-read.json",
+      "write_credential_file": "/etc/veetbot/gmail/work/gmail-write.json",
+      "send_credential_file": "/etc/veetbot/gmail/work/gmail-send.json"
+    }
+  ]
+}
+```
+
+Version 1 requires one through eight unique accounts, a default id present in
+the list, account ids matching `^[a-z][a-z0-9_]{0,31}$`, exactly three absolute
+owner-only regular credential files per account, and no unknown fields. The
+composition root synthesizes three operator-tier stdio server rows per account
+— command, mode and optional account-id arguments, `env` auth scheme,
+per-server credential reference, classification, and single required scope —
+and hands them to the MCP adapter with every other configured server. The
+default account keeps the three legacy server ids. Every other account uses an
+account-qualified id, so account selection is fixed in the advertised tool
+name rather than accepted as a model-authored argument.
+
 Per-server request timeouts and `maximum_output_bytes` use the adapter's
 defaults unless the deployment overrides them. When the flag is unset no row
 is composed: no `mcp.gmail_*` tool exists in the registry, none is advertised,
-and no `mcp.gmail_*.use` scope is granted. A missing or unreadable credential
-file while the flag is set is a configuration error at composition, not a
-connect failure later.
+and no `mcp.gmail_*.use` scope is granted. A missing or unreadable manifest or
+credential file while the flag is set is a configuration error at composition,
+not a connect failure later.
 
 ## Policy, approvals, and trust
 
@@ -342,6 +397,14 @@ the mailbox. The platform does not guess, and it does not send again.
   events, or logs.
 - With `AGENT_EMAIL_ENABLED` unset, no `mcp.gmail_*` tool, row, or scope
   grant exists.
+- A manifest with a default and a second account composes six isolated server
+  processes, retains the default account's three legacy ids, gives the second
+  account three explicit ids, and grants exactly one matching platform scope
+  per server.
+- Every manifest-configured child receives only the credential matching its
+  account and mode; tagged credentials refuse a different account id, and
+  mixed legacy/manifest, partial, duplicate, unknown, relative, insecure, or
+  over-eight-account configuration fails before discovery.
 - The bootstrap ceremony writes 0600 credential files that round-trip through
   the settings loader, requests exactly the per-server Google scopes, and
   prints no secret.
@@ -356,8 +419,8 @@ the mailbox. The platform does not guess, and it does not send again.
 
 ## Build sequence
 
-1. This document, ADR-0071, the milestone-map area and census rows, and the
-   thirteen registry entries, checks pending. **M18.**
+1. This document, ADR-0071, ADR-0085, the milestone-map area and census rows,
+   and the seventeen registry entries, checks pending. **M18.**
 2. The fake Gmail API fixture and the shared three-mode contract suite, red;
    then `src/gmail_mcp/` read mode green, with the two-way import-isolation
    check. **M18.**
@@ -370,7 +433,9 @@ the mailbox. The platform does not guess, and it does not send again.
 5. Composition: the flag, the credential-file settings, three synthesized
    server rows, scope grants. **M18.**
 6. The bootstrap consent command. **M18.**
-7. The monitoring recipe exercised end to end; gate evidence recorded; the
+7. Operator-managed multi-account composition, account-bound bootstrap, and
+   isolation gates. **M18.**
+8. The monitoring recipe exercised end to end; gate evidence recorded; the
    owner's real-mailbox smoke. **M18.**
 
 ## Hard gates
@@ -421,6 +486,25 @@ the mailbox. The platform does not guess, and it does not send again.
     reads pass without approval, whose first write parks an approval whose
     notification is content-free, and whose outcome is reported. **M18.**
 
-These thirteen registry-backed gates are the milestone's blocking delivery
+14. **Named-account composition.** A two-account manifest synthesizes three
+    servers per account; the default retains the legacy ids, the second uses
+    account-qualified ids, and all six advertise the expected rosters and
+    exact server-id scopes. **M18.**
+15. **Account credential isolation.** Every generated account/mode server
+    resolves one distinct credential reference and passes only that credential
+    plus the non-secret account id to its child; no process can receive another
+    account's credential. **M18.**
+16. **Account-bound bootstrap.** Bootstrap with `--account-id` writes three
+    owner-only documents tagged with that id, a matching server accepts them,
+    and a missing or different id is rejected before any Gmail request. Legacy
+    untagged documents remain valid only through legacy single-account
+    configuration. **M18.**
+17. **Multi-account configuration bounds.** The accounts manifest is
+    versioned, closed, bounded at eight unique ids, requires its declared
+    default and three absolute private credential paths per account, and is
+    mutually exclusive with the legacy triplet; every violation fails at
+    startup. **M18.**
+
+These seventeen registry-backed gates are the milestone's blocking delivery
 contract. They do not advance the verified gate ceiling, which still moves
 only in milestone order.

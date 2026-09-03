@@ -77,3 +77,27 @@
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Monitoring recipe** — a daily triage schedule materializes a run whose reads pass without approval, whose first write parks an approval whose notification is content-free, and whose outcome is reported."
   check: tests/gates/test_email_m18.py::test_daily_triage_recipe_reads_then_parks_write_and_reports_outcome
+- id: gate.email.named_account_composition
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Named-account composition** — a two-account manifest synthesizes three servers per account; the default retains the legacy ids, the second uses account-qualified ids, and all six advertise the expected rosters and exact server-id scopes."
+  check: tests/gates/test_email_m18.py::test_named_accounts_compose_isolated_server_triplets
+- id: gate.email.account_credential_isolation
+  milestone: 18
+  kind: property
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Account credential isolation** — every generated account and mode server resolves one distinct credential reference and passes only that credential plus the non-secret account id to its child; no process can receive another account's credential."
+  check: tests/gates/test_email_m18.py::test_named_account_credentials_cross_only_their_server_environment
+- id: gate.email.account_bound_bootstrap
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Account-bound bootstrap** — bootstrap with `--account-id` writes three owner-only documents tagged with that id, a matching server accepts them, and a missing or different id is rejected before any Gmail request; legacy untagged documents remain valid only through legacy single-account configuration."
+  check: tests/gates/test_email_m18.py::test_account_bound_bootstrap_tags_and_validates_credentials
+- id: gate.email.multi_account_configuration_bounds
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Multi-account configuration bounds** — the accounts manifest is versioned, closed, bounded at eight unique ids, requires its declared default and three absolute private credential paths per account, and is mutually exclusive with the legacy triplet; every violation fails at startup."
+  check: tests/gates/test_email_m18.py::test_multi_account_manifest_rejects_every_invalid_boundary
