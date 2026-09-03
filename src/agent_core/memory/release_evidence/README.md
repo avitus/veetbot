@@ -21,14 +21,23 @@ control arm of the three-policy comparison and the fallback evidence.
 evidence for Nemori-assisted `formation@9` on the same tuple. It was produced on
 2026-09-03 by `agent eval memory-distillation` under `distillation-scorer@2`
 against the 66-case formation-v3 corpus at commit
-`9013d20706f44a717cef402330a4d2d204ca8446`, with five cases run against a
-populated store: 100 percent direct and hypothesis must-form recall, 96.2
-percent useful recall, 98.7 percent benign precision, 100 percent
-evidence-disposition precision, a 73.1 percentage-point useful-recall lift over
+`a904417ff95882cccc922095b02b1702849027f0`, the deployed `main` head, so its
+compiled policy version `default@19be675c1b3c+hb03f69cf` matches the running
+composition after the Milestone 24 device-channel policy rules changed it. Five
+cases run against a populated store: 97.7 percent direct and 100 percent
+hypothesis must-form recall, 94.8 percent benign precision, 100 percent
+evidence-disposition precision, a 65.4 percentage-point useful-recall lift over
 the leniently scored `formation@8` control, exactly three provider calls per
 segment (183 calls over 61 eligible consolidations), zero boundary failures,
-and USD 1.07 of provider cost.
-Automatic selection activates it for that exact tuple.
+and USD 0.99 of provider cost. Automatic selection activates it for that exact
+tuple.
+
+An earlier `formation@9` artifact was evaluated at commit `9013d20`, before the
+Milestone 24 policy rules merged, so its compiled policy version no longer
+matched the deployed composition and activation correctly refused it; it was
+replaced by this artifact. The `formation@8` control remains bound to the older
+`default@8905b6f85895+hb03f69cf` policy for the same reason and no longer
+activates; republishing it belongs with its budget repair.
 
 The artifact published on 2026-09-02 was withdrawn on 2026-09-03 because its
 scorer equated negations, counts, supersets, and sibling activities, its corpus
