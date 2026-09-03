@@ -16,6 +16,7 @@ from agent_core.config import (
     AuthMode,
     ConfigurationError,
     DeploymentMode,
+    MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     PushProviderKind,
     SandboxMechanism,
@@ -1036,3 +1037,33 @@ def test_memory_profiles_knob_paths_match_document() -> None:
 
     assert declared == _leaf_paths(document) - {"schema_version"}
     assert len(declared) == 37
+
+
+def test_required_mode_judges_evidence_under_the_operator_pin() -> None:
+    """Startup validation must agree with composition about which artifact counts."""
+
+    bundled_provider_evidence = (
+        config_module.PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT
+        / "openai-balanced-gpt-5.6-sol-default-formation8.json"
+    )
+    assert bundled_provider_evidence.exists()
+
+    with pytest.raises(ConfigurationError, match="evaluation evidence did not pass"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(bundled_provider_evidence),
+                "AGENT_MEMORY_FORMATION_POLICY_PIN": "formation@9",
+            }
+        )
+
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(bundled_provider_evidence),
+            "AGENT_MEMORY_FORMATION_POLICY_PIN": "formation@8",
+        }
+    )
+    assert settings.memory_formation_policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED

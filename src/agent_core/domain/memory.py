@@ -406,7 +406,8 @@ class MemoryDistillationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
+    scorer_version: Literal["distillation-scorer@2"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
     model_policy: str = Field(min_length=1)
@@ -414,16 +415,28 @@ class MemoryDistillationEvidence(BaseModel):
     model: str = Field(min_length=1)
     policy_profile: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
-    build_ref: str = Field(min_length=1)
+    # An immutable commit, never an operator-typed content label.
+    build_ref: str = Field(pattern=r"^[0-9a-f]{40}$")
     corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     sample_count: int = Field(ge=60)
     positive_case_count: int = Field(ge=42)
+    # Every positive case that ran against a populated store; zero would mean the
+    # belief view, anticipation, and attributed redundancy were never exercised.
+    seeded_case_count: int = Field(ge=1)
     direct_must_form_recall: float = Field(ge=0.95, le=1)
     hypothesis_must_form_recall: float = Field(ge=0.8, le=1)
     benign_precision: float = Field(ge=0.9, le=1)
     useful_recall_lift_percentage_points: float = Field(ge=15, le=100)
     correction_rate_per_hundred: float = Field(ge=0, le=10)
-    provider_calls_per_consolidation: Literal[3] = 3
+    # The share of gold-evidence clauses the provider formed or represented
+    # rather than labelled away as transient, unsafe, or not memory.
+    evidence_disposition_precision: float = Field(ge=0.75, le=1)
+    # Three batched calls per planned segment, and the measured totals behind
+    # that claim: a consolidation over several segments makes three per segment.
+    provider_calls_per_segment: Literal[3] = 3
+    provider_calls_measured: int = Field(ge=3)
+    consolidations_measured: int = Field(ge=1)
+    provider_cost_usd: str = Field(pattern=r"^\d+(?:\.\d+)?$")
     boundary_failures: Literal[0] = 0
     comparative_policies: tuple[
         Literal["formation@7"], Literal["formation@8"], Literal["formation@9"]
@@ -438,6 +451,12 @@ class MemoryDistillationEvidence(BaseModel):
             raise ValueError("distillation evidence is less than seventy percent positive")
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
             raise ValueError("distillation evidence time must be timezone-aware")
+        if self.provider_calls_measured % self.provider_calls_per_segment:
+            raise ValueError("measured provider calls are not a whole number of segments")
+        if self.provider_calls_measured < self.provider_calls_per_segment * (
+            self.consolidations_measured
+        ):
+            raise ValueError("measured provider calls fall short of one segment per consolidation")
         return self
 
 
@@ -583,8 +602,9 @@ class ConsolidationRun(BaseModel):
     rejected: int = Field(ge=0)
     decision_counts: dict[str, int] = Field(default_factory=dict)
     episode_count: int = Field(default=0, ge=0)
-    provider_call_count: int = Field(default=0, ge=0, le=3)
+    provider_call_count: int = Field(default=0, ge=0)
     fallback_stages: list[str] = Field(default_factory=list)
+    provider_stage_metrics: dict[str, dict[str, int | str | None]] = Field(default_factory=dict)
     started_at: datetime
     finished_at: datetime | None = None
 

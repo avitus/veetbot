@@ -1578,3 +1578,17 @@ async def test_established_facts_are_ignored_when_the_profile_disables_them() ->
 
     assert result.beliefs == []
     assert (result.run.candidates_proposed, result.run.committed, result.run.rejected) == (0, 0, 0)
+
+
+async def test_high_recall_extractor_scans_a_hundred_kilobyte_turn_quickly() -> None:
+    """Clause-bounded patterns keep a huge turn linear; the budget is generous."""
+
+    import time
+
+    from agent_core.memory.formation import HighRecallCandidateExtractor
+
+    repeated = "the blue theme works better for me " * 3000
+    event = _envelope("user.message.created", {"content": repeated}, sequence=1)
+    started = time.perf_counter()
+    await HighRecallCandidateExtractor().extract([event], principal=principal(), scope="general")
+    assert time.perf_counter() - started < 10.0

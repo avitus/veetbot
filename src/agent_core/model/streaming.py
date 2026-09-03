@@ -36,11 +36,18 @@ from agent_core.domain.security import (
 class ModelStreamError(ValueError):
     """A normalized adapter stream broke a provider-neutral invariant."""
 
-    def __init__(self, message: str, *, failure: ModelFailure | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure: ModelFailure | None = None,
+        partial_turn: ModelTurn | None = None,
+    ) -> None:
         """Retain safe normalized failure detail for terminal diagnostics."""
 
         super().__init__(message)
         self.failure = failure
+        self.partial_turn = partial_turn
 
 
 SECRET_VALUE = re.compile(
@@ -215,5 +222,6 @@ async def collect_turn(source: AsyncIterable[ModelEvent]) -> ModelTurn:
         raise ModelStreamError(
             f"model attempt failed: {terminal.error.kind}",
             failure=terminal.error,
+            partial_turn=terminal.partial_turn,
         )
     raise ModelStreamError("stream did not produce a terminal turn")

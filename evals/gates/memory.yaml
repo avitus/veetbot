@@ -503,3 +503,33 @@
   spec: docs/plan/adaptive-memory-distillation.md#hard-gates
   statement: "**Activation is exact and evidence-bound.** Formation@9 activates only for the exact artifact tuple; auto keeps the older evidenced policy and required refuses otherwise."
   check: tests/gates/test_memory_m21.py::test_distillation_activation_is_exact_and_evidence_bound
+- id: gate.memory.scorer_symmetric
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**The comparative scorer cannot be fooled by supersets, negations, counts, or siblings.** A belief that elaborates beyond, negates, recounts, or names a sibling activity of a gold claim never scores as a match, and a generic user subject never matches a specific conflict key."
+  check: tests/gates/test_memory_m21.py::test_comparative_scorer_rejects_supersets_negations_counts_and_siblings
+- id: gate.memory.formation_corpus_seeded
+  milestone: 21
+  kind: structural
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Comparative evidence runs against a populated store.** The corpus declares a seed pool of at least twenty-five prior beliefs, the rich production conversation and another multi-event case run against it, and the evaluator writes the seeds through the governed service before consolidating."
+  check: tests/gates/test_memory_m21.py::test_formation_corpus_v3_runs_against_a_populated_store
+- id: gate.memory.fallback_never_fabricates
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**The deterministic fallback never fabricates.** Turns that share surface phrasing with the production training conversation but state no durable training fact form nothing except the stated wish for age-aware recommendations, and a long or unterminated turn neither crashes nor stalls consolidation."
+  check: tests/gates/test_memory_m21.py::test_high_recall_fallback_never_fabricates_from_control_turns
+- id: gate.memory.coverage_dispositions_verified
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**A represented clause is verified against the memory it cites.** A coverage unit marked represented counts only when the attributed live memory asserts the same claim and is about that clause; otherwise it is recorded as unverified and the stage completes partially rather than trusting the label."
+  check: tests/gates/test_memory_m21.py::test_represented_coverage_is_verified_against_the_cited_memory
+- id: gate.memory.distill_segmentation
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Long batches segment into bounded three-call rounds.** A batch beyond one ledger's clause bound runs exactly three calls per segment, persists one episode set per segment, and records per-segment stage metrics; a segment's ledger and candidates fit the output ceiling."
+  check: tests/gates/test_memory_m21.py::test_long_batches_are_segmented_into_bounded_three_call_rounds

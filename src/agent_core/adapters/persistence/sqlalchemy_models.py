@@ -1001,6 +1001,9 @@ class ConsolidationRunRow(Base):
     episode_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     provider_call_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     fallback_stages: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    provider_stage_metrics: Mapped[dict[str, dict[str, int | str | None]]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
