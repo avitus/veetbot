@@ -1829,6 +1829,17 @@ def test_apple_ui_builds_once_and_runs_phone_and_tablet_concurrently() -> None:
     assert 'wait "$$ipad_pid"' in recipe
 
 
+def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
+    """An xctestproducts run cannot also select a project or scheme."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+
+    invocation = recipe.split("xcodebuild test-without-building", 1)[1].split(";", 1)[0]
+    assert "-testProductsPath" in invocation
+    assert "-project" not in invocation
+    assert "-scheme" not in invocation
+
+
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True, exist_ok=True)

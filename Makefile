@@ -103,8 +103,6 @@ test-apple-ui:
 		device_label="$$1"; \
 		device_id="$$2"; \
 		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test-without-building -quiet \
-			-project clients/apple/Veetbot.xcodeproj \
-			-scheme Veetbot \
 			-destination "platform=iOS Simulator,id=$$device_id" \
 			-testProductsPath "$$test_products_path" \
 			-resultBundlePath "$$apple_results_run_dir/$$device_label.xcresult" \
