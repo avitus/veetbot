@@ -467,12 +467,22 @@ def test_scorer_finds_the_largest_valid_pairing_regardless_of_order() -> None:
 
 
 def test_rich_conversation_case_requires_a_populated_pool() -> None:
+    """Another seeded multi-event case satisfies the global rule; only the rich one fails."""
+
     payload = _corpus_payload()
     payload["seed_pools"]["empty"] = []
     for case in payload["cases"]:
+        if case["id"] == "personal-agent-900":
+            case["prior_beliefs_pool"] = "populated"
+            case["events"] = [
+                {"actor": "user", "text": "I am building a personal AI agent."},
+                {"actor": "user", "text": "I am building a personal AI agent."},
+            ]
         if case["scenario"] == "rich-conversation":
             case["prior_beliefs_pool"] = "empty"
-    with pytest.raises(ValidationError, match="populated store"):
+    with pytest.raises(
+        ValidationError, match="rich-conversation scenario must run against a populated store"
+    ):
         MemoryDistillationCorpus.model_validate(payload)
 
 
