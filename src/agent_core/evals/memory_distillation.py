@@ -357,9 +357,9 @@ def _maximum_matching(adjacency: list[list[int]], belief_count: int) -> list[int
     for expected_index in range(len(adjacency)):
         augment(expected_index, set())
     assignment: list[int | None] = [None] * len(adjacency)
-    for belief_index, expected_index in enumerate(owner):
-        if expected_index is not None:
-            assignment[expected_index] = belief_index
+    for belief_index, assigned_expected in enumerate(owner):
+        if assigned_expected is not None:
+            assignment[assigned_expected] = belief_index
     return assignment
 
 
