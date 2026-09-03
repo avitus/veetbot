@@ -2842,7 +2842,12 @@ async def build(
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(
             [DEVICE_SMS_SEND_TOOL_NAME]
-            if effective_settings.device_channel_enabled and effective_settings.device_sms_enabled
+            if effective_settings.device_channel_enabled
+            and effective_settings.device_sms_enabled
+            and (
+                device_channel_override is not None
+                or effective_settings.notification_dispatch_enabled
+            )
             else []
         ),
     ]

@@ -854,9 +854,24 @@ def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(paths))
 
 
-def _provider_extraction_evidence_is_valid(path: Path) -> bool:
+def _provider_extraction_evidence_is_valid(
+    path: Path, *, policy_pin: MemoryFormationPolicyPin | None = None
+) -> bool:
+    """Whether an artifact can satisfy required mode under the operator's pin.
+
+    Composition skips distillation evidence when pinned to ``formation@8`` and
+    provider-assisted evidence when pinned to ``formation@9``, so startup must
+    judge the same evidence type or it approves a configuration that then
+    fails one layer later.
+    """
+
     try:
-        load_memory_release_evidence(path)
+        if policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED:
+            load_provider_extraction_evidence(path)
+        elif policy_pin is MemoryFormationPolicyPin.DISTILLATION:
+            load_memory_distillation_evidence(path)
+        else:
+            load_memory_release_evidence(path)
     except ConfigurationError:
         return False
     return True
@@ -882,7 +897,12 @@ def validate_settings(
             if settings.memory_provider_extraction_evidence is not None
             else evidence_paths
         )
-        if not any(_provider_extraction_evidence_is_valid(path) for path in required_paths):
+        if not any(
+            _provider_extraction_evidence_is_valid(
+                path, policy_pin=settings.memory_formation_policy_pin
+            )
+            for path in required_paths
+        ):
             raise ConfigurationError(
                 "provider-backed memory extraction evaluation evidence did not pass"
             )

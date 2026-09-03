@@ -203,11 +203,11 @@ def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
 
 _GATE_TABLE_DERIVED = {
     "subject_specs": 28,
-    "subject_gates": 422,
+    "subject_gates": 427,
     "plan_gates": 2,
     "map_gates": 7,
-    "declarations": 431,
-    "entries": 428,
+    "declarations": 436,
+    "entries": 433,
     "aliases": 3,
 }
 
@@ -222,18 +222,18 @@ def test_gate_table_arithmetic_reports_stale_digits() -> None:
     )
     assert gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED) == [
         "gate table intro says 15 subject specs; registry derives 28",
-        "gate table intro says 178 subject gates; registry derives 422",
-        "gate table intro says 187 declarations; registry derives 431",
-        "gate table intro says 184 entries; registry derives 428",
+        "gate table intro says 178 subject gates; registry derives 427",
+        "gate table intro says 187 declarations; registry derives 436",
+        "gate table intro says 184 entries; registry derives 433",
     ]
 
 
 def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
     shifted = (
         "## The gate table\n\n"
-        "The 28 subject specifications declare 422 gates, the engineering plan\n"
-        "declares 3 more, and this document declares 6 over the corpus: 431\n"
-        "declarations, 428 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 28 subject specifications declare 427 gates, the engineering plan\n"
+        "declares 3 more, and this document declares 6 over the corpus: 436\n"
+        "declarations, 433 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED) == [
@@ -245,9 +245,9 @@ def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
 def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
     reconciled = (
         "## The gate table\n\n"
-        "The 28 subject specifications declare 422 gates, the engineering plan\n"
-        "declares 2 more, and this document declares 7 over the corpus: 431\n"
-        "declarations, 428 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 28 subject specifications declare 427 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 436\n"
+        "declarations, 433 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(reconciled, _GATE_TABLE_DERIVED) == []

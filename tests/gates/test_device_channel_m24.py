@@ -930,3 +930,46 @@ async def test_gate_default_off() -> None:
     assert ingested.status_code == 404
     assert queued == []
     assert pending == []
+
+
+async def test_sms_tool_is_advertised_only_when_the_channel_can_wake() -> None:
+    """The agent lists the SMS tool exactly when the device runtime registers it.
+
+    Device flags without notification dispatch or an injected channel leave
+    the runtime unset; advertising the tool anyway sends every call into an
+    unknown-tool denial. The advertisement follows the same readiness rule.
+    """
+
+    async def enabled_tools(composition: object) -> set[str]:
+        session_id = await composition.sessions.create()  # type: ignore[attr-defined]
+        async with composition.uow_factory() as uow:  # type: ignore[attr-defined]
+            session = await uow.sessions.get(session_id, composition.principal)  # type: ignore[attr-defined]
+            agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+        return set(agent.enabled_tools)
+
+    dark_clock = FixedClock(NOW)
+    async with build(
+        settings=_settings(),
+        script=_replies(1),
+        clock=dark_clock,
+        sequential_ids=True,
+    ) as dark:
+        assert DEVICE_SMS_SEND_TOOL_NAME not in await enabled_tools(dark)
+
+    lit_clock = FixedClock(NOW)
+    async with build(
+        settings=_settings(),
+        script=_replies(1),
+        clock=lit_clock,
+        sequential_ids=True,
+        device_channel_override=_fake_channel(lit_clock),
+    ) as lit:
+        assert DEVICE_SMS_SEND_TOOL_NAME in await enabled_tools(lit)
+
+    async with build(
+        settings=_notifying_settings(),
+        script=_replies(1),
+        clock=FixedClock(NOW),
+        sequential_ids=True,
+    ) as notifying:
+        assert DEVICE_SMS_SEND_TOOL_NAME in await enabled_tools(notifying)

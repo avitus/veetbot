@@ -96,7 +96,7 @@ rather than smoothed.
 | 18 | First-class email integration | Authorized | 13 | Nothing in the corpus; OAuth consent and the real-mailbox smoke are owner actions outside it |
 | 19 | Conversational schedule creation | Authorized | 5 | Nothing; the surface is deliberately limited to approved one-time creation |
 | 20 | Calendar recurrence and conversational schedules | Authorized | 6 | Nothing; ADR-0073 fixes the monthly, yearly, and recurring-tool semantics |
-| 21 | Adaptive memory distillation | Authorized | 24 | Nothing in the corpus; activation needs the funded three-arm live evidence |
+| 21 | Adaptive memory distillation | Authorized | 29 | Nothing in the corpus; the three-arm live evidence for the production tuple was published on 2026-09-03 |
 | 22 | Persona surface and curated belief promotion | Authorized | 14 | Nothing; ADR-0079 fixes the human-only promotion boundary |
 | 23 | Conversational schedule lifecycle | Authorized | 7 | Nothing; ADR-0080 fixes discovery, approval, scope, and cancellation semantics |
 
