@@ -17,12 +17,24 @@ provider-assisted `formation@8` evidence for the `balanced` model policy, the
 at build `3b3c972b3003cdca6881d857b931401999f49545`. It remains the honest
 control arm of the three-policy comparison and the fallback evidence.
 
-No `formation@9` artifact is bundled. The artifact published on 2026-09-02 was
-withdrawn on 2026-09-03 because its scorer equated negations, counts,
-supersets, and sibling activities, its corpus had been edited toward the
-implementation, every case ran against an empty store, and its build reference
-was an operator-typed label. A `formation@9` artifact may be bundled only when
-it carries `scorer_version` `distillation-scorer@2`, a forty-character commit
-`build_ref`, the digest of the checked-in corpus, at least one seeded case, the
-evidence-disposition precision, and the measured provider cost, all of which
+`openai-balanced-gpt-5.6-sol-default-formation9.json` is the active comparative
+evidence for Nemori-assisted `formation@9` on the same tuple. It was produced on
+2026-09-03 by `agent eval memory-distillation` under `distillation-scorer@2`
+against the 66-case formation-v3 corpus at commit
+`9013d20706f44a717cef402330a4d2d204ca8446`, with five cases run against a
+populated store: 100 percent direct and hypothesis must-form recall, 96.2
+percent useful recall, 98.7 percent benign precision, 100 percent
+evidence-disposition precision, a 73.1 percentage-point useful-recall lift over
+the leniently scored `formation@8` control, exactly three provider calls per
+consolidation, zero boundary failures, and USD 1.07 of provider cost.
+Automatic selection activates it for that exact tuple.
+
+The artifact published on 2026-09-02 was withdrawn on 2026-09-03 because its
+scorer equated negations, counts, supersets, and sibling activities, its corpus
+had been edited toward the implementation, every case ran against an empty
+store, and its build reference was an operator-typed label. A `formation@9`
+artifact may be bundled only when it carries `scorer_version`
+`distillation-scorer@2`, a forty-character commit `build_ref`, the digest of the
+checked-in corpus, at least one seeded case, the evidence-disposition precision,
+and the measured provider cost, all of which
 `tests/unit/test_release_evidence_bundle.py` checks against this tree.

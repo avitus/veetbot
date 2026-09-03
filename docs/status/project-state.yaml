@@ -590,7 +590,6 @@ milestones:
       - temporal entity graphs, persona editing, and global consolidation
       - a public memory-write API
     open_items:
-      - Run the three-arm live corpus under distillation-scorer@2 with seeded stores and publish passing evidence for the production tuple
       - Run hosted CI and the CodeRabbit review loop on the final head
     evidence:
       - check: local Milestone 21 behavior and contracts
@@ -625,16 +624,23 @@ milestones:
           citation assertion was reproduced and corrected to require that
           usage advances last_used_at without advancing last_reinforced_at.
       - check: comparative live-model evidence
-        outcome: not_run
+        outcome: passed
         detail: >-
-          The 2026-09-02 artifact was withdrawn on 2026-09-03: it was scored by
-          a matcher that equated negations, counts, supersets, and sibling
-          activities, against a corpus edited toward the implementation, on an
-          empty store, with an operator-typed build reference. The evaluator
-          now uses distillation-scorer@2, seeds a populated store, verifies
-          coverage dispositions, measures calls per segment, requires a commit
-          build reference, and records seeded cases and cost. No artifact for
-          the production tuple has been published under it yet.
+          The 2026-09-03 production-tuple run under distillation-scorer@2
+          executed all three policies over 66 cases, five of them against a
+          populated store, and published the exact-tuple formation@9 artifact
+          bound to commit 9013d20. It reached 100 percent direct and hypothesis
+          must-form recall, 96.2 percent useful recall, 98.7 percent benign
+          precision, 100 percent evidence-disposition precision, a 73.1
+          percentage-point useful-recall lift over the leniently scored
+          formation@8 control, exactly three provider calls per consolidation,
+          a zero correction rate, zero boundary failures, and USD 1.07 of
+          provider cost. Two earlier runs under the same scorer refused
+          publication at 0.927 direct recall and 0.863 precision; the misses
+          were a local rejection of statements beginning "The user" and
+          redundant merges, not model omissions. The 2026-09-02 artifact was
+          withdrawn because its scorer, corpus, empty store, and build
+          reference could not support the numbers it carried.
       - check: rich-conversation regression, fallback honesty, and stage telemetry
         outcome: passed_locally
         detail: >-
