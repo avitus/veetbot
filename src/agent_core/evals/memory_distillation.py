@@ -7,6 +7,7 @@ import importlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from dataclasses import replace
 from datetime import datetime
@@ -195,7 +196,9 @@ class MemoryDistillationCorpus(BaseModel):
         ):
             raise ValueError("a seeded positive case must be a multi-event session")
         if not any(
-            case.scenario == "rich-conversation" and case.prior_beliefs_pool is not None
+            case.scenario == "rich-conversation"
+            and case.prior_beliefs_pool is not None
+            and len(self.seed_pools[case.prior_beliefs_pool]) >= MINIMUM_SEED_POOL_SIZE
             for case in positives
         ):
             raise ValueError("the rich-conversation scenario must run against a populated store")
@@ -330,6 +333,36 @@ def _belief_matches(
     return subject_matches(belief.subject, expected.subjects, expected.statements)
 
 
+def _maximum_matching(adjacency: list[list[int]], belief_count: int) -> list[int | None]:
+    """Assign each expected claim to at most one belief, maximizing the pairs.
+
+    A greedy pass can strand a claim when an earlier claim takes the only
+    belief it could use; augmenting paths find the largest valid pairing
+    regardless of the order beliefs were formed in.
+    """
+
+    owner: list[int | None] = [None] * belief_count
+
+    def augment(expected_index: int, seen: set[int]) -> bool:
+        for belief_index in adjacency[expected_index]:
+            if belief_index in seen:
+                continue
+            seen.add(belief_index)
+            current = owner[belief_index]
+            if current is None or augment(current, seen):
+                owner[belief_index] = expected_index
+                return True
+        return False
+
+    for expected_index in range(len(adjacency)):
+        augment(expected_index, set())
+    assignment: list[int | None] = [None] * len(adjacency)
+    for belief_index, expected_index in enumerate(owner):
+        if expected_index is not None:
+            assignment[expected_index] = belief_index
+    return assignment
+
+
 def score_distillation_case(
     case: MemoryDistillationCase,
     beliefs: list[DistillationEvaluationBelief],
@@ -340,32 +373,30 @@ def score_distillation_case(
 ) -> DistillationCaseScore:
     """Match each expected semantic claim once and count every extra prediction."""
 
-    occupied: set[int] = set()
-    matched = 0
+    adjacency = [
+        [
+            index
+            for index, belief in enumerate(beliefs)
+            if _belief_matches(belief, expected, closed_fields=closed_fields)
+        ]
+        for expected in case.expected
+    ]
+    assignment = _maximum_matching(adjacency, len(beliefs))
+    occupied = {belief_index for belief_index in assignment if belief_index is not None}
+    matched = len(occupied)
     direct_expected = 0
     direct_matched = 0
     hypothesis_expected = 0
     hypothesis_matched = 0
-    for expected in case.expected:
-        if case.label == "must_form":
-            if expected.derivation is MemoryDerivation.DIRECT:
-                direct_expected += 1
-            else:
-                hypothesis_expected += 1
-        found = False
-        for index, belief in enumerate(beliefs):
-            if index in occupied:
-                continue
-            if _belief_matches(belief, expected, closed_fields=closed_fields):
-                occupied.add(index)
-                matched += 1
-                found = True
-                break
-        if found and case.label == "must_form":
-            if expected.derivation is MemoryDerivation.DIRECT:
-                direct_matched += 1
-            else:
-                hypothesis_matched += 1
+    for expected, belief_index in zip(case.expected, assignment, strict=True):
+        if case.label != "must_form":
+            continue
+        if expected.derivation is MemoryDerivation.DIRECT:
+            direct_expected += 1
+            direct_matched += int(belief_index is not None)
+        else:
+            hypothesis_expected += 1
+            hypothesis_matched += int(belief_index is not None)
     false_positives = len(beliefs) - len(occupied)
     return DistillationCaseScore(
         scoring="strict" if closed_fields else "lenient",
@@ -632,6 +663,34 @@ async def _evaluate_case(
     )
 
 
+def _git_output(repository_root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", *arguments],
+        cwd=repository_root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        raise ValueError("the evaluated tree must be a git checkout so its build ref can be bound")
+    return completed.stdout.strip()
+
+
+def require_committed_tree(repository_root: Path, build_ref: str) -> None:
+    """Refuse to label evidence with a commit the evaluated files do not match.
+
+    The build reference is what a later reader reproduces from, so it must be
+    the checked-out HEAD and no tracked file may differ from it.
+    """
+
+    head = _git_output(repository_root, "rev-parse", "HEAD")
+    if head != build_ref:
+        raise ValueError("build ref must name the checked-out HEAD of the evaluated tree")
+    if _git_output(repository_root, "status", "--porcelain", "--untracked-files=no"):
+        raise ValueError("the evaluated tree has uncommitted changes; commit before evaluating")
+
+
 def load_distillation_corpus(repository_root: Path) -> tuple[MemoryDistillationCorpus, str]:
     root = repository_root.resolve()
     path = (root / CORPUS_PATH).resolve()
@@ -690,6 +749,7 @@ async def run_live_evaluation(
         raise ValueError("model policy, policy profile, and build ref must be non-empty")
     if _BUILD_REF.match(build_ref.strip()) is None:
         raise ValueError("build ref must be the full forty-character commit sha")
+    require_committed_tree(repository_root, build_ref.strip())
     if output.resolve().exists():
         raise ValueError(f"refusing to overwrite existing evaluation evidence: {output.resolve()}")
 

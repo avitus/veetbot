@@ -424,3 +424,96 @@ def test_equivalence_survives_oversized_digit_runs() -> None:
     assert quantity_terms(huge) == frozenset()
     assert "9" * 5000 in content_terms(huge)
     assert not statements_equivalent(huge, "User's reference number is 12.")
+
+
+def test_scorer_finds_the_largest_valid_pairing_regardless_of_order() -> None:
+    """A claim that could use two beliefs must not strand the claim that needs one."""
+
+    case = _case(
+        expected=[
+            {
+                "claim_kind": "habit",
+                "derivation": "direct",
+                "longevity": "ongoing",
+                "subjects": ["swimming", "running"],
+                "statements": ["User regularly swims.", "User regularly runs."],
+                "evidence_text": ["finish the marathon"],
+            },
+            {
+                "claim_kind": "habit",
+                "derivation": "direct",
+                "longevity": "ongoing",
+                "subjects": ["running"],
+                "statements": ["User regularly runs."],
+                "evidence_text": ["finish the marathon"],
+            },
+        ]
+    )
+    running = _belief(
+        claim_kind="habit", longevity="ongoing", subject="running", statement="User regularly runs."
+    )
+    swimming = _belief(
+        claim_kind="habit",
+        longevity="ongoing",
+        subject="swimming",
+        statement="User regularly swims.",
+    )
+
+    score = score_distillation_case(case, [running, swimming])
+
+    assert score.matched == 2
+    assert score.false_positives == 0
+    assert score.direct_must_form_matched == 2
+
+
+def test_rich_conversation_case_requires_a_populated_pool() -> None:
+    payload = _corpus_payload()
+    payload["seed_pools"]["empty"] = []
+    for case in payload["cases"]:
+        if case["scenario"] == "rich-conversation":
+            case["prior_beliefs_pool"] = "empty"
+    with pytest.raises(ValidationError, match="populated store"):
+        MemoryDistillationCorpus.model_validate(payload)
+
+
+def test_live_evaluation_refuses_a_dirty_or_mismatched_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import subprocess
+
+    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repository, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repository, check=True)
+    tracked = repository / "tracked.txt"
+    tracked.write_text("one\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "one"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    with pytest.raises(ValueError, match="checked-out HEAD"):
+        asyncio.run(
+            memory_eval.run_live_evaluation(
+                repository,
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref="0" * 40,
+                output=tmp_path / "evidence.json",
+            )
+        )
+    tracked.write_text("two\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="uncommitted changes"):
+        asyncio.run(
+            memory_eval.run_live_evaluation(
+                repository,
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref=head,
+                output=tmp_path / "evidence.json",
+            )
+        )

@@ -477,7 +477,10 @@ RUN_LIVE_MODEL_TESTS=1 agent eval memory-distillation \
 
 The build reference is the forty-character commit the evaluated tree was
 committed as; the command resolves it from CI or `git rev-parse HEAD` when the
-option is omitted, and the evidence schema refuses any other form.
+option is omitted, and the evidence schema refuses any other form. The run
+also refuses a reference that is not the checked-out HEAD and a worktree with
+uncommitted tracked changes, so an artifact never describes files the named
+commit does not contain.
 
 Without the explicit live-model flag it reports a skip and makes no provider
 call or artifact. A failed run returns its comparative per-policy metrics but
