@@ -1375,7 +1375,17 @@ class NemoriAssistedCandidateExtractor:
         return json.dumps(
             {
                 "scope": scope,
-                "episodes": [episode.model_dump(mode="json") for episode in episodes],
+                # Only what the stage reads: never tenant, principal, session,
+                # or derivation identifiers.
+                "episodes": [
+                    {
+                        "episode_index": index,
+                        "narrative": episode.narrative,
+                        "subjects": list(episode.subjects),
+                        "source_event_ids": list(episode.source_event_ids),
+                    }
+                    for index, episode in enumerate(episodes)
+                ],
                 "source_events": [
                     {"source_event_id": event.sequence, "text": _event_text(event)}
                     for event in events

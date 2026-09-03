@@ -91,9 +91,10 @@ forgetting, persistence, comparative activation evidence, and the honesty of
 that evidence: a scorer that cannot be fooled, a seeded evaluation store, a
 fallback that never fabricates, verified coverage dispositions, and bounded
 segmentation. The local implementation, static and contract suites, strict
-documentation build, Apple package tests, the fresh PostgreSQL 16
-integration lane, and the 2026-09-03 three-arm live production-tuple corpus
-under distillation-scorer@2 pass. The 2026-09-02 artifact was withdrawn
+documentation build, and Apple package tests pass locally; the fresh
+PostgreSQL 16 integration lane passed in hosted CI on pull request 90
+(CircleCI build 2668); and the 2026-09-03 three-arm live production-tuple
+corpus under distillation-scorer@2 passed. The 2026-09-02 artifact was withdrawn
 because its scorer, corpus, empty store, and build reference could not
 support the numbers it carried; the replacement is bundled for immediate
 exact-tuple activation. Remaining:

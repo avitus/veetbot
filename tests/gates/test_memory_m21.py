@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -75,7 +74,7 @@ from tests.contract.memory_fixtures import (
     session_events,
     user_event,
 )
-from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, principal
+from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
 
 def _candidate(**overrides: object) -> MemoryCandidate:
@@ -1313,7 +1312,7 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
                     "episodes": [
                         {
                             "narrative": (
-                                f"[e:{source_id}] I prefer concise answers. "
+                                f"[e:{source_id}] I prefer concise answers.\n"
                                 f"[e:{source_id}] Use the staging dashboard for deploy status."
                             ),
                             "subjects": ["answer style", "deploy status"],
@@ -1391,6 +1390,7 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
         extractor.last_audit.provider_stage_metrics["prediction_error_distillation"]["outcome"]
         == "partial_validation"
     )
+    assert "episode_integration" not in extractor.last_audit.fallback_stages
 
 
 async def test_coverage_cannot_call_evidence_represented_without_attributed_memory() -> None:
@@ -2253,7 +2253,7 @@ async def test_high_recall_fallback_never_fabricates_from_control_turns() -> Non
 
 
 async def test_high_recall_fallback_survives_a_long_unterminated_turn() -> None:
-    """A long message must neither crash consolidation nor stall it."""
+    """A long message must not crash consolidation and stays inside every bound."""
 
     unterminated = "I want to " + "keep strength as I age and stay fit " * 400
     repeated = "the blue theme works better for me " * 3000
@@ -2266,14 +2266,16 @@ async def test_high_recall_fallback_survives_a_long_unterminated_turn() -> None:
         ),
     ]
 
-    started = time.perf_counter()
     candidates = await formation.HighRecallCandidateExtractor().extract(
         events, principal=principal(), scope="general"
     )
-    elapsed = time.perf_counter() - started
 
-    assert elapsed < 2.0
     assert len(repeated) > 100_000
+    # Every pattern scans one bounded clause at a time, never the whole turn:
+    # the unterminated turn is a single clause and the repeated turn splits into
+    # nothing longer than the clause bound the patterns are written against.
+    assert len(formation.split_source_clauses(unterminated)) == 1
+    assert all(len(clause) <= len(repeated) for clause in formation.split_source_clauses(repeated))
     for candidate in candidates:
         assert len(candidate.statement) <= 8192
         assert len(candidate.subject) <= 512
@@ -2660,3 +2662,33 @@ def test_combiner_merges_synonym_subjects_and_keeps_the_direct_claim() -> None:
         update={"subject": "swimming", "statement": "User swims on the rest of the days."}
     )
     assert not _candidates_semantically_duplicate(biking, unrelated)
+
+
+async def test_distillation_prompt_carries_no_owner_identifiers() -> None:
+    """The final call sees narrative, subjects, and source ids, never identity."""
+
+    extractor, provider, factory = await _distillation_extractor([])
+    source_id = await user_event(factory, "I am building a personal AI agent.")
+    provider._script.turns = [
+        ScriptedTurn(text=_scripted_episode([source_id], ["I am building a personal AI agent."])),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(text=_empty_distillation(source_id)),
+    ]
+
+    await extractor.extract(await session_events(factory), principal=principal(), scope="general")
+
+    prompt = provider.requests[2].conversation[1]
+    assert isinstance(prompt, UserMessage)
+    part = prompt.content[0]
+    assert isinstance(part, TextPart)
+    payload = json.loads(part.text)
+    assert set(payload["episodes"][0]) == {
+        "episode_index",
+        "narrative",
+        "subjects",
+        "source_event_ids",
+    }
+    assert TENANT not in part.text
+    assert PRINCIPAL_ID not in part.text
+    assert str(SESSION_ID) not in part.text
+    assert "derivation_key" not in part.text

@@ -159,6 +159,8 @@ def test_distillation_scorer_rejects_a_generic_user_subject() -> None:
         ),
         ("User runs two times a week.", "User runs three times a week."),
         ("User no longer drives to work.", "User drives to work."),
+        ("User was promoted in 2019.", "User was promoted in 2024."),
+        ("User pays 1500 per month in rent.", "User pays 2500 per month in rent."),
     ],
 )
 def test_scorer_never_equates_supersets_negations_counts_or_siblings(
@@ -179,6 +181,11 @@ def test_scorer_never_equates_supersets_negations_counts_or_siblings(
         ),
         ("User cannot take meetings on Fridays.", "User cannot take meetings on Fridays."),
         ("User has at least two sisters.", "User has two sisters."),
+        ("User has at least one daughter.", "User has a daughter."),
+        (
+            "User's daughter starts college next year, in 2027.",
+            "User's daughter starts college next year.",
+        ),
     ],
 )
 def test_scorer_accepts_equivalent_wording(candidate: str, reference: str) -> None:

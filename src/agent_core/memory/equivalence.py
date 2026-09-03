@@ -161,7 +161,12 @@ def _stem(term: str) -> str:
 
 
 def content_terms(value: str) -> set[str]:
-    """The stemmed content-bearing terms, without negation or quantity markers."""
+    """The stemmed content-bearing terms, without negation or count markers.
+
+    Small numbers are counts and are compared separately; a number of one
+    hundred or more is a year, a version, or an identifier and stays a term so
+    that two claims differing only in it never compare equal.
+    """
 
     return {
         _stem(term)
@@ -169,7 +174,7 @@ def content_terms(value: str) -> set[str]:
         if term not in _STOPWORDS
         and term not in _NEGATIONS
         and term not in _NUMBER_WORDS
-        and not term.isdecimal()
+        and not (term.isdecimal() and int(term) < 100)
     }
 
 
@@ -224,6 +229,12 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     return len(candidate_terms - reference_terms) <= 1
 
 
+def is_generic_subject(subject: str) -> bool:
+    """Whether a subject names the user bucket rather than a conflict key."""
+
+    return normalized_statement(subject) in _GENERIC_SUBJECTS
+
+
 def subject_matches(
     subject: str,
     expected_subjects: Iterable[str],
@@ -239,7 +250,7 @@ def subject_matches(
     """
 
     normalized = normalized_statement(subject)
-    if normalized in _GENERIC_SUBJECTS:
+    if is_generic_subject(subject):
         return False
     terms = content_terms(subject)
     if not terms:

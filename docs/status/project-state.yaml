@@ -615,14 +615,16 @@ milestones:
           make test-apple builds the updated memory wire model and detail view,
           then passes all 165 Swift Testing cases across 18 suites.
       - check: PostgreSQL Milestone 21 lane
-        outcome: passed_locally
+        outcome: passed
         detail: >-
-          A fresh isolated PostgreSQL 16 database migrated from base through
-          head f4a7c2d9e105. The lifecycle backfill, history preservation,
-          integrated-episode persistence and erasure gate passed, followed by
-          all 159 integration and resilience tests. The hosted failure's stale
-          citation assertion was reproduced and corrected to require that
-          usage advances last_used_at without advancing last_reinforced_at.
+          The hosted CircleCI integration job (build 2668) on pull request 90
+          at head 6082006 migrated a fresh PostgreSQL 16 database from base
+          through Alembic revision f4a7c2d9e105, the stage-metrics column
+          added on 2026-09-02, and passed every integration and resilience
+          test, including the lifecycle backfill, history preservation, and
+          integrated-episode persistence and erasure gates. Docker is not
+          installed on the authoring machine, so this lane ran only in CI for
+          the 2026-09-03 changes.
       - check: comparative live-model evidence
         outcome: passed
         detail: >-

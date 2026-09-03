@@ -106,9 +106,16 @@ helpers that may be silently widened. `formation@9` composes new objects and
 may reuse their public ports; it does not alter their output for the same
 input.
 
-Automatic selection activates `formation@9` only on an exact evidence tuple:
-extractor version, all three policy versions, model policy, provider, model,
-policy profile, compiled policy version, corpus digest, and build reference.
+Automatic selection activates `formation@9` only on an exact evidence tuple.
+Startup compares the seven fields a running composition can know: extractor
+version, formation policy version, model policy, provider, model, policy
+profile, and compiled policy version. The corpus digest, scorer version, and
+build reference bind the artifact at bundle time instead: the bundle test
+refuses an artifact whose digest is not the checked-in corpus or whose scorer
+is not the current one, and the build reference names the commit the
+evaluated tree was committed as. A running process cannot compare that
+reference against itself, because the artifact is necessarily bundled in a
+later commit than the one it evaluated.
 Until such evidence exists, `auto` keeps the currently evidenced
 `formation@8`; `required` refuses rather than claiming an unevaluated policy is
 active. A content-free selection audit records the decision.

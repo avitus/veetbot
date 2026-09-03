@@ -35,6 +35,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
+    is_generic_subject,
     normalized_statement,
     statements_equivalent,
     subject_matches,
@@ -75,8 +76,7 @@ class ExpectedDistilledCandidate(BaseModel):
 
     @model_validator(mode="after")
     def subjects_are_specific(self) -> ExpectedDistilledCandidate:
-        generic = {"user", "the user", "users", "me", "i", "myself"}
-        if any(_normalized(subject) in generic for subject in self.subjects):
+        if any(is_generic_subject(subject) for subject in self.subjects):
             raise ValueError("expected subjects must name a specific conflict key, not the user")
         return self
 
