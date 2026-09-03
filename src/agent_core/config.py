@@ -68,6 +68,20 @@ class MemoryProviderExtractionMode(StrEnum):
     REQUIRED = "required"
 
 
+class MemoryFormationPolicyPin(StrEnum):
+    """An operator's choice between the evidenced provider formation policies.
+
+    Automatic selection prefers ``formation@9`` whenever its artifact matches.
+    A pin lets a deploy hold or roll back to one policy without deleting an
+    artifact: ``formation@8`` ignores distillation evidence, ``formation@9``
+    ignores provider-assisted evidence and falls back to deterministic
+    formation when its own evidence is missing.
+    """
+
+    PROVIDER_ASSISTED = "formation@8"
+    DISTILLATION = "formation@9"
+
+
 class BrowserProviderKind(StrEnum):
     DISABLED = "disabled"
     PLAYWRIGHT = "playwright"
@@ -98,6 +112,7 @@ class Settings:
         MemoryProviderExtractionMode.AUTO
     )
     memory_provider_extraction_evidence: Path | None = None
+    memory_formation_policy_pin: MemoryFormationPolicyPin | None = None
     schedule_api_enabled: bool = False
     schedule_worker_enabled: bool = False
     notification_api_enabled: bool = False
@@ -1097,6 +1112,12 @@ def _load_settings(
     memory_provider_extraction_evidence = (
         Path(raw_memory_evidence).expanduser().resolve() if raw_memory_evidence else None
     )
+    raw_memory_pin = values.get("AGENT_MEMORY_FORMATION_POLICY_PIN", "").strip()
+    memory_formation_policy_pin = (
+        _parse_enum(MemoryFormationPolicyPin, raw_memory_pin, "AGENT_MEMORY_FORMATION_POLICY_PIN")
+        if raw_memory_pin
+        else None
+    )
     schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
@@ -1237,6 +1258,7 @@ def _load_settings(
         skill_background_review_enabled=skill_background_review_enabled,
         memory_provider_extraction_mode=memory_provider_extraction_mode,
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
+        memory_formation_policy_pin=memory_formation_policy_pin,
         schedule_api_enabled=schedule_api_enabled,
         schedule_worker_enabled=schedule_worker_enabled,
         notification_api_enabled=notification_api_enabled,

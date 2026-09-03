@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -41,16 +42,25 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.views import MemoryView
-from agent_core.evals.memory_distillation import load_distillation_corpus
+from agent_core.evals.memory_distillation import (
+    DistillationEvaluationBelief,
+    MemoryDistillationCase,
+    load_distillation_corpus,
+    score_distillation_case,
+)
 from agent_core.memory import SHIPPED_MEMORY_CANDIDATE_EXTRACTORS, formation
 from agent_core.memory.distillation import (
+    DISTILLATION_MAXIMUM_OUTPUT_TOKENS,
+    MAX_SEGMENT_COVERAGE_UNITS,
     NemoriAssistedCandidateExtractor,
     _candidates_semantically_duplicate,
     _normalize_provider_candidate,
     deterministic_integrated_episode,
+    plan_segments,
     select_distillation_policy,
     validate_integrated_episode,
 )
+from agent_core.memory.equivalence import statements_equivalent, subject_matches
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.model_extraction import ModelAssistedCandidateExtractor
 from agent_core.memory.provider_extraction import (
@@ -193,27 +203,22 @@ async def test_ongoing_project_evidence_preserves_exact_source_whitespace() -> N
 
 
 async def test_rich_training_conversation_forms_atomic_high_recall_memories() -> None:
-    messages = [
-        (
-            "I currently do the standard 5x5 strength training routine 2-3 times per week. "
-            "What would be the best modification to improve that. The rest of the days I "
-            "swim, run, or bike."
-        ),
-        (
-            "Are you factoring my age into this recommendation? I have trained regularly "
-            "most of my life."
-        ),
-        (
-            "Progress has not stalled yet. I restarted 5x5 a year ago after many years of "
-            "calisthenics. I did the gymnastic strength training routine for about six years "
-            "(I forget exactly how long)"
-        ),
-    ]
+    """The production training conversation forms all eleven labeled memories.
+
+    The gate scores the deterministic fallback with the same strict scorer the
+    comparative evaluation uses, so a rendering that only a lenient matcher
+    would accept, a generic subject, or a fabricated extra claim fails here
+    before it can inflate published evidence.
+    """
+
+    root = Path(__file__).resolve().parents[2]
+    corpus, _digest = load_distillation_corpus(root)
+    case = next(case for case in corpus.cases if case.id == "rich-conversation-001")
     events = [
         _personal_agent_event().model_copy(
-            update={"id": sequence, "sequence": sequence, "payload": {"content": message}}
+            update={"id": sequence, "sequence": sequence, "payload": {"content": event.text}}
         )
-        for sequence, message in enumerate(messages, start=7)
+        for sequence, event in enumerate(case.events, start=7)
     ]
 
     candidates = await formation.HighRecallCandidateExtractor().extract(
@@ -221,81 +226,27 @@ async def test_rich_training_conversation_forms_atomic_high_recall_memories() ->
         principal=principal(),
         scope="general",
     )
-    by_statement = {candidate.statement: candidate for candidate in candidates}
+    beliefs = [
+        DistillationEvaluationBelief(
+            claim_kind=candidate.claim_kind,
+            derivation=candidate.derivation,
+            longevity=candidate.longevity,
+            subject=candidate.subject,
+            statement=candidate.statement,
+        )
+        for candidate in candidates
+    ]
+    score = score_distillation_case(case, beliefs)
 
-    expected = {
-        (
-            "User wants to improve the standard 5x5 strength-training routine through modification."
-        ): (
-            "5x5 strength training improvement",
-            MemoryClaimKind.GOAL,
-            MemoryLongevity.ONGOING,
-        ),
-        "User prefers training recommendations to account for their age.": (
-            "age-aware training recommendations",
-            MemoryClaimKind.PREFERENCE,
-            MemoryLongevity.DURABLE,
-        ),
-        "User follows a standard 5x5 strength-training routine two to three times per week.": (
-            "5x5 strength training",
-            MemoryClaimKind.HABIT,
-            MemoryLongevity.ONGOING,
-        ),
-        "User regularly swims on non-strength-training days.": (
-            "swimming",
-            MemoryClaimKind.HABIT,
-            MemoryLongevity.ONGOING,
-        ),
-        "User regularly runs on non-strength-training days.": (
-            "running",
-            MemoryClaimKind.HABIT,
-            MemoryLongevity.ONGOING,
-        ),
-        "User regularly bikes on non-strength-training days.": (
-            "biking",
-            MemoryClaimKind.HABIT,
-            MemoryLongevity.ONGOING,
-        ),
-        "User has trained regularly for most of their life.": (
-            "training history",
-            MemoryClaimKind.SKILL,
-            MemoryLongevity.DURABLE,
-        ),
-        "User's current 5x5 progress has not stalled.": (
-            "5x5 progress",
-            MemoryClaimKind.RECURRING_STATE,
-            MemoryLongevity.ONGOING,
-        ),
-        "User restarted 5x5 about one year ago.": (
-            "5x5 training history",
-            MemoryClaimKind.SKILL,
-            MemoryLongevity.DURABLE,
-        ),
-        "User trained with calisthenics for many years before restarting 5x5.": (
-            "calisthenics experience",
-            MemoryClaimKind.SKILL,
-            MemoryLongevity.DURABLE,
-        ),
-        (
-            "User trained with a gymnastic strength training routine for approximately six years, "
-            "but is uncertain of the exact duration."
-        ): (
-            "gymnastic strength training",
-            MemoryClaimKind.SKILL,
-            MemoryLongevity.DURABLE,
-        ),
-    }
-    assert set(expected) <= set(by_statement)
-    for statement, (subject, claim_kind, longevity) in expected.items():
-        candidate = by_statement[statement]
-        assert candidate.subject == subject
-        assert candidate.claim_kind is claim_kind
-        assert candidate.derivation is MemoryDerivation.DIRECT
-        assert candidate.longevity is longevity
+    assert score.expected == 11
+    assert score.matched == 11, [candidate.statement for candidate in candidates]
+    assert score.false_positives == 0, [candidate.statement for candidate in candidates]
+    for candidate in candidates:
         assert all(
             span.text in events[span.source_event_id - 7].payload["content"]
             for span in candidate.evidence_spans
         )
+        assert candidate.subject.casefold() not in {"user", "the user"}
     assert not any(
         candidate.statement.startswith("User has a trained regularly") for candidate in candidates
     )
@@ -382,7 +333,7 @@ async def test_high_recall_fallback_does_not_form_corrections_as_new_memories(
         (
             "Our runbook is in docs/operations.md.",
             MemoryClaimKind.RESOURCE,
-            "The user's runbook is at docs/operations.md.",
+            "The user's runbook is in docs/operations.md.",
         ),
         (
             "I keep tax records in the Blue folder.",
@@ -392,7 +343,7 @@ async def test_high_recall_fallback_does_not_form_corrections_as_new_memories(
         (
             "Use the staging dashboard for deploy status.",
             MemoryClaimKind.RESOURCE,
-            "The staging dashboard shows the user's deploy status.",
+            "The staging dashboard is used for deploy status.",
         ),
     ],
 )
@@ -1025,9 +976,13 @@ async def test_one_consolidation_makes_exactly_three_batched_calls() -> None:
     responses = [
         json.dumps(
             {
-                "narrative": f"[e:{source_id}] I am building a personal AI agent.",
-                "subjects": ["personal AI agent"],
-                "source_event_ids": [source_id],
+                "episodes": [
+                    {
+                        "narrative": f"[e:{source_id}] I am building a personal AI agent.",
+                        "subjects": ["personal AI agent"],
+                        "source_event_ids": [source_id],
+                    }
+                ]
             }
         ),
         '{"predictions":[]}',
@@ -1070,9 +1025,13 @@ async def test_consolidation_persists_content_free_metrics_for_each_provider_sta
     responses = [
         json.dumps(
             {
-                "narrative": f"[e:{source_id}] I am building a personal AI agent.",
-                "subjects": ["personal AI agent"],
-                "source_event_ids": [source_id],
+                "episodes": [
+                    {
+                        "narrative": f"[e:{source_id}] I am building a personal AI agent.",
+                        "subjects": ["personal AI agent"],
+                        "source_event_ids": [source_id],
+                    }
+                ]
             }
         ),
         '{"predictions":[]}',
@@ -1222,24 +1181,20 @@ async def test_episode_integration_partitions_topics_and_anticipates_from_prefix
     prompt = anticipation.content[0]
     assert isinstance(prompt, TextPart)
     payload = json.loads(prompt.text)
-    assert set(payload) == {"episode_cues", "prior_memories"}
+    assert set(payload) == {"prefix_events", "episode_cues", "prior_memories"}
     assert payload["episode_cues"] == [
-        {
-            "before_event_sequence": first,
-            "episode_index": 0,
-            "source_prefix": [],
-        },
-        {
-            "before_event_sequence": second,
-            "episode_index": 1,
-            "source_prefix": [
-                {
-                    "source_event_id": first,
-                    "text": "PRIOR_ACTIVITY I swim three mornings each week.",
-                }
-            ],
-        },
+        {"before_event_sequence": first, "episode_index": 0},
+        {"before_event_sequence": second, "episode_index": 1},
     ]
+    # The prefix is sent once, never once per episode, and stops before the
+    # last episode's own evidence.
+    assert payload["prefix_events"] == [
+        {
+            "source_event_id": first,
+            "text": "PRIOR_ACTIVITY I swim three mornings each week.",
+        }
+    ]
+    assert prompt.text.count("PRIOR_ACTIVITY") == 1
     assert "CURRENT_HOME" not in prompt.text
 
 
@@ -1250,9 +1205,13 @@ async def test_distillation_normalizes_provider_policy_fields_locally() -> None:
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": f"[e:{source_id}] I am prototyping an app for my class.",
-                    "subjects": ["software-development experience"],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": f"[e:{source_id}] I am prototyping an app for my class.",
+                            "subjects": ["software-development experience"],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1299,7 +1258,7 @@ async def test_distillation_normalizes_provider_policy_fields_locally() -> None:
     assert skill.proposed_portability == "portable"
     assert skill.sensitivity_guess == "internal"
     assert skill.longevity == "tentative"
-    assert skill.statement == "User likely has software-development experience."
+    assert skill.statement == "User may have software-development experience."
     assert skill.valid_from == NOW
     assert skill.expires_hint is None
 
@@ -1314,12 +1273,16 @@ async def test_distillation_rejects_an_incomplete_source_coverage_ledger() -> No
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": (
-                        f"[e:{source_id}] I am building a personal AI agent and I prefer "
-                        "concise answers."
-                    ),
-                    "subjects": ["personal AI agent", "answer style"],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": (
+                                f"[e:{source_id}] I am building a personal AI agent and I prefer "
+                                "concise answers."
+                            ),
+                            "subjects": ["personal AI agent", "answer style"],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1347,12 +1310,16 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": (
-                        f"[e:{source_id}] I prefer concise answers. "
-                        f"[e:{source_id}] Use the staging dashboard for deploy status."
-                    ),
-                    "subjects": ["answer style", "deploy status"],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": (
+                                f"[e:{source_id}] I prefer concise answers. "
+                                f"[e:{source_id}] Use the staging dashboard for deploy status."
+                            ),
+                            "subjects": ["answer style", "deploy status"],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1433,9 +1400,13 @@ async def test_coverage_cannot_call_evidence_represented_without_attributed_memo
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": f"[e:{source_id}] I swim three mornings each week.",
-                    "subjects": ["swimming"],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": f"[e:{source_id}] I swim three mornings each week.",
+                            "subjects": ["swimming"],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1474,7 +1445,15 @@ async def test_coverage_cannot_call_evidence_represented_without_attributed_memo
     assert "prediction_error_distillation" in extractor.last_audit.fallback_stages
 
 
-def test_local_policy_renders_a_provider_hypothesis_with_uncertainty() -> None:
+def test_provider_cannot_render_a_hypothesis_as_an_unqualified_fact() -> None:
+    """A hypothesis the provider wrote as a fact is rejected, never rewritten.
+
+    Local code owns confidence and longevity; it does not own the hedge. Adding
+    one would let the provider store an inference as a fact and have the
+    platform soften it after the fact, and strengthening "may" into "likely"
+    would move a belief's uncertainty without any evidence moving it.
+    """
+
     candidate = _candidate(
         claim_kind="skill",
         derivation="hypothesis",
@@ -1489,13 +1468,21 @@ def test_local_policy_renders_a_provider_hypothesis_with_uncertainty() -> None:
         ],
     )
 
-    normalized = _normalize_provider_candidate(
-        candidate,
+    with pytest.raises(ValueError, match="uncertainty language"):
+        _normalize_provider_candidate(
+            candidate,
+            by_sequence={7: _personal_agent_event()},
+            scope="general",
+        )
+
+    hedged = _normalize_provider_candidate(
+        candidate.model_copy(update={"statement": "User may be a software developer."}),
         by_sequence={7: _personal_agent_event()},
         scope="general",
     )
-
-    assert normalized.statement == "User likely is a software developer."
+    assert hedged.statement == "User may be a software developer."
+    assert hedged.model_confidence == 0.35
+    assert hedged.longevity == "tentative"
 
 
 def test_local_policy_canonicalizes_explicit_avoidance_as_a_constraint() -> None:
@@ -1672,12 +1659,16 @@ async def test_anticipation_is_causally_blinded() -> None:
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": (
-                        f"[e:{source_id}] CURRENT_EVIDENCE_SENTINEL I am building a "
-                        "personal AI agent."
-                    ),
-                    "subjects": [],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": (
+                                f"[e:{source_id}] CURRENT_EVIDENCE_SENTINEL I am building a "
+                                "personal AI agent."
+                            ),
+                            "subjects": [],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1697,7 +1688,8 @@ async def test_anticipation_is_causally_blinded() -> None:
     assert "narrative" not in payload
     assert "source_events" not in payload
     assert "gold" not in payload
-    assert set(json.loads(payload)) == {"episode_cues", "prior_memories"}
+    assert set(json.loads(payload)) == {"prefix_events", "episode_cues", "prior_memories"}
+    assert json.loads(payload)["prefix_events"] == []
 
 
 async def test_every_provider_stage_has_an_audited_deterministic_fallback() -> None:
@@ -1730,9 +1722,13 @@ async def test_invalid_provider_episode_subjects_use_the_validated_fallback() ->
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": f"[e:{source_id}] I am building a personal AI agent.",
-                    "subjects": ["personal AI agent", "PERSONAL AI AGENT"],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": f"[e:{source_id}] I am building a personal AI agent.",
+                            "subjects": ["personal AI agent", "PERSONAL AI AGENT"],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1911,9 +1907,13 @@ async def test_predictability_suppresses_only_attributable_redundancy() -> None:
         ScriptedTurn(
             text=json.dumps(
                 {
-                    "narrative": f"[e:{source_id}] I am building a personal AI agent.",
-                    "subjects": [],
-                    "source_event_ids": [source_id],
+                    "episodes": [
+                        {
+                            "narrative": f"[e:{source_id}] I am building a personal AI agent.",
+                            "subjects": [],
+                            "source_event_ids": [source_id],
+                        }
+                    ]
                 }
             )
         ),
@@ -1950,9 +1950,15 @@ async def test_predictability_suppresses_only_attributable_redundancy() -> None:
                 ScriptedTurn(
                     text=json.dumps(
                         {
-                            "narrative": (f"[e:{new_source}] I am building a personal AI agent."),
-                            "subjects": [],
-                            "source_event_ids": [new_source],
+                            "episodes": [
+                                {
+                                    "narrative": (
+                                        f"[e:{new_source}] I am building a personal AI agent."
+                                    ),
+                                    "subjects": [],
+                                    "source_event_ids": [new_source],
+                                }
+                            ]
                         }
                     )
                 ),
@@ -2051,16 +2057,20 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version="policy@1",
-        build_ref="build-123",
+        scorer_version="distillation-scorer@2",
+        build_ref="0123456789abcdef0123456789abcdef01234567",
         corpus_sha256="a" * 64,
         sample_count=60,
         positive_case_count=48,
+        seeded_case_count=12,
         direct_must_form_recall=0.96,
         hypothesis_must_form_recall=0.82,
         benign_precision=0.92,
         useful_recall_lift_percentage_points=18,
         correction_rate_per_hundred=4,
+        evidence_disposition_precision=0.9,
         provider_calls_per_consolidation=3,
+        provider_cost_usd="1.25",
         boundary_failures=0,
         evaluated_at=NOW,
     )
@@ -2148,6 +2158,10 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "correction_rate_per_hundred": 10.1,
         "provider_calls_per_consolidation": 2,
         "boundary_failures": 1,
+        "evidence_disposition_precision": 0.74,
+        "seeded_case_count": 0,
+        "build_ref": "content-6973e8ddc75c6e40947e1f368abf2a96",
+        "scorer_version": "distillation-scorer@1",
     }
     baseline = evidence.model_dump(mode="python")
     for field, value in failing_values.items():
@@ -2181,3 +2195,393 @@ def test_formation_corpus_v3_has_declared_coverage() -> None:
         "self-citation",
         "rich-conversation",
     } <= {case.scenario for case in corpus.cases}
+
+
+def _scripted_episode(source_ids: list[int], texts: list[str]) -> str:
+    return json.dumps(
+        {
+            "episodes": [
+                {
+                    "narrative": "\n".join(
+                        f"[e:{source_id}] {text}"
+                        for source_id, text in zip(source_ids, texts, strict=True)
+                    ),
+                    "subjects": [],
+                    "source_event_ids": source_ids,
+                }
+            ]
+        }
+    )
+
+
+async def test_high_recall_fallback_never_fabricates_from_control_turns() -> None:
+    """A safety net must abstain rather than invent training memories.
+
+    These turns share surface phrasing with the production training
+    conversation (an improvement question, an age question, a duration, a
+    'cannot', a 'want to') but state no durable fact about the user's training.
+    The only admissible output is the age-awareness inference, and only as a
+    hypothesis.
+    """
+
+    turns = [
+        "Here is my sourdough recipe. What would be the best modification to improve that?",
+        "I am planning a trip to Japan. Are you factoring my age into this recommendation?",
+        "I did the dishes for an hour.",
+        "I did the laundry for the whole family yesterday.",
+        "I cannot open this PDF, can you help?",
+        "Our meeting is in 10 minutes.",
+        "I want to know what time the meeting starts today.",
+        "Use the search tool for this question.",
+        "I keep getting a 500 error in production.",
+        "All tests must pass before you answer.",
+    ]
+    events = [
+        _personal_agent_event().model_copy(
+            update={"id": sequence, "sequence": sequence, "payload": {"content": turn}}
+        )
+        for sequence, turn in enumerate(turns, start=7)
+    ]
+
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        events, principal=principal(), scope="general"
+    )
+
+    statements = [candidate.statement for candidate in candidates]
+    assert not any("5x5" in statement or "strength" in statement for statement in statements)
+    assert all(candidate.derivation is MemoryDerivation.HYPOTHESIS for candidate in candidates), (
+        statements
+    )
+    assert all("age" in statement for statement in statements), statements
+
+
+async def test_high_recall_fallback_survives_a_long_unterminated_turn() -> None:
+    """A long message must neither crash consolidation nor stall it."""
+
+    unterminated = "I want to " + "keep strength as I age and stay fit " * 400
+    repeated = "the blue theme works better for me " * 3000
+    events = [
+        _personal_agent_event().model_copy(
+            update={"id": 7, "sequence": 7, "payload": {"content": unterminated}}
+        ),
+        _personal_agent_event().model_copy(
+            update={"id": 8, "sequence": 8, "payload": {"content": repeated}}
+        ),
+    ]
+
+    started = time.perf_counter()
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        events, principal=principal(), scope="general"
+    )
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 2.0
+    assert len(repeated) > 100_000
+    for candidate in candidates:
+        assert len(candidate.statement) <= 8192
+        assert len(candidate.subject) <= 512
+        assert all(len(span.text) <= 8192 for span in candidate.evidence_spans)
+
+
+async def test_correction_veto_is_clause_scoped() -> None:
+    """A retraction suppresses its own clause, not the unrelated claims beside it."""
+
+    events = [
+        _personal_agent_event().model_copy(
+            update={
+                "id": 7,
+                "sequence": 7,
+                "payload": {"content": "I don't drive. I keep tax records in the Blue folder."},
+            }
+        ),
+        _personal_agent_event().model_copy(
+            update={
+                "id": 8,
+                "sequence": 8,
+                "payload": {"content": "I no longer live in Rome. I lead the infrastructure team."},
+            }
+        ),
+    ]
+
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        events, principal=principal(), scope="general"
+    )
+
+    statements = {candidate.statement for candidate in candidates}
+    assert "User keeps tax records in the Blue folder." in statements
+    assert "User leads an infrastructure team." in statements
+    assert not any("drive" in statement or "Rome" in statement for statement in statements)
+
+
+async def test_legacy_candidates_cite_their_own_clause() -> None:
+    """Evidence precision survives the high-recall wrapper."""
+
+    events = [
+        _personal_agent_event().model_copy(
+            update={
+                "id": 7,
+                "sequence": 7,
+                "payload": {
+                    "content": (
+                        "My daughter starts college next year and I prefer concise answers. "
+                        "Remember that the deploy gate is manual."
+                    )
+                },
+            }
+        )
+    ]
+
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        events, principal=principal(), scope="general"
+    )
+
+    preference = next(
+        candidate
+        for candidate in candidates
+        if candidate.statement == "User prefers concise answers."
+    )
+    assert [span.text for span in preference.evidence_spans] == ["I prefer concise answers"]
+
+
+def test_source_clauses_keep_paths_versions_and_abbreviations() -> None:
+    assert formation.split_source_clauses(
+        "Our runbook is in docs/operations.md. We use Python 3.12, e.g. for the API. "
+        "I swim, run, or bike most days and I lift weights twice a week!"
+    ) == [
+        "Our runbook is in docs/operations.md",
+        "We use Python 3.12, e.g. for the API",
+        "I swim, run, or bike most days",
+        "I lift weights twice a week",
+    ]
+
+
+async def test_distillation_grounds_evidence_that_contains_a_period() -> None:
+    extractor, provider, factory = await _distillation_extractor([])
+    source_id = await user_event(factory, "Our runbook is in docs/operations.md.")
+    provider._script.turns = [
+        ScriptedTurn(
+            text=_scripted_episode([source_id], ["Our runbook is in docs/operations.md."])
+        ),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(
+            text=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "subject": "operations runbook",
+                            "statement": "The user's runbook is in docs/operations.md.",
+                            "source_event_ids": [source_id],
+                            "sensitivity_guess": "internal",
+                            "claim_kind": "resource",
+                            "derivation": "direct",
+                            "evidence_spans": [
+                                {
+                                    "source_event_id": source_id,
+                                    "text": "runbook is in docs/operations.md",
+                                }
+                            ],
+                        }
+                    ],
+                    "coverage": [
+                        {
+                            "coverage_unit_id": f"{source_id}:1",
+                            "decision": "formed",
+                            "candidate_indexes": [0],
+                            "prediction_indexes": [],
+                        }
+                    ],
+                }
+            )
+        ),
+    ]
+
+    await extractor.extract(await session_events(factory), principal=principal(), scope="general")
+
+    audit = extractor.last_audit
+    assert audit.fallback_stages == []
+    assert audit.provider_candidates == 1
+    assert audit.rejected_provider_candidates == 0
+    assert audit.coverage_dispositions == {f"{source_id}:1": "formed"}
+
+
+async def test_represented_coverage_is_verified_against_the_cited_memory() -> None:
+    """A clause is only represented by a memory that asserts it."""
+
+    clock, factory, baseline, _retriever = await formation_stack()
+    await user_event(factory, "I prefer concise answers.")
+    existing = await baseline.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers.",
+        subject="answer style",
+        scope="general",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    new_source = await user_event(factory, "I swim three mornings each week.")
+    provider = FakeModelProvider(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    text=_scripted_episode([new_source], ["I swim three mornings each week."])
+                ),
+                ScriptedTurn(
+                    text=json.dumps(
+                        {
+                            "predictions": [
+                                {
+                                    "episode_index": 0,
+                                    "statement": "User prefers concise answers.",
+                                    "attributed_memory_ids": [str(existing.id)],
+                                }
+                            ]
+                        }
+                    )
+                ),
+                ScriptedTurn(
+                    text=json.dumps(
+                        {
+                            "candidates": [],
+                            "coverage": [
+                                {
+                                    "coverage_unit_id": f"{new_source}:1",
+                                    "decision": "represented",
+                                    "candidate_indexes": [],
+                                    "prediction_indexes": [0],
+                                }
+                            ],
+                        }
+                    )
+                ),
+            ]
+        ),
+        clock,
+    )
+    extractor = NemoriAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=_resolved_model(),
+        uow_factory=factory,
+        clock=clock,
+        ids=baseline._ids,
+    )
+    new_events = [event for event in await session_events(factory) if event.sequence == new_source]
+
+    await extractor.extract(new_events, principal=principal(), scope="general")
+
+    audit = extractor.last_audit
+    assert "prediction_error_distillation" not in audit.fallback_stages
+    assert audit.represented_unverified == 1
+    assert audit.coverage_dispositions == {f"{new_source}:1": "represented_unverified"}
+    assert audit.coverage_counts == {"represented": 1, "represented_unverified": 1}
+    assert audit.provider_stage_metrics["prediction_error_distillation"]["outcome"] == (
+        "partial_validation"
+    )
+
+
+async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
+    """A batch beyond one ledger's worth of clauses runs three calls per segment."""
+
+    extractor, provider, factory = await _distillation_extractor([])
+    texts = [f"I keep item {index} in the Blue folder." for index in range(100)]
+    source_ids = [await user_event(factory, text) for text in texts]
+    segments = plan_segments(await session_events(factory))
+    assert [len(segment) for segment in segments] == [90, 10]
+    turns: list[ScriptedTurn] = []
+    for segment in segments:
+        segment_ids = [event.sequence for event in segment]
+        segment_texts = [texts[source_ids.index(source_id)] for source_id in segment_ids]
+        turns.extend(
+            [
+                ScriptedTurn(text=_scripted_episode(segment_ids, segment_texts)),
+                ScriptedTurn(text='{"predictions":[]}'),
+                ScriptedTurn(text=_empty_distillation(*segment_ids)),
+            ]
+        )
+    provider._script.turns = turns
+
+    await extractor.extract(await session_events(factory), principal=principal(), scope="general")
+
+    audit = extractor.last_audit
+    assert audit.segment_count == 2
+    assert audit.provider_calls == 6
+    assert audit.fallback_stages == []
+    assert audit.episode_count == 2
+    assert set(audit.provider_stage_metrics) == {
+        "episode_integration",
+        "anticipation",
+        "prediction_error_distillation",
+        "episode_integration#2",
+        "anticipation#2",
+        "prediction_error_distillation#2",
+    }
+    assert audit.coverage_counts == {"not_memory": 100}
+
+
+def test_distillation_output_ceiling_fits_a_full_segment_ledger() -> None:
+    """Ninety clauses of dispositions plus one candidate each stay inside the cap."""
+
+    needed = MAX_SEGMENT_COVERAGE_UNITS * (30 + 110)
+    assert needed <= 0.8 * DISTILLATION_MAXIMUM_OUTPUT_TOKENS
+
+
+def test_comparative_scorer_rejects_supersets_negations_counts_and_siblings() -> None:
+    """The scorer that authorizes activation must say no to a wrong memory."""
+
+    pairs = [
+        ("User has a son named Robert who lives in Berlin.", "User has a son."),
+        ("User can take meetings on Fridays.", "User cannot take meetings on Fridays."),
+        ("User has at least one sister.", "User has at least two sisters."),
+        (
+            "User regularly runs on non-strength-training days.",
+            "User regularly swims on non-strength-training days.",
+        ),
+        (
+            "User's current 5x5 progress has stalled.",
+            "User's current 5x5 progress has not stalled.",
+        ),
+    ]
+    for candidate, reference in pairs:
+        assert not statements_equivalent(candidate, reference), (candidate, reference)
+        assert not statements_equivalent(reference, candidate), (reference, candidate)
+    assert statements_equivalent(
+        "User's goal is to finish the marathon.", "User wants to finish the marathon."
+    )
+    assert not subject_matches("User", ["marathon"])
+    case = MemoryDistillationCase.model_validate(
+        {
+            "id": "goal-gate-901",
+            "label": "must_form",
+            "scenario": "ordinary",
+            "events": [{"actor": "user", "text": "My goal is to finish the marathon."}],
+            "expected": [
+                {
+                    "claim_kind": "goal",
+                    "derivation": "direct",
+                    "longevity": "ongoing",
+                    "subjects": ["marathon"],
+                    "statements": ["User wants to finish the marathon."],
+                    "evidence_text": ["finish the marathon"],
+                }
+            ],
+        }
+    )
+    generic = DistillationEvaluationBelief(
+        claim_kind=MemoryClaimKind.GOAL,
+        derivation=MemoryDerivation.DIRECT,
+        longevity=MemoryLongevity.ONGOING,
+        subject="User",
+        statement="User wants to finish the marathon.",
+    )
+    assert score_distillation_case(case, [generic]).matched == 0
+
+
+def test_formation_corpus_v3_runs_against_a_populated_store() -> None:
+    root = Path(__file__).resolve().parents[2]
+    corpus, _digest = load_distillation_corpus(root)
+
+    pool = corpus.seed_pools["populated"]
+    assert len(pool) >= 25
+    assert {seed.claim_kind for seed in pool} == set(MemoryClaimKind)
+    seeded = [case for case in corpus.cases if case.prior_beliefs_pool == "populated"]
+    assert any(case.scenario == "rich-conversation" for case in seeded)
+    assert sum(sum(event.actor == "user" for event in case.events) >= 2 for case in seeded) >= 2
+    assert all(case.label != "must_not_form" for case in seeded)

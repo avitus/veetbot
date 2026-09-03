@@ -3661,7 +3661,8 @@ Acceptance criteria:
 - `formation@9` activates only for the exact comparative-evidence tuple; until
   then automatic composition retains the evidenced `formation@8` behavior.
   Once the passing artifact is bundled, automatic composition activates it
-  immediately for that tuple without a shadow or canary phase.
+  immediately for that tuple without a shadow or canary phase; an operator pin
+  may hold or roll back the selection without deleting an artifact.
 
 The milestone does not include reinforcement learning, fine-tuning, embeddings,
 `pgvector`, a temporal entity graph, a persona editor, an external memory

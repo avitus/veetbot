@@ -189,19 +189,41 @@ code owns canonical subject composition and uncertainty language as well as
 scope, portability, sensitivity floors, confidence, longevity, and expiry.
 
 The final request splits user text at bounded sentence and first-person clause
-boundaries. Every resulting `coverage_unit` must appear exactly once as
-`formed`, `represented`, `transient`, `unsafe`, or `not_memory`. A formed unit
-names the zero-based candidates it grounds, and every candidate is named by at
-least one formed unit. A represented unit names an anticipation prediction for
-the same episode, and that prediction must cite a live prior memory; ordinary
-model expectation cannot justify omission. Missing units, unknown indexes,
-negative indexes, ungrounded candidates, or falsely attributed represented
-units invalidate the stage and select the deterministic high-recall fallback.
-After that structural validation, local policy validates each candidate
-independently: an invalid candidate is rejected and counted without discarding
-its valid siblings, and the stage outcome is `partial_validation`. This keeps
-one bad proposal from recreating the all-or-nothing recall failure while no
-invalid proposal reaches consolidation.
+boundaries. A period ends a clause only before whitespace or the end of the
+text and never after a common abbreviation, so a file path, a version number,
+a decimal, or "e.g." stays inside one clause and can be cited. Every resulting
+`coverage_unit` must appear exactly once as `formed`, `represented`,
+`transient`, `unsafe`, or `not_memory`. A formed unit names the zero-based
+candidates it grounds, and every candidate is named by at least one formed
+unit. Missing units, unknown indexes, negative indexes, or an unreferenced
+candidate invalidate the stage structurally and select the deterministic
+high-recall fallback. After that structural validation every disposition is
+judged on its own. A candidate whose evidence is not in the unit that claims it
+is rejected and counted. A represented unit names an anticipation prediction
+for the same episode; local code verifies that the prediction asserts what the
+cited live memory asserts and that the memory is about the clause, and
+otherwise records the unit as `represented_unverified`. Ordinary model
+expectation, and a label alone, cannot justify omission. Local policy then
+validates each candidate independently: an invalid candidate is rejected and
+counted without discarding its valid siblings, and the stage outcome is
+`partial_validation`. This keeps one bad proposal from recreating the
+all-or-nothing recall failure while no invalid proposal reaches consolidation.
+The transient, unsafe, and not-memory labels are counted, and the comparative
+evaluation measures how often they land on clauses the gold labels as
+evidence.
+
+### Segments and limits
+
+The output ceiling is 16,384 tokens, sized so a full ledger and its candidates
+fit. A batch is planned into segments before any call: a segment closes before
+the event that would carry it past ninety coverage units, two hundred and
+fifty-six events, or ninety-six kilobytes of source text, and an oversized
+single event forms its own segment. Each segment makes the three calls in
+order, so a consolidation makes exactly three calls per segment and never a
+candidate-level call. The anticipation request sends the causal prefix once,
+as the events before the last episode's first source event, with each cue
+naming the sequence before which its own evidence begins. There is no cost
+ceiling on the distiller; cost is recorded per stage and reported in evidence.
 
 A directly stated claim is not suppressed merely because a general model could
 predict it. It may be skipped as redundant only when an existing live memory
@@ -378,9 +400,10 @@ displaced_global        provider_invalid
 
 `ConsolidationRun` stores the category counts plus episode count, provider call
 count, fallback stages, direct proposed/committed, hypothesis
-proposed/committed, prediction-attributed redundancies, coverage dispositions,
-rejected provider candidates, and per-stage input, cached-input, cache-write,
-output, and reasoning tokens, cost, latency, and outcome. The sum of terminal
+proposed/committed, prediction-attributed redundancies, coverage dispositions
+including unverified representations, segment count, rejected provider
+candidates, and per-stage input, cached-input, cache-write, output, and
+reasoning tokens, cost, latency, and outcome. The sum of terminal
 categories equals proposals plus provider-invalid claims. Events and metrics carry counts, versions, and
 normalized failure classes only—never source text, episode narrative, evidence
 spans, or memory statements.
@@ -391,9 +414,29 @@ spans, or memory statements.
 cases. At least seventy percent are positive. Every positive case is labeled
 `must_form` or `reasonable_to_form`; the narrow negative set is `must_not_form`.
 Each expected candidate declares claim kind, derivation, longevity, canonical
-subject and statement alternatives, and exact evidence text. Coverage includes
-every claim kind, direct and hypothesis formation, compound utterances,
-corroboration and promotion, correction, retirement, and self-citation.
+subject and statement alternatives, and exact evidence text; a subject is a
+specific conflict key, never the user. Coverage includes every claim kind,
+direct and hypothesis formation, compound utterances, corroboration and
+promotion, correction, retirement, and self-citation.
+
+The corpus also declares seed pools of realistic prior beliefs. A positive
+case may name a pool, and the evaluator writes those beliefs through the
+governed service, in a separate session, before the case consolidates, so the
+belief view, anticipation, and attributed redundancy behave as they do on a
+populated production store. At least one positive multi-event case and the
+rich production conversation run against a pool of at least twenty-five
+beliefs.
+
+Scoring is `distillation-scorer@2`. A belief matches a gold claim when its
+closed fields agree, its subject names the gold conflict key, and its statement
+is equivalent: equal after normalization, or sharing three quarters of the
+combined content terms with the same negations and quantities and at most one
+term the gold lacks. Elaborations, negations, different counts, and sibling
+activities never match. The frozen `formation@7` and `formation@8` controls
+cannot express the closed fields, so they are scored on statement equivalence
+alone and the lift threshold compares `formation@9` strict recall against that
+lenient control recall. The scorer version is recorded in every result and
+artifact, and an artifact from an older scorer cannot activate.
 
 The core scenarios include:
 
@@ -418,9 +461,13 @@ and publishes a never-overwritten `MemoryDistillationEvidence` only when:
 RUN_LIVE_MODEL_TESTS=1 agent eval memory-distillation \
   --model-policy balanced \
   --policy-profile default \
-  --build-ref IMMUTABLE_BUILD_REF \
+  --build-ref FULL_COMMIT_SHA \
   --output PATH_THAT_DOES_NOT_EXIST.json
 ```
+
+The build reference is the forty-character commit the evaluated tree was
+committed as; the command resolves it from CI or `git rev-parse HEAD` when the
+option is omitted, and the evidence schema refuses any other form.
 
 Without the explicit live-model flag it reports a skip and makes no provider
 call or artifact. A failed run returns its comparative per-policy metrics but
@@ -438,8 +485,13 @@ Publication requires:
 - every claim kind has a positive case and the personal-agent core passes;
 - measurable user correction or rejection is below ten per one hundred
   automatically formed memories;
-- all lifecycle timing, promotion, self-citation, cost, and call-count checks
-  pass;
+- at least three quarters of the clauses the gold labels as evidence are formed
+  or verifiably represented rather than labelled transient, unsafe, or not
+  memory;
+- at least one positive case ran against a populated store;
+- every eligible consolidation made exactly three calls per planned segment;
+- all lifecycle timing, promotion, and self-citation checks pass, and the
+  measured provider cost is recorded;
 - the exact version and provider tuple matches the artifact.
 
 The thresholds intentionally tolerate some provisional false positives. The
@@ -449,7 +501,11 @@ memory.
 There is no shadow, canary, or manual opt-in phase after passing evidence is
 bundled. `auto` selects `formation@9` immediately for the exact production
 tuple. `formation@8` remains an honest control and the fallback for a different
-or unevidenced tuple, not a conservative rollout stage.
+or unevidenced tuple, not a conservative rollout stage. The operator pin
+`AGENT_MEMORY_FORMATION_POLICY_PIN` holds the selection at `formation@8` or
+`formation@9` without deleting either artifact; a pin to an unevidenced policy
+falls back to deterministic formation with a content-free
+`pinned_policy_unevidenced` audit, and `required` still refuses.
 
 ## Persistence and migration
 
@@ -597,6 +653,32 @@ short units of work with idempotent derivation keys.
     differences, `formation@9` activates only for the exact artifact tuple;
     `auto` otherwise keeps the evidenced older policy and `required` refuses.
     Registered as `gate.memory.distill_activation_bound`, property. **M21.**
+25. **The comparative scorer cannot be fooled.** A belief that elaborates
+    beyond, negates, recounts, or names a sibling activity of a gold claim never
+    scores as a match, and a generic user subject never matches a specific
+    conflict key. Registered as `gate.memory.scorer_symmetric`, case. **M21.**
+26. **Comparative evidence runs against a populated store.** The corpus declares
+    a seed pool of at least twenty-five prior beliefs, the rich production
+    conversation and another multi-event case run against it, and the evaluator
+    writes the seeds through the governed service before consolidating.
+    Registered as `gate.memory.formation_corpus_seeded`, structural. **M21.**
+27. **The deterministic fallback never fabricates.** Turns that share surface
+    phrasing with the production training conversation but state no durable
+    training fact form no direct claim, only the age-awareness inference as a
+    hypothesis, and a long or unterminated turn neither crashes nor stalls
+    consolidation. Registered as `gate.memory.fallback_never_fabricates`, case.
+    **M21.**
+28. **A represented clause is verified against the memory it cites.** A
+    coverage unit marked represented counts only when the attributed live
+    memory asserts the same claim and is about that clause; otherwise it is
+    recorded as unverified and the stage completes partially rather than
+    trusting the label. Registered as
+    `gate.memory.coverage_dispositions_verified`, case. **M21.**
+29. **Long batches segment into bounded three-call rounds.** A batch beyond one
+    ledger's clause bound runs exactly three calls per segment, persists one
+    episode set per segment, and records per-segment stage metrics; a segment's
+    ledger and candidates fit the output ceiling. Registered as
+    `gate.memory.distill_segmentation`, case. **M21.**
 
 ## Tracked metrics
 

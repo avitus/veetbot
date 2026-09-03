@@ -56,7 +56,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "operational-hardening.md": (16, 0),
     "memory-evaluation-and-lifecycle.md": (20, 0),
     "memory-read-api-and-browser.md": (10, 0),
-    "adaptive-memory-distillation.md": (24, 0),
+    "adaptive-memory-distillation.md": (29, 0),
     "persona-surface.md": (14, 0),
     "email-integration.md": (13, 0),
     "milestone-map.md": (7, 0),

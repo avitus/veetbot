@@ -48,7 +48,7 @@ sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) first
 declared twenty-three Milestone 11 gates in a seventeenth area, then five at
 Milestone 19 and six at Milestone 20.
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) adds
-twenty-four Milestone 21 gates in the existing memory area.
+twenty-nine Milestone 21 gates in the existing memory area.
 [persona-surface.md](persona-surface.md) adds fourteen Milestone 22 gates in
 a new `persona` area. The current counts
 are reconciled in the gate table and census below.
@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 26 subject specifications declare 391 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 400
-declarations, 397 registry entries once the 3 aliases are subtracted.
+The 26 subject specifications declare 396 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 405
+declarations, 402 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1296,13 +1296,16 @@ resolution range over generated selectors, dates, and zones. The remaining
 four are boundary cases over materialization, HTTP, and the ordinary tool
 pipeline.
 
-### Adaptive memory distillation, twenty-four gates
+### Adaptive memory distillation, twenty-nine gates
 
-Twenty-four gates extend the existing `memory` area at Milestone 21. Six cover
+Twenty-nine gates extend the existing `memory` area at Milestone 21. Six cover
 the three-stage provider pipeline and its persisted episode input, seven cover
 high-recall grounded formation and accounting, seven cover the separation of
-evidence, use, forgetting, promotion, and rendered uncertainty, and four cover
-corrections, migration, corpus coverage, comparative evidence, and activation.
+evidence, use, forgetting, promotion, and rendered uncertainty, four cover
+corrections, migration, corpus coverage, comparative evidence, and activation,
+and five cover the honesty of that evidence: a scorer that cannot be fooled, a
+populated evaluation store, a fallback that never fabricates, verified coverage
+dispositions, and bounded segmentation.
 
 ```text
 #   id                                              kind         M
@@ -1331,15 +1334,21 @@ corrections, migration, corpus coverage, comparative evidence, and activation.
 22  gate.memory.formation_corpus_v3                 structural   21
 23  gate.memory.comparative_evidence                case         21
 24  gate.memory.distill_activation_bound            property     21
+25  gate.memory.scorer_symmetric                    case         21
+26  gate.memory.formation_corpus_seeded             structural   21
+27  gate.memory.fallback_never_fabricates           case         21
+28  gate.memory.coverage_dispositions_verified      case         21
+29  gate.memory.distill_segmentation                case         21
 ```
 
 Gates 4, 12, and 24 are properties because causal blinding, source ownership,
 and exact tuple activation quantify over generated prefixes, event identities,
-and tuple differences. Gates 1, 3, 10, 21, and 22 are structural because they
-inspect frozen controls, both repositories against one contract, closed
-schemas, migrations, and the checked-in corpus. The remaining sixteen are
-boundary cases over provider orchestration, formation, lifecycle, retrieval,
-and evidence publication.
+and tuple differences. Gates 1, 3, 10, 21, 22, and 26 are structural because
+they inspect frozen controls, both repositories against one contract, closed
+schemas, migrations, and the checked-in corpus and its seed pool. The remaining
+twenty are boundary cases over provider orchestration, formation, lifecycle,
+retrieval, evidence publication, scoring, fabrication, coverage verification,
+and segmentation.
 
 ### Persona surface, fourteen gates
 
@@ -1469,10 +1478,12 @@ milestone  new gates  cumulative  the earliest of them
 20                 6         359  monthly and yearly calendar rules,
                                   bounded catch-up, HTTP union parity,
                                   recurring conversational creation
-21                24         383  integrated episodes, causal anticipation,
+21                29         388  integrated episodes, causal anticipation,
                                   high-recall direct and hypothesis formation,
-                                  evidence-based forgetting and activation
-22                14         397  the persona row, its cap and pinning,
+                                  evidence-based forgetting and activation,
+                                  honest scoring, seeded evaluation, fallback
+                                  restraint, verified coverage, segmentation
+22                14         402  the persona row, its cap and pinning,
                                   human-only promotion, durable decline,
                                   snapshot de-duplication, exact scopes
 ```
@@ -1513,7 +1524,7 @@ Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 those specs already shared, Milestone 18's thirteen are `gate.email.*` in
 an area of their own, Milestone 19's five return to the existing
 `gate.schedule.*` area, Milestone 20 adds six more there, Milestone 21
-adds twenty-four more to `gate.memory.*`, and Milestone 22's fourteen are
+adds twenty-nine more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.persona.*` in an area of their own. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
