@@ -281,6 +281,7 @@ from agent_core.config import (
     BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
+    MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     PushProviderKind,
     Settings,
@@ -1628,7 +1629,11 @@ async def _compose(
             else:
                 selected_evidence = None
                 selected_distillation_evidence = None
-                for evidence_path in provider_extraction_evidence_paths(settings):
+                evidence_paths = provider_extraction_evidence_paths(settings)
+                policy_pin = settings.memory_formation_policy_pin
+                for evidence_path in evidence_paths:
+                    if policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED:
+                        break
                     try:
                         candidate_distillation_evidence = load_memory_distillation_evidence(
                             evidence_path
@@ -1649,23 +1654,28 @@ async def _compose(
                                 else "release"
                             )
                             break
-                    try:
-                        candidate_evidence = load_provider_extraction_evidence(evidence_path)
-                    except ConfigurationError:
-                        continue
-                    if provider_extraction_evidence_matches(
-                        candidate_evidence,
-                        extraction_model,
-                        agent.policy_profile,
-                        ruleset.policy_version,
-                    ):
-                        selected_evidence = candidate_evidence
-                        evidence_source = (
-                            "operator"
-                            if evidence_path == settings.memory_provider_extraction_evidence
-                            else "release"
-                        )
-                        break
+                if (
+                    selected_distillation_evidence is None
+                    and policy_pin is not MemoryFormationPolicyPin.DISTILLATION
+                ):
+                    for evidence_path in evidence_paths:
+                        try:
+                            candidate_evidence = load_provider_extraction_evidence(evidence_path)
+                        except ConfigurationError:
+                            continue
+                        if provider_extraction_evidence_matches(
+                            candidate_evidence,
+                            extraction_model,
+                            agent.policy_profile,
+                            ruleset.policy_version,
+                        ):
+                            selected_evidence = candidate_evidence
+                            evidence_source = (
+                                "operator"
+                                if evidence_path == settings.memory_provider_extraction_evidence
+                                else "release"
+                            )
+                            break
                 if selected_distillation_evidence is None and selected_evidence is None:
                     if memory_mode is MemoryProviderExtractionMode.REQUIRED:
                         raise ConfigurationError(
@@ -1673,7 +1683,11 @@ async def _compose(
                             "evaluation evidence"
                         )
                     selection_outcome = "deterministic_fallback"
-                    selection_reason = "no_matching_evidence"
+                    selection_reason = (
+                        "pinned_policy_unevidenced"
+                        if policy_pin is not None
+                        else "no_matching_evidence"
+                    )
                 else:
                     assert extraction_provider is not None
                     if selected_distillation_evidence is not None:
@@ -1730,9 +1744,12 @@ async def _compose(
             "none" if extraction_model is None else extraction_model.model,
             evidence_build_ref or "none",
             evidence_corpus_sha256 or "none",
+            "none"
+            if settings.memory_formation_policy_pin is None
+            else settings.memory_formation_policy_pin.value,
         )
     )
-    selection_key = f"memory.provider_extraction.selection:v2:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v3:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -1756,6 +1773,11 @@ async def _compose(
                     "evidence_source": evidence_source,
                     "evidence_build_ref": evidence_build_ref,
                     "evidence_corpus_sha256": evidence_corpus_sha256,
+                    "policy_pin": (
+                        None
+                        if settings.memory_formation_policy_pin is None
+                        else settings.memory_formation_policy_pin.value
+                    ),
                 },
                 derivation_key=selection_key,
                 created_at=clock.now(),
@@ -2820,7 +2842,12 @@ async def build(
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(
             [DEVICE_SMS_SEND_TOOL_NAME]
-            if effective_settings.device_channel_enabled and effective_settings.device_sms_enabled
+            if effective_settings.device_channel_enabled
+            and effective_settings.device_sms_enabled
+            and (
+                device_channel_override is not None
+                or effective_settings.notification_dispatch_enabled
+            )
             else []
         ),
     ]

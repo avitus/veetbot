@@ -579,7 +579,7 @@ milestones:
     authorized_on: 2026-08-31
     design: docs/plan/adaptive-memory-distillation.md
     adr: docs/adr/0077-milestone-21-adaptive-memory-distillation.md
-    gates_registered: 24
+    gates_registered: 29
     authorized_scope:
       - persisted provenance-complete integrated episodes
       - three-call Nemori-style formation at formation@9
@@ -593,8 +593,6 @@ milestones:
       - temporal entity graphs, persona editing, and global consolidation
       - a public memory-write API
     open_items:
-      - Run the three-arm live corpus and publish passing evidence for the production tuple
-      - Complete per-stage cost telemetry required by the comparative gate
       - Run hosted CI and the CodeRabbit review loop on the final head
     evidence:
       - check: local Milestone 21 behavior and contracts
@@ -611,30 +609,61 @@ milestones:
         outcome: passed_locally
         detail: >-
           Ruff formatting and linting pass, strict mypy reports no issues in
-          558 source files, the static partition passes 1410 tests, the contract
-          partition passes 404 tests, deployment-script tests pass, and the
-          strict documentation build reconciles 383 gates and 187 citations.
+          570 source files, the static partition passes 1484 tests, the contract
+          partition passes 420 tests, deployment-script tests pass, and the
+          strict documentation build reconciles 397 gates and 192 citations.
       - check: Apple package test lane
         outcome: passed_locally
         detail: >-
           make test-apple builds the updated memory wire model and detail view,
           then passes all 165 Swift Testing cases across 18 suites.
       - check: PostgreSQL Milestone 21 lane
+        outcome: passed
+        detail: >-
+          The hosted CircleCI integration job (build 2668) on pull request 90
+          at head 6082006 migrated a fresh PostgreSQL 16 database from base
+          through Alembic revision f4a7c2d9e105, the stage-metrics column
+          added on 2026-09-02, and passed every integration and resilience
+          test, including the lifecycle backfill, history preservation, and
+          integrated-episode persistence and erasure gates. Docker is not
+          installed on the authoring machine, so this lane ran only in CI for
+          the 2026-09-03 changes.
+      - check: comparative live-model evidence
+        outcome: passed
+        detail: >-
+          The 2026-09-03 production-tuple run under distillation-scorer@2
+          executed all three policies over 66 cases, five of them against a
+          populated store, and published the exact-tuple formation@9 artifact
+          bound to commit 9013d20. It reached 100 percent direct and hypothesis
+          must-form recall, 96.2 percent useful recall, 98.7 percent benign
+          precision, 100 percent evidence-disposition precision, a 73.1
+          percentage-point useful-recall lift over the leniently scored
+          formation@8 control, exactly three provider calls per consolidation,
+          a zero correction rate, zero boundary failures, and USD 1.07 of
+          provider cost. Two earlier runs under the same scorer refused
+          publication at 0.927 direct recall and 0.863 precision; the misses
+          were a local rejection of statements beginning "The user" and
+          redundant merges, not model omissions. The 2026-09-02 artifact was
+          withdrawn because its scorer, corpus, empty store, and build
+          reference could not support the numbers it carried.
+      - check: rich-conversation regression, fallback honesty, and stage telemetry
         outcome: passed_locally
         detail: >-
-          A fresh isolated PostgreSQL 16 database migrated from base through
-          head c2e0f4a6b831. The lifecycle backfill, history preservation,
-          integrated-episode persistence and erasure gate passed, followed by
-          all 157 integration and resilience tests. The hosted failure's stale
-          citation assertion was reproduced and corrected to require that
-          usage advances last_used_at without advancing last_reinforced_at.
-      - check: comparative live-model evidence
-        outcome: not_run
-        detail: >-
-          agent eval memory-distillation now executes formation@7, formation@8,
-          and formation@9 over the same sixty cases and refuses to overwrite or
-          publish below threshold. RUN_LIVE_MODEL_TESTS was not enabled and no
-          production-tuple activation artifact has been published.
+          The actual three-turn strength-training conversation is an
+          eleven-memory must-form corpus case scored by the strict scorer
+          against the deterministic fallback, alongside control turns that
+          must form nothing and paraphrase cases that literal patterns cannot
+          pass. The fallback renders only source words in the third person,
+          bounds every capture, scopes retractions to their clause, cites the
+          supporting clause for legacy candidates, and survives a 100 KB
+          unterminated turn. Formation@9 partitions topical episodes, sends the
+          causal prefix once, keeps file paths and versions inside one clause,
+          segments long batches into bounded three-call rounds under a 16,384
+          output-token ceiling, verifies represented dispositions against the
+          cited memory, rejects rather than rewrites an unhedged hypothesis, and
+          preserves content-free latency, token, cost, and outcome metrics for
+          every stage. An operator pin can hold or roll back the selected
+          policy without deleting an artifact.
   "22":
     title: Persona surface and curated belief promotion
     status: in_progress

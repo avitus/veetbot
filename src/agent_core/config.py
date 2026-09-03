@@ -68,6 +68,20 @@ class MemoryProviderExtractionMode(StrEnum):
     REQUIRED = "required"
 
 
+class MemoryFormationPolicyPin(StrEnum):
+    """An operator's choice between the evidenced provider formation policies.
+
+    Automatic selection prefers ``formation@9`` whenever its artifact matches.
+    A pin lets a deploy hold or roll back to one policy without deleting an
+    artifact: ``formation@8`` ignores distillation evidence, ``formation@9``
+    ignores provider-assisted evidence and falls back to deterministic
+    formation when its own evidence is missing.
+    """
+
+    PROVIDER_ASSISTED = "formation@8"
+    DISTILLATION = "formation@9"
+
+
 class BrowserProviderKind(StrEnum):
     DISABLED = "disabled"
     PLAYWRIGHT = "playwright"
@@ -98,6 +112,7 @@ class Settings:
         MemoryProviderExtractionMode.AUTO
     )
     memory_provider_extraction_evidence: Path | None = None
+    memory_formation_policy_pin: MemoryFormationPolicyPin | None = None
     schedule_api_enabled: bool = False
     schedule_worker_enabled: bool = False
     notification_api_enabled: bool = False
@@ -814,6 +829,20 @@ def load_memory_distillation_evidence(path: Path) -> MemoryDistillationEvidence:
         ) from exc
 
 
+def load_memory_release_evidence(
+    path: Path,
+) -> ProviderExtractionEvaluationEvidence | MemoryDistillationEvidence:
+    """Load either supported provider-memory activation artifact."""
+
+    try:
+        return load_memory_distillation_evidence(path)
+    except ConfigurationError:
+        try:
+            return load_provider_extraction_evidence(path)
+        except ConfigurationError as exc:
+            raise ConfigurationError("provider memory release evidence did not pass") from exc
+
+
 def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     """Return operator evidence first, followed by immutable release-bundled evidence."""
 
@@ -825,14 +854,26 @@ def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(paths))
 
 
-def _provider_extraction_evidence_is_valid(path: Path) -> bool:
+def _provider_extraction_evidence_is_valid(
+    path: Path, *, policy_pin: MemoryFormationPolicyPin | None = None
+) -> bool:
+    """Whether an artifact can satisfy required mode under the operator's pin.
+
+    Composition skips distillation evidence when pinned to ``formation@8`` and
+    provider-assisted evidence when pinned to ``formation@9``, so startup must
+    judge the same evidence type or it approves a configuration that then
+    fails one layer later.
+    """
+
     try:
-        load_provider_extraction_evidence(path)
-    except ConfigurationError:
-        try:
+        if policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED:
+            load_provider_extraction_evidence(path)
+        elif policy_pin is MemoryFormationPolicyPin.DISTILLATION:
             load_memory_distillation_evidence(path)
-        except ConfigurationError:
-            return False
+        else:
+            load_memory_release_evidence(path)
+    except ConfigurationError:
+        return False
     return True
 
 
@@ -856,7 +897,12 @@ def validate_settings(
             if settings.memory_provider_extraction_evidence is not None
             else evidence_paths
         )
-        if not any(_provider_extraction_evidence_is_valid(path) for path in required_paths):
+        if not any(
+            _provider_extraction_evidence_is_valid(
+                path, policy_pin=settings.memory_formation_policy_pin
+            )
+            for path in required_paths
+        ):
             raise ConfigurationError(
                 "provider-backed memory extraction evaluation evidence did not pass"
             )
@@ -1098,6 +1144,12 @@ def _load_settings(
     memory_provider_extraction_evidence = (
         Path(raw_memory_evidence).expanduser().resolve() if raw_memory_evidence else None
     )
+    raw_memory_pin = values.get("AGENT_MEMORY_FORMATION_POLICY_PIN", "").strip()
+    memory_formation_policy_pin = (
+        _parse_enum(MemoryFormationPolicyPin, raw_memory_pin, "AGENT_MEMORY_FORMATION_POLICY_PIN")
+        if raw_memory_pin
+        else None
+    )
     schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
@@ -1240,6 +1292,7 @@ def _load_settings(
         skill_background_review_enabled=skill_background_review_enabled,
         memory_provider_extraction_mode=memory_provider_extraction_mode,
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
+        memory_formation_policy_pin=memory_formation_policy_pin,
         schedule_api_enabled=schedule_api_enabled,
         schedule_worker_enabled=schedule_worker_enabled,
         notification_api_enabled=notification_api_enabled,

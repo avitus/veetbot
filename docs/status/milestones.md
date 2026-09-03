@@ -85,14 +85,20 @@ fresh PostgreSQL integration lane pass locally. Remaining:
 ### Milestone 21 — Adaptive memory distillation
 
 A sixth parallel workstream making memory formation materially less timid.
-Its twenty-four gates cover integrated episodes, the fixed three-call
+Its twenty-nine gates cover integrated episodes, the fixed three-call
 prediction-error pipeline, direct and hypothesis recall, evidence-based
-forgetting, persistence, and comparative activation evidence. The local
-implementation, static and contract suites, strict documentation build, Apple
-package tests, and fresh PostgreSQL 16 integration lane pass. Remaining:
+forgetting, persistence, comparative activation evidence, and the honesty of
+that evidence: a scorer that cannot be fooled, a seeded evaluation store, a
+fallback that never fabricates, verified coverage dispositions, and bounded
+segmentation. The local implementation, static and contract suites, strict
+documentation build, and Apple package tests pass locally; the fresh
+PostgreSQL 16 integration lane passed in hosted CI on pull request 90
+(CircleCI build 2668); and the 2026-09-03 three-arm live production-tuple
+corpus under distillation-scorer@2 passed. The 2026-09-02 artifact was withdrawn
+because its scorer, corpus, empty store, and build reference could not
+support the numbers it carried; the replacement is bundled for immediate
+exact-tuple activation. Remaining:
 
-- [ ] Run the three-arm live corpus and publish passing evidence for the production tuple
-- [ ] Complete per-stage cost telemetry required by the comparative gate
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 
 ### Milestone 22 — Persona surface and curated belief promotion

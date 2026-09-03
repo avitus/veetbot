@@ -2,6 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-08-31
+- Amended: 2026-09-02, 2026-09-03
 - Related: Sections 13, 20, 21, 22, and 24 of the engineering plan;
   ADR-0014, ADR-0018, ADR-0019, ADR-0022, ADR-0045, ADR-0051, ADR-0057,
   ADR-0068, ADR-0069, ADR-0070
@@ -83,6 +84,54 @@ training loop, reinforcement learning, or a new dependency into this milestone.
     count, fallback, recall, candidate bounds, grounding, telemetry, evidence
     clocks, forgetting, promotion, rendering, corrections, persistence,
     evaluation, and activation.
+15. **Episode output is a topical partition, not a session-sized singleton.**
+    Provider fragments must form an ordered complete partition of source-event
+    provenance. One anticipation request covers a segment's episodes and
+    receives only the source prefix before the earliest of them, never any
+    episode being predicted.
+16. **Silent omission is a protocol failure.** The distillation response
+    accounts for every bounded source clause. `represented` is valid only when
+    it references a same-episode prediction attributed to a live memory, and
+    every formed candidate is grounded back to a coverage unit.
+17. **The production rich-conversation regression is a release blocker.** The
+    actual three-turn exercise discussion is an eleven-memory must-form case in
+    the shared three-policy corpus, including its improvement goal and
+    age-aware recommendation preference, not merely a narrow regex unit test.
+18. **Passing evidence activates immediately.** The exact-tuple evidence gate
+    stays because it measures recall and boundary behavior, but there is no
+    subsequent shadow, canary, or manual opt-in stage. `auto` selects the
+    bundled passing `formation@9` artifact at startup.
+19. **Candidate-local validation is isolated after structural validation.** A
+    malformed response or coverage ledger selects the deterministic fallback;
+    a locally invalid candidate is rejected and counted while valid siblings
+    remain eligible. One bad proposal cannot erase a rich response.
+20. **The comparative scorer is symmetric and content-aware.** Equivalence
+    requires the same negations and quantities, three quarters of the combined
+    content terms, and at most one term the gold claim lacks; a generic user
+    subject never matches. Frozen controls are scored on statement equivalence
+    alone so the lift is measured against what they actually formed. The
+    scorer version is part of the evidence tuple.
+21. **Evidence is produced on a populated store.** The corpus declares seed
+    pools, the evaluator writes them through the governed service before a
+    seeded case consolidates, and an artifact records how many cases ran
+    seeded; zero refuses publication.
+22. **The fallback is a safety net, not a recall source.** The deterministic
+    formation@9 fallback renders only the user's own words in the third
+    person, bounds every capture and rendering, scopes retractions to their
+    clause, cites the supporting clause for legacy candidates, and emits
+    inferences only as hypotheses. It never encodes a corpus sentence.
+23. **A represented disposition is verified.** A clause counts as represented
+    only when the cited live memory asserts the prediction and is about the
+    clause; otherwise it is recorded as unverified, and the evaluation
+    measures how often gold evidence is labelled away.
+24. **Segments bound the protocol, cost does not.** Long batches run three
+    calls per segment under a 16,384 output-token ceiling and clause, event,
+    and byte bounds; the causal prefix is sent once. The distiller has no cost
+    ceiling; cost is recorded and published.
+25. **Evidence names a commit and an operator may pin the policy.** The build
+    reference is the full commit sha, resolved from CI or git when omitted.
+    `AGENT_MEMORY_FORMATION_POLICY_PIN` holds `formation@8` or `formation@9`
+    without deleting an artifact, so a deploy can be rolled back.
 
 ## Consequences
 
@@ -98,6 +147,9 @@ training loop, reinforcement learning, or a new dependency into this milestone.
 - Provider assistance remains evidence-gated. Until a valid `formation@9`
   artifact exists, automatic composition keeps the currently evidenced
   `formation@8` rather than treating the new code as activated.
+- Each consolidation audit exposes content-free tokens, cost, latency, and
+  outcome for all three provider stages, making a low-recall provider response
+  distinguishable from a provider failure or local validation fallback.
 - The deterministic and previous provider policies remain available as honest
   controls, so a claimed lift can be reproduced rather than inferred from two
   unrelated runs.

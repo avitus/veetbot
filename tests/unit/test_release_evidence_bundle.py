@@ -18,6 +18,7 @@ activated policy version ambiguous.
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -26,14 +27,21 @@ import pytest
 from agent_core.config import (
     PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT,
     ConfigurationError,
-    load_provider_extraction_evidence,
+    load_memory_release_evidence,
 )
-from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+from agent_core.domain.memory import (
+    MemoryDistillationEvidence,
+    ProviderExtractionEvaluationEvidence,
+)
+from agent_core.evals.memory_distillation import load_distillation_corpus
+from agent_core.memory.equivalence import DISTILLATION_SCORER_VERSION
 
 ActivationTuple = tuple[str, str, str, str, str, str, str]
 
 
-def _activation_tuple(evidence: ProviderExtractionEvaluationEvidence) -> ActivationTuple:
+def _activation_tuple(
+    evidence: ProviderExtractionEvaluationEvidence | MemoryDistillationEvidence,
+) -> ActivationTuple:
     """The seven fields startup validation matches an artifact against."""
 
     return (
@@ -58,7 +66,7 @@ def _duplicate_activation_tuples(root: Path) -> dict[ActivationTuple, list[str]]
 
     claimed: dict[ActivationTuple, list[str]] = {}
     for path in _bundled_artifacts(root):
-        evidence = load_provider_extraction_evidence(path)
+        evidence = load_memory_release_evidence(path)
         claimed.setdefault(_activation_tuple(evidence), []).append(path.name)
     return {tuple_: names for tuple_, names in claimed.items() if len(names) > 1}
 
@@ -68,8 +76,11 @@ def test_every_bundled_artifact_parses_through_the_runtime_loader() -> None:
 
     assert artifacts, "the release bundle holds no artifact for the runtime to load"
     for path in artifacts:
-        evidence = load_provider_extraction_evidence(path)
-        assert isinstance(evidence, ProviderExtractionEvaluationEvidence)
+        evidence = load_memory_release_evidence(path)
+        assert isinstance(
+            evidence,
+            (ProviderExtractionEvaluationEvidence, MemoryDistillationEvidence),
+        )
         assert all(field for field in _activation_tuple(evidence))
 
 
@@ -106,3 +117,24 @@ def test_an_unparseable_bundled_artifact_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="did not pass"):
         _duplicate_activation_tuples(tmp_path)
+
+
+def test_bundled_distillation_evidence_matches_the_corpus_and_scorer_it_claims() -> None:
+    """A formation@9 artifact activates production, so its provenance must be live.
+
+    The corpus digest must be the digest of the checked-in corpus, the scorer
+    version must be the scorer this tree runs, and the build ref must be a
+    commit rather than an operator-typed label; otherwise the numbers in the
+    artifact describe an evaluation nobody can rerun.
+    """
+
+    repository_root = Path(__file__).resolve().parents[2]
+    _corpus, corpus_sha256 = load_distillation_corpus(repository_root)
+    for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
+        evidence = load_memory_release_evidence(path)
+        if not isinstance(evidence, MemoryDistillationEvidence):
+            continue
+        assert evidence.corpus_sha256 == corpus_sha256, path.name
+        assert evidence.scorer_version == DISTILLATION_SCORER_VERSION, path.name
+        assert re.fullmatch(r"[0-9a-f]{40}", evidence.build_ref), path.name
+        assert evidence.seeded_case_count >= 1, path.name

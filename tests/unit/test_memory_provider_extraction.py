@@ -18,6 +18,7 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.config import (
     ConfigurationError,
+    MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     load_config_document,
 )
@@ -25,6 +26,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryCandidate,
+    MemoryDistillationEvidence,
     MemoryExtractionResult,
     Polarity,
     Portability,
@@ -2212,6 +2214,157 @@ async def test_auto_mode_activates_matching_release_bundled_evidence(
     assert ":matching_evidence:release:" in selections[0].derivation_key
     assert selections[0].payload["evidence_build_ref"] == "test-build"
     assert selections[0].payload["evidence_corpus_sha256"] == "a" * 64
+
+
+async def test_auto_mode_prefers_newer_distillation_evidence_over_older_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    (release_root / "a-formation8.json").write_text(
+        _evidence()
+        .model_copy(
+            update={
+                "model_policy": "fake-balanced",
+                "policy_version": _runtime_policy_version(),
+            }
+        )
+        .model_dump_json(),
+        encoding="utf-8",
+    )
+    (release_root / "b-formation9.json").write_text(
+        _distillation_evidence().model_dump_json(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+
+    assert len(selections) == 1
+    assert selections[0].payload["outcome"] == "activated"
+    assert selections[0].payload["evidence_build_ref"] == _DISTILLATION_BUILD_REF
+    assert selections[0].payload["evidence_corpus_sha256"] == "b" * 64
+    assert selections[0].payload["policy_pin"] is None
+
+
+_DISTILLATION_BUILD_REF = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _distillation_evidence() -> MemoryDistillationEvidence:
+    return MemoryDistillationEvidence(
+        model_policy="fake-balanced",
+        provider="fake",
+        model="scripted",
+        policy_profile="default",
+        policy_version=_runtime_policy_version(),
+        scorer_version="distillation-scorer@2",
+        build_ref=_DISTILLATION_BUILD_REF,
+        corpus_sha256="b" * 64,
+        sample_count=61,
+        positive_case_count=49,
+        seeded_case_count=5,
+        direct_must_form_recall=1,
+        hypothesis_must_form_recall=1,
+        benign_precision=0.96,
+        useful_recall_lift_percentage_points=90,
+        correction_rate_per_hundred=0,
+        evidence_disposition_precision=0.9,
+        provider_cost_usd="2.5",
+        evaluated_at=NOW,
+    )
+
+
+async def test_operator_pin_holds_the_provider_policy_while_newer_evidence_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A pin lets a deploy roll back without deleting an artifact."""
+
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    (release_root / "a-formation8.json").write_text(
+        _evidence()
+        .model_copy(
+            update={
+                "model_policy": "fake-balanced",
+                "policy_version": _runtime_policy_version(),
+            }
+        )
+        .model_dump_json(),
+        encoding="utf-8",
+    )
+    (release_root / "b-formation9.json").write_text(
+        _distillation_evidence().model_dump_json(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        memory_formation_policy_pin=MemoryFormationPolicyPin.PROVIDER_ASSISTED,
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+
+    assert len(selections) == 1
+    assert selections[0].payload["outcome"] == "activated"
+    assert selections[0].payload["evidence_build_ref"] != _DISTILLATION_BUILD_REF
+    assert selections[0].payload["policy_pin"] == "formation@8"
+
+
+async def test_operator_pin_to_an_unevidenced_policy_falls_back_deterministically(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    (release_root / "a-formation8.json").write_text(
+        _evidence()
+        .model_copy(
+            update={
+                "model_policy": "fake-balanced",
+                "policy_version": _runtime_policy_version(),
+            }
+        )
+        .model_dump_json(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        memory_formation_policy_pin=MemoryFormationPolicyPin.DISTILLATION,
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+
+    assert len(selections) == 1
+    assert selections[0].payload["outcome"] == "deterministic_fallback"
+    assert selections[0].payload["reason"] == "pinned_policy_unevidenced"
+    assert selections[0].payload["policy_pin"] == "formation@9"
 
 
 async def test_off_mode_never_resolves_a_formation_provider(tmp_path: Path) -> None:
