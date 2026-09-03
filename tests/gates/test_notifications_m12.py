@@ -35,6 +35,7 @@ from agent_core.domain.notifications import (
     NotificationSeverity,
     NotificationStatus,
     approval_requested_key,
+    device_invocation_key,
     device_test_key,
     ops_alert_key,
     ops_recovered_key,
@@ -58,6 +59,7 @@ APPROVAL_ID = UUID("00000000-0000-0000-0000-000000001206")
 QUESTION_ID = UUID("00000000-0000-0000-0000-000000001207")
 SCHEDULE_ID = UUID("00000000-0000-0000-0000-000000001208")
 OCCURRENCE_ID = UUID("00000000-0000-0000-0000-000000001209")
+INVOCATION_ID = UUID("00000000-0000-0000-0000-00000000120a")
 NOW = datetime(2026, 8, 22, 19, 30, tzinfo=UTC)
 
 
@@ -91,6 +93,7 @@ def test_notification_and_device_vocabularies_are_closed() -> None:
         "ops_alert",
         "ops_recovered",
         "test",
+        "device_invocation",
     }
     assert {item.value for item in NotificationStatus} == {
         "pending",
@@ -134,6 +137,7 @@ def test_apple_and_server_notification_contract_cannot_drift() -> None:
         "opsAlert": NotificationKind.OPS_ALERT,
         "opsRecovered": NotificationKind.OPS_RECOVERED,
         "test": NotificationKind.TEST,
+        "deviceInvocation": NotificationKind.DEVICE_INVOCATION,
     }
 
     assert {swift_cases[name]: title for name, title in swift_titles.items()} == dict(
@@ -218,6 +222,15 @@ def test_apple_and_server_notification_contract_cannot_drift() -> None:
             "reason_code": "ops.disk_free_recovered",
         },
         _base_payload(NotificationKind.TEST, "Test notification"),
+        {
+            **_base_payload(
+                NotificationKind.DEVICE_INVOCATION,
+                "Your device has a pending action",
+            ),
+            "status": "pending",
+            "invocation_id": INVOCATION_ID,
+            "device_id": DEVICE_ID,
+        },
     ],
 )
 def test_closed_payload_accepts_only_kind_specific_vocabulary(values: dict[str, object]) -> None:
@@ -277,6 +290,8 @@ def test_notification_payload_is_content_free() -> None:
         "question_id",
         "schedule_id",
         "occurrence_id",
+        "invocation_id",
+        "device_id",
         "notification_id",
         "signal",
         "severity",
@@ -333,6 +348,7 @@ def test_bearer_token_corpus_member_is_explicitly_redacted() -> None:
     occurrence_id=st.uuids(),
     device_id=st.uuids(),
     idempotency_key=st.text(min_size=1, max_size=64).filter(lambda value: bool(value.strip())),
+    invocation_id=st.uuids(),
 )
 def _check_generated_deduplication_keys(
     approval_id: UUID,
@@ -341,6 +357,7 @@ def _check_generated_deduplication_keys(
     occurrence_id: UUID,
     device_id: UUID,
     idempotency_key: str,
+    invocation_id: UUID,
 ) -> None:
     keys = (
         approval_requested_key(approval_id),
@@ -349,6 +366,7 @@ def _check_generated_deduplication_keys(
         schedule_run_finished_key(occurrence_id),
         schedule_occurrence_skipped_key(occurrence_id),
         device_test_key(device_id, idempotency_key),
+        device_invocation_key(invocation_id),
     )
 
     assert len(set(keys)) == len(keys)
@@ -359,6 +377,7 @@ def _check_generated_deduplication_keys(
         schedule_run_finished_key(occurrence_id),
         schedule_occurrence_skipped_key(occurrence_id),
         device_test_key(device_id, idempotency_key),
+        device_invocation_key(invocation_id),
     )
 
 
@@ -373,6 +392,7 @@ def test_notification_dedupe_keys_are_stable() -> None:
         f"schedule.occurrence.skipped:{OCCURRENCE_ID}"
     )
     assert device_test_key(DEVICE_ID, "retry-1") == f"device.test:{DEVICE_ID}:retry-1"
+    assert device_invocation_key(INVOCATION_ID) == f"device_invocation:{INVOCATION_ID}"
     assert ops_alert_key("tenant_a", "disk_free", 4) == "ops.tenant_a.disk_free.4"
     assert ops_recovered_key("tenant_a", "disk_free", 4) == ("ops.tenant_a.disk_free.4.recovered")
     assert ops_alert_key("tenant_a", "disk_free", 4) != ops_recovered_key(

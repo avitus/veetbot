@@ -33,6 +33,7 @@ public enum NotificationKind: String, Codable, CaseIterable, Sendable {
     case opsAlert = "ops_alert"
     case opsRecovered = "ops_recovered"
     case test
+    case deviceInvocation = "device_invocation"
 }
 
 public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
@@ -45,6 +46,7 @@ public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
     public let pushToken: String
     public let pushEnvironment: PushEnvironment
     public let mutedKinds: [NotificationKind]
+    public let capabilities: [String]
 
     public init(
         clientDeviceID: String,
@@ -55,7 +57,8 @@ public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
         pushProvider: PushProvider = .apns,
         pushToken: String,
         pushEnvironment: PushEnvironment,
-        mutedKinds: [NotificationKind] = []
+        mutedKinds: [NotificationKind] = [],
+        capabilities: [String] = []
     ) {
         self.clientDeviceID = clientDeviceID
         self.name = name
@@ -66,10 +69,11 @@ public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
         self.pushToken = pushToken
         self.pushEnvironment = pushEnvironment
         self.mutedKinds = mutedKinds
+        self.capabilities = capabilities
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, kind, platform
+        case name, kind, platform, capabilities
         case clientDeviceID = "client_device_id"
         case appBundleID = "app_bundle_id"
         case pushProvider = "push_provider"
@@ -92,6 +96,7 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
     public let pushTokenUpdatedAt: Date?
     public let pushTokenInvalidatedAt: Date?
     public let mutedKinds: Set<NotificationKind>
+    public let capabilities: [String]
     public let status: DeviceStatus
     public let revokedAt: Date?
     public let lastSeenAt: Date
@@ -111,6 +116,7 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
         pushTokenUpdatedAt: Date?,
         pushTokenInvalidatedAt: Date?,
         mutedKinds: Set<NotificationKind>,
+        capabilities: [String],
         status: DeviceStatus,
         revokedAt: Date?,
         lastSeenAt: Date,
@@ -129,6 +135,7 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
         self.pushTokenUpdatedAt = pushTokenUpdatedAt
         self.pushTokenInvalidatedAt = pushTokenInvalidatedAt
         self.mutedKinds = mutedKinds
+        self.capabilities = capabilities
         self.status = status
         self.revokedAt = revokedAt
         self.lastSeenAt = lastSeenAt
@@ -136,8 +143,39 @@ public struct DeviceView: Codable, Equatable, Identifiable, Sendable {
         self.updatedAt = updatedAt
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        clientDeviceID = try container.decode(String.self, forKey: .clientDeviceID)
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decode(DeviceKind.self, forKey: .kind)
+        platform = try container.decode(String.self, forKey: .platform)
+        appBundleID = try container.decodeIfPresent(String.self, forKey: .appBundleID)
+        pushProvider = try container.decodeIfPresent(PushProvider.self, forKey: .pushProvider)
+        pushEnvironment = try container.decodeIfPresent(
+            PushEnvironment.self,
+            forKey: .pushEnvironment
+        )
+        pushTokenFingerprint = try container.decodeIfPresent(
+            String.self,
+            forKey: .pushTokenFingerprint
+        )
+        pushTokenUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .pushTokenUpdatedAt)
+        pushTokenInvalidatedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .pushTokenInvalidatedAt
+        )
+        mutedKinds = try container.decode(Set<NotificationKind>.self, forKey: .mutedKinds)
+        capabilities = try container.decodeIfPresent([String].self, forKey: .capabilities) ?? []
+        status = try container.decode(DeviceStatus.self, forKey: .status)
+        revokedAt = try container.decodeIfPresent(Date.self, forKey: .revokedAt)
+        lastSeenAt = try container.decode(Date.self, forKey: .lastSeenAt)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, platform, status
+        case id, name, kind, platform, status, capabilities
         case clientDeviceID = "client_device_id"
         case appBundleID = "app_bundle_id"
         case pushProvider = "push_provider"
@@ -165,6 +203,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
     public let questionID: UUID?
     public let scheduleID: UUID?
     public let occurrenceID: UUID?
+    public let invocationID: UUID?
+    public let deviceID: UUID?
     public let notificationID: UUID
     public let signal: String?
     public let severity: String?
@@ -175,8 +215,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         guard let value = userInfo["veetbot"] as? [String: Any] else { return nil }
         let allowedKeys: Set<String> = [
             "version", "kind", "title", "status", "tool_name", "session_id", "run_id",
-            "approval_id", "question_id", "schedule_id", "occurrence_id", "notification_id",
-            "signal", "severity", "reason_code", "release_id",
+            "approval_id", "question_id", "schedule_id", "occurrence_id", "invocation_id",
+            "device_id", "notification_id", "signal", "severity", "reason_code", "release_id",
         ]
         guard Set(value.keys).isSubset(of: allowedKeys),
             JSONSerialization.isValidJSONObject(value),
@@ -198,6 +238,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
             "question_id": questionID,
             "schedule_id": scheduleID,
             "occurrence_id": occurrenceID,
+            "invocation_id": invocationID,
+            "device_id": deviceID,
         ]
         let present = Set(identifiers.compactMap { $0.value == nil ? nil : $0.key })
         guard present == Self.requiredIdentifiers[kind] else { return false }
@@ -225,6 +267,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsAlert: "Production alert",
         .opsRecovered: "Production recovered",
         .test: "Test notification",
+        .deviceInvocation: "Your device has a pending action",
     ]
 
     private static let requiredIdentifiers: [NotificationKind: Set<String>] = [
@@ -236,6 +279,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsAlert: [],
         .opsRecovered: [],
         .test: [],
+        .deviceInvocation: ["invocation_id", "device_id"],
     ]
 
     private static let allowedStatuses: [NotificationKind: Set<String?>] = [
@@ -249,6 +293,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsAlert: [nil],
         .opsRecovered: [nil],
         .test: [nil],
+        .deviceInvocation: ["pending"],
     ]
 
     enum CodingKeys: String, CodingKey {
@@ -260,6 +305,8 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         case questionID = "question_id"
         case scheduleID = "schedule_id"
         case occurrenceID = "occurrence_id"
+        case invocationID = "invocation_id"
+        case deviceID = "device_id"
         case notificationID = "notification_id"
         case reasonCode = "reason_code"
         case releaseID = "release_id"

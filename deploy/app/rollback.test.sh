@@ -9,10 +9,12 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 BIN_DIR="$TEST_ROOT/bin"
 DEPLOY_ROOT="$TEST_ROOT/opt/veetbot"
 DOCS_ROOT="$DEPLOY_ROOT/shared/docs"
+WEBSITE_ROOT="$DEPLOY_ROOT/shared/website"
 PROCESS_ROOT="$TEST_ROOT/proc"
 LOG_FILE="$TEST_ROOT/commands.log"
 DOCKER_STATE="$TEST_ROOT/docker-production-image"
 FAIL_MARKER="$TEST_ROOT/docs-switch-failed"
+WEBSITE_FAIL_MARKER="$TEST_ROOT/website-switch-failed"
 SERVICES_STOPPED="$TEST_ROOT/services-stopped"
 ENV_FILE="$TEST_ROOT/veetbot.env"
 RAW_RUNBOOK="$TEST_ROOT/manual-rollback.raw.sh"
@@ -28,7 +30,9 @@ mkdir -p \
   "$DEPLOY_ROOT/shared" \
   "$PROCESS_ROOT/4242" \
   "$DOCS_ROOT/releases/$PREVIOUS_ID" \
-  "$DOCS_ROOT/releases/$TARGET_ID"
+  "$DOCS_ROOT/releases/$TARGET_ID" \
+  "$WEBSITE_ROOT/releases/$PREVIOUS_ID" \
+  "$WEBSITE_ROOT/releases/$TARGET_ID"
 printf 'VEETBOT_RELEASE_ID=%s\n' "$PREVIOUS_ID" \
   >"$DEPLOY_ROOT/releases/$PREVIOUS_ID/.release.env"
 printf 'VEETBOT_RELEASE_ID=%s\n' "$TARGET_ID" \
@@ -39,11 +43,17 @@ printf '%s\n' \
   'COMPOSE_PROJECT_NAME=veetbot' >"$ENV_FILE"
 printf '%s\n' "$PREVIOUS_ID" >"$DOCS_ROOT/releases/$PREVIOUS_ID/release.txt"
 printf '%s\n' "$TARGET_ID" >"$DOCS_ROOT/releases/$TARGET_ID/release.txt"
+printf '%s\n' "$PREVIOUS_ID" >"$WEBSITE_ROOT/releases/$PREVIOUS_ID/release.txt"
+printf '%s\n' "$TARGET_ID" >"$WEBSITE_ROOT/releases/$TARGET_ID/release.txt"
 touch \
   "$DOCS_ROOT/releases/$PREVIOUS_ID/index.html" \
   "$DOCS_ROOT/releases/$TARGET_ID/index.html"
+touch \
+  "$WEBSITE_ROOT/releases/$PREVIOUS_ID/index.html" \
+  "$WEBSITE_ROOT/releases/$TARGET_ID/index.html"
 ln -s "$DEPLOY_ROOT/releases/$PREVIOUS_ID" "$DEPLOY_ROOT/current"
 ln -s "$DOCS_ROOT/releases/$PREVIOUS_ID" "$DOCS_ROOT/current"
+ln -s "$WEBSITE_ROOT/releases/$PREVIOUS_ID" "$WEBSITE_ROOT/current"
 ln -s "$DEPLOY_ROOT/releases/$TARGET_ID" "$PROCESS_ROOT/4242/cwd"
 printf '%s\n' previous-image-id >"$DOCKER_STATE"
 : >"$LOG_FILE"
@@ -87,6 +97,12 @@ write_stub mv '
       && "$target" == "$VEETBOT_TEST_DOCS_CURRENT" \
       && ! -e "$VEETBOT_TEST_FAIL_MARKER" ]]; then
       : >"$VEETBOT_TEST_FAIL_MARKER"
+      exit 1
+    fi
+    if [[ "${VEETBOT_TEST_FAIL_WEBSITE_SWITCH_ONCE:-0}" == 1 \
+      && "$target" == "$VEETBOT_TEST_WEBSITE_CURRENT" \
+      && ! -e "$VEETBOT_TEST_WEBSITE_FAIL_MARKER" ]]; then
+      : >"$VEETBOT_TEST_WEBSITE_FAIL_MARKER"
       exit 1
     fi
     /bin/rm -f -- "$target"
@@ -180,6 +196,8 @@ run_rollback() {
   VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$TARGET_ID}" \
   VEETBOT_TEST_DOCS_CURRENT="$DOCS_ROOT/current" \
   VEETBOT_TEST_FAIL_MARKER="$FAIL_MARKER" \
+  VEETBOT_TEST_WEBSITE_CURRENT="$WEBSITE_ROOT/current" \
+  VEETBOT_TEST_WEBSITE_FAIL_MARKER="$WEBSITE_FAIL_MARKER" \
   VEETBOT_ENV_FILE="$ENV_FILE" \
     "$RUNBOOK"
 }
@@ -192,6 +210,7 @@ if VEETBOT_TEST_INCOMPATIBLE_SCHEDULE_REVISIONS=1 \
 fi
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
 [[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$PREVIOUS_ID" ]]
 grep -Fq "docker compose --env-file $ENV_FILE" "$LOG_FILE"
 grep -Fq 'systemctl stop veetbot-execution' "$LOG_FILE"
 grep -Fq 'timeout --signal=TERM --kill-after=5s 20s docker compose' "$LOG_FILE"
@@ -218,6 +237,27 @@ fi
 }
 grep -Fq 'docker tag previous-image-id agent-core-sandbox:production' "$LOG_FILE"
 
+rm -f -- "$WEBSITE_FAIL_MARKER"
+: >"$LOG_FILE"
+if VEETBOT_TEST_FAIL_WEBSITE_SWITCH_ONCE=1 run_rollback \
+  >"$TEST_ROOT/website-failed.out" 2>&1; then
+  printf 'rollback with a failed website switch unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]] || {
+  printf 'application pointer was not restored after website failure\n' >&2
+  exit 1
+}
+[[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]] || {
+  printf 'documentation pointer was not restored after website failure\n' >&2
+  exit 1
+}
+[[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$PREVIOUS_ID" ]] || {
+  printf 'website pointer was not restored\n' >&2
+  exit 1
+}
+[[ "$(cat "$DOCKER_STATE")" == previous-image-id ]]
+
 rm -f -- "$FAIL_MARKER"
 : >"$LOG_FILE"
 if VEETBOT_TEST_READY_RELEASE=20260810-152244-bbbbbbb run_rollback \
@@ -227,6 +267,7 @@ if VEETBOT_TEST_READY_RELEASE=20260810-152244-bbbbbbb run_rollback \
 fi
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
 [[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$PREVIOUS_ID" ]]
 [[ "$(cat "$DOCKER_STATE")" == previous-image-id ]]
 
 : >"$LOG_FILE"
@@ -237,12 +278,14 @@ if VEETBOT_TEST_READY_RELEASE=20260810-152233-ABCDEF0 run_rollback \
 fi
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
 [[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$PREVIOUS_ID" ]]
 [[ "$(cat "$DOCKER_STATE")" == previous-image-id ]]
 
 : >"$LOG_FILE"
 run_rollback
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$TARGET_ID" ]]
 [[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$TARGET_ID" ]]
+[[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$TARGET_ID" ]]
 [[ "$(cat "$DOCKER_STATE")" == target-image-id ]]
 grep -Fq \
   'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any, cast
 from uuid import UUID
+
+import yaml
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.persistence.memory import (
@@ -15,6 +18,7 @@ from agent_core.adapters.persistence.memory import (
 )
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.bootstrap import _memory_uow_repositories
+from agent_core.config import PACKAGE_ROOT
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.policies import ExecutionTarget, TrustLevel
 from agent_core.domain.runs import Run, RunLimits, RunStatus
@@ -27,6 +31,15 @@ PRINCIPAL_ID = "principal-a"
 AGENT_ID = UUID("00000000-0000-0000-0000-000000000010")
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000020")
 RUN_ID = UUID("00000000-0000-0000-0000-000000000030")
+
+# The device timeout is an operator knob rather than a module constant, so a
+# test that asserts the shipped default reads the shipped document.
+_RUNTIME_LIMITS = cast(
+    dict[str, Any],
+    yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8")),
+)
+SHIPPED_DEVICE_LIMITS: dict[str, Any] = _RUNTIME_LIMITS["device"]
+SHIPPED_INVOCATION_TIMEOUT_SECONDS = int(SHIPPED_DEVICE_LIMITS["invocation_timeout_seconds"])
 
 
 def principal() -> Principal:

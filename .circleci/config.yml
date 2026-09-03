@@ -28,10 +28,33 @@ commands:
             - ~/.cache/uv
 
 jobs:
+  public-site:
+    docker:
+      - image: cimg/node:22.13
+    resource_class: small
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - 'website-npm-v1-{{ arch }}-{{ checksum "website/package-lock.json" }}'
+      - run:
+          name: Build, test, and lint public website
+          command: make test-website
+      - save_cache:
+          key: 'website-npm-v1-{{ arch }}-{{ checksum "website/package-lock.json" }}'
+          paths:
+            - ~/.npm
+      - persist_to_workspace:
+          root: website
+          paths:
+            - out
+
   static:
     docker:
       - image: cimg/python:3.12
-    resource_class: small
+    resource_class: medium
     steps:
       - checkout
       - install_uv
@@ -44,8 +67,25 @@ jobs:
           name: Install Pandoc
           command: sudo apt-get update && sudo apt-get install -y pandoc
       - run:
-          name: Static checks
-          command: make lint typecheck test-static test-deploy docs-check
+          name: Lint
+          command: make lint
+      - run:
+          name: Type check
+          command: make typecheck
+      - run:
+          name: Static tests
+          command: |
+            mkdir -p test-results/static
+            PYTEST_ADDOPTS="-n 2 --dist loadscope --junitxml=test-results/static/results.xml" \
+              make test-static
+      - store_test_results:
+          path: test-results/static
+      - run:
+          name: Deployment tests
+          command: make test-deploy
+      - run:
+          name: Documentation checks
+          command: make docs-check
       - run:
           name: Build downloadable client
           command: make client-build
@@ -62,7 +102,12 @@ jobs:
       - install_uv
       - run:
           name: Contract tests
-          command: make test-contract
+          command: |
+            mkdir -p test-results/contract
+            PYTEST_ADDOPTS="--junitxml=test-results/contract/results.xml" \
+              make test-contract
+      - store_test_results:
+          path: test-results/contract
 
   integration:
     docker:
@@ -82,8 +127,16 @@ jobs:
           name: Wait for PostgreSQL
           command: dockerize -wait tcp://localhost:5432 -timeout 60s
       - run:
-          name: Migrations and integration tests
-          command: make migrate test-integration
+          name: Migrations
+          command: make migrate
+      - run:
+          name: Integration tests
+          command: |
+            mkdir -p test-results/integration
+            PYTEST_ADDOPTS="--junitxml=test-results/integration/results.xml" \
+              make test-integration
+      - store_test_results:
+          path: test-results/integration
 
   sandbox:
     machine:
@@ -94,7 +147,12 @@ jobs:
       - install_uv
       - run:
           name: Real-runtime sandbox security gates
-          command: make test-sandbox
+          command: |
+            mkdir -p test-results/sandbox
+            PYTEST_ADDOPTS="--junitxml=test-results/sandbox/results.xml" \
+              make test-sandbox
+      - store_test_results:
+          path: test-results/sandbox
 
   apple:
     macos:
@@ -107,7 +165,10 @@ jobs:
           command: make test-apple
       - run:
           name: Apple client UI tests
-          command: make test-apple-ui
+          command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui
+      - store_artifacts:
+          path: build/apple-test-results
+          destination: apple-test-results
 
   apple-testflight:
     macos:
@@ -190,8 +251,10 @@ jobs:
     steps:
       - checkout
       - install_uv
+      - attach_workspace:
+          at: /tmp/veetbot-website
       - run:
-          name: Package immutable application and documentation release
+          name: Package immutable application, documentation, and website release
           command: |
             mkdir -p build/release
             release_id="$(date -u +%Y%m%d-%H%M%S)-${CIRCLE_SHA1:0:7}"
@@ -201,9 +264,15 @@ jobs:
             uv run --frozen --only-group docs mkdocs build --strict
             printf '%s\n' "$release_id" > site/release.txt
             tar -czf build/release/veetbot-docs.tar.gz -C site .
+            website_stage="$(mktemp -d)"
+            trap 'rm -rf -- "$website_stage"' EXIT
+            cp -a /tmp/veetbot-website/out/. "$website_stage/"
+            printf '%s\n' "$release_id" > "$website_stage/release.txt"
+            tar -czf build/release/veetbot-website.tar.gz -C "$website_stage" .
             cd build/release
             sha256sum veetbot-server.tar.gz > veetbot-server.tar.gz.sha256
             sha256sum veetbot-docs.tar.gz > veetbot-docs.tar.gz.sha256
+            sha256sum veetbot-website.tar.gz > veetbot-website.tar.gz.sha256
       - persist_to_workspace:
           root: build/release
           paths:
@@ -211,6 +280,8 @@ jobs:
             - veetbot-server.tar.gz.sha256
             - veetbot-docs.tar.gz
             - veetbot-docs.tar.gz.sha256
+            - veetbot-website.tar.gz
+            - veetbot-website.tar.gz.sha256
             - release-id
 
   deploy-app:
@@ -328,6 +399,9 @@ jobs:
             remote_docs_dir="/tmp/veetbot-docs-$CIRCLE_SHA1"
             remote_docs="$remote_docs_dir/veetbot-docs.tar.gz"
             remote_docs_checksum="$remote_docs.sha256"
+            remote_website_dir="/tmp/veetbot-website-$CIRCLE_SHA1"
+            remote_website="$remote_website_dir/veetbot-website.tar.gz"
+            remote_website_checksum="$remote_website.sha256"
             deployment_outcome="/tmp/veetbot-release/nginx-deployment-outcome"
             rm -f "$deployment_outcome"
             scp -P "${DEPLOY_PORT:-22}" nginx/veetbot.conf \
@@ -335,21 +409,30 @@ jobs:
             scp -P "${DEPLOY_PORT:-22}" deploy/nginx/deploy.sh \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_script"
             ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "install -d -m 0700 '$remote_docs_dir'"
+              "install -d -m 0700 '$remote_docs_dir' '$remote_website_dir'"
             scp -P "${DEPLOY_PORT:-22}" \
               /tmp/veetbot-release/veetbot-docs.tar.gz \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_docs"
             scp -P "${DEPLOY_PORT:-22}" \
               /tmp/veetbot-release/veetbot-docs.tar.gz.sha256 \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_docs_checksum"
+            scp -P "${DEPLOY_PORT:-22}" \
+              /tmp/veetbot-release/veetbot-website.tar.gz \
+              "$DEPLOY_USER@$DEPLOY_HOST:$remote_website"
+            scp -P "${DEPLOY_PORT:-22}" \
+              /tmp/veetbot-release/veetbot-website.tar.gz.sha256 \
+              "$DEPLOY_USER@$DEPLOY_HOST:$remote_website_checksum"
             if ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "VEETBOT_EXPECTED_RELEASE_ID='$expected_release_id' \
                  bash '$remote_script' '$remote_config' '$remote_docs' \
-                   '$remote_docs_checksum'; \
+                   '$remote_docs_checksum' '$remote_website' \
+                   '$remote_website_checksum'; \
                status=\$?; \
                rm -f '$remote_script' '$remote_config' '$remote_docs' \
-                 '$remote_docs_checksum'; \
+                 '$remote_docs_checksum' '$remote_website' \
+                 '$remote_website_checksum'; \
                rmdir '$remote_docs_dir' 2>/dev/null || true; \
+               rmdir '$remote_website_dir' 2>/dev/null || true; \
                exit \$status"; then
               printf 'published\n' >"$deployment_outcome"
             else
@@ -361,32 +444,57 @@ jobs:
               fi
             fi
       - run:
-          name: Verify public documentation release
+          name: Verify public documentation and website release
           command: |
             expected_release_id="$(cat /tmp/veetbot-release/release-id)"
             deployment_outcome="$(cat /tmp/veetbot-release/nginx-deployment-outcome)"
             if [[ "$deployment_outcome" == stale ]]; then
-              echo "Skipping documentation identity probe for stale release $expected_release_id"
+              echo "Skipping documentation and website identity probes for stale release $expected_release_id"
               exit 0
             fi
             [[ "$deployment_outcome" == published ]]
             docs_url="${DOCS_URL:-https://docs.veetbot.com}"
             attempt=0
             max_attempts=10
+            docs_verified=0
             while (( attempt < max_attempts )); do
               attempt=$((attempt + 1))
               if release_id="$(curl --fail --silent --show-error \
                    --connect-timeout 5 --max-time 15 \
                    "$docs_url/release.txt")" \
                  && [[ "$release_id" == "$expected_release_id" ]]; then
-                exit 0
+                docs_verified=1
+                break
               fi
               if (( attempt < max_attempts )); then
                 sleep 5
               fi
             done
-            echo "documentation did not report release $expected_release_id" >&2
-            exit 1
+            if [[ "$docs_verified" != 1 ]]; then
+              echo "documentation did not report release $expected_release_id" >&2
+              exit 1
+            fi
+
+            website_url="${WEBSITE_URL:-https://www.veetbot.com}"
+            attempt=0
+            website_verified=0
+            while (( attempt < max_attempts )); do
+              attempt=$((attempt + 1))
+              if release_id="$(curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   "$website_url/release.txt")" \
+                 && [[ "$release_id" == "$expected_release_id" ]]; then
+                website_verified=1
+                break
+              fi
+              if (( attempt < max_attempts )); then
+                sleep 5
+              fi
+            done
+            if [[ "$website_verified" != 1 ]]; then
+              echo "website did not report release $expected_release_id" >&2
+              exit 1
+            fi
 
 workflows:
   verify:
@@ -402,6 +510,7 @@ workflows:
           filters:
             branches:
               only: dev
+      - public-site
       - package-release:
           requires:
             - static
@@ -409,6 +518,7 @@ workflows:
             - integration
             - sandbox
             - apple
+            - public-site
           filters:
             branches:
               only: main

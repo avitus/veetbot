@@ -48,6 +48,11 @@ release gates. See the
 [current project state](docs/status/project-state.yaml) for the exact status of
 each milestone.
 
+Public product and policy pages are available at
+[www.veetbot.com](https://www.veetbot.com/), with technical documentation at
+[docs.veetbot.com](https://docs.veetbot.com/). The website source and its local
+verification commands live under [`website/`](website/README.md).
+
 ## Developer guide
 
 The quickest way to understand Veetbot is to run its deterministic local demo.
@@ -57,6 +62,7 @@ the event log without requiring a model API key.
 ### Prerequisites
 
 - Python 3.12 or newer
+- Node.js 22.13 or newer
 - [uv](https://docs.astral.sh/uv/)
 - Docker with the Compose plugin
 - `make`
@@ -174,6 +180,7 @@ its own [setup guide](clients/apple/README.md).
 | `make test-integration` | Run tests that need PostgreSQL or another local service |
 | `make docs` | Build the MkDocs site and standalone HTML documentation |
 | `make docs-serve` | Serve the documentation locally with live reload |
+| `make test-website` | Install, build, test, and lint the public static website |
 
 `make check` does not require a database or provider credential. Static and
 contract tests block network access; only explicitly enabled live tests may

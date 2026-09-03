@@ -105,6 +105,8 @@ class Settings:
     memory_api_enabled: bool = False
     persona_api_enabled: bool = False
     delegation_enabled: bool = False
+    device_channel_enabled: bool = False
+    device_sms_enabled: bool = False
     email_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
@@ -154,7 +156,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 161 operator-reviewable knobs. Metadata such as
+# The design corpus declares 164 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -292,6 +294,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "delegation.synthesis_reserve_model_calls",
             "delegation.synthesis_reserve_cost",
             "delegation.summary_max_bytes",
+            "device.invocation_timeout_seconds",
+            "device.ingest_daily_cap",
+            "device.invocation_poll_seconds",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -373,6 +378,9 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:delegation.child_max_model_calls": 1,
         "runtime/limits.yaml:delegation.child_max_tool_calls": 1,
         "runtime/limits.yaml:delegation.child_max_cost": 0.01,
+        "runtime/limits.yaml:device.invocation_timeout_seconds": 1,
+        "runtime/limits.yaml:device.ingest_daily_cap": 1,
+        "runtime/limits.yaml:device.invocation_poll_seconds": 1,
         "runtime/limits.yaml:delegation.child_wall_seconds": 1,
         "runtime/limits.yaml:delegation.synthesis_reserve_steps": 1,
         "runtime/limits.yaml:delegation.synthesis_reserve_model_calls": 1,
@@ -858,6 +866,10 @@ def validate_settings(
         raise ConfigurationError(
             "notification API and dispatch flags must be enabled or disabled together"
         )
+    if settings.device_channel_enabled != settings.device_sms_enabled:
+        raise ConfigurationError(
+            "device channel and SMS flags must be enabled or disabled together"
+        )
     gmail_credential_names = set(_GMAIL_CREDENTIAL_FILES)
     configured_gmail_credentials = gmail_credential_names & set(settings.credentials)
     if settings.email_enabled and configured_gmail_credentials != gmail_credential_names:
@@ -1093,6 +1105,8 @@ def _load_settings(
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
     persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
+    device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
+    device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     configured_gmail_files = {
         credential_name: (variable, values.get(variable, "").strip(), scope)
@@ -1233,6 +1247,8 @@ def _load_settings(
         memory_api_enabled=memory_api_enabled,
         persona_api_enabled=persona_api_enabled,
         delegation_enabled=delegation_enabled,
+        device_channel_enabled=device_channel_enabled,
+        device_sms_enabled=device_sms_enabled,
         email_enabled=email_enabled,
         push_provider=push_provider,
         apns_key_file=apns_key_file,

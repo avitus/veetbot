@@ -149,6 +149,32 @@ class PolicyRule(BaseModel):
     otherwise: PolicyDecisionType | None = None
 
 
+class ToolPolicyRule(BaseModel):
+    """A matrix entry keyed on one tool name instead of a side-effect class.
+
+    The side-effect matrix stays total: an entry decides for the one tool it
+    names, and every other tool in the class keeps the class's decision. A
+    profile uses one for a tool whose own mechanism already carries the control
+    the class demands.
+
+    `human_confirms_arguments` is a separate, explicit claim: this tool shows
+    the arguments to the human who completes the action, so the argument half of
+    the trust overlay would refuse what that human is looking at. Only a rule
+    declaring it gets that suppression. The origin half always applies and
+    follows the trust table's "May authorize" column, which is defense in depth
+    rather than a containment boundary: origin trust is scoped to the active
+    turn, so it does not survive the next user message.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool_name: str = Field(min_length=1, max_length=96)
+    decision: PolicyDecisionType
+    condition: PolicyCondition | None = None
+    otherwise: PolicyDecisionType | None = None
+    human_confirms_arguments: bool = False
+
+
 class HardlineRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -171,6 +197,7 @@ class LoadedRuleset(BaseModel):
     profile_sha256: str
     hardline_sha256: str
     rules: tuple[PolicyRule, ...]
+    tool_rules: tuple[ToolPolicyRule, ...] = ()
     hardline: tuple[HardlineRule, ...]
     default_effect: PolicyDecisionType
     unknown_tool_decision: PolicyDecisionType

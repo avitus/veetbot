@@ -40,6 +40,9 @@ configured clients use a separate settings window that resizes in both
 dimensions and remembers its frame. The main and settings windows persist their
 sizes and positions independently. Device-local text-size and font-style controls
 apply immediately throughout the client; system text sizing remains the default.
+On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
+an explicit accessible More menu so every destination remains usable at narrow
+split-view widths.
 
 Website Access creates and lists dedicated browser profiles. The app opens the
 server-provided isolated login ceremony only after a separate Continue in web

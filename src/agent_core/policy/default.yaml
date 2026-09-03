@@ -40,6 +40,15 @@ rules:
     decision: deny
   privileged:
     decision: deny
+tool_rules:
+  # The iOS compose sheet shows the owner the recipient and the body, and the
+  # Send tap that dispatches them is non-bypassable, so a second in-app approval
+  # would duplicate rather than add control (ADR-0081, ADR-0083). The
+  # external_message row above is unchanged for every other tool, and a turn
+  # whose origin cannot authorize still escalates to an approval.
+  device.sms.send:
+    decision: allow
+    human_confirms_arguments: true
 unknown_tool:
   decision: deny
 trust_overlay:

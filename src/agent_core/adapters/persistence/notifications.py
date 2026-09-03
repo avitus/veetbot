@@ -44,6 +44,7 @@ from agent_core.domain.devices import (
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.notifications import (
+    DEVICE_CONFINED_KINDS,
     TEST_NOTIFICATION_DEDUPE_PREFIX,
     DeliveryOutcome,
     NewNotification,
@@ -52,7 +53,6 @@ from agent_core.domain.notifications import (
     NotificationDelivery,
     NotificationKind,
     NotificationStatus,
-    test_notification_target_device_id,
 )
 from agent_core.ports.determinism import Clock
 
@@ -301,8 +301,8 @@ class InMemoryNotificationOutbox:
                     value.principal_id,
                     value.kind,
                 )
-                if value.kind is NotificationKind.TEST:
-                    target_device_id = test_notification_target_device_id(value.dedupe_key)
+                if value.kind in DEVICE_CONFINED_KINDS:
+                    target_device_id = value.target_device_id()
                     targets = [target for target in targets if target.device_id == target_device_id]
                 terminal_devices = {
                     delivery.device_id
@@ -1003,6 +1003,10 @@ def _pending_target_exists(provider_values: set[str] | None = None) -> ColumnEle
                     ":%",
                 )
             ),
+        ),
+        or_(
+            NotificationOutboxRow.kind != NotificationKind.DEVICE_INVOCATION.value,
+            NotificationOutboxRow.payload["device_id"].as_string() == cast(device.id, String),
         ),
     ]
     if provider_values is not None:

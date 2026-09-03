@@ -16,7 +16,7 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
-from agent_core.domain.devices import DeviceRegistration
+from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.schedules import (
@@ -31,6 +31,9 @@ from agent_core.domain.views import (
     ArtifactView,
     CancelResult,
     ContentBlock,
+    DeviceIngestResult,
+    DeviceInvocationResultView,
+    DeviceInvocationView,
     DeviceRegistrationResult,
     DeviceView,
     MemoryView,
@@ -279,6 +282,33 @@ class DeviceService(Protocol):
         device_id: UUID,
         idempotency_key: str,
     ) -> TestNotificationResult: ...
+
+    async def list_pending_invocations(
+        self,
+        principal: Principal,
+        device_id: UUID,
+    ) -> builtins.list[DeviceInvocationView]: ...
+
+    async def record_invocation_result(
+        self,
+        principal: Principal,
+        device_id: UUID,
+        invocation_id: UUID,
+        status: DeviceInvocationStatus,
+    ) -> DeviceInvocationResultView: ...
+
+
+class DeviceIngestService(Protocol):
+    async def ingest(
+        self,
+        principal: Principal,
+        device_id: UUID,
+        *,
+        channel: str,
+        sender: str,
+        body: str,
+        received_at: datetime,
+    ) -> DeviceIngestResult: ...
 
 
 class NotificationService(Protocol):

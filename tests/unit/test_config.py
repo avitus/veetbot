@@ -291,6 +291,47 @@ def test_notification_roles_must_change_together(enabled: str, disabled: str) ->
         )
 
 
+@pytest.mark.parametrize(
+    ("enabled", "disabled"),
+    [
+        ("AGENT_DEVICE_CHANNEL_ENABLED", "AGENT_DEVICE_SMS_ENABLED"),
+        ("AGENT_DEVICE_SMS_ENABLED", "AGENT_DEVICE_CHANNEL_ENABLED"),
+    ],
+)
+def test_device_channel_flags_must_change_together(enabled: str, disabled: str) -> None:
+    with pytest.raises(ConfigurationError, match="device channel and SMS"):
+        load_settings(
+            {
+                **base_environment(),
+                enabled: "1",
+                disabled: "0",
+            }
+        )
+
+
+def test_device_channel_flags_load_together() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_DEVICE_CHANNEL_ENABLED": "1",
+            "AGENT_DEVICE_SMS_ENABLED": "1",
+        }
+    )
+
+    assert settings.device_channel_enabled is True
+    assert settings.device_sms_enabled is True
+
+
+def test_device_channel_limits_are_versioned_knobs() -> None:
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert loaded["device"] == {
+        "invocation_timeout_seconds": 300,
+        "ingest_daily_cap": 500,
+        "invocation_poll_seconds": 2,
+    }
+
+
 def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
     key_file = tmp_path / "AuthKey_TEST.p8"
     key_file.write_text("test APNs private key material", encoding="ascii")
@@ -720,6 +761,21 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
         ),
         (
             "runtime/limits.yaml",
+            "device:\n  invocation_timeout_seconds: 0\n",
+            r"device\.invocation_timeout_seconds must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "device:\n  ingest_daily_cap: -1\n",
+            r"device\.ingest_daily_cap must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "device:\n  invocation_poll_seconds: 0\n",
+            r"device\.invocation_poll_seconds must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
             "model:\n  max_internal_attempts: -" + "9" * 400 + "\n",
             r"model\.max_internal_attempts must be at least 1",
         ),
@@ -893,13 +949,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_161_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_164_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 161
+    assert len(qualified_paths) == 164
+    assert {
+        "runtime/limits.yaml:device.invocation_timeout_seconds",
+        "runtime/limits.yaml:device.ingest_daily_cap",
+        "runtime/limits.yaml:device.invocation_poll_seconds",
+    } <= qualified_paths
     assert {
         "runtime/limits.yaml:delegation.max_children_per_call",
         "runtime/limits.yaml:delegation.max_live_children_per_parent",

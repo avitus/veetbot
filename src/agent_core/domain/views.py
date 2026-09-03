@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.devices import (
+    DeviceInvocationStatus,
     DeviceKind,
     DeviceStatus,
     PushEnvironment,
@@ -197,6 +198,7 @@ class DeviceView(BaseModel):
     push_token_updated_at: datetime | None
     push_token_invalidated_at: datetime | None
     muted_kinds: frozenset[NotificationKind]
+    capabilities: frozenset[str]
     status: DeviceStatus
     revoked_at: datetime | None
     last_seen_at: datetime
@@ -212,6 +214,42 @@ class DeviceRegistrationResult(BaseModel):
 class TestNotificationResult(BaseModel):
     notification_id: UUID | None
     replayed: bool = Field(default=False, exclude=True)
+
+
+class DeviceInvocationView(BaseModel):
+    """One pending device-scoped call, as the device's fetch route returns it."""
+
+    id: UUID
+    tool_name: str
+    arguments: dict[str, Any]
+    created_at: datetime
+    expires_at: datetime
+
+
+class DeviceInvocationList(BaseModel):
+    """Everything one device still owes an answer for, oldest first.
+
+    A device's pending queue is bounded by the invocation timeout rather than
+    by a page size, so this is a whole answer rather than a keyset page.
+    """
+
+    invocations: list[DeviceInvocationView]
+
+
+class DeviceInvocationResultView(BaseModel):
+    """The recorded terminal state of one device-scoped call."""
+
+    id: UUID
+    status: DeviceInvocationStatus
+    resolved_at: datetime | None
+
+
+class DeviceIngestResult(BaseModel):
+    """Where one ingested device message was routed, and whether it was a replay."""
+
+    duplicate: bool
+    session_id: UUID
+    run_id: UUID
 
 
 class NotificationInboxItem(BaseModel):

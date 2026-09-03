@@ -12,15 +12,24 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from pydantic import SecretStr
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
 from agent_core.adapters.push import FakePushTransport
 from agent_core.application.notification_dispatcher import DispatchProbe, NotificationDispatcher
+from agent_core.application.notification_producer import NotificationProducer
 from agent_core.application.notification_worker import NotificationWorker
 from agent_core.bootstrap import Composition, build, build_notification_worker
 from agent_core.config import AuthMode, DeploymentMode, PushProviderKind, SandboxMechanism
-from agent_core.domain.devices import PushProvider
+from agent_core.domain.devices import (
+    Device,
+    DeviceInvocation,
+    DeviceInvocationStatus,
+    DeviceKind,
+    DeviceStatus,
+    PushProvider,
+)
 from agent_core.domain.notifications import NewNotification, NotificationStatus
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import Clock, IdFactory
@@ -98,6 +107,74 @@ async def test_postgres_enqueue_wakes_only_after_transaction_commit() -> None:
             await asyncio.wait_for(waiting, timeout=1)
     finally:
         await listener.close()
+
+
+async def test_postgres_claim_does_not_mistake_an_unrelated_devices_provider_for_the_named_target() -> (  # noqa: E501
+    None
+):
+    """SQL twin of the in-memory claim-narrowing test: `_pending_target_exists`
+    must narrow DEVICE_INVOCATION by its payload device_id exactly as it
+    already narrows TEST by its dedupe key, so an unrelated device's own
+    provider eligibility can never justify claiming a notification confined
+    to a different, currently-unreachable device."""
+
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        owner = composition.principal
+        named_id = UUID(int=0x4E0000)
+        unrelated_id = UUID(int=0x4E0001)
+        invocation_id = UUID(int=0x4E0002)
+        run_id = UUID(int=0x4E0003)
+        named = device(device_id=named_id, client_device_id="pg-target-device").model_copy(
+            update={"tenant_id": owner.tenant_id, "principal_id": owner.principal_id}
+        )
+        unrelated = Device(
+            id=unrelated_id,
+            tenant_id=owner.tenant_id,
+            principal_id=owner.principal_id,
+            client_device_id="pg-unrelated-surface",
+            name="Unrelated surface",
+            kind=DeviceKind.SURFACE,
+            platform="telegram",
+            app_bundle_id=None,
+            push_provider=PushProvider.TELEGRAM,
+            push_token=SecretStr("telegram-chat-ref"),  # noqa: S106
+            push_environment=None,
+            muted_kinds=frozenset(),
+            status=DeviceStatus.ACTIVE,
+            last_seen_at=NOW,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        invocation = DeviceInvocation(
+            id=invocation_id,
+            tenant_id=owner.tenant_id,
+            device_id=named_id,
+            run_id=run_id,
+            tool_name="device.sms.send",
+            arguments={},
+            status=DeviceInvocationStatus.PENDING,
+            created_at=NOW,
+        )
+        producer = NotificationProducer(clock=composition.clock, ids=composition.ids)
+        async with composition.uow_factory() as uow:
+            await uow.devices.upsert(named, owner)
+            await uow.devices.upsert(unrelated, owner)
+            assert await producer.for_device_invocation(uow, invocation=invocation, device=named)
+
+            claimed = await uow.notification_outbox.claim_due(
+                NOW, 10, "notify-a", 30, frozenset({PushProvider.TELEGRAM})
+            )
+            assert claimed == []
+            [row] = await uow.notification_outbox.list(owner, limit=10)
+
+        assert row.status is NotificationStatus.PENDING
+        assert row.attempts == 0
+        assert row.claimed_by is None
 
 
 async def test_lean_production_notification_role_constructs_without_app_credentials(

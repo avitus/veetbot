@@ -31,6 +31,7 @@ from agent_core.application.services import (
     ArtifactService,
     BrowserGrantService,
     BrowserProfileService,
+    DeviceIngestService,
     DeviceService,
     MemoryReadService,
     NotificationService,
@@ -50,10 +51,13 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.devices import (
+    DeviceCapability,
+    DeviceInvocationStatus,
     DeviceKind,
     DeviceRegistration,
     PushEnvironment,
     PushProvider,
+    device_capability_issue,
     device_routing_issue,
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
@@ -75,6 +79,9 @@ from agent_core.domain.views import (
     ApprovalView,
     ArtifactView,
     ContentBlock,
+    DeviceIngestResult,
+    DeviceInvocationList,
+    DeviceInvocationResultView,
     DeviceView,
     MemoryView,
     NotificationInboxItem,
@@ -152,6 +159,9 @@ class ApplicationServices(Protocol):
 
     @property
     def devices(self) -> DeviceService: ...
+
+    @property
+    def device_ingest(self) -> DeviceIngestService: ...
 
     @property
     def notifications(self) -> NotificationService: ...
@@ -275,6 +285,7 @@ class DeviceRegistrationRequest(BaseModel):
     push_token: str | None = Field(default=None, min_length=1, max_length=8192)
     push_environment: str | None = Field(default=None, min_length=1, max_length=32)
     muted_kinds: tuple[str, ...] = Field(default=(), max_length=len(NotificationKind))
+    capabilities: tuple[str, ...] = Field(default=(), max_length=len(DeviceCapability))
 
     def registration(self) -> DeviceRegistration:
         kind = _required_device_enum(DeviceKind, self.kind, "device.kind_unknown")
@@ -297,13 +308,19 @@ class DeviceRegistrationRequest(BaseModel):
                 "device.muted_kind_duplicate",
                 "muted notification kinds must be unique",
             )
+        capabilities = frozenset(self.capabilities)
+        if len(capabilities) != len(self.capabilities):
+            raise DeviceValidationError(
+                "device.capability_duplicate",
+                "device capabilities must be unique",
+            )
         issue = device_routing_issue(
             kind=kind,
             provider=provider,
             token_present=self.push_token is not None,
             environment=environment,
             app_bundle_id_present=self.app_bundle_id is not None,
-        )
+        ) or device_capability_issue(kind=kind, capabilities=capabilities)
         if issue is not None:
             raise DeviceValidationError(issue.reason_code, issue.message)
         return DeviceRegistration(
@@ -316,7 +333,41 @@ class DeviceRegistrationRequest(BaseModel):
             push_token=None if self.push_token is None else SecretStr(self.push_token),
             push_environment=environment,
             muted_kinds=muted,
+            capabilities=capabilities,
         )
+
+
+class DeviceInvocationResultRequest(BaseModel):
+    """The single terminal outcome a device may post for one invocation.
+
+    Four tokens, not three: a client that watched its own deadline pass reports
+    `expired` rather than inventing a failure the owner never saw.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["sent", "cancelled", "failed", "expired"]
+
+    def terminal_status(self) -> DeviceInvocationStatus:
+        return DeviceInvocationStatus(self.status)
+
+
+class DeviceMessageRequest(BaseModel):
+    """One message captured on the owner's device, as the client posts it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str = Field(min_length=1, max_length=64)
+    sender: str = Field(min_length=1, max_length=64)
+    body: str = Field(min_length=1, max_length=4000)
+    received_at: datetime
+
+    @field_validator("received_at")
+    @classmethod
+    def received_at_is_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("received_at must carry a UTC offset")
+        return value
 
 
 def _required_device_enum[T: StrEnum](enum_type: type[T], value: str, reason: str) -> T:
@@ -1208,6 +1259,61 @@ def create_app(
 
     if settings.notification_api_enabled:
         app.include_router(notification_router)
+
+    device_channel_router = APIRouter()
+
+    @device_channel_router.get(
+        "/v1/devices/{device_id}/invocations",
+        openapi_extra={"required_scope": "device.read"},
+    )
+    async def list_device_invocations(
+        response: Response,
+        device_id: UUID,
+        authenticated: Annotated[Principal, secured("device.read")],
+    ) -> DeviceInvocationList:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return DeviceInvocationList(
+            invocations=await services.devices.list_pending_invocations(authenticated, device_id)
+        )
+
+    @device_channel_router.post(
+        "/v1/devices/{device_id}/invocations/{invocation_id}/result",
+        openapi_extra={"required_scope": "device.write"},
+    )
+    async def record_device_invocation_result(
+        device_id: UUID,
+        invocation_id: UUID,
+        body: DeviceInvocationResultRequest,
+        authenticated: Annotated[Principal, secured("device.write")],
+    ) -> DeviceInvocationResultView:
+        return await services.devices.record_invocation_result(
+            authenticated,
+            device_id,
+            invocation_id,
+            body.terminal_status(),
+        )
+
+    @device_channel_router.post(
+        "/v1/devices/{device_id}/messages",
+        status_code=202,
+        openapi_extra={"required_scope": "device.write"},
+    )
+    async def ingest_device_message(
+        device_id: UUID,
+        body: DeviceMessageRequest,
+        authenticated: Annotated[Principal, secured("device.write")],
+    ) -> DeviceIngestResult:
+        return await services.device_ingest.ingest(
+            authenticated,
+            device_id,
+            channel=body.channel,
+            sender=body.sender,
+            body=body.body,
+            received_at=body.received_at,
+        )
+
+    if settings.device_channel_enabled:
+        app.include_router(device_channel_router)
 
     memory_router = APIRouter()
 

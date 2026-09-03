@@ -24,23 +24,30 @@ public struct AppleDeviceDescriptor: Equatable, Sendable {
     public let platform: String
     public let bundleID: String
     public let environment: PushEnvironment
+    public let capabilities: [String]
 
     public init(
         name: String,
         kind: DeviceKind,
         platform: String,
         bundleID: String,
-        environment: PushEnvironment
+        environment: PushEnvironment,
+        capabilities: [String] = []
     ) {
         self.name = name
         self.kind = kind
         self.platform = platform
         self.bundleID = bundleID
         self.environment = environment
+        self.capabilities = capabilities
     }
 
+    /// This device as the server should see it, declaring whichever
+    /// device-scoped capabilities the owner has switched on. The capability
+    /// set rides into the registration digest, so a change re-registers rather
+    /// than replaying the previous body.
     @MainActor
-    public static var current: AppleDeviceDescriptor {
+    public static func current(capabilities: [String] = []) -> AppleDeviceDescriptor {
         #if os(iOS)
         let name = UIDevice.current.name
         let kind = DeviceKind.mobile
@@ -60,7 +67,8 @@ public struct AppleDeviceDescriptor: Equatable, Sendable {
             kind: kind,
             platform: platform,
             bundleID: Bundle.main.bundleIdentifier ?? "com.veetbot.apple",
-            environment: environment
+            environment: environment,
+            capabilities: capabilities
         )
     }
 }
@@ -99,7 +107,8 @@ public actor DeviceRegistrationCoordinator {
             platform: descriptor.platform,
             appBundleID: descriptor.bundleID,
             pushToken: deviceToken.map { String(format: "%02x", $0) }.joined(),
-            pushEnvironment: descriptor.environment
+            pushEnvironment: descriptor.environment,
+            capabilities: descriptor.capabilities
         )
         do {
             let device = try await api.registerDevice(

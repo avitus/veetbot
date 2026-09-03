@@ -42,9 +42,10 @@ durable, content-free notification path to one transport. It includes:
   credential and the database credential and nothing else;
 - one push transport, Apple Push Notification service (APNs), behind a port a
   fake transport satisfies under the same contract;
-- exactly five trigger transitions: an approval is requested, a run waits for
+- exactly six trigger transitions: an approval is requested, a run waits for
   user input, a run fails, a scheduled occurrence's run reaches a terminal
-  state, and a scheduled occurrence is missed or skipped;
+  state, a scheduled occurrence is missed or skipped, and a device
+  invocation is pending (Milestone 24, ADR-0081);
 - content-free payloads that deep-link the Apple client to the session, run,
   approval, or question;
 - device and notification routes with exact scopes, an offline notification
@@ -308,8 +309,9 @@ The client fetches details after the tap, when it is online and authenticated.
 
 ## Triggers
 
-Exactly five transitions enqueue, and each is observed where the corpus
-already records it:
+Exactly six transitions enqueue, and each is observed where the corpus
+already records it — the sixth, a pending device invocation, arriving with
+Milestone 24 (ADR-0081):
 
 ```text
 trigger                                   observed in                            kind
@@ -324,6 +326,8 @@ schedule.occurrence.{missed,              scheduling materializer, same         
   skipped_overlap,                        transaction as the occurrence
   authorization_failed,
   configuration_failed}
+device_invocation.created                 device-invocation write path, same     device_invocation
+                                          transaction as the device_invocations row
 ```
 
 The single terminal writer in `runtime/executor.py` is the only code that
@@ -348,7 +352,7 @@ interactive run finished is, by construction, watching it. A surface reply
 producer that is not a run or schedule transition is Milestone 15's host
 health check, which enqueues only the `ops_alert` and `ops_recovered` kinds
 through the outbox port with its own tenant- and episode-scoped deduplication
-keys and cool-down; it adds no trigger to the five above.
+keys and cool-down; it adds no trigger to the six above.
 
 ## Dispatch
 
@@ -838,6 +842,9 @@ content, tokens, or the key.
    and surface replies enqueue nothing; the Milestone 15 health check is the
    only non-transition producer and enqueues only the two ops kinds.
    Registered as `gate.notify.trigger_catalog`, case. **M12.**
+
+   Milestone 24 widens the catalog to six with the pending device invocation;
+   the sixth trigger's behavior is gated by that milestone (ADR-0081).
 9. **Repeated triggers deduplicate.** Generated repeats — a retry after an
    unknown commit, a repeated hook invocation, two processes recording one
    transition — produce exactly one outbox row per deduplication key.
@@ -910,5 +917,6 @@ content, tokens, or the key.
    wants it, the kind is added to the closed set and defaults to muted.
 4. `capabilities` and `granted_scopes` from Section 29.6 wait for the device
    channel. Landing them now as empty columns would be speculative.
+   Milestone 24 lands the `capabilities` half (ADR-0081).
 5. Actionable lock-screen approval is a new authorization layer, not a
    notification feature, and needs its own ADR.

@@ -78,6 +78,45 @@ async def test_context_planner_persists_and_rotates_a_session_plan() -> None:
     assert conflict_rotated.model_id == "fake:other"
 
 
+async def test_context_planner_reconciles_device_tools_before_reusing_a_cached_plan() -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    attached: list[UUID] = []
+
+    async def attach(session_id: UUID, _principal) -> None:  # type: ignore[no-untyped-def]
+        attached.append(session_id)
+
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        attach_device_tools=attach,
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    created = await planner.plan(session(), agent(), principal(), model)
+    reused = await planner.plan(session(), agent(), principal(), model)
+
+    assert reused == created
+    assert attached == [session().id, session().id]
+
+
 async def test_context_planner_rotates_a_plan_from_the_previous_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

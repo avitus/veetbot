@@ -12,6 +12,7 @@ from agent_core.adapters.persistence.notifications import InMemoryDeviceRegistry
 from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
     Device,
+    DeviceCapability,
     DeviceCursor,
     DeviceKind,
     DeviceStatus,
@@ -33,6 +34,7 @@ def device(
     principal_id: str = PRINCIPAL_ID,
     token: str | None = "push-token-a",  # noqa: S107
     muted_kinds: frozenset[NotificationKind] = frozenset(),
+    capabilities: frozenset[str] = frozenset(),
     created_at: datetime = NOW,
 ) -> Device:
     return Device(
@@ -49,6 +51,7 @@ def device(
         push_environment=None if token is None else PushEnvironment.SANDBOX,
         push_token_updated_at=None if token is None else created_at,
         muted_kinds=muted_kinds,
+        capabilities=capabilities,
         status=DeviceStatus.ACTIVE,
         last_seen_at=created_at,
         created_at=created_at,
@@ -191,6 +194,30 @@ async def assert_device_tokens_move_and_lifecycle_removes_targets(
     assert Device.model_validate(invalidated_surface.model_dump()) == invalidated_surface
 
 
+async def assert_declared_capabilities_survive_the_round_trip(
+    registry: DeviceRegistry,
+) -> None:
+    declaring = device(capabilities=frozenset({DeviceCapability.SMS_SEND.value}))
+    stored = await registry.upsert(declaring, principal())
+
+    assert stored.capabilities == frozenset({"device.sms.send"})
+    assert await registry.get(declaring.id, principal()) == stored
+
+    plain = device(
+        device_id=UUID(int=DEVICE_ID.int + 30),
+        client_device_id="client-device-plain",
+        token="push-token-p",  # noqa: S106
+    )
+    assert (await registry.upsert(plain, principal())).capabilities == frozenset()
+
+    withdrawn = await registry.upsert(
+        declaring.model_copy(update={"capabilities": frozenset()}),
+        principal(),
+    )
+    assert withdrawn.capabilities == frozenset()
+    assert (await registry.get(declaring.id, principal())).capabilities == frozenset()
+
+
 async def assert_device_listing_is_stable(registry: DeviceRegistry) -> None:
     values = [
         device(
@@ -215,6 +242,10 @@ async def test_device_registration_is_idempotent_and_principal_scoped() -> None:
 
 async def test_device_tokens_move_and_lifecycle_removes_targets() -> None:
     await assert_device_tokens_move_and_lifecycle_removes_targets(InMemoryDeviceRegistry())
+
+
+async def test_declared_capabilities_survive_the_round_trip() -> None:
+    await assert_declared_capabilities_survive_the_round_trip(InMemoryDeviceRegistry())
 
 
 async def test_device_listing_is_stable() -> None:

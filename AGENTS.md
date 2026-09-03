@@ -78,25 +78,25 @@ validates the floor, and no trailer means lane A.
 | The memory read API and the native memory browser | `memory-read-api-and-browser.md` |
 | The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
+| The device channel and SMS through the owner's iPhone | `device-channel-and-sms.md` |
+| The WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
 ## Authority and conflicts
 - The **engineering plan** holds the normative requirements and acceptance criteria; **project state** (`docs/status/project-state.yaml`) determines what work is authorized; **code and tests** describe actual behavior.
-- Do **not** silently modify requirements to match an implementation; propose
-  divergence explicitly. An architectural conflict with the plan requires a
-  **proposed ADR** in `docs/adr/` (index at `docs/adr/index.md`).
+- Do **not** silently modify requirements to match an implementation; propose divergence explicitly.
+  An architectural conflict with the plan requires a **proposed ADR** in `docs/adr/` (index at `docs/adr/index.md`).
 - Security requirements and acceptance criteria must **not** be weakened without explicit human approval.
 
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
-- Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15
-  proceed in that order (ADR-0061); 18 through 22 are parallel workstreams
-  (ADRs 0071–0073, 0077, 0079). Milestone 21 is limited to adaptive memory
-  distillation, 22 to the persona surface. Model routing and the plan's
-  remaining roadmap items are not authorized. The grouped summary with each
-  in-progress milestone's open items is `docs/status/milestones.md`.
+- Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
+  18 through 25 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082). Milestone 21 is limited to adaptive
+  memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
+  the owner's iPhone, and 25 to the WhatsApp business surface. Model routing and the plan's remaining roadmap items
+  are not authorized. The grouped summary with each in-progress milestone's open items is `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

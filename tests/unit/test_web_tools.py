@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -130,6 +131,9 @@ async def test_fetch_returns_page_content_as_external_untrusted() -> None:
         "title": "Ada Lovelace",
         "content": "# Ada Lovelace\n\nA public biographical record.",
     }
+    assert result.content == [
+        TextPart(text="Provider: fake-web\n\n# Ada Lovelace\n\nA public biographical record.")
+    ]
     assert provider.fetches == ["https://example.org/ada"]
 
 
@@ -179,7 +183,53 @@ async def test_provider_failures_keep_their_stable_kind_and_retryability(
         assert result.failure.kind is kind
         assert result.failure.reason_code == reason_code
         assert result.failure.retryable is retryable
+        assert result.failure.external_text == '{"provider":"fake-web"}'
+        assert result.structured == {"provider": "fake-web"}
         assert result.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+@dataclass
+class HangingWebProvider(FakeWebProvider):
+    name: str = "hanging-web"
+
+    async def search(self, request: WebSearchRequest) -> tuple[WebSearchResult, ...]:
+        del request
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def fetch(self, url: str) -> WebPage:
+        del url
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        (WebSearchTool(HangingWebProvider()), {"query": "Ada"}),
+        (WebFetchTool(HangingWebProvider()), {"url": "https://example.org/ada"}),
+    ],
+)
+async def test_web_tool_deadline_reports_the_selected_provider(
+    tool: WebSearchTool | WebFetchTool,
+    arguments: dict[str, object],
+) -> None:
+    context = replace(tool_context(), timeout_seconds=0.01)
+
+    async with asyncio.timeout(0.2):
+        result = await tool.execute(dict(arguments), context)
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.kind is ToolFailureKind.TRANSPORT
+    assert result.failure.reason_code == "tool.web.provider_unavailable"
+    assert result.failure.retryable is True
+    assert result.failure.external_text == '{"provider":"hanging-web"}'
+    assert result.structured == {"provider": "hanging-web"}
+
+
+def test_web_fetch_allows_slow_progressing_extraction_beyond_provider_io_timeout() -> None:
+    assert WebFetchTool.spec.timeout_seconds > 30
 
 
 @pytest.mark.parametrize(
@@ -300,6 +350,11 @@ async def test_fetch_bounds_multibyte_content_before_building_both_output_shapes
     assert isinstance(result.structured, dict)
     structured_content = result.structured["content"]
     assert isinstance(structured_content, str)
-    assert result.content == [TextPart(text=structured_content)]
-    assert len(structured_content.encode("utf-8")) <= WebFetchTool.spec.maximum_output_bytes
+    assert result.content == [TextPart(text="Provider: fake-web\n\n" + structured_content)]
+    rendered = json.dumps(
+        [part.model_dump(mode="json") for part in result.content],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert len(rendered) <= WebFetchTool.spec.maximum_output_bytes
     assert structured_content.encode("utf-8").decode("utf-8") == structured_content

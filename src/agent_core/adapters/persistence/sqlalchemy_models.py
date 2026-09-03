@@ -1272,8 +1272,17 @@ class DeviceRow(Base):
             "jsonb_typeof(muted_kinds) = 'array' AND muted_kinds <@ "
             '\'["approval_requested","question_asked","run_failed",'
             '"schedule_run_finished","schedule_occurrence_skipped",'
-            '"ops_alert","ops_recovered","test"]\'::jsonb',
+            '"ops_alert","ops_recovered","test","device_invocation"]\'::jsonb',
             name="device_muted_kinds_closed",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(capabilities) = 'array' AND capabilities <@ "
+            "'[\"device.sms.send\"]'::jsonb",
+            name="device_capabilities_closed",
+        ),
+        CheckConstraint(
+            "kind <> 'surface' OR capabilities = '[]'::jsonb",
+            name="device_surface_capabilities",
         ),
         Index(
             "uq_devices_active_push_token",
@@ -1305,6 +1314,7 @@ class DeviceRow(Base):
     push_token_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     push_token_invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     muted_kinds: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    capabilities: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     status: Mapped[str] = mapped_column(String(32))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -1330,7 +1340,7 @@ class NotificationOutboxRow(Base):
         CheckConstraint(
             "kind IN ('approval_requested','question_asked','run_failed',"
             "'schedule_run_finished','schedule_occurrence_skipped','ops_alert',"
-            "'ops_recovered','test')",
+            "'ops_recovered','test','device_invocation')",
             name="notification_kind_closed",
         ),
         CheckConstraint(
@@ -1513,3 +1523,69 @@ class PersonaNominationRow(Base):
     nominated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     affirmed_version: Mapped[int | None] = mapped_column(Integer)
+
+
+class DeviceInvocationRow(Base):
+    __tablename__ = "device_invocations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','sent','cancelled','failed','expired')",
+            name="status_closed",
+        ),
+        Index(
+            "ix_device_invocations_device_status_created",
+            "device_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    device_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    tool_name: Mapped[str] = mapped_column(Text)
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DeviceIngestReceiptRow(Base):
+    __tablename__ = "device_ingest_receipts"
+
+    device_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("devices.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    channel: Mapped[str] = mapped_column(String(64), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL")
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL")
+    )
+
+
+class DeviceTriageSessionRow(Base):
+    __tablename__ = "device_triage_sessions"
+
+    device_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("devices.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    channel: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )

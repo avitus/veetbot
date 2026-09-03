@@ -65,6 +65,15 @@ func nextPageCursor(
     return cursor
 }
 
+/// Whatever owns the platform's push registration — the application delegate
+/// in the shipping app. A capability the owner switches on has to reach the
+/// server through a fresh registration, and only the delegate may ask the
+/// operating system for the token that carries it.
+@MainActor
+public protocol PushRegistrationRequesting: AnyObject {
+    func requestPushRegistration()
+}
+
 @MainActor
 public final class ChatViewModel: ObservableObject {
     @Published public private(set) var history: [SessionHistoryEntry] = []
@@ -86,6 +95,15 @@ public final class ChatViewModel: ObservableObject {
     /// ceremony so no view can offer it after the ceremony ends.
     @Published public private(set) var websiteAuthenticationLaunchURL: URL?
     @Published public private(set) var isManagingWebsiteAccess = false
+    /// The `device.sms.send` invocation whose compose sheet the owner should
+    /// see now, if any. Its recipient and body live only here and in the sheet.
+    @Published public private(set) var pendingSmsInvocation: SmsInvocation?
+    /// This installation's server-side device id, learned from its own
+    /// registration. Nil until the push token has been registered this launch.
+    @Published public private(set) var registeredDeviceID: UUID?
+
+    /// Set by the application delegate when it attaches.
+    public weak var pushRegistrar: (any PushRegistrationRequesting)?
 
     public let runState: RunStateReducer
 
@@ -105,6 +123,12 @@ public final class ChatViewModel: ObservableObject {
     private var historyReconciliationID: UUID?
     private var pendingSubmission: (text: String, key: String)?
     private var pendingNotificationPayload: NotificationPushPayload?
+    private var smsInvocations = SmsInvocationQueue()
+    private var smsInvocationDeviceID: UUID?
+    /// Held rather than rebuilt per call: the service remembers the results it
+    /// still owes the server, and a fresh instance would forget them.
+    private var smsService: DeviceInvocationService?
+    private var smsServiceBaseURL: URL?
 
     public init(
         tokenStore: any TokenStore = KeychainTokenStore(),
@@ -197,6 +221,7 @@ public final class ChatViewModel: ObservableObject {
         browserProfiles = []
         selectedBrowserProfileID = nil
         clearWebsiteAuthenticationState()
+        clearPendingSmsInvocations()
         await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
         isConfigured = false
@@ -220,12 +245,27 @@ public final class ChatViewModel: ObservableObject {
                 using: api
             )
             notificationFeatureAvailable = outcome != .unsupported
+            if case .registered(let deviceID) = outcome {
+                registeredDeviceID = deviceID
+            }
         } catch {
             present(error)
         }
     }
 
+    /// Asks the operating system for the push token again so the delegate
+    /// re-registers this device with whatever capabilities are now declared.
+    /// The registration digest covers the capability set, so the repost is a
+    /// real update rather than an idempotent replay.
+    public func requestDeviceCapabilityRegistration() {
+        pushRegistrar?.requestPushRegistration()
+    }
+
     public func openNotification(_ payload: NotificationPushPayload) async {
+        if payload.kind == .deviceInvocation {
+            await openDeviceInvocation(payload)
+            return
+        }
         guard let link = NotificationDeepLinkReducer.reduce(payload) else { return }
         guard let api else {
             pendingNotificationPayload = payload
@@ -263,6 +303,82 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             present(error)
         }
+    }
+
+    /// The owner tapped a device-invocation push. The payload names only the
+    /// invocation and the device, so the arguments come from the authenticated
+    /// fetch rather than from the notification.
+    private func openDeviceInvocation(_ payload: NotificationPushPayload) async {
+        guard let deviceID = payload.deviceID else { return }
+        guard api != nil else {
+            pendingNotificationPayload = payload
+            return
+        }
+        await loadSmsInvocations(deviceID: deviceID, reportingFailures: true)
+    }
+
+    /// Re-reads the pending queue when the app comes forward, so an invocation
+    /// whose push was missed still reaches the owner before it expires.
+    public func refreshPendingSmsInvocations() async {
+        guard let deviceID = registeredDeviceID else { return }
+        await loadSmsInvocations(deviceID: deviceID, reportingFailures: false)
+    }
+
+    /// One service per (connection, device), kept alive so the results it owes
+    /// the server survive between a failed post and the next recovery fetch.
+    private func smsInvocationService(for deviceID: UUID) -> DeviceInvocationService? {
+        guard let api else { return nil }
+        if let smsService, smsInvocationDeviceID == deviceID, smsServiceBaseURL == baseURL {
+            return smsService
+        }
+        let service = DeviceInvocationService(api: api, deviceID: deviceID)
+        smsService = service
+        smsInvocationDeviceID = deviceID
+        smsServiceBaseURL = baseURL
+        return service
+    }
+
+    private func loadSmsInvocations(deviceID: UUID, reportingFailures: Bool) async {
+        guard let service = smsInvocationService(for: deviceID) else { return }
+        do {
+            let invocations = try await service.nextSmsInvocations()
+            smsInvocations.merge(invocations)
+            pendingSmsInvocation = smsInvocations.presented
+        } catch {
+            // The recovery fetch is best-effort: an invocation this client
+            // never sees expires server-side and surfaces as `tool.device_offline`
+            // in the conversation, which beats an alert on every app launch.
+            if reportingFailures { present(error) }
+        }
+    }
+
+    /// Posts the owner's outcome for the invocation that was on screen and
+    /// brings forward whatever is waiting behind it. An outcome for anything
+    /// other than the presented invocation — a sheet dismissal that arrives
+    /// after the head advanced — settles nothing and posts nothing.
+    public func completeSmsInvocation(
+        _ invocation: SmsInvocation,
+        with result: DeviceInvocationResult
+    ) async {
+        guard smsInvocations.settle(invocation.id) else { return }
+        pendingSmsInvocation = smsInvocations.presented
+        guard
+            let deviceID = smsInvocationDeviceID ?? registeredDeviceID,
+            let service = smsInvocationService(for: deviceID)
+        else { return }
+        await service.complete(invocation, with: result)
+    }
+
+    /// Drops every invocation this client was holding without posting a
+    /// result: the credential that authorized the fetch is gone, so the server
+    /// expires whatever is outstanding.
+    private func clearPendingSmsInvocations() {
+        smsInvocations.removeAll()
+        smsInvocationDeviceID = nil
+        smsService = nil
+        smsServiceBaseURL = nil
+        registeredDeviceID = nil
+        pendingSmsInvocation = nil
     }
 
     public func acknowledgeNotificationNavigation() {

@@ -1,0 +1,73 @@
+# Canonical gate registry entries for Milestone 25 WhatsApp business surface.
+- id: gate.whatsapp.signature_required
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Signature required.** A webhook body whose X-Hub-Signature-256 is missing or wrong is rejected content-free before parsing; nothing content-bearing is stored."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.handshake_confined
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Handshake confined.** The subscription challenge is echoed only on a constant-time verify-token match."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.receipt_idempotent
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Receipt idempotency.** A replayed Meta message id processes once through the external_update_id receipt key."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.unpaired_denied
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Unpaired denied.** An unpaired WhatsApp sender yields the rejected disposition and a content-free receipt, and creates nothing else."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.token_confinement
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Token confinement.** The three WhatsApp secrets appear in no event, result, log, or export; their rule families cover scanner and redaction."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.transport_confined
+  milestone: 25
+  kind: structural
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Transport confined.** Adapter egress reaches only the fixed Meta Graph origin over HTTPS with no redirects and bounded bodies."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.template_outside_window
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Template outside the window.** A send on a channel idle past twenty-four hours goes only through the approved template path; freeform is refused with a closed reason code."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.reply_chunked_redacted
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Replies chunked and redacted.** Outbound replies pass the surface redaction families and the 4096-character chunking with per-chunk receipts."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.scope_ceiling
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Scope ceiling.** Every message resolves the pairing's granted scopes intersected with the principal's current scopes, fresh."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.loopback_bind
+  milestone: 25
+  kind: structural
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Loopback bind.** The listener binds loopback only; the structural check walks the bind the way the operational-hardening gate does."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.persistence_isolated
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Persistence isolated.** WhatsApp rows ride the surface tables' tenant RLS; a second tenant sees nothing."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.whatsapp.default_off
+  milestone: 25
+  kind: case
+  spec: docs/plan/whatsapp-surface.md#hard-gates
+  statement: "**Default off.** With the flag unset, no listener starts, no adapter or provider registers, and no route is proxied."
+  check: tests/gates/pending.py::pending_gate

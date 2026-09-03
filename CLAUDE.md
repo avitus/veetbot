@@ -10,7 +10,7 @@ Do not duplicate the engineering plan here. Tool-specific note: when running in
 Claude Code, treat `make docs-check` as the pre-submit gate for
 documentation-only changes.
 
-The plan is expanded by twenty-seven detailed-design documents under
+The plan is expanded by twenty-nine detailed-design documents under
 `docs/plan/`,
 and `AGENTS.md` has the routing table. Before concluding that something is
 undesigned, check `docs/plan/readiness.md` — it traces every milestone's work

@@ -276,7 +276,14 @@ def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive")
     active_turn: list[object] = []
     for item in reversed(checkpoint.conversation):
         active_turn.append(item)
-        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
+        if isinstance(item, UserMessage):
+            # The turn is opened by the newest user message, whatever its
+            # trust. A device-ingested message is not laundered by an owner
+            # message earlier in the same standing session, and the checkpoint
+            # stamp cannot carry the fact either — the context builder rewrites
+            # it from request metadata at the top of every step.
+            if item.trust is not TrustLevel.USER:
+                return item.trust
             break
     else:
         return TrustLevel.EXTERNAL_UNTRUSTED
@@ -1068,6 +1075,7 @@ class ToolPipeline:
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
                 network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
+                device_id=tool.spec.device_id,
             ),
             workspace=(
                 None
@@ -1383,6 +1391,7 @@ class ToolPipeline:
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
                 network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
+                device_id=tool.spec.device_id,
                 server_id=tool.spec.server_id,
             ),
             evaluated_at=self._clock.now(),
@@ -1680,8 +1689,10 @@ class ToolPipeline:
             name,
             pinned.version if pinned is not None else checkpoint.pinned_tool_versions.get(name),
             tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
             source=None if pinned is None else pinned.source,
             server_id=None if pinned is None else pinned.server_id,
+            device_id=None if pinned is None else pinned.device_id,
         )
 
     async def _deny_invocation(

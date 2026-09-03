@@ -102,6 +102,8 @@ def test_required_make_targets_exist() -> None:
         "production-check",
         "client-build",
         "docs",
+        "website-install",
+        "test-website",
     ):
         assert f"{target}:" in text
 
@@ -455,12 +457,14 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     manual = deployment.partition("## Manual rollback")[2].partition("## Accepted limitations")[0]
     app_precondition = 'grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"'
     docs_precondition = 'test "$(cat "$docs_target/release.txt")" = "$target_id"'
+    website_precondition = 'test "$(cat "$website_target/release.txt")" = "$target_id"'
     image_validation = 'docker image inspect "agent-core-sandbox:$target_id"'
     image_tag = 'docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production'
     readiness_identity = 'tolower($1) == "x-veetbot-release"'
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
+    website_switch = 'mv -Tf "$website_next" /opt/veetbot/shared/website/current'
     writer_stop = 'sudo systemctl stop "${managed_units[@]}"'
     compatibility_query = "SELECT count(*) FROM schedule_revisions"
     external_timeout = "timeout --signal=TERM --kill-after=5s 20s"
@@ -475,17 +479,23 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     )
 
     assert 'docs_target="/opt/veetbot/shared/docs/releases/$target_id"' in manual
+    assert 'website_target="/opt/veetbot/shared/website/releases/$target_id"' in manual
     assert 'test -d "$docs_target"' in manual
     assert 'test -f "$docs_target/release.txt"' in manual
     assert app_precondition in manual
     assert docs_precondition in manual
+    assert website_precondition in manual
+    assert 'test -d "$previous_website_target"' in manual
+    assert 'test -f "$previous_website_target/release.txt"' in manual
     assert image_validation in manual
     assert image_tag in manual
     assert readiness_identity in manual
     assert "IGNORECASE" not in manual
     assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
+    assert 'ln -s "$website_target" "$website_next"' in manual
     assert docs_switch in manual
+    assert website_switch in manual
     unit_list_start = manual.index("managed_units=(")
     unit_list = manual[unit_list_start : manual.index(")", unit_list_start)]
     for unit in required_units:
@@ -493,16 +503,22 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert 'for unit in "${managed_units[@]}"; do' in manual
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
+    assert manual.index(image_validation) < manual.index(website_switch)
     assert manual.index(image_tag) < manual.index(app_switch)
     assert manual.index(image_tag) < manual.index(docs_switch)
+    assert manual.index(image_tag) < manual.index(website_switch)
     assert manual.index(app_precondition) < manual.index(app_switch)
     assert manual.index(app_precondition) < manual.index(docs_switch)
+    assert manual.index(app_precondition) < manual.index(website_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index(docs_precondition) < manual.index(website_switch)
+    assert manual.index(website_precondition) < manual.index(website_switch)
     assert manual.index("flock -w 900 9") < manual.index(writer_stop)
     assert manual.index(writer_stop) < manual.index(compatibility_query)
     assert manual.index(compatibility_query) < manual.index(app_switch)
     assert manual.index(compatibility_query) < manual.index(docs_switch)
+    assert manual.index(compatibility_query) < manual.index(website_switch)
     assert external_timeout in manual
     assert connection_timeout in manual
     assert statement_timeout in manual
@@ -510,6 +526,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     validation_position = manual.index(unit_process_validation)
     assert manual.index(app_switch) < restart_position < validation_position
     assert manual.index(docs_switch) < restart_position < validation_position
+    assert manual.index(website_switch) < restart_position < validation_position
     assert manual.index(unit_process_validation) < manual.rindex("rollback_pending=0")
 
 
@@ -518,10 +535,12 @@ def test_manual_rollback_has_failure_injection_coverage() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert "VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE" in harness
+    assert "VEETBOT_TEST_FAIL_WEBSITE_SWITCH_ONCE" in harness
     assert "VEETBOT_TEST_READY_RELEASE" in harness
     assert "rollback with a mismatched readiness identity unexpectedly succeeded" in harness
     assert "application pointer was not restored" in harness
     assert "documentation pointer was not restored" in harness
+    assert "website pointer was not restored" in harness
     assert "production image tag was not restored" in harness
     assert "deploy/app/rollback.test.sh" in makefile
 
@@ -566,6 +585,11 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert "proxy_buffering off" in nginx
     assert "root /opt/veetbot/shared/docs/current" in nginx
     assert "try_files $uri $uri/ =404" in nginx
+    assert "server_name veetbot.com" in nginx
+    assert "server_name www.veetbot.com" in nginx
+    assert "/etc/letsencrypt/live/veetbot.com/fullchain.pem" in nginx
+    assert "root /opt/veetbot/shared/website/current" in nginx
+    assert "try_files $uri $uri.html $uri/ =404" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
     assert "rollback" in nginx_deploy
@@ -575,6 +599,10 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert 'DOCS_ROOT="${VEETBOT_DOCS_ROOT:-$DEPLOY_ROOT/shared/docs}"' in nginx_deploy
     assert 'sha256sum "$DOCS_ARCHIVE"' in nginx_deploy
     assert 'mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"' in nginx_deploy
+    assert "VEETBOT_WEBSITE_ROOT" in nginx_deploy
+    assert 'WEBSITE_ROOT="${VEETBOT_WEBSITE_ROOT:-$DEPLOY_ROOT/shared/website}"' in nginx_deploy
+    assert 'sha256sum "$WEBSITE_ARCHIVE"' in nginx_deploy
+    assert 'mv -Tf "$NEXT_WEBSITE_CURRENT" "$WEBSITE_ROOT/current"' in nginx_deploy
 
 
 def test_production_preflight_normalizes_missing_executable(
@@ -667,6 +695,7 @@ def test_ci_has_the_required_partitions() -> None:
         "package-release",
         "deploy-app",
         "deploy-nginx",
+        "public-site",
     }
     for name, job in jobs.items():
         if name == "sandbox":
@@ -678,10 +707,14 @@ def test_ci_has_the_required_partitions() -> None:
                 assert job["macos"] == {"xcode": "26.6.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
-        expected_image = (
-            "cimg/base:stable" if name in {"deploy-app", "deploy-nginx"} else "cimg/python:3.12"
-        )
+        expected_image = {
+            "deploy-app": "cimg/base:stable",
+            "deploy-nginx": "cimg/base:stable",
+            "public-site": "cimg/node:22.13",
+        }.get(name, "cimg/python:3.12")
         assert job["docker"][0]["image"] == expected_image
+
+    assert jobs["static"]["resource_class"] == "medium"
 
     postgres = jobs["integration"]["docker"][1]
     assert postgres == {
@@ -700,17 +733,20 @@ def test_ci_has_the_required_partitions() -> None:
             for step in job["steps"]
             if isinstance(step, dict) and "run" in step
         ]
-    assert "make lint typecheck test-static test-deploy docs-check" in commands["static"]
+    for target in ("lint", "typecheck", "test-static", "test-deploy", "docs-check"):
+        assert any(f"make {target}" in command for command in commands["static"])
+    assert "make test-website" in commands["public-site"]
     assert "make client-build" in commands["static"]
     assert any(
         "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command
         for command in commands["static"]
     )
-    assert "make test-contract" in commands["contract"]
-    assert "make migrate test-integration" in commands["integration"]
-    assert "make test-sandbox" in commands["sandbox"]
+    assert any("make test-contract" in command for command in commands["contract"])
+    assert "make migrate" in commands["integration"]
+    assert any("make test-integration" in command for command in commands["integration"])
+    assert any("make test-sandbox" in command for command in commands["sandbox"])
     assert "make test-apple" in commands["apple"]
-    assert "make test-apple-ui" in commands["apple"]
+    assert any("make test-apple-ui" in command for command in commands["apple"])
     testflight_job = jobs["apple-testflight"]
     assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
@@ -750,6 +786,8 @@ def test_ci_has_the_required_partitions() -> None:
     assert "release-id" in package_workspace["paths"]
     assert "veetbot-docs.tar.gz" in package_workspace["paths"]
     assert "veetbot-docs.tar.gz.sha256" in package_workspace["paths"]
+    assert "veetbot-website.tar.gz" in package_workspace["paths"]
+    assert "veetbot-website.tar.gz.sha256" in package_workspace["paths"]
     assert any("deploy/app/release.sh" in command for command in commands["deploy-app"])
     assert any(
         "X-Veetbot-Release" not in command and "x-veetbot-release" in command
@@ -766,12 +804,20 @@ def test_ci_has_the_required_partitions() -> None:
         for command in commands["deploy-nginx"]
     )
     assert any(
+        "veetbot-website.tar.gz" in command and "veetbot-website.tar.gz.sha256" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
         "VEETBOT_EXPECTED_RELEASE_ID" in command
         and '[[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]' in command
         for command in commands["deploy-nginx"]
     )
     assert any(
         "https://docs.veetbot.com" in command and "documentation did not report release" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "https://www.veetbot.com" in command and "website did not report release" in command
         for command in commands["deploy-nginx"]
     )
     assert any(
@@ -782,7 +828,7 @@ def test_ci_has_the_required_partitions() -> None:
     )
     assert any(
         "nginx-deployment-outcome" in command
-        and "Skipping documentation identity probe for stale release" in command
+        and "Skipping documentation and website identity probes for stale release" in command
         for command in commands["deploy-nginx"]
     )
     assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
@@ -820,6 +866,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "public-site",
     ]
     assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
     assert delivery_jobs["deploy-app"]["context"] == "veetbot-production"
@@ -854,6 +901,53 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    jobs = config["jobs"]
+
+    expected_python_lanes = {
+        "static": "test-static",
+        "contract": "test-contract",
+        "integration": "test-integration",
+        "sandbox": "test-sandbox",
+    }
+    for job_name, target in expected_python_lanes.items():
+        commands = [
+            step["run"]["command"]
+            for step in jobs[job_name]["steps"]
+            if isinstance(step, dict) and "run" in step
+        ]
+        test_command = next(command for command in commands if f"make {target}" in command)
+        assert f"--junitxml=test-results/{job_name}/results.xml" in test_command
+        assert {"store_test_results": {"path": f"test-results/{job_name}"}} in jobs[job_name][
+            "steps"
+        ]
+
+    static_command = next(
+        step["run"]["command"]
+        for step in jobs["static"]["steps"]
+        if isinstance(step, dict) and "run" in step and "make test-static" in step["run"]["command"]
+    )
+    assert "-n 2" in static_command
+    assert "--dist loadscope" in static_command
+
+    apple_commands = [
+        step["run"]["command"]
+        for step in jobs["apple"]["steps"]
+        if isinstance(step, dict) and "run" in step
+    ]
+    assert any(
+        "APPLE_TEST_RESULTS_DIR" in command and "make test-apple-ui" in command
+        for command in apple_commands
+    )
+    assert {
+        "store_artifacts": {
+            "path": "build/apple-test-results",
+            "destination": "apple-test-results",
+        }
+    } in jobs["apple"]["steps"]
 
 
 def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
@@ -1037,6 +1131,9 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
     assert set(project["dependency-groups"]) == {"dev", "test", "docs"}
+    assert any(
+        dependency.startswith("pytest-xdist") for dependency in project["dependency-groups"]["test"]
+    )
     assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
         "src/agent_core",
         "src/gmail_mcp",
@@ -1542,13 +1639,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 22 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 25 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(23)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(26)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1571,7 +1668,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 23):
+    for milestone in range(12, 26):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
@@ -1729,6 +1826,39 @@ def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
         "DEVELOPMENT_TEAM=",
     ):
         assert override in invocation_tail, f"macOS UI-test arm is missing {override}"
+
+
+def test_apple_ui_builds_once_and_runs_phone_and_tablet_concurrently() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+
+    assert "APPLE_TEST_RESULTS_DIR" in recipe
+    assert "-resultBundlePath" in recipe
+    assert recipe.count("xcodebuild build-for-testing") == 1
+    assert "-testProductsPath" in recipe
+    assert recipe.count("xcodebuild test-without-building") == 1
+    assert "run_ios_ui_tests" in recipe
+    assert 'run_ios_ui_tests iphone "$$iphone_device_id" &' in recipe
+    assert 'run_ios_ui_tests ipad "$$ipad_device_id" &' in recipe
+    assert "iphone_pid=$$!" in recipe
+    assert "ipad_pid=$$!" in recipe
+    assert 'wait "$$iphone_pid"' in recipe
+    assert 'wait "$$ipad_pid"' in recipe
+
+
+def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
+    """An xctestproducts run cannot also select a project or scheme."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+
+    invocations = [
+        tail.split(";", 1)[0] for tail in recipe.split("xcodebuild test-without-building")[1:]
+    ]
+    assert invocations
+    for invocation in invocations:
+        assert "-testProductsPath" in invocation
+        assert "-project" not in invocation
+        assert "-scheme" not in invocation
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:

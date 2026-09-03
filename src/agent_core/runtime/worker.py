@@ -193,6 +193,7 @@ class MaintenanceWorker:
         sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_decay: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
+        sweep_device_invocations: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
     ) -> None:
@@ -210,6 +211,7 @@ class MaintenanceWorker:
         self._sweep_memory_consolidation = sweep_memory_consolidation
         self._sweep_memory_decay = sweep_memory_decay
         self._sweep_session_deletions = sweep_session_deletions
+        self._sweep_device_invocations = sweep_device_invocations
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if memory_decay_interval_seconds <= 0:
@@ -261,6 +263,11 @@ class MaintenanceWorker:
                 await self._sweep_approvals()
             except Exception:
                 logger.exception("approval expiry sweep failed")
+        if self._sweep_device_invocations is not None:
+            try:
+                await self._sweep_device_invocations()
+            except Exception:
+                logger.exception("device invocation expiry sweep failed")
         if self._sweep_exports is not None:
             try:
                 await self._sweep_exports()

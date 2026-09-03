@@ -472,6 +472,10 @@ def _notification(kind: NotificationKind, offset: int, principal: Principal) -> 
     elif kind is NotificationKind.SCHEDULE_OCCURRENCE_SKIPPED:
         references = {"schedule_id": schedule_id, "occurrence_id": occurrence_id}
         payload["status"] = OccurrenceDisposition.MISSED.value
+    elif kind is NotificationKind.DEVICE_INVOCATION:
+        payload["status"] = "pending"
+        payload["invocation_id"] = UUID(int=7700 + offset)
+        payload["device_id"] = UUID(int=7800 + offset)
     elif kind in {NotificationKind.OPS_ALERT, NotificationKind.OPS_RECOVERED}:
         payload.update(
             {

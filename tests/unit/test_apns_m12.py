@@ -93,7 +93,7 @@ async def test_apns_signs_addresses_and_refreshes_provider_token(
     assert first_headers["apns-expiration"] == str(int(message.expires_at.timestamp()))
     assert json.loads(requests[0].content) == {
         "aps": {"alert": {"title": "Test notification"}},
-        "veetbot": message.payload.model_dump(mode="json"),
+        "veetbot": message.payload.model_dump(mode="json", exclude_none=True),
     }
 
     tokens = [request.headers["authorization"].split(" ", 1)[1] for request in requests]

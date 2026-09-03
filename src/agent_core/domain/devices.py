@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
+from typing import Any
 from uuid import UUID
 
 from pydantic import (
@@ -51,9 +52,38 @@ class DeviceStatus(StrEnum):
     REVOKED = "revoked"
 
 
+class DeviceCapability(StrEnum):
+    """Closed vocabulary of capabilities a client may declare at registration."""
+
+    SMS_SEND = "device.sms.send"
+
+
+KNOWN_DEVICE_CAPABILITIES: frozenset[str] = frozenset(
+    capability.value for capability in DeviceCapability
+)
+
+
+class DeviceInvocationStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+TERMINAL_DEVICE_INVOCATION_STATUSES: frozenset[DeviceInvocationStatus] = frozenset(
+    {
+        DeviceInvocationStatus.SENT,
+        DeviceInvocationStatus.CANCELLED,
+        DeviceInvocationStatus.FAILED,
+        DeviceInvocationStatus.EXPIRED,
+    }
+)
+
+
 @dataclass(frozen=True)
 class DeviceRoutingIssue:
-    """One shared push-routing rule violation with an API-stable reason code."""
+    """One shared device rule violation with an API-stable reason code."""
 
     reason_code: str
     message: str
@@ -102,6 +132,26 @@ def device_routing_issue(
     return None
 
 
+def device_capability_issue(
+    *,
+    kind: DeviceKind,
+    capabilities: frozenset[str],
+) -> DeviceRoutingIssue | None:
+    """Validate declared capabilities consistently for API input and durable rows."""
+
+    if not capabilities <= KNOWN_DEVICE_CAPABILITIES:
+        return DeviceRoutingIssue(
+            "device.capability_unknown",
+            "device capability is not recognized",
+        )
+    if kind is DeviceKind.SURFACE and capabilities:
+        return DeviceRoutingIssue(
+            "device.surface_capability_unsupported",
+            "surface registration cannot declare capabilities",
+        )
+    return None
+
+
 class DeviceRegistration(BaseModel):
     """Validated registration material before server-owned lifecycle fields exist."""
 
@@ -116,6 +166,14 @@ class DeviceRegistration(BaseModel):
     push_token: SecretStr | None = None
     push_environment: PushEnvironment | None = None
     muted_kinds: frozenset[NotificationKind] = frozenset()
+    capabilities: frozenset[str] = frozenset()
+
+    @model_validator(mode="after")
+    def capabilities_are_declarable(self) -> DeviceRegistration:
+        issue = device_capability_issue(kind=self.kind, capabilities=self.capabilities)
+        if issue is not None:
+            raise ValueError(issue.message)
+        return self
 
 
 class DeviceRegistrationIdempotencyRecord(BaseModel):
@@ -155,6 +213,7 @@ class Device(BaseModel):
     push_token_updated_at: datetime | None = None
     push_token_invalidated_at: datetime | None = None
     muted_kinds: frozenset[NotificationKind]
+    capabilities: frozenset[str] = frozenset()
     status: DeviceStatus
     revoked_at: datetime | None = None
     last_seen_at: datetime
@@ -193,6 +252,12 @@ class Device(BaseModel):
         )
         if issue is not None:
             raise ValueError(issue.message)
+        capability_issue = device_capability_issue(
+            kind=self.kind,
+            capabilities=self.capabilities,
+        )
+        if capability_issue is not None:
+            raise ValueError(capability_issue.message)
 
         if self.status is DeviceStatus.REVOKED:
             if self.revoked_at is None:
@@ -228,6 +293,60 @@ class DeviceCursor(BaseModel):
     @classmethod
     def created_at_is_aware_utc(cls, value: datetime) -> datetime:
         return _aware_utc(value, "device cursor created_at")
+
+
+class DeviceInvocation(BaseModel):
+    """One device-scoped tool call awaiting exactly one device-posted result."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: UUID
+    tenant_id: str = Field(min_length=1, max_length=255)
+    device_id: UUID
+    run_id: UUID
+    tool_name: str = Field(min_length=1, max_length=255)
+    arguments: dict[str, Any]
+    status: DeviceInvocationStatus
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+    @field_validator("created_at", "resolved_at")
+    @classmethod
+    def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _aware_utc(value, "device invocation instants")
+
+
+class DeviceIngestReceipt(BaseModel):
+    """Content-free proof that one ingested device message was already accepted."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    device_id: UUID
+    tenant_id: str = Field(min_length=1, max_length=255)
+    channel: str = Field(min_length=1, max_length=64)
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    received_at: datetime
+    accepted_at: datetime
+    session_id: UUID | None = None
+    run_id: UUID | None = None
+
+    @field_validator("received_at", "accepted_at")
+    @classmethod
+    def received_at_is_aware_utc(cls, value: datetime) -> datetime:
+        return _aware_utc(value, "device ingest instant")
+
+
+class DeviceTriageMapping(BaseModel):
+    """The standing triage session pinned to one device channel."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    device_id: UUID
+    tenant_id: str = Field(min_length=1, max_length=255)
+    channel: str = Field(min_length=1, max_length=64)
+    session_id: UUID
 
 
 class PushTarget(BaseModel):

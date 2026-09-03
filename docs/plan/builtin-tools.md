@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Thirteen more model-callable tools are declared at build time by other
+Seventeen more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -146,9 +146,13 @@ knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
 schedule.create               capability  scheduling
+schedule.list                 capability  scheduling
+schedule.pause                capability  scheduling
+schedule.resume               capability  scheduling
+schedule.cancel               capability  scheduling
 ```
 
-Twenty-one model-callable tools in total, and this document's roster is
+Twenty-five model-callable tools in total, and this document's roster is
 eight of them. The rule that keeps both numbers right is
 [knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
 here because a reader who finds it only there has already been
@@ -161,8 +165,8 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other thirteen, `skill.manage`, `web.search`,
-`web.fetch`, and `schedule.create` are fully classified in their subject
+nothing else.** Of the other seventeen, `skill.manage`, `web.search`,
+`web.fetch`, and the five `schedule.*` tools are fully classified in their subject
 specifications;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
 `skill.load` carries three. The three remaining control tools inherit
@@ -178,24 +182,24 @@ one. Whoever builds a tool on that list supplies its classification
 with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
-roster.** Its subject is the twenty checked-in, complete builtin tool
+roster.** Its subject is the twenty-four checked-in, complete builtin tool
 identities (plus historical versions of `memory.remember` and `skill.load`):
 `math.calculate`, `conversation.ask_user`, `system.current_time`, the three
 `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
 `skill.load`, `skill.manage`, the two `knowledge.*` tools, the two `web.*`
-tools, and `schedule.create`. Step 6 validates every registered version of
-those twenty identities.
+tools, and the five `schedule.*` tools. Step 6 validates every registered version of
+those twenty-four identities.
 `delegate.run` is the
-twenty-first model-callable tool declared by the corpus.
+twenty-fifth model-callable tool declared by the corpus.
 [tool-system.md](tool-system.md) deferred its implementation with the
 general-purpose-subagent extension, and Milestone 13 supplied it:
 [subagents-and-delegation.md](subagents-and-delegation.md) is its checked-in
 specification, a control tool in the `delegate` domain gated behind
 `AGENT_DELEGATION_ENABLED`. The composition root registers it only when that
-flag is on, so a default deployment still validates twenty identities in
+flag is on, so a default deployment still validates twenty-four identities in
 step 6 while a delegation-enabled one validates `delegate.run` as the
-twenty-first. Step 3, domain membership,
+twenty-fifth. Step 3, domain membership,
 already passes for every registered tool because the partition table in
 [tool-system.md](tool-system.md) lists their builtin domains, `delegate`
 among them.
@@ -1620,9 +1624,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; twenty-one model-callable tools are
-    declared at build time across the corpus, and thirteen of them belong
-    to other specifications. Resolved by naming those thirteen here,
+    is what this document designs; twenty-five model-callable tools are
+    declared at build time across the corpus, and seventeen of them belong
+    to other specifications. Resolved by naming those seventeen here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not

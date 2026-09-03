@@ -69,7 +69,7 @@ find it here should find the reason here.
 3. **Per-agent or per-surface persona variants.** One document per principal.
    A second agent reading a different persona is a composition question for a
    milestone that has a second agent.
-4. **Any change to `AgentSpec.instructions`** (engineering-plan.md:527). The
+4. **Any change to `AgentSpec.instructions`** (engineering-plan.md:541). The
    persona layers over it at assembly time; the agent's spec, its
    content-addressed version, and every pin that references it are untouched.
 
@@ -299,7 +299,7 @@ the memory browser's is.
 ## Safety
 
 - **Secrets are refused at write time, everywhere.** The system prompt must
-  not contain secrets (engineering-plan.md:3774), and the persona is system
+  not contain secrets (engineering-plan.md:3919), and the persona is system
   prompt. CLI, HTTP, and affirmation all run the secret-material scan before
   persistence; a credential-shaped value is a refusal, not a warning.
 - **Injection is scanned at load.** Persona text passes the same
