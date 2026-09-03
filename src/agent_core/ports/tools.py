@@ -35,6 +35,7 @@ class ToolRegistry(Protocol):
         tenant_id: str | None = None,
         source: ToolSource | None = None,
         server_id: str | None = None,
+        device_id: str | None = None,
     ) -> Tool:
         """Return the selected tool or raise NotFoundError when unavailable."""
         ...

@@ -328,13 +328,14 @@ class DeviceIngestReceipt(BaseModel):
     channel: str = Field(min_length=1, max_length=64)
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     received_at: datetime
+    accepted_at: datetime
     session_id: UUID | None = None
     run_id: UUID | None = None
 
-    @field_validator("received_at")
+    @field_validator("received_at", "accepted_at")
     @classmethod
     def received_at_is_aware_utc(cls, value: datetime) -> datetime:
-        return _aware_utc(value, "device ingest received_at")
+        return _aware_utc(value, "device ingest instant")
 
 
 class DeviceTriageMapping(BaseModel):

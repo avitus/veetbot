@@ -52,6 +52,12 @@ _SWEEP_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002a2")
 _FOREIGN_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002a3")
 
 
+class _RefusingNotifier:
+    async def for_device_invocation(self, uow, *, invocation, device) -> bool:  # type: ignore[no-untyped-def]
+        del uow, invocation, device
+        return False
+
+
 class _RacingInvocationStore:
     """Post the device's result at the instant the adapter starts its sweep."""
 
@@ -136,6 +142,22 @@ async def test_the_row_and_the_wake_land_in_one_transaction() -> None:
     assert notification.kind is NotificationKind.DEVICE_INVOCATION
     assert notification.dedupe_key == device_invocation_key(INVOCATION_ID)
     assert notification.target_device_id() == DEVICE_ID
+
+
+async def test_a_refused_wake_rolls_back_the_pending_invocation() -> None:
+    factory, clock = await push_wake_stack()
+    channel = PushWakeDeviceChannel(
+        uow_factory=factory,
+        notification_producer=_RefusingNotifier(),
+        clock=clock,
+        invocation_timeout_seconds=TIMEOUT_SECONDS,
+        poll_seconds=0,
+    )
+
+    with pytest.raises(DeviceChannelUnavailable) as refused:
+        await invoke(channel, invocation_id=INVOCATION_ID)
+
+    assert refused.value.reason == "device.wake_not_enqueued"
 
 
 async def test_a_device_result_posted_during_polling_is_returned() -> None:

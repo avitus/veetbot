@@ -94,7 +94,7 @@ class DeviceIngestStore(Protocol):
         ...
 
     async def count_for_utc_day(self, device_id: UUID, channel: str, *, day: date) -> int:
-        """Count receipts received on one UTC calendar day, for the per-device daily cap."""
+        """Count receipts accepted on one UTC calendar day, for the per-device daily cap."""
         ...
 
     async def get_triage_mapping(

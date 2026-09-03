@@ -354,7 +354,7 @@ Cancelling a suspended parent cascades: `cancel_parked_run` requests
 cancellation of every non-terminal `DELEGATED` child (a queued child through
 the same parked path, a running child through the lazy cancellation token) and
 completes the suspended invocation as `failed` with `tool.run_cancelled`, the
-rule tool-system.md:968-972 already states for a suspended invocation whose run
+rule tool-system.md:971-975 already states for a suspended invocation whose run
 is cancelled. A child's deadline is never later than its parent's, so the
 deadline sweep ends children first and the parent's own sweep handles the
 parent. A child's cancellation or failure never cancels its siblings.

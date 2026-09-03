@@ -327,6 +327,7 @@ def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> Non
     }
     forbidden = {"sender", "body", "content", "text", "message"}
     assert forbidden.isdisjoint(receipts.columns.keys())
+    assert {"received_at", "accepted_at"} <= set(receipts.columns.keys())
 
     triage = tables["device_triage_sessions"]
     assert tuple(column.name for column in triage.primary_key.columns) == ("device_id", "channel")
@@ -364,7 +365,7 @@ def test_device_channel_tables_encode_ownership_idempotency_and_erasure() -> Non
     migration_sql = migration.read_text(encoding="utf-8")
     for table in ("device_invocations", "device_ingest_receipts", "device_triage_sessions"):
         assert f'_tenant_policy("{table}")' in migration_sql
-    assert "device_invocation" in migration_sql
+    assert '"device_invocation"' in migration_sql
 
 
 def test_delegation_table_encodes_trust_boundaries() -> None:

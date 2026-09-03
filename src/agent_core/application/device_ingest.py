@@ -136,7 +136,8 @@ class DeviceMessageIngestService:
             # informed about which of its fields the platform would reject.
             await self._present_device(uow, principal, device_id)
             self._admit(channel, sender, body)
-            await self._admit_daily_volume(uow, device_id, channel, received_at)
+            accepted_at = self._clock.now()
+            await self._admit_daily_volume(uow, device_id, channel, accepted_at)
             stored = await uow.device_ingest.record(
                 DeviceIngestReceipt(
                     device_id=device_id,
@@ -144,6 +145,7 @@ class DeviceMessageIngestService:
                     channel=channel,
                     digest=digest,
                     received_at=received_at,
+                    accepted_at=accepted_at,
                 )
             )
             if stored is None:
@@ -244,9 +246,9 @@ class DeviceMessageIngestService:
         uow: RepositoryUnitOfWork,
         device_id: UUID,
         channel: str,
-        received_at: datetime,
+        accepted_at: datetime,
     ) -> None:
-        day = received_at.astimezone(UTC).date()
+        day = accepted_at.astimezone(UTC).date()
         taken = await uow.device_ingest.count_for_utc_day(device_id, channel, day=day)
         if taken >= self._ingest_daily_cap:
             raise DeviceIngestError(

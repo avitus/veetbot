@@ -7,11 +7,13 @@ from typing import Any
 import pytest
 from sqlalchemy import select, text
 
+from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.persistence.sqlalchemy_models import DeviceIngestReceiptRow
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
-from agent_core.domain.devices import DeviceTriageMapping
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.devices import DeviceCapability, DeviceTriageMapping
+from agent_core.domain.errors import DeviceChannelUnavailable, NotFoundError
 from tests.contract import test_device_ingest_store_contract as ingest_contract
 from tests.contract import test_device_invocation_store_contract as invocation_contract
 from tests.contract.support import (
@@ -40,6 +42,12 @@ _DEVICE_IDS = (
 
 class _RollbackContractError(Exception):
     pass
+
+
+class _RefusingNotifier:
+    async def for_device_invocation(self, uow, *, invocation, device) -> bool:  # type: ignore[no-untyped-def]
+        del uow, invocation, device
+        return False
 
 
 async def _seed(uow: Any) -> None:
@@ -76,6 +84,65 @@ async def test_postgres_device_invocation_store_satisfies_shared_contracts() -> 
                     await _seed(uow)
                     await contract(uow.device_invocations)
                     raise _RollbackContractError
+
+
+async def test_postgres_refused_wake_rolls_back_the_pending_invocation() -> None:
+    """A failed outbox enqueue cannot leave a phone polling an unwakeable row."""
+
+    device_id = invocation_contract.DEVICE_ID
+    invocation_id = invocation_contract.INVOCATION_ID
+    tool_name = DeviceCapability.SMS_SEND.value
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        principal=principal(),
+    ) as composition:
+        try:
+            async with composition.uow_factory() as uow:
+                await _seed(uow)
+                await uow.devices.upsert(
+                    device(
+                        device_id=device_id,
+                        client_device_id="m24-contract-device-0",
+                        token=None,
+                        capabilities=frozenset({tool_name}),
+                    ),
+                    principal(),
+                )
+            channel = PushWakeDeviceChannel(
+                uow_factory=composition.uow_factory,
+                notification_producer=_RefusingNotifier(),
+                clock=FixedClock(NOW),
+                invocation_timeout_seconds=300,
+                poll_seconds=0,
+            )
+
+            with pytest.raises(DeviceChannelUnavailable) as refused:
+                await channel.invoke(
+                    device_id=device_id,
+                    run_id=RUN_ID,
+                    invocation_id=invocation_id,
+                    tool_name=tool_name,
+                    arguments={"recipient": "contract-recipient", "body": "contract body"},
+                    principal=principal(),
+                )
+
+            assert refused.value.reason == "device.wake_not_enqueued"
+            async with composition.uow_factory() as uow:
+                with pytest.raises(NotFoundError):
+                    await uow.device_invocations.get(invocation_id)
+        finally:
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await uow.session.execute(
+                    text("DELETE FROM devices WHERE id = ANY(:ids)"),
+                    {"ids": list(_DEVICE_IDS)},
+                )
+                await uow.session.execute(text("DELETE FROM runs WHERE id = :id"), {"id": RUN_ID})
+                await uow.session.execute(
+                    text("DELETE FROM sessions WHERE id = ANY(:ids)"),
+                    {"ids": [SESSION_ID, ingest_contract.ROTATED_SESSION_ID]},
+                )
 
 
 async def test_postgres_device_ingest_store_satisfies_shared_contracts() -> None:
@@ -119,6 +186,7 @@ async def test_postgres_attach_routing_pins_the_session_and_run_on_the_receipt()
                 assert row.session_id == SESSION_ID
                 assert row.run_id == RUN_ID
                 assert row.received_at == NOW
+                assert row.accepted_at == NOW
                 raise _RollbackContractError
 
 

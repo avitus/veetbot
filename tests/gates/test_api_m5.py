@@ -24,6 +24,7 @@ from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.api import create_app
 from agent_core.api.errors import (
     API_ERROR_STATUS,
+    ERROR_CODE_STATUSES,
     ERROR_CODE_VOCABULARY,
     ERROR_STATUS_MAP,
     INTERNAL_ONLY_ERROR_TYPES,
@@ -294,14 +295,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
             assert response.status_code >= 400, (method, path, response.text)
             code = response.json()["error"]["code"]
             assert code in ERROR_CODE_VOCABULARY
-            statuses = {
-                mapping.status for mapping in ERROR_STATUS_MAP.values() if mapping.code == code
-            }
-            expected_status = API_ERROR_STATUS.get(code)
-            if expected_status is None:
-                assert len(statuses) == 1
-                expected_status = statuses.pop()
-            assert response.status_code == expected_status
+            assert response.status_code in ERROR_CODE_STATUSES[code]
 
 
 def test_error_status_map_is_total_over_the_public_taxonomy() -> None:
@@ -335,11 +329,14 @@ def test_error_status_map_is_total_over_the_public_taxonomy() -> None:
         domain_errors.ConcurrencyConflict,
         domain_errors.ScheduleValidationError,
         domain_errors.DeviceValidationError,
+        domain_errors.DeviceIngestError,
+        domain_errors.DeviceChannelUnavailable,
     }
     assert public_types <= set(ERROR_STATUS_MAP)
     assert INTERNAL_ONLY_ERROR_TYPES.isdisjoint(ERROR_STATUS_MAP)
     assert mapping_for(RuntimeError("unknown")).code == "internal_error"
     assert mapping_for(RuntimeError("unknown")).status == 500
+    assert ERROR_CODE_STATUSES["device_ingest_error"] == frozenset({409, 422, 429})
 
 
 def test_api_handlers_never_bind_a_request_tenant() -> None:

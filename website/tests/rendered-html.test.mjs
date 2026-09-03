@@ -10,7 +10,10 @@ async function htmlFor(pathname) {
 }
 
 test("homepage identifies Veetbot and links its public policies", async () => {
-  const html = await htmlFor("/");
+  const [html, css] = await Promise.all([
+    htmlFor("/"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
 
   assert.match(html, /<title>Veetbot \| Governed AI agent<\/title>/i);
   assert.match(html, /An agent that can act\. A system you can inspect\./i);
@@ -18,6 +21,7 @@ test("homepage identifies Veetbot and links its public policies", async () => {
   assert.match(html, /href="\/privacy"/i);
   assert.match(html, /href="\/tos"/i);
   assert.match(html, /href="https:\/\/docs\.veetbot\.com\//i);
+  assert.doesNotMatch(css, /\.site-nav a:not\(:last-child\)\s*\{\s*display:\s*none/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 

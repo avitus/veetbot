@@ -70,9 +70,19 @@ DEVICE_INGEST_STATUS: dict[str, int] = {
     "body_invalid": 422,
 }
 
-ERROR_CODE_VOCABULARY = frozenset(
-    {mapping.code for mapping in ERROR_STATUS_MAP.values()} | set(API_ERROR_STATUS)
-)
+
+def _code_statuses() -> dict[str, frozenset[int]]:
+    collected: dict[str, set[int]] = {}
+    for mapping in ERROR_STATUS_MAP.values():
+        collected.setdefault(mapping.code, set()).add(mapping.status)
+    for code, status in API_ERROR_STATUS.items():
+        collected.setdefault(code, set()).add(status)
+    collected["device_ingest_error"].update(DEVICE_INGEST_STATUS.values())
+    return {code: frozenset(statuses) for code, statuses in collected.items()}
+
+
+ERROR_CODE_STATUSES = _code_statuses()
+ERROR_CODE_VOCABULARY = frozenset(ERROR_CODE_STATUSES)
 INTERNAL_ONLY_ERROR_TYPES = frozenset({domain_errors.WorkerFenced, domain_errors.EmptyModelTurn})
 
 

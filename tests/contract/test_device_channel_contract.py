@@ -17,6 +17,7 @@ from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.device_channel import FakeDeviceChannel, PushWakeDeviceChannel
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.application.notification_producer import NotificationProducer
+from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
     TERMINAL_DEVICE_INVOCATION_STATUSES,
     DeviceCapability,
@@ -68,6 +69,7 @@ async def invoke(
     *,
     invocation_id: UUID,
     device_id: UUID = DEVICE_ID,
+    supplied_principal: Principal | None = None,
 ) -> DeviceInvocation:
     return await channel.invoke(
         device_id=device_id,
@@ -75,7 +77,7 @@ async def invoke(
         invocation_id=invocation_id,
         tool_name=TOOL_NAME,
         arguments=dict(ARGUMENTS),
-        principal=principal(),
+        principal=supplied_principal or principal(),
     )
 
 
@@ -102,6 +104,18 @@ async def assert_an_absent_device_is_refused(channel: DeviceChannel) -> None:
 
     with pytest.raises(DeviceChannelUnavailable):
         await invoke(channel, invocation_id=INVOCATION_ID, device_id=ABSENT_DEVICE_ID)
+
+
+async def assert_a_foreign_principal_is_refused(channel: DeviceChannel) -> None:
+    """A real device identifier never grants another principal its capability."""
+
+    foreign = principal().model_copy(update={"principal_id": "principal-elsewhere"}, deep=True)
+    with pytest.raises(DeviceChannelUnavailable):
+        await invoke(
+            channel,
+            invocation_id=INVOCATION_ID,
+            supplied_principal=foreign,
+        )
 
 
 async def assert_a_replayed_invocation_id_is_idempotent(
@@ -153,6 +167,7 @@ def fake_channel() -> FakeDeviceChannel:
     return FakeDeviceChannel(
         clock=FixedClock(NOW),
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+        owners={DEVICE_ID: principal()},
     )
 
 
@@ -168,6 +183,12 @@ async def test_push_wake_channel_refuses_an_absent_device() -> None:
     await assert_an_absent_device_is_refused(push_wake_channel(factory, clock))
 
 
+async def test_push_wake_channel_refuses_a_foreign_principal() -> None:
+    factory, clock = await push_wake_stack()
+
+    await assert_a_foreign_principal_is_refused(push_wake_channel(factory, clock))
+
+
 async def test_push_wake_channel_is_idempotent_on_a_replayed_invocation_id() -> None:
     factory, clock = await push_wake_stack()
 
@@ -180,6 +201,10 @@ async def test_fake_channel_resolves_terminally() -> None:
 
 async def test_fake_channel_refuses_an_absent_device() -> None:
     await assert_an_absent_device_is_refused(fake_channel())
+
+
+async def test_fake_channel_refuses_a_foreign_principal() -> None:
+    await assert_a_foreign_principal_is_refused(fake_channel())
 
 
 async def test_fake_channel_is_idempotent_on_a_replayed_invocation_id() -> None:

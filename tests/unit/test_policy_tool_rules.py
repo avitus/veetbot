@@ -95,6 +95,11 @@ def test_the_shipped_device_entry_declares_its_human_confirmation() -> None:
     assert shipped.human_confirms_arguments is True
 
 
+def test_an_explicit_empty_otherwise_decision_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        _ruleset({TOOL_NAME: {"decision": "allow", "otherwise": ""}})
+
+
 # --- (a) the suppression is opt-in per rule ---------------------------------
 
 

@@ -135,6 +135,8 @@ class EventContextPlanner:
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
+                if self._attach_device_tools is not None:
+                    await self._attach_device_tools(session.id, principal)
                 if self._skill_catalogs is not None:
                     await self._skill_catalogs.open(session.id, agent, principal)
                 current_prefix = build_prefix(

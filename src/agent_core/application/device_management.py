@@ -251,6 +251,10 @@ class DeviceManagementService:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             await self._present_device(uow, principal, device_id)
+            await uow.device_invocations.expire_overdue(
+                now=now,
+                timeout_seconds=self._invocation_timeout_seconds,
+            )
             pending = await uow.device_invocations.list_pending_for_device(device_id, now=now)
         return [
             DeviceInvocationView(

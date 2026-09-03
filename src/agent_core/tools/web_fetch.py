@@ -15,6 +15,7 @@ from agent_core.tools.web_search import (
     _failure,
     _provider_failure,
     _provider_timeout_seconds,
+    _rendered_parts_bytes,
 )
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -38,11 +39,22 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
-def _bounded_utf8(value: str, maximum_bytes: int) -> str:
-    encoded = value.encode("utf-8")
-    if len(encoded) <= maximum_bytes:
-        return value
-    return encoded[:maximum_bytes].decode("utf-8", errors="ignore")
+def _bounded_content(prefix: str, content: str, maximum_bytes: int) -> tuple[str, TextPart]:
+    """Keep the longest character prefix whose serialized part stays in budget."""
+
+    low, high = 0, len(content)
+    selected = ""
+    part = TextPart(text=prefix)
+    while low <= high:
+        midpoint = (low + high) // 2
+        candidate = content[:midpoint]
+        candidate_part = TextPart(text=prefix + candidate)
+        if len(_rendered_parts_bytes([candidate_part])) <= maximum_bytes:
+            selected, part = candidate, candidate_part
+            low = midpoint + 1
+        else:
+            high = midpoint - 1
+    return selected, part
 
 
 class WebFetchTool:
@@ -89,11 +101,11 @@ class WebFetchTool:
         except WebProviderError as error:
             return _provider_failure(error, provider_name=provider.name)
         attribution = f"Provider: {provider.name}\n\n"
-        content_budget = max(
-            0,
-            self.spec.maximum_output_bytes - len(attribution.encode("utf-8")),
+        content, part = _bounded_content(
+            attribution,
+            page.content,
+            self.spec.maximum_output_bytes,
         )
-        content = _bounded_utf8(page.content, content_budget)
         structured = {
             "provider": provider.name,
             "url": page.url,
@@ -102,7 +114,7 @@ class WebFetchTool:
         }
         return ToolResult(
             ok=True,
-            content=[TextPart(text=attribution + content)],
+            content=[part],
             structured=structured,
             output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
         )

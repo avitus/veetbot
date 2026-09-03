@@ -859,6 +859,7 @@ def device_ingest_receipt_to_domain(row: DeviceIngestReceiptRow) -> DeviceIngest
         channel=row.channel,
         digest=row.digest,
         received_at=row.received_at,
+        accepted_at=row.accepted_at,
         session_id=row.session_id,
         run_id=row.run_id,
     )
@@ -871,6 +872,7 @@ def device_ingest_receipt_values(receipt: DeviceIngestReceipt) -> dict[str, Any]
         "channel": receipt.channel,
         "digest": receipt.digest,
         "received_at": receipt.received_at,
+        "accepted_at": receipt.accepted_at,
         "session_id": receipt.session_id,
         "run_id": receipt.run_id,
     }

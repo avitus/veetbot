@@ -118,6 +118,16 @@ def _provider_timeout_seconds(effective_timeout_seconds: float) -> float:
     return max(0.0, effective_timeout_seconds - margin)
 
 
+def _rendered_parts_bytes(parts: list[TextPart]) -> bytes:
+    """Render parts exactly as the execution pipeline measures their output."""
+
+    return json.dumps(
+        [part.model_dump(mode="json") for part in parts],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 async def _provider_search(
     provider: WebProvider,
     request: WebSearchRequest,
@@ -206,11 +216,7 @@ class WebSearchTool:
                     sort_keys=True,
                 )
             )
-            rendered = json.dumps(
-                [part.model_dump(mode="json")],
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
+            rendered = _rendered_parts_bytes([part])
             if len(rendered) <= self.spec.maximum_output_bytes or not records:
                 break
             records = records[:-1]

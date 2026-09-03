@@ -161,7 +161,7 @@ class InMemoryDeviceIngestStore:
             for receipt in self._receipts.values()
             if receipt.device_id == device_id
             and receipt.channel == channel
-            and start <= receipt.received_at < end
+            and start <= receipt.accepted_at < end
         )
 
     async def get_triage_mapping(
@@ -336,8 +336,8 @@ class PostgresDeviceIngestStore:
             .where(
                 DeviceIngestReceiptRow.device_id == device_id,
                 DeviceIngestReceiptRow.channel == channel,
-                DeviceIngestReceiptRow.received_at >= start,
-                DeviceIngestReceiptRow.received_at < end,
+                DeviceIngestReceiptRow.accepted_at >= start,
+                DeviceIngestReceiptRow.accepted_at < end,
             )
         )
         return int(counted or 0)

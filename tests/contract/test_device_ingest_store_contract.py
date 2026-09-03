@@ -40,6 +40,7 @@ def receipt(**updates: Any) -> DeviceIngestReceipt:
         "channel": CHANNEL,
         "digest": DIGEST_A,
         "received_at": NOW,
+        "accepted_at": NOW,
     }
     values.update(updates)
     return DeviceIngestReceipt.model_validate(values)
@@ -95,7 +96,7 @@ async def assert_receipt_counting_is_per_device_channel_and_utc_day(
 ) -> None:
     await store.record(receipt())
     await store.record(receipt(digest=DIGEST_B, received_at=LAST_INSTANT_OF_DAY))
-    await store.record(receipt(digest=DIGEST_C, received_at=FIRST_INSTANT_OF_NEXT_DAY))
+    await store.record(receipt(digest=DIGEST_C, accepted_at=FIRST_INSTANT_OF_NEXT_DAY))
     await store.record(receipt(digest=DIGEST_D, channel=OTHER_CHANNEL))
     await store.record(receipt(digest=DIGEST_E, device_id=OTHER_DEVICE_ID))
 

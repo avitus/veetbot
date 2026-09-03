@@ -578,7 +578,11 @@ h1 em {
 }
 
 @media (max-width: 900px) {
-  .site-nav a:not(:last-child) { display: none; }
+  .site-nav {
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    justify-content: flex-end;
+  }
 
   .hero,
   .gmail-grid { grid-template-columns: 1fr; }

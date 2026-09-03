@@ -44,7 +44,7 @@ from agent_core.domain.views import DeviceIngestResult, TextContentBlock
 from agent_core.ports.policies import PolicyEngine
 from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME
 from tests.contract.test_device_registry_contract import device
-from tests.integration.m2_support import memory_settings
+from tests.integration.m2_support import PRINCIPAL, memory_settings
 
 NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 SESSION_ID = UUID("00000000-0000-0000-0000-0000000002b0")
@@ -340,7 +340,7 @@ async def test_the_daily_cap_refuses_further_messages() -> None:
         service = cast(DeviceMessageIngestService, composition.services.device_ingest)
         service._ingest_daily_cap = 1
 
-        await _ingest(composition)
+        await _ingest(composition, received_at=NOW - timedelta(days=30))
         with pytest.raises(DeviceIngestError) as refused:
             await _ingest(composition, body=OTHER_BODY)
 
@@ -464,6 +464,7 @@ async def test_a_triage_turn_cannot_reach_a_plain_allow() -> None:
     channel = FakeDeviceChannel(
         clock=FixedClock(NOW),
         capabilities={DEVICE_ID: frozenset({DEVICE_SMS_SEND_TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
     )
     async with build(
         settings=_settings(),
@@ -474,21 +475,7 @@ async def test_a_triage_turn_cannot_reach_a_plain_allow() -> None:
     ) as composition:
         await _seed_device(composition)
         recording: list[PolicyDecisionType] = []
-        inner = composition.tool_pipeline._policy
-
-        class _Recording:
-            async def evaluate(
-                self,
-                action: ProposedAction,
-                principal: Principal,
-                run: Run,
-            ) -> PolicyDecision:
-                decision = await inner.evaluate(action, principal, run)
-                if action.name == DEVICE_SMS_SEND_TOOL_NAME:
-                    recording.append(decision.decision)
-                return decision
-
-        composition.tool_pipeline._policy = cast(PolicyEngine, _Recording())
+        _record_device_decisions(composition, recording)
         result = await _ingest(composition)
         parked = await composition.runs.get(result.run_id)
         pending = await composition.approvals.list_pending(run_id=result.run_id)
@@ -552,6 +539,7 @@ async def test_an_owner_turn_in_the_triage_session_does_not_launder_the_next_mes
     channel = FakeDeviceChannel(
         clock=FixedClock(NOW),
         capabilities={DEVICE_ID: frozenset({DEVICE_SMS_SEND_TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
     )
     async with build(
         settings=_settings(),
@@ -586,6 +574,7 @@ async def test_an_owner_answer_to_a_triage_question_does_not_launder_the_next_me
     channel = FakeDeviceChannel(
         clock=FixedClock(NOW),
         capabilities={DEVICE_ID: frozenset({DEVICE_SMS_SEND_TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
     )
     async with build(
         settings=_settings(),

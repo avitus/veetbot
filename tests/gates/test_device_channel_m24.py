@@ -55,7 +55,7 @@ from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME
 from agent_core.tools.registry import RegisteredTool
 from tests.contract.support import SHIPPED_INVOCATION_TIMEOUT_SECONDS, tool_context
 from tests.contract.test_device_registry_contract import device
-from tests.integration.m2_support import memory_settings
+from tests.integration.m2_support import PRINCIPAL, memory_settings
 
 NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002d0")
@@ -127,6 +127,7 @@ def _fake_channel(
     return FakeDeviceChannel(
         clock=clock,
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
         default_status=status,
     )
 

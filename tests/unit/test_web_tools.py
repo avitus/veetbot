@@ -351,5 +351,10 @@ async def test_fetch_bounds_multibyte_content_before_building_both_output_shapes
     structured_content = result.structured["content"]
     assert isinstance(structured_content, str)
     assert result.content == [TextPart(text="Provider: fake-web\n\n" + structured_content)]
-    assert len(structured_content.encode("utf-8")) <= WebFetchTool.spec.maximum_output_bytes
+    rendered = json.dumps(
+        [part.model_dump(mode="json") for part in result.content],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert len(rendered) <= WebFetchTool.spec.maximum_output_bytes
     assert structured_content.encode("utf-8").decode("utf-8") == structured_content

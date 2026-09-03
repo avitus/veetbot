@@ -1567,6 +1567,7 @@ class DeviceIngestReceiptRow(Base):
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     session_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL")
     )

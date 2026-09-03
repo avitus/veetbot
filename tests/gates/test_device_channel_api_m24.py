@@ -117,6 +117,7 @@ def _pending(
     tenant_id: str,
     device_id: UUID = DEVICE_ID,
     status: DeviceInvocationStatus = DeviceInvocationStatus.PENDING,
+    created_at: datetime = NOW,
 ) -> DeviceInvocation:
     return DeviceInvocation(
         id=invocation_id,
@@ -126,7 +127,7 @@ def _pending(
         tool_name=TOOL_NAME,
         arguments={"recipient": SENDER, "body": "Feeding at six."},
         status=status,
-        created_at=NOW,
+        created_at=created_at,
         resolved_at=None if status is DeviceInvocationStatus.PENDING else NOW,
     )
 
@@ -220,13 +221,14 @@ async def test_a_device_fetches_its_pending_invocations_oldest_first() -> None:
                 _pending(
                     EXPIRED_INVOCATION_ID,
                     tenant_id=composition.principal.tenant_id,
-                    status=DeviceInvocationStatus.SENT,
+                    created_at=NOW - timedelta(seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS + 1),
                 )
             )
         async with _client(composition) as client:
             fetched = await client.get(f"/v1/devices/{DEVICE_ID}/invocations")
 
     assert fetched.status_code == 200
+    assert fetched.headers["cache-control"] == "private, no-store"
     assert fetched.json() == {
         "invocations": [
             {
@@ -240,6 +242,9 @@ async def test_a_device_fetches_its_pending_invocations_oldest_first() -> None:
             }
         ]
     }
+    async with composition.uow_factory() as uow:
+        expired = await uow.device_invocations.get(EXPIRED_INVOCATION_ID)
+    assert expired.status is DeviceInvocationStatus.EXPIRED
 
 
 async def test_an_unknown_foreign_or_revoked_device_can_neither_fetch_nor_answer() -> None:

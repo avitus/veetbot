@@ -103,7 +103,8 @@ to the device-authenticated ingest route.
 The server appends the message as device-originated untrusted content
 (`actor_type = device`, origin recorded), idempotent by the SHA-256 digest
 of `(sender, body, received_at)`, rate-capped per device by
-`ingest_daily_cap` (default 500). Bodies never appear in process logs, and
+`ingest_daily_cap` (default 500) using the server acceptance day's UTC bucket,
+never the device-supplied timestamp. Bodies never appear in process logs, and
 the existing export redaction covers the content events.
 
 Routing: one standing triage session per `(device_id, channel)`, created
@@ -157,6 +158,7 @@ device_ingest_receipts
   channel TEXT NOT NULL
   digest TEXT NOT NULL
   received_at TIMESTAMPTZ NOT NULL
+  accepted_at TIMESTAMPTZ NOT NULL
   session_id UUID NULL REFERENCES sessions(id) ON DELETE SET NULL
   run_id UUID NULL REFERENCES runs(id) ON DELETE SET NULL
   PRIMARY KEY (device_id, channel, digest)

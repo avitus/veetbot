@@ -1691,6 +1691,7 @@ class ToolPipeline:
             tenant_id=principal.tenant_id,
             source=None if pinned is None else pinned.source,
             server_id=None if pinned is None else pinned.server_id,
+            device_id=None if pinned is None else pinned.device_id,
         )
 
     async def _deny_invocation(

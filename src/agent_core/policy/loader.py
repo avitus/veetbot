@@ -86,7 +86,11 @@ def _tool_rules(value: Any) -> tuple[ToolPolicyRule, ...]:
                 condition=(
                     PolicyCondition(row["condition"]) if row.get("condition") is not None else None
                 ),
-                otherwise=(PolicyDecisionType(row["otherwise"]) if row.get("otherwise") else None),
+                otherwise=(
+                    PolicyDecisionType(row["otherwise"])
+                    if row.get("otherwise") is not None
+                    else None
+                ),
                 human_confirms_arguments=confirms,
             )
         )
@@ -128,7 +132,11 @@ def _build_ruleset(
                 condition=(
                     PolicyCondition(row["condition"]) if row.get("condition") is not None else None
                 ),
-                otherwise=(PolicyDecisionType(row["otherwise"]) if row.get("otherwise") else None),
+                otherwise=(
+                    PolicyDecisionType(row["otherwise"])
+                    if row.get("otherwise") is not None
+                    else None
+                ),
             )
         )
     tool_rules = _tool_rules(profile.get("tool_rules"))

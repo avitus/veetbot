@@ -1267,9 +1267,11 @@ def create_app(
         openapi_extra={"required_scope": "device.read"},
     )
     async def list_device_invocations(
+        response: Response,
         device_id: UUID,
         authenticated: Annotated[Principal, secured("device.read")],
     ) -> DeviceInvocationList:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return DeviceInvocationList(
             invocations=await services.devices.list_pending_invocations(authenticated, device_id)
         )

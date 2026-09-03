@@ -102,7 +102,16 @@ class PushWakeDeviceChannel:
                     principal=principal,
                 )
             else:
-                await self._producer.for_device_invocation(uow, invocation=stored, device=device)
+                enqueued = await self._producer.for_device_invocation(
+                    uow,
+                    invocation=stored,
+                    device=device,
+                )
+                if not enqueued:
+                    raise _unavailable(
+                        "device.wake_not_enqueued",
+                        "the device wake could not be queued",
+                    )
         return await self._await_result(stored, device_id=device_id, principal=principal)
 
     def _owned(
@@ -204,6 +213,7 @@ class FakeDeviceChannel:
         *,
         clock: Clock,
         capabilities: Mapping[UUID, frozenset[str]] | None = None,
+        owners: Mapping[UUID, Principal] | None = None,
         results: Mapping[UUID, DeviceInvocationStatus] | None = None,
         default_status: DeviceInvocationStatus = DeviceInvocationStatus.SENT,
         delay_seconds: float = 0.0,
@@ -214,6 +224,7 @@ class FakeDeviceChannel:
                 raise ValueError("scripted device results must be terminal")
         self._clock = clock
         self._capabilities = dict(capabilities or {})
+        self._owners = dict(owners or {})
         self._results = scripted
         self._default_status = default_status
         self._delay_seconds = delay_seconds
@@ -230,7 +241,13 @@ class FakeDeviceChannel:
         principal: Principal,
     ) -> DeviceInvocation:
         granted = self._capabilities.get(device_id)
-        if granted is None:
+        owner = self._owners.get(device_id)
+        if (
+            granted is None
+            or owner is None
+            or owner.tenant_id != principal.tenant_id
+            or owner.principal_id != principal.principal_id
+        ):
             raise _unavailable(
                 "device.not_found",
                 "the named device is not registered to this principal",

@@ -73,7 +73,7 @@ from tests.contract.support import (
 from tests.contract.support import run as contract_run
 from tests.contract.test_device_channel_contract import DEVICE_ID
 from tests.contract.test_device_registry_contract import device
-from tests.integration.m2_support import memory_settings
+from tests.integration.m2_support import PRINCIPAL, memory_settings
 
 SECOND_DEVICE_ID = UUID("00000000-0000-0000-0000-0000000002b0")
 OTHER_SESSION_ID = UUID("00000000-0000-0000-0000-0000000002b2")
@@ -107,7 +107,12 @@ async def _runtime_stack(
     runtime = DeviceToolRuntime(
         factory,
         registry,
-        channel or FakeDeviceChannel(clock=clock, capabilities={DEVICE_ID: capabilities}),
+        channel
+        or FakeDeviceChannel(
+            clock=clock,
+            capabilities={DEVICE_ID: capabilities},
+            owners={DEVICE_ID: _device_principal()},
+        ),
         clock,
         SequenceIdFactory(),
         invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
@@ -220,7 +225,11 @@ async def test_a_second_declaring_device_is_refused_with_a_process_event() -> No
 async def test_device_discovery_may_register_dynamically_but_other_sources_may_not() -> None:
     registry = StaticToolRegistry()
     tool = DeviceSmsSendTool(
-        FakeDeviceChannel(clock=_clock(), capabilities={DEVICE_ID: frozenset({TOOL_NAME})}),
+        FakeDeviceChannel(
+            clock=_clock(),
+            capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+            owners={DEVICE_ID: _device_principal()},
+        ),
         DEVICE_ID,
         SequenceIdFactory(),
         invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
@@ -228,7 +237,14 @@ async def test_device_discovery_may_register_dynamically_but_other_sources_may_n
 
     registry.register_dynamic(tool, tenant_id=principal().tenant_id)
 
-    sandboxed = tool.spec.model_copy(update={"source": ToolSource.SANDBOX, "name": "device.other"})
+    sandboxed = tool.spec.model_copy(
+        update={
+            "source": ToolSource.SANDBOX,
+            "name": "external.other",
+            "target_kind": "sandbox",
+            "device_id": None,
+        }
+    )
     with pytest.raises(ToolValidationError):
         registry.register_dynamic(_Stub(sandboxed), tenant_id=principal().tenant_id)
 
@@ -243,6 +259,43 @@ async def test_a_device_tool_requires_a_device_target_and_a_device_identifier() 
         validate_registration(spec.model_copy(update={"device_id": None}))
     with pytest.raises(ToolValidationError):
         validate_registration(spec.model_copy(update={"target_kind": "in_process"}))
+
+
+def test_dynamic_lookup_requires_the_pinned_device_identifier() -> None:
+    registry = StaticToolRegistry()
+    first = DeviceSmsSendTool(
+        FakeDeviceChannel(
+            clock=_clock(),
+            capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+            owners={DEVICE_ID: _device_principal()},
+        ),
+        DEVICE_ID,
+        SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+    )
+    replacement = DeviceSmsSendTool(
+        FakeDeviceChannel(
+            clock=_clock(),
+            capabilities={SECOND_DEVICE_ID: frozenset({TOOL_NAME})},
+            owners={SECOND_DEVICE_ID: _device_principal()},
+        ),
+        SECOND_DEVICE_ID,
+        SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+    )
+    tenant_id = _device_principal().tenant_id
+    registry.register_dynamic(first, tenant_id=tenant_id)
+    registry.unregister_dynamic(first.spec.name, first.spec.version, tenant_id=tenant_id)
+    registry.register_dynamic(replacement, tenant_id=tenant_id)
+
+    with pytest.raises(NotFoundError):
+        registry.get(
+            first.spec.name,
+            first.spec.version,
+            tenant_id=tenant_id,
+            source=ToolSource.DEVICE,
+            device_id=str(DEVICE_ID),
+        )
 
 
 class _Stub:
@@ -264,6 +317,7 @@ def _tool(*, status: DeviceInvocationStatus) -> tuple[DeviceSmsSendTool, FakeDev
     channel = FakeDeviceChannel(
         clock=_clock(),
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+        owners={DEVICE_ID: _device_principal()},
         default_status=status,
     )
     return (
@@ -444,6 +498,7 @@ async def test_the_execution_target_names_the_declaring_device() -> None:
     channel = FakeDeviceChannel(
         clock=_clock(),
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
     )
     async with build(
         settings=_device_settings(),
@@ -524,6 +579,7 @@ async def test_an_unreachable_device_surfaces_the_offline_outcome_to_the_model()
     channel = FakeDeviceChannel(
         clock=_clock(),
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
         default_status=DeviceInvocationStatus.EXPIRED,
     )
     async with build(
@@ -588,6 +644,7 @@ async def test_the_owner_confirmed_device_send_is_allowed_without_a_second_appro
     channel = FakeDeviceChannel(
         clock=_clock(),
         capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+        owners={DEVICE_ID: PRINCIPAL},
     )
     async with build(
         settings=_device_settings(),

@@ -761,6 +761,21 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
         ),
         (
             "runtime/limits.yaml",
+            "device:\n  invocation_timeout_seconds: 0\n",
+            r"device\.invocation_timeout_seconds must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "device:\n  ingest_daily_cap: -1\n",
+            r"device\.ingest_daily_cap must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "device:\n  invocation_poll_seconds: 0\n",
+            r"device\.invocation_poll_seconds must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
             "model:\n  max_internal_attempts: -" + "9" * 400 + "\n",
             r"model\.max_internal_attempts must be at least 1",
         ),

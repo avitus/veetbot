@@ -213,6 +213,7 @@ class StaticToolRegistry:
         tenant_id: str | None = None,
         source: ToolSource | None = None,
         server_id: str | None = None,
+        device_id: str | None = None,
     ) -> Tool:
         """Return the selected tool or raise NotFoundError when it is unavailable."""
 
@@ -223,7 +224,10 @@ class StaticToolRegistry:
             if dynamic_version is not None:
                 dynamic = self._dynamic_tools.get((tenant_id, name, dynamic_version))
                 if dynamic is not None and self._identity_matches(
-                    dynamic.spec, source=source, server_id=server_id
+                    dynamic.spec,
+                    source=source,
+                    server_id=server_id,
+                    device_id=device_id,
                 ):
                     return dynamic
         selected_version = self._latest.get(name) if version is None else version
@@ -233,7 +237,12 @@ class StaticToolRegistry:
             tool = self._tools[(name, selected_version)]
         except KeyError as exc:
             raise NotFoundError("tool not found") from exc
-        if not self._identity_matches(tool.spec, source=source, server_id=server_id):
+        if not self._identity_matches(
+            tool.spec,
+            source=source,
+            server_id=server_id,
+            device_id=device_id,
+        ):
             raise NotFoundError("tool not found")
         return tool
 
@@ -243,9 +252,12 @@ class StaticToolRegistry:
         *,
         source: ToolSource | None,
         server_id: str | None,
+        device_id: str | None,
     ) -> bool:
-        return (source is None or spec.source is source) and (
-            server_id is None or spec.server_id == server_id
+        return (
+            (source is None or spec.source is source)
+            and (server_id is None or spec.server_id == server_id)
+            and (device_id is None or spec.device_id == device_id)
         )
 
     def specs_for_session(

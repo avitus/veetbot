@@ -125,6 +125,7 @@ def upgrade() -> None:
         sa.Column("digest", sa.String(length=64), nullable=False),
         sa.Column("tenant_id", sa.Text(), nullable=False),
         sa.Column("received_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=True),
         sa.Column("run_id", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(
