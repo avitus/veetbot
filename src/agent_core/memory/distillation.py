@@ -500,6 +500,11 @@ def _canonical_provider_statement(
     """
 
     compact = " ".join(statement.strip().rstrip(".!?").split())
+    # "The user ..." names the same subject as "User ..."; fold it rather than
+    # discarding a good claim over its article.
+    compact = re.sub(r"^the\s+user(?=\s)", "User", compact, flags=re.IGNORECASE)
+    compact = re.sub(r"^the\s+user's(?=\s)", "The user's", compact, flags=re.IGNORECASE)
+    compact = re.sub(r"^user(?=['\s])", "User", compact, flags=re.IGNORECASE)
     if _CANONICAL_USER_STATEMENT.match(compact) is None:
         raise ValueError("provider statement has no canonical user subject")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None

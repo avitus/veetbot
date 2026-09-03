@@ -519,7 +519,7 @@
   milestone: 21
   kind: case
   spec: docs/plan/adaptive-memory-distillation.md#hard-gates
-  statement: "**The deterministic fallback never fabricates.** Turns that share surface phrasing with the production training conversation but state no durable training fact form no direct claim, only the age-awareness inference as a hypothesis, and a long or unterminated turn neither crashes nor stalls consolidation."
+  statement: "**The deterministic fallback never fabricates.** Turns that share surface phrasing with the production training conversation but state no durable training fact form nothing except the stated wish for age-aware recommendations, and a long or unterminated turn neither crashes nor stalls consolidation."
   check: tests/gates/test_memory_m21.py::test_high_recall_fallback_never_fabricates_from_control_turns
 - id: gate.memory.coverage_dispositions_verified
   milestone: 21

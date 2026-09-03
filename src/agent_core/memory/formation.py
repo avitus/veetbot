@@ -882,6 +882,11 @@ _ACTIVITY_FREQUENCY = re.compile(
     r"(?:\s+(?P<object>[^,;]{1,40}?))?\s+(?P<frequency>" + _FREQUENCY + r")\b",
     re.IGNORECASE,
 )
+_LEADING_FREQUENCY_HABIT = re.compile(
+    r"\b(?P<frequency>" + _FREQUENCY + r")\s*,?\s*i\s+(?:usually\s+)?"
+    r"(?P<verb>" + _ACTIVITY_VERB_ALTERNATION + r")(?:\s+(?P<object>[^,;]{1,40}?))?\s*$",
+    re.IGNORECASE,
+)
 _ACTIVITY_LIST = re.compile(
     r"(?:\b(?P<context>(?:the\s+)?rest\s+of\s+(?:the\s+)?days|most\s+days|on\s+(?:the\s+)?"
     r"other\s+days|on\s+off\s+days|on\s+weekends|most\s+(?:mornings|evenings))\s*,?\s*)?"
@@ -1594,12 +1599,10 @@ class HighRecallCandidateExtractor:
                             event,
                             subject=f"{factor}-aware recommendations",
                             statement=(
-                                "User likely wants recommendations that account for "
-                                f"their {factor}."
+                                f"User wants recommendations that account for their {factor}."
                             ),
                             claim_kind=MemoryClaimKind.PREFERENCE,
                             evidence_spans=[span(match)],
-                            derivation=MemoryDerivation.HYPOTHESIS,
                         )
                     ):
                         return proposed
@@ -1670,6 +1673,24 @@ class HighRecallCandidateExtractor:
                         return proposed
 
                 for match in _ACTIVITY_FREQUENCY.finditer(clause):
+                    verb = match.group("verb").casefold()
+                    if verb in frequent_verbs:
+                        continue
+                    object_ = " ".join((match.group("object") or "").split()).strip(_CLAUSE_STRIP)
+                    frequency = _frequency_words(match.group("frequency"))
+                    activity = f"{_third_person_verb(verb)} {_third_person(object_)}".strip()
+                    if note(
+                        render(
+                            event,
+                            subject=f"{_gerund(verb)} {_third_person(object_)}".strip(),
+                            statement=f"User {activity} {frequency}.",
+                            claim_kind=MemoryClaimKind.HABIT,
+                            evidence_spans=[span(match)],
+                        )
+                    ):
+                        return proposed
+
+                for match in _LEADING_FREQUENCY_HABIT.finditer(clause):
                     verb = match.group("verb").casefold()
                     if verb in frequent_verbs:
                         continue

@@ -326,7 +326,7 @@ def _belief_matches(
         return False
     if not closed_fields:
         return True
-    return subject_matches(belief.subject, expected.subjects)
+    return subject_matches(belief.subject, expected.subjects, expected.statements)
 
 
 def score_distillation_case(

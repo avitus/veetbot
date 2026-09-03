@@ -2220,8 +2220,8 @@ async def test_high_recall_fallback_never_fabricates_from_control_turns() -> Non
     These turns share surface phrasing with the production training
     conversation (an improvement question, an age question, a duration, a
     'cannot', a 'want to') but state no durable fact about the user's training.
-    The only admissible output is the age-awareness inference, and only as a
-    hypothesis.
+    The only admissible output is the stated wish for age-aware
+    recommendations, which the trip turn does state.
     """
 
     turns = [
@@ -2249,10 +2249,7 @@ async def test_high_recall_fallback_never_fabricates_from_control_turns() -> Non
 
     statements = [candidate.statement for candidate in candidates]
     assert not any("5x5" in statement or "strength" in statement for statement in statements)
-    assert all(candidate.derivation is MemoryDerivation.HYPOTHESIS for candidate in candidates), (
-        statements
-    )
-    assert all("age" in statement for statement in statements), statements
+    assert statements == ["User wants recommendations that account for their age."], statements
 
 
 async def test_high_recall_fallback_survives_a_long_unterminated_turn() -> None:
@@ -2585,3 +2582,38 @@ def test_formation_corpus_v3_runs_against_a_populated_store() -> None:
     assert any(case.scenario == "rich-conversation" for case in seeded)
     assert sum(sum(event.actor == "user" for event in case.events) >= 2 for case in seeded) >= 2
     assert all(case.label != "must_not_form" for case in seeded)
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        (
+            "The user coordinates volunteers at the food bank.",
+            "User coordinates volunteers at the food bank.",
+        ),
+        ("the user practices the piano most evenings", "User practices the piano most evenings."),
+        ("the user's class app is being prototyped.", "The user's class app is being prototyped."),
+        ("user prefers examples before theory.", "User prefers examples before theory."),
+    ],
+)
+def test_local_policy_folds_the_user_article_instead_of_rejecting(
+    statement: str, expected: str
+) -> None:
+    """A good claim is not discarded over the article in front of its subject."""
+
+    candidate = _candidate(
+        claim_kind="preference",
+        derivation="direct",
+        longevity="durable",
+        subject="explanation style",
+        statement=statement,
+        evidence_spans=[{"source_event_id": 7, "text": "building a personal AI agent"}],
+    )
+
+    normalized = _normalize_provider_candidate(
+        candidate,
+        by_sequence={7: _personal_agent_event()},
+        scope="general",
+    )
+
+    assert normalized.statement == expected

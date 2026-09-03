@@ -664,9 +664,9 @@ short units of work with idempotent derivation keys.
     Registered as `gate.memory.formation_corpus_seeded`, structural. **M21.**
 27. **The deterministic fallback never fabricates.** Turns that share surface
     phrasing with the production training conversation but state no durable
-    training fact form no direct claim, only the age-awareness inference as a
-    hypothesis, and a long or unterminated turn neither crashes nor stalls
-    consolidation. Registered as `gate.memory.fallback_never_fabricates`, case.
+    training fact form nothing except the stated wish for age-aware
+    recommendations, and a long or unterminated turn neither crashes nor
+    stalls consolidation. Registered as `gate.memory.fallback_never_fabricates`, case.
     **M21.**
 28. **A represented clause is verified against the memory it cites.** A
     coverage unit marked represented counts only when the attributed live

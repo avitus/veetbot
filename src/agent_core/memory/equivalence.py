@@ -178,12 +178,22 @@ def negation_terms(value: str) -> frozenset[str]:
 
 
 def quantity_terms(value: str) -> frozenset[str]:
+    """Counts asserted by a statement.
+
+    Numbers of one hundred or more are years, versions, and identifiers rather
+    than counts, and a lone "one" says no more than "a", so neither takes part
+    in the comparison.
+    """
+
     quantities: set[str] = set()
     for term in _tokens(value):
         if term.isdecimal():
-            quantities.add(str(int(term)))
+            if int(term) < 100:
+                quantities.add(str(int(term)))
         elif term in _NUMBER_WORDS:
             quantities.add(_NUMBER_WORDS[term])
+    if quantities == {"1"}:
+        return frozenset()
     return frozenset(quantities)
 
 
@@ -214,24 +224,32 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     return len(candidate_terms - reference_terms) <= 1
 
 
-def subject_matches(subject: str, expected_subjects: Iterable[str]) -> bool:
-    """Whether a belief subject names one of the expected conflict keys.
+def subject_matches(
+    subject: str,
+    expected_subjects: Iterable[str],
+    expected_statements: Iterable[str] = (),
+) -> bool:
+    """Whether a belief subject names the thing an expected claim is about.
 
     A generic bucket such as "User" never matches: subjects are conflict keys,
     and a belief filed under the user rather than the thing it is about cannot
-    be corrected or superseded in isolation.
+    be corrected or superseded in isolation. Naming conventions differ, so a
+    subject also matches when it shares a content term with the gold statement
+    itself.
     """
 
     normalized = normalized_statement(subject)
     if normalized in _GENERIC_SUBJECTS:
         return False
     terms = content_terms(subject)
+    if not terms:
+        return False
     for expected in expected_subjects:
         if normalized == normalized_statement(expected):
             return True
-        if terms and terms & content_terms(expected):
+        if terms & content_terms(expected):
             return True
-    return False
+    return any(terms & content_terms(statement) for statement in expected_statements)
 
 
 def statement_supports_clause(statement: str, clause: str) -> bool:
