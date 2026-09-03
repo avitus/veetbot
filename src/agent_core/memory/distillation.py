@@ -724,13 +724,44 @@ def _validate_coverage(
     )
 
 
+_SUBJECT_SYNONYMS = {
+    "bike": "bike",
+    "bikes": "bike",
+    "biking": "bike",
+    "cycle": "bike",
+    "cycles": "bike",
+    "cycling": "bike",
+    "bicycling": "bike",
+    "deploys": "deploy",
+    "deployment": "deploy",
+    "deployments": "deploy",
+    "run": "run",
+    "running": "run",
+    "runs": "run",
+    "swim": "swim",
+    "swimming": "swim",
+    "swims": "swim",
+}
+
+
+def _subject_tokens(subject: str) -> set[str]:
+    return {
+        _SUBJECT_SYNONYMS.get(token, token)
+        for token in _SEMANTIC_MEMORY_TOKEN.findall(subject.replace("-", " "))
+    }
+
+
 def _candidates_semantically_duplicate(
     left: MemoryCandidate,
     right: MemoryCandidate,
 ) -> bool:
+    """Whether two candidates from one batch assert the same claim.
+
+    Derivation is deliberately not compared: a direct claim and a hypothesis
+    about the same thing are one memory, and the combiner keeps the direct one.
+    """
+
     if not set(left.source_event_ids) & set(right.source_event_ids):
-        return False
-    if left.derivation is not right.derivation:
         return False
     normalized_left = " ".join(left.statement.casefold().strip().rstrip(".!?").split())
     normalized_right = " ".join(right.statement.casefold().strip().rstrip(".!?").split())
@@ -762,28 +793,34 @@ def _candidates_semantically_duplicate(
         }
     ):
         return True
-    if (
-        left.claim_kind is right.claim_kind
-        and normalized_left_subject not in generic_subjects
-        and normalized_right_subject not in generic_subjects
-        and not (
-            set(_SEMANTIC_MEMORY_TOKEN.findall(normalized_left_subject))
-            & set(_SEMANTIC_MEMORY_TOKEN.findall(normalized_right_subject))
-        )
-    ):
-        return False
+    subjects_related = bool(
+        _subject_tokens(normalized_left_subject) & _subject_tokens(normalized_right_subject)
+    )
     normalized_left = normalized_left.replace("-", " ")
     normalized_right = normalized_right.replace("-", " ")
-    left_tokens = set(_SEMANTIC_MEMORY_TOKEN.findall(normalized_left)) - _SEMANTIC_MEMORY_STOPWORDS
-    right_tokens = (
-        set(_SEMANTIC_MEMORY_TOKEN.findall(normalized_right)) - _SEMANTIC_MEMORY_STOPWORDS
-    )
+    left_tokens = {
+        _SUBJECT_SYNONYMS.get(token, token)
+        for token in _SEMANTIC_MEMORY_TOKEN.findall(normalized_left)
+    } - _SEMANTIC_MEMORY_STOPWORDS
+    right_tokens = {
+        _SUBJECT_SYNONYMS.get(token, token)
+        for token in _SEMANTIC_MEMORY_TOKEN.findall(normalized_right)
+    } - _SEMANTIC_MEMORY_STOPWORDS
     smaller = min(len(left_tokens), len(right_tokens))
     if not smaller:
         return False
     overlap = len(left_tokens & right_tokens) / smaller
-    threshold = 0.75 if left.claim_kind is not right.claim_kind else 0.5
-    return overlap >= threshold
+    if left.claim_kind is not right.claim_kind:
+        return overlap >= 0.75
+    if (
+        normalized_left_subject not in generic_subjects
+        and normalized_right_subject not in generic_subjects
+        and not subjects_related
+    ):
+        # Different subjects only merge when the statements assert the same
+        # claim under the strict comparison; sibling activities never do.
+        return statements_equivalent(left.statement, right.statement)
+    return overlap >= 0.5
 
 
 def _empty_stage_metric(outcome: str, latency_ms: int = 0) -> dict[str, int | str | None]:
@@ -1082,13 +1119,20 @@ class NemoriAssistedCandidateExtractor:
                 candidate.statement.casefold(),
                 tuple(candidate.source_event_ids),
             )
-            if key in seen or (
-                semantic_deduplication
-                and any(
-                    _candidates_semantically_duplicate(existing, candidate) for existing in combined
-                )
-            ):
+            if key in seen:
                 return
+            if semantic_deduplication:
+                for index, existing in enumerate(combined):
+                    if not _candidates_semantically_duplicate(existing, candidate):
+                        continue
+                    if (
+                        existing.derivation is MemoryDerivation.HYPOTHESIS
+                        and candidate.derivation is MemoryDerivation.DIRECT
+                    ):
+                        # A direct statement of the same claim outranks the guess.
+                        combined[index] = candidate
+                        seen.add(key)
+                    return
             seen.add(key)
             combined.append(candidate)
 

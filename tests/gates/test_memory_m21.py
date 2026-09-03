@@ -2617,3 +2617,46 @@ def test_local_policy_folds_the_user_article_instead_of_rejecting(
     )
 
     assert normalized.statement == expected
+
+
+def test_combiner_merges_synonym_subjects_and_keeps_the_direct_claim() -> None:
+    """One claim stays one memory across subject wording and derivation."""
+
+    biking = _candidate(
+        claim_kind="habit",
+        derivation="direct",
+        longevity="ongoing",
+        subject="biking",
+        statement="User bikes on the rest of the days.",
+        evidence_spans=[{"source_event_id": 7, "text": "building a personal AI agent"}],
+    )
+    cycling = biking.model_copy(
+        update={
+            "subject": "Cycling",
+            "statement": "User bikes on some days when not doing the 5x5 strength routine.",
+        }
+    )
+    assert _candidates_semantically_duplicate(biking, cycling)
+
+    direct = _candidate(
+        claim_kind="preference",
+        derivation="direct",
+        longevity="durable",
+        subject="age-aware recommendations",
+        statement="User wants recommendations that account for their age.",
+        evidence_spans=[{"source_event_id": 7, "text": "building a personal AI agent"}],
+    )
+    guess = direct.model_copy(
+        update={
+            "subject": "age-related recommendations",
+            "statement": "User likely prefers recommendations that account for their age.",
+            "derivation": "hypothesis",
+            "longevity": "tentative",
+            "model_confidence": 0.35,
+        }
+    )
+    assert _candidates_semantically_duplicate(direct, guess)
+    unrelated = direct.model_copy(
+        update={"subject": "swimming", "statement": "User swims on the rest of the days."}
+    )
+    assert not _candidates_semantically_duplicate(biking, unrelated)
