@@ -631,21 +631,18 @@ milestones:
       - check: comparative live-model evidence
         outcome: passed
         detail: >-
-          The 2026-09-03 production-tuple run under distillation-scorer@2
-          executed all three policies over 66 cases, five of them against a
-          populated store, and published the exact-tuple formation@9 artifact
-          bound to commit 9013d20. It reached 100 percent direct and hypothesis
-          must-form recall, 96.2 percent useful recall, 98.7 percent benign
-          precision, 100 percent evidence-disposition precision, a 73.1
-          percentage-point useful-recall lift over the leniently scored
-          formation@8 control, exactly three provider calls per consolidation,
-          a zero correction rate, zero boundary failures, and USD 1.07 of
-          provider cost. Two earlier runs under the same scorer refused
-          publication at 0.927 direct recall and 0.863 precision; the misses
-          were a local rejection of statements beginning "The user" and
-          redundant merges, not model omissions. The 2026-09-02 artifact was
-          withdrawn because its scorer, corpus, empty store, and build
-          reference could not support the numbers it carried.
+          The 2026-09-03 production-tuple run under distillation-scorer@2 executed
+          all three policies over 66 cases, five against a populated store, and
+          published the exact-tuple formation@9 artifact bound to the deployed
+          main head a904417 and its compiled policy default@19be675c1b3c+hb03f69cf.
+          It reached 97.7 percent direct and 100 percent hypothesis must-form
+          recall, 94.8 percent benign precision, 100 percent evidence-disposition
+          precision, a 65.4 percentage-point useful-recall lift over the leniently
+          scored formation@8 control, three provider calls per segment, zero
+          boundary failures, and USD 0.99 of provider cost. An earlier artifact
+          evaluated at 9013d20 was replaced because the Milestone 24 device policy
+          rules changed the compiled policy version, so activation correctly
+          refused the stale tuple in production.
       - check: rich-conversation regression, fallback honesty, and stage telemetry
         outcome: passed_locally
         detail: >-
