@@ -92,3 +92,4 @@ implementation without one.
 - [ADR-0081 — Milestone 24 SMS through the owner's iPhone (Proposed)](0081-milestone-24-sms-device-channel.md)
 - [ADR-0082 — Milestone 25 WhatsApp business surface (Proposed)](0082-milestone-25-whatsapp-surface.md)
 - [ADR-0083 — Tool-name-keyed policy rules and declared human confirmation](0083-tool-name-keyed-policy-rules.md)
+- [ADR-0084 — Atomic public website publication on DigitalOcean](0084-public-website-and-oauth-policy-pages.md)

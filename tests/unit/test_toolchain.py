@@ -102,6 +102,8 @@ def test_required_make_targets_exist() -> None:
         "production-check",
         "client-build",
         "docs",
+        "website-install",
+        "test-website",
     ):
         assert f"{target}:" in text
 
@@ -566,6 +568,11 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert "proxy_buffering off" in nginx
     assert "root /opt/veetbot/shared/docs/current" in nginx
     assert "try_files $uri $uri/ =404" in nginx
+    assert "server_name veetbot.com" in nginx
+    assert "server_name www.veetbot.com" in nginx
+    assert "/etc/letsencrypt/live/veetbot.com/fullchain.pem" in nginx
+    assert "root /opt/veetbot/shared/website/current" in nginx
+    assert "try_files $uri $uri.html $uri/ =404" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
     assert "rollback" in nginx_deploy
@@ -575,6 +582,10 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert 'DOCS_ROOT="${VEETBOT_DOCS_ROOT:-$DEPLOY_ROOT/shared/docs}"' in nginx_deploy
     assert 'sha256sum "$DOCS_ARCHIVE"' in nginx_deploy
     assert 'mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"' in nginx_deploy
+    assert "VEETBOT_WEBSITE_ROOT" in nginx_deploy
+    assert 'WEBSITE_ROOT="${VEETBOT_WEBSITE_ROOT:-$DEPLOY_ROOT/shared/website}"' in nginx_deploy
+    assert 'sha256sum "$WEBSITE_ARCHIVE"' in nginx_deploy
+    assert 'mv -Tf "$NEXT_WEBSITE_CURRENT" "$WEBSITE_ROOT/current"' in nginx_deploy
 
 
 def test_production_preflight_normalizes_missing_executable(
@@ -667,6 +678,7 @@ def test_ci_has_the_required_partitions() -> None:
         "package-release",
         "deploy-app",
         "deploy-nginx",
+        "public-site",
     }
     for name, job in jobs.items():
         if name == "sandbox":
@@ -678,9 +690,11 @@ def test_ci_has_the_required_partitions() -> None:
                 assert job["macos"] == {"xcode": "26.6.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
-        expected_image = (
-            "cimg/base:stable" if name in {"deploy-app", "deploy-nginx"} else "cimg/python:3.12"
-        )
+        expected_image = {
+            "deploy-app": "cimg/base:stable",
+            "deploy-nginx": "cimg/base:stable",
+            "public-site": "cimg/node:22.13",
+        }.get(name, "cimg/python:3.12")
         assert job["docker"][0]["image"] == expected_image
 
     assert jobs["static"]["resource_class"] == "medium"
@@ -704,6 +718,7 @@ def test_ci_has_the_required_partitions() -> None:
         ]
     for target in ("lint", "typecheck", "test-static", "test-deploy", "docs-check"):
         assert any(f"make {target}" in command for command in commands["static"])
+    assert "make test-website" in commands["public-site"]
     assert "make client-build" in commands["static"]
     assert any(
         "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command
@@ -754,6 +769,8 @@ def test_ci_has_the_required_partitions() -> None:
     assert "release-id" in package_workspace["paths"]
     assert "veetbot-docs.tar.gz" in package_workspace["paths"]
     assert "veetbot-docs.tar.gz.sha256" in package_workspace["paths"]
+    assert "veetbot-website.tar.gz" in package_workspace["paths"]
+    assert "veetbot-website.tar.gz.sha256" in package_workspace["paths"]
     assert any("deploy/app/release.sh" in command for command in commands["deploy-app"])
     assert any(
         "X-Veetbot-Release" not in command and "x-veetbot-release" in command
@@ -770,12 +787,20 @@ def test_ci_has_the_required_partitions() -> None:
         for command in commands["deploy-nginx"]
     )
     assert any(
+        "veetbot-website.tar.gz" in command and "veetbot-website.tar.gz.sha256" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
         "VEETBOT_EXPECTED_RELEASE_ID" in command
         and '[[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]' in command
         for command in commands["deploy-nginx"]
     )
     assert any(
         "https://docs.veetbot.com" in command and "documentation did not report release" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "https://www.veetbot.com" in command and "website did not report release" in command
         for command in commands["deploy-nginx"]
     )
     assert any(
@@ -786,7 +811,7 @@ def test_ci_has_the_required_partitions() -> None:
     )
     assert any(
         "nginx-deployment-outcome" in command
-        and "Skipping documentation identity probe for stale release" in command
+        and "Skipping documentation and website identity probes for stale release" in command
         for command in commands["deploy-nginx"]
     )
     assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
@@ -824,6 +849,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "public-site",
     ]
     assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
     assert delivery_jobs["deploy-app"]["context"] == "veetbot-production"

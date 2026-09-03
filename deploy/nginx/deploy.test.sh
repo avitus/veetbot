@@ -21,6 +21,10 @@ DOCS_ROOT="$DEPLOY_ROOT/shared/docs"
 DOCS_SOURCE="$TEST_ROOT/docs-source"
 DOCS_ARCHIVE="$TEST_ROOT/veetbot-docs.tar.gz"
 DOCS_CHECKSUM="$DOCS_ARCHIVE.sha256"
+WEBSITE_ROOT="$DEPLOY_ROOT/shared/website"
+WEBSITE_SOURCE="$TEST_ROOT/website-source"
+WEBSITE_ARCHIVE="$TEST_ROOT/veetbot-website.tar.gz"
+WEBSITE_CHECKSUM="$WEBSITE_ARCHIVE.sha256"
 GNU_MV="${VEETBOT_TEST_GNU_MV:-$(command -v gmv || command -v mv || true)}"
 GNU_SHA256SUM="${VEETBOT_TEST_GNU_SHA256SUM:-$(
   command -v gsha256sum || command -v sha256sum || true
@@ -62,15 +66,26 @@ mkdir -p \
   "$BIN_DIR" \
   "$DEPLOY_ROOT/shared" \
   "$DOCS_SOURCE" \
+  "$WEBSITE_SOURCE" \
   "$(dirname "$AVAILABLE")" \
   "$(dirname "$ENABLED")"
 : >"$LOG_FILE"
 printf '<h1>Veetbot documentation</h1>\n' >"$DOCS_SOURCE/index.html"
 printf '20260810-152233-abcdef0\n' >"$DOCS_SOURCE/release.txt"
+printf '<h1>Veetbot</h1>\n' >"$WEBSITE_SOURCE/index.html"
+printf '<h1>Privacy Policy</h1>\n' >"$WEBSITE_SOURCE/privacy.html"
+printf '<h1>Terms of Service</h1>\n' >"$WEBSITE_SOURCE/tos.html"
+printf '20260810-152233-abcdef0\n' >"$WEBSITE_SOURCE/release.txt"
 "$GNU_TAR" -czf "$DOCS_ARCHIVE" -C "$DOCS_SOURCE" .
+"$GNU_TAR" -czf "$WEBSITE_ARCHIVE" -C "$WEBSITE_SOURCE" .
 (
   cd "$(dirname "$DOCS_ARCHIVE")"
   "$GNU_SHA256SUM" "$(basename "$DOCS_ARCHIVE")" >"$(basename "$DOCS_CHECKSUM")"
+)
+(
+  cd "$(dirname "$WEBSITE_ARCHIVE")"
+  "$GNU_SHA256SUM" "$(basename "$WEBSITE_ARCHIVE")" \
+    >"$(basename "$WEBSITE_CHECKSUM")"
 )
 
 write_stub() {
@@ -132,6 +147,7 @@ run_deploy() {
   VEETBOT_NGINX_AVAILABLE="$AVAILABLE" \
   VEETBOT_NGINX_ENABLED="$ENABLED" \
   VEETBOT_NGINX_BACKUP_DIR="$BACKUPS" \
+  VEETBOT_WEBSITE_ROOT="$WEBSITE_ROOT" \
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_FAIL_MARKER="$FAIL_MARKER" \
   VEETBOT_TEST_SYSTEMCTL_FAIL_MARKER="$SYSTEMCTL_FAIL_MARKER" \
@@ -145,7 +161,9 @@ run_deploy() {
     "$DEPLOY_SCRIPT" \
       "${1:-$SOURCE_CONFIG}" \
       "${2:-}" \
-      "${3:-}"
+      "${3:-}" \
+      "${4:-}" \
+      "${5:-}"
 }
 
 if run_deploy "$TEST_ROOT/missing.conf" >/dev/null 2>&1; then
@@ -165,7 +183,8 @@ printf 'VEETBOT_RELEASE_ID=20260810-152233-abcdef0\n' \
   >"$DEPLOY_ROOT/releases/20260810-152233-abcdef0/.release.env"
 ln -s "$DEPLOY_ROOT/releases/20260810-152233-abcdef0" "$DEPLOY_ROOT/current"
 VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy \
-  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM"
+  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" \
+  "$WEBSITE_ARCHIVE" "$WEBSITE_CHECKSUM"
 [[ "$(readlink "$DOCS_ROOT/current")" == \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
 cmp -s \
@@ -174,6 +193,20 @@ cmp -s \
 grep -Fqx \
   '20260810-152233-abcdef0' \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0/release.txt"
+[[ "$(readlink "$WEBSITE_ROOT/current")" == \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0" ]]
+cmp -s \
+  "$WEBSITE_SOURCE/index.html" \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0/index.html"
+cmp -s \
+  "$WEBSITE_SOURCE/privacy.html" \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0/privacy.html"
+cmp -s \
+  "$WEBSITE_SOURCE/tos.html" \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0/tos.html"
+VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy \
+  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" \
+  "$WEBSITE_ARCHIVE" "$WEBSITE_CHECKSUM" >/dev/null
 
 printf 'server { return 418; }\n' >"$SOURCE_CONFIG"
 if VEETBOT_EXPECTED_RELEASE_ID=20260810-152244-bcdef01 run_deploy \
@@ -349,12 +382,53 @@ tar -czf "$NEXT_DOCS_ARCHIVE" -C "$NEXT_DOCS_SOURCE" .
   sha256sum "$(basename "$NEXT_DOCS_ARCHIVE")" \
     >"$(basename "$NEXT_DOCS_CHECKSUM")"
 )
+NEXT_WEBSITE_SOURCE="$TEST_ROOT/next-website-source"
+NEXT_WEBSITE_ARCHIVE="$TEST_ROOT/next-website.tar.gz"
+NEXT_WEBSITE_CHECKSUM="$NEXT_WEBSITE_ARCHIVE.sha256"
+mkdir -p "$NEXT_WEBSITE_SOURCE"
+printf '<h1>Next website</h1>\n' >"$NEXT_WEBSITE_SOURCE/index.html"
+printf '<h1>Next privacy policy</h1>\n' >"$NEXT_WEBSITE_SOURCE/privacy.html"
+printf '<h1>Next terms</h1>\n' >"$NEXT_WEBSITE_SOURCE/tos.html"
+printf '%s\n' "$next_release_id" >"$NEXT_WEBSITE_SOURCE/release.txt"
+tar -czf "$NEXT_WEBSITE_ARCHIVE" -C "$NEXT_WEBSITE_SOURCE" .
+(
+  cd "$(dirname "$NEXT_WEBSITE_ARCHIVE")"
+  sha256sum "$(basename "$NEXT_WEBSITE_ARCHIVE")" \
+    >"$(basename "$NEXT_WEBSITE_CHECKSUM")"
+)
+
+MISSING_PAGE_WEBSITE_SOURCE="$TEST_ROOT/missing-page-website-source"
+MISSING_PAGE_WEBSITE_ARCHIVE="$TEST_ROOT/missing-page-website.tar.gz"
+MISSING_PAGE_WEBSITE_CHECKSUM="$MISSING_PAGE_WEBSITE_ARCHIVE.sha256"
+mkdir -p "$MISSING_PAGE_WEBSITE_SOURCE"
+printf '<h1>Incomplete website</h1>\n' >"$MISSING_PAGE_WEBSITE_SOURCE/index.html"
+printf '<h1>Privacy policy</h1>\n' >"$MISSING_PAGE_WEBSITE_SOURCE/privacy.html"
+printf '%s\n' "$next_release_id" >"$MISSING_PAGE_WEBSITE_SOURCE/release.txt"
+tar -czf "$MISSING_PAGE_WEBSITE_ARCHIVE" -C "$MISSING_PAGE_WEBSITE_SOURCE" .
+(
+  cd "$(dirname "$MISSING_PAGE_WEBSITE_ARCHIVE")"
+  sha256sum "$(basename "$MISSING_PAGE_WEBSITE_ARCHIVE")" \
+    >"$(basename "$MISSING_PAGE_WEBSITE_CHECKSUM")"
+)
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "" "" "$MISSING_PAGE_WEBSITE_ARCHIVE" \
+  "$MISSING_PAGE_WEBSITE_CHECKSUM" >"$TEST_ROOT/missing-page-website.out" 2>&1; then
+  printf 'website archive without tos.html unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fqx \
+  'nginx deployment failed: website archive does not contain tos.html' \
+  "$TEST_ROOT/missing-page-website.out"
+[[ "$(readlink "$WEBSITE_ROOT/current")" == \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0" ]]
+
 printf 'server { return 200; }\n' >"$AVAILABLE"
 printf 'server { return 503; }\n' >"$SOURCE_CONFIG"
 rm -f -- "$FAIL_MARKER"
 if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" \
   VEETBOT_TEST_NGINX_FAIL_ONCE=1 run_deploy \
     "$SOURCE_CONFIG" "$NEXT_DOCS_ARCHIVE" "$NEXT_DOCS_CHECKSUM" \
+    "$NEXT_WEBSITE_ARCHIVE" "$NEXT_WEBSITE_CHECKSUM" \
     >/dev/null 2>&1; then
   printf 'failed Nginx validation published documentation unexpectedly\n' >&2
   exit 1
@@ -362,6 +436,8 @@ fi
 grep -Fq 'return 200' "$AVAILABLE"
 [[ "$(readlink "$DOCS_ROOT/current")" == \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+[[ "$(readlink "$WEBSITE_ROOT/current")" == \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0" ]]
 
 printf 'server { return 200; }\n' >"$AVAILABLE"
 printf 'server { return 503; }\n' >"$SOURCE_CONFIG"
@@ -369,6 +445,7 @@ rm -f -- "$SYSTEMCTL_FAIL_MARKER"
 if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" \
   VEETBOT_TEST_SYSTEMCTL_FAIL_ONCE=1 run_deploy \
     "$SOURCE_CONFIG" "$NEXT_DOCS_ARCHIVE" "$NEXT_DOCS_CHECKSUM" \
+    "$NEXT_WEBSITE_ARCHIVE" "$NEXT_WEBSITE_CHECKSUM" \
     >/dev/null 2>&1; then
   printf 'failed Nginx reload published documentation unexpectedly\n' >&2
   exit 1
@@ -376,6 +453,8 @@ fi
 grep -Fq 'return 200' "$AVAILABLE"
 [[ "$(readlink "$DOCS_ROOT/current")" == \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+[[ "$(readlink "$WEBSITE_ROOT/current")" == \
+  "$WEBSITE_ROOT/releases/20260810-152233-abcdef0" ]]
 
 printf 'server { return 200; }\n' >"$AVAILABLE"
 printf 'server { return 503; }\n' >"$SOURCE_CONFIG"

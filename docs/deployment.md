@@ -28,6 +28,27 @@ The flow adapts the useful deployment invariants from
 [avitus/mankunku](https://github.com/avitus/mankunku) to Veetbot's Python and
 systemd runtime. ADR-0048 records the differences and security boundary.
 
+## Public website
+
+The visitor-facing homepage and Google OAuth policy pages are a separate static
+site defined under `website/`:
+
+- `https://www.veetbot.com/`
+- `https://www.veetbot.com/privacy`
+- `https://www.veetbot.com/tos`
+
+The source is a Next.js static export with no account system, analytics,
+database, object storage, or Veetbot application credential. Run
+`make website-install test-website` locally. CircleCI repeats that build in a
+credential-free Node job and passes only the generated `website/out` tree to
+release packaging.
+
+The application, documentation, and website artifacts receive the same release
+identity. The Nginx deployment validates and atomically promotes the website at
+`/opt/veetbot/shared/website/current`; configuration validation or reload
+failure restores both static-site pointers and the prior configuration. ADR-0084
+records the boundary and rationale.
+
 ## Release flow
 
 ```text
@@ -122,6 +143,7 @@ sudo usermod -aG docker veetbot-exec
 sudo mkdir -p \
   /opt/veetbot/releases \
   /opt/veetbot/shared/docs/releases \
+  /opt/veetbot/shared/website/releases \
   /opt/veetbot/shared/uv-cache \
   /etc/veetbot \
   /var/lib/veetbot/artifacts
@@ -360,14 +382,18 @@ source as `veetbot-deploy`.
 The committed Nginx virtual hosts expect Let's Encrypt certificates at
 `/etc/letsencrypt/live/api.veetbot.com/`,
 `/etc/letsencrypt/live/browser.veetbot.com/`, and
-`/etc/letsencrypt/live/docs.veetbot.com/`. The Nginx installer changes only
+`/etc/letsencrypt/live/docs.veetbot.com/`. The homepage certificate covering
+both `veetbot.com` and `www.veetbot.com` lives under
+`/etc/letsencrypt/live/veetbot.com/`. The Nginx installer changes only
 Veetbot's `sites-available` and `sites-enabled` entries; it preserves other
 virtual hosts.
 
-Before merging the documentation-hosting change to `main`:
+Before merging a new static-host configuration to `main`:
 
-1. Add a DigitalOcean DNS `A` record for `docs.veetbot.com` with the same target
-   as `api.veetbot.com`, and wait for public resolution.
+1. Confirm that `docs.veetbot.com` resolves to the same address as
+   `api.veetbot.com`. For the public website, the apex `A` record must target
+   that address and `www` must be a CNAME to the apex. Wait for public
+   resolution.
 2. Provision the dedicated certificate at the exact path above. Prefer
    Certbot's DigitalOcean DNS plugin so issuance and renewal do not depend on a
    temporary HTTP virtual host. Keep its API token in a root-owned `0600`
@@ -405,6 +431,7 @@ Create a restricted CircleCI context named `veetbot-production` with:
 | `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
 | `PRODUCTION_URL` | Optional public origin; defaults to `https://api.veetbot.com` |
 | `DOCS_URL` | Optional docs origin; defaults to `https://docs.veetbot.com` |
+| `WEBSITE_URL` | Optional website origin; defaults to `https://www.veetbot.com` |
 
 Obtain the public host-key record from the server or provider console and verify
 its fingerprint through a second trusted channel before placing it in the
@@ -505,19 +532,23 @@ that counter.
 
 An ordinary branch or pull request runs verification only. A `dev` push also
 runs the non-publishing Apple signing smoke described above. On `main`, after
-all five required verification lanes pass:
+all six required verification lanes pass:
 
+- `public-site` installs the locked Node dependencies, builds, tests, and lints
+  the static export, and exposes only that output to downstream packaging;
 - `package-release` archives the exact tested commit, builds MkDocs in strict
-  mode, and records both artifacts' SHA-256 values;
+  mode, stamps the website output, and records all three artifacts' SHA-256
+  values;
 - `deploy-app` stages the archive, verifies the checksum, and executes the
   locked server release; and
 - `deploy-nginx` follows a successful application release, takes the same host
-  lock, atomically promotes `/opt/veetbot/shared/docs/current`, and reconciles the
-  versioned virtual hosts. If a newer pipeline has already promoted another
+  lock, atomically promotes `/opt/veetbot/shared/docs/current` and
+  `/opt/veetbot/shared/website/current`, and reconciles the versioned virtual
+  hosts. If a newer pipeline has already promoted another
   application release, the older proxy job detects the release-identity
   mismatch, reports a distinct stale outcome, and exits without overwriting the
-  newer site or config. CircleCI skips that older job's documentation identity
-  probe because the newer release remains authoritative; and
+  newer sites or config. CircleCI skips that older job's documentation and
+  website identity probes because the newer release remains authoritative; and
 - `apple-testflight` follows a successful application release in a separate
   serial group, archives and verifies the macOS application with
   `pipeline.number` as its build number, creates the signed installer package
@@ -537,8 +568,9 @@ candidate file or activating its symlink. `deploy/app/release.sh` requires the
 local readiness header to identify the staged release and the authenticated
 session-index route to respond successfully; after it returns, CircleCI polls
 the public readiness endpoint for that exact identity. The Nginx job then
-requires `https://docs.veetbot.com/release.txt` to return the same identity. A
-public probe failure is therefore a post-promotion CircleCI failure boundary.
+requires both `https://docs.veetbot.com/release.txt` and
+`https://www.veetbot.com/release.txt` to return the same identity. A public
+probe failure is therefore a post-promotion CircleCI failure boundary.
 The release verifies every application process through its `/proc` working
 directory. The execution service instead relies on its checked-in `ExecStart`,
 the completed restart, and an active main PID because `DynamicUser=yes`
@@ -559,13 +591,16 @@ After the first successful pipeline, verify the active revision and services:
 curl --fail --show-error --dump-header - --output /dev/null \
   https://api.veetbot.com/health/ready
 curl --fail --show-error https://docs.veetbot.com/release.txt
+curl --fail --show-error https://www.veetbot.com/release.txt
 ssh veetbot-deploy@api.veetbot.com '
   set -eu
   app_release="$(readlink -f /opt/veetbot/current)"
   . "$app_release/.release.env"
   docs_release="$(readlink -f /opt/veetbot/shared/docs/current)"
+  website_release="$(readlink -f /opt/veetbot/shared/website/current)"
   test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"
-  printf "%s\n" "$docs_release"
+  test "$(cat "$website_release/release.txt")" = "$VEETBOT_RELEASE_ID"
+  printf "%s\n%s\n" "$docs_release" "$website_release"
 '
 ssh veetbot-deploy@api.veetbot.com \
   'systemctl is-active veetbot-execution veetbot-api veetbot-worker veetbot-async-worker veetbot-maintenance'

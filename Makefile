@@ -4,7 +4,7 @@ PYTHON ?= python
 	test-static test-contract test-fast test-integration test-live \
 	test-sandbox test-apple test-apple-ui test-deploy sandbox-image \
 	production-check \
-	docs docs-serve docs-check citations-fix
+	docs docs-serve docs-check citations-fix website-install test-website
 
 install:
 	uv sync --all-groups
@@ -126,6 +126,13 @@ test-deploy:
 	deploy/app/rollback.test.sh
 	deploy/nginx/deploy.test.sh
 
+website-install:
+	npm --prefix website ci --no-audit --no-fund
+
+test-website: website-install
+	npm --prefix website test
+	npm --prefix website run lint
+
 production-check:
 	uv run python scripts/check_production_deployment.py
 
@@ -141,7 +148,7 @@ docs-check:
 citations-fix:
 	uv run $(PYTHON) scripts/check_citations.py --update
 
-check: lint typecheck test-fast test-deploy docs-check
+check: lint typecheck test-fast test-deploy docs-check test-website
 
 db-up:
 	docker compose up -d postgres

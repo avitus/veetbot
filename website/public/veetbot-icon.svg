@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Veetbot icon</title>
+  <desc id="desc">A friendly face framed by teal and amber code brackets.</desc>
+  <rect width="1024" height="1024" fill="#FAFAF7"/>
+  <path d="M370 270 160 512l210 242" fill="none" stroke="#2DD4BF" stroke-linecap="round" stroke-linejoin="round" stroke-width="116"/>
+  <path d="m654 270 210 242-210 242" fill="none" stroke="#F59E0B" stroke-linecap="round" stroke-linejoin="round" stroke-width="116"/>
+  <circle cx="430" cy="478" r="48" fill="#0E172A"/>
+  <circle cx="594" cy="478" r="48" fill="#0E172A"/>
+  <circle cx="414" cy="462" r="13" fill="#FAFAF7"/>
+  <circle cx="578" cy="462" r="13" fill="#FAFAF7"/>
+</svg>

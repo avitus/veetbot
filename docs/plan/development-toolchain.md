@@ -40,7 +40,7 @@ CI is defined as running that target plus the ones that do.
 Three consequences follow.
 
 1.  A developer who runs `make check` and sees it pass has run exactly
-    the two CI jobs that gate a pull request without a database. They
+    the three CI jobs that gate a pull request without a database. They
     have not run the integration job; the Makefile says so by giving it
     a separate target rather than folding it in silently.
 2.  Adding a gate means adding it to one place. A gate registered under
@@ -178,12 +178,12 @@ format      uv run ruff format . && uv run ruff check --fix .
 lint        uv run ruff format --check . && uv run ruff check .
 typecheck   uv run mypy src tests
 test        uv run pytest -m "not live"
-check       lint typecheck test-fast docs
+check       lint typecheck test-fast test-deploy docs-check test-website
 db-up       docker compose up -d postgres && wait-for-healthy
 migrate     uv run alembic upgrade head
 ```
 
-Six targets exist that Section 21 does not list, because CI needs them
+Eight targets exist that Section 21 does not list, because CI needs them
 and rule 3 above says CI may not invent commands:
 
 ```text
@@ -196,15 +196,17 @@ test-fast         test-static then test-contract
 test-integration  pytest -m integration
 test-live         RUN_LIVE_MODEL_TESTS=1 pytest -m live
 docs              mkdocs build --strict
+website-install   npm --prefix website ci
+test-website      website-install, static export tests, and lint
 ```
 
-`make check` is `lint typecheck test-fast`, `test-fast` is
-`test-static` followed by `test-contract`, and those two are CI jobs 1
-and 2 exactly — everything that needs neither a database nor a
+`make check` is `lint typecheck test-fast test-deploy docs-check
+test-website`. `test-fast` is `test-static` followed by `test-contract`;
+those Python checks plus the independent Node website lane are CI jobs 1,
+2, and 9 exactly — everything that needs neither a database nor a
 credential, partitioned rather than overlapping. This is the whole of
-the reconciliation the governing rule demands. A developer with no
-Docker daemon running can still satisfy the criterion in Section 24
-that says
+the reconciliation the governing rule demands. A developer with no Docker
+daemon running can still satisfy the criterion in Section 24 that says
 "`make check` succeeds"; a developer with one runs `make db-up migrate
 test-integration` and has run the third job as well.
 
@@ -281,7 +283,8 @@ The original four verification jobs match
 sandbox lane, native Apple lane, and post-gate production delivery jobs extend
 that file without changing the meaning of the original partitions or `make
 check`. ADR-0048 owns the server delivery mechanics, ADR-0049 owns native-client
-verification, and ADR-0074 owns native macOS TestFlight delivery.
+verification, ADR-0074 owns native macOS TestFlight delivery, and ADR-0084 owns
+the public-site verification and publication lane.
 
 ```text
 job           target invoked         needs     runs on
@@ -299,15 +302,16 @@ job           target invoked         needs     runs on
   smoke
 8 apple-      shared archive and     signing   main, after deploy-app
   testflight  package script, altool API key
+9 public-site make test-website      Node 22   every push, PR
 ```
 
-Jobs 1 and 2 partition `make check`, split so the cheap one fails
-first. The union of the two jobs' `make` targets is exactly
+Jobs 1, 2, and 9 partition `make check`, split so the cheap lanes fail
+first. The union of those jobs' `make` targets is exactly
 `make check`, including `test-deploy` in both the static lane and the
 local aggregate; job 1's reading-lane step below is the one check
 outside that equality, because it reads git range state `make check`
-does not assume. No check appears in both jobs, and a developer who
-runs `make check` locally has run both jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
+does not assume. No check appears in more than one lane, and a developer who
+runs `make check` locally has run all three jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
 Job 1 uses a two-vCPU CircleCI executor and runs only `test-static` with two
 processes and load-scope scheduling; the local Makefile target remains serial,
@@ -327,7 +331,13 @@ selection, switching, and new-conversation navigation without a live server or
 credential. The simulator test products are built once, then the iPhone and
 iPad destinations run concurrently without rebuilding. Each platform writes a
 distinct result bundle, and CircleCI retains those bundles for diagnosis.
-Release packaging depends on both additional gates.
+Release packaging depends on all three additional gates.
+
+Job 9 is a credential-free Node lane. It installs the exact
+`website/package-lock.json`, builds the static export, runs rendered-route
+assertions for the homepage and both OAuth policy pages, and lints the source.
+Only the generated `website/out` tree enters the release workspace; the
+application and deployment jobs receive no Node runtime or website credential.
 
 Job 7 is a pre-merge signing smoke, not a verification partition and not part of
 `make check`. On trusted `dev` pushes it installs the CircleCI-managed
@@ -389,12 +399,13 @@ credentials without placing them in the configuration file.
 Three workflow-level facts complete the definition:
 
 1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 plus the additional
-    sandbox and Apple jobs 5 and 6 for ordinary VCS pipelines, including
-    pull-request branches.
+    sandbox, Apple, and public-site jobs 5, 6, and 9 for ordinary VCS pipelines,
+    including pull-request branches.
     A pipeline with `run_live: true` selects the manual live workflow instead.
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
     runs only on trusted `dev`; it does not receive publication credentials.
-    Production delivery begins only after all five `verify` jobs pass. On
+    Production delivery begins only after all six required verification jobs
+    pass. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
     live-model pipelines. The
@@ -404,8 +415,9 @@ Three workflow-level facts complete the definition:
 2.  **Python version.** A single version, 3.12, not a matrix. The
     project pins `requires-python >=3.12` and runs one deployment; a
     matrix here would test a configuration nothing runs.
-3.  **Caching.** The CircleCI `uv` cache is keyed on `uv.lock`. The lockfile is
-    committed, so a cache miss is a dependency change and never a
+3.  **Caching.** The CircleCI `uv` cache is keyed on `uv.lock`, and the website's
+    npm download cache is keyed on `website/package-lock.json`. Both lockfiles
+    are committed, so a cache miss is a dependency change and never a
     coincidence.
 
 No standalone job is added for the documentation build. `make docs`
@@ -619,12 +631,13 @@ done badly.
 
 1.  **`make check` and CI are the same set of checks.** CI runs no
     command that is not a Makefile target, and `make check` is the
-    exact union of the two CI jobs that need neither a database nor a
-    credential. A gate added to one is added to both, because both
-    select by pytest marker rather than by listing files.
-2.  **Six targets are added to Section 21's eight.** `test-static`,
+    exact union of the three CI jobs that need neither a database nor a
+    credential. The Python lanes select by pytest marker, and the independent
+    public-site lane runs the pinned Node build through its Make target.
+2.  **Eight targets are added to Section 21's eight.** `test-static`,
     `test-contract`, `test-fast`, `test-integration`, `test-live`, and
-    `docs`. Each exists because a CI job invokes it; none exists
+    `docs`, plus `website-install` and `test-website`. Each exists because a CI
+    job invokes it; none exists
     because it seemed useful.
 3.  **`test-static` and `test-contract` partition `test-fast`.** The
     contract selector is a negation — not static, not integration, not
@@ -656,9 +669,9 @@ done badly.
     placeholder service is one nobody starts and nobody maintains.
 10. **One CircleCI configuration file and one Python version.** The four
     original verification jobs retain their specified partitions. The later
-    sandbox, native Apple, pre-merge Apple signing smoke, server delivery, and
-    macOS TestFlight delivery jobs share the same file under ADR-0048,
-    ADR-0049, and ADR-0074. No Python matrix is added: the project pins `>=3.12`
+    sandbox, native Apple, public-site, pre-merge Apple signing smoke, server
+    delivery, and macOS TestFlight delivery jobs share the same file under
+    ADR-0048, ADR-0049, ADR-0074, and ADR-0084. No Python matrix is added: the project pins `>=3.12`
     and runs one deployment, so a matrix would test a configuration nothing
     runs. The `uv` cache keys on `uv.lock`, so a cache miss means a dependency
     changed.
