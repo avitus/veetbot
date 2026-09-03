@@ -7,10 +7,12 @@ import AppKit
 struct VeetbotSceneRoot: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject var appearance: AppearancePreferences
+    @ObservedObject var smsIntegration: SmsIntegrationPreferences
 
     var body: some View {
         RootView(model: model)
             .environmentObject(appearance)
+            .environmentObject(smsIntegration)
             .appTypography(appearance)
             .tint(AppTheme.turquoise)
         #if os(macOS)
@@ -27,6 +29,11 @@ public struct RootView: View {
     #endif
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appearance: AppearancePreferences
+    #if os(iOS)
+    @EnvironmentObject private var smsIntegration: SmsIntegrationPreferences
+    @State private var composingInvocation: SmsInvocation?
+    @State private var answeredSmsInvocationIDs: Set<UUID> = []
+    #endif
     #if os(macOS)
     @StateObject private var settingsWindowPresenter = SettingsWindowPresenter()
     #endif
@@ -46,6 +53,19 @@ public struct RootView: View {
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
             ConnectionSettingsView(model: model, embedded: false)
+        }
+        #endif
+        #if os(iOS)
+        .sheet(item: composedInvocation, onDismiss: { presentNextSmsInvocation() }) { invocation in
+            SmsComposeSheet(invocation: invocation) { result in
+                answerSmsInvocation(invocation, with: DeviceInvocationResult(composeResult: result))
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: model.pendingSmsInvocation) { _ in presentNextSmsInvocation() }
+        .task(id: smsRecoveryKey) {
+            guard scenePhase == .active, smsIntegration.integrationEnabled else { return }
+            await model.refreshPendingSmsInvocations()
         }
         #endif
         .onChange(of: model.requiresReauthentication) { required in
@@ -122,6 +142,77 @@ public struct RootView: View {
         horizontalSizeClass == .regular
         #endif
     }
+
+    #if os(iOS)
+    /// The invocation this sheet is showing — the view's own state, not the
+    /// head of the model's queue, which may already have advanced. Dismissing
+    /// the sheet by hand never reaches the compose delegate, so that path
+    /// posts the cancellation for the invocation that was on screen.
+    private var composedInvocation: Binding<SmsInvocation?> {
+        Binding(
+            get: { composingInvocation },
+            set: { newValue in
+                guard newValue == nil, let dismissed = composingInvocation else { return }
+                answerSmsInvocation(dismissed, with: .cancelled)
+            }
+        )
+    }
+
+    /// Records the owner's outcome for the invocation that was on screen. The
+    /// id is retired here, synchronously, because the sheet's dismissal can
+    /// reach `onDismiss` before the view model has settled the queue — and a
+    /// dismissal must never bring the answered invocation back.
+    private func answerSmsInvocation(
+        _ invocation: SmsInvocation,
+        with result: DeviceInvocationResult
+    ) {
+        answeredSmsInvocationIDs.insert(invocation.id)
+        composingInvocation = nil
+        Task { await model.completeSmsInvocation(invocation, with: result) }
+    }
+
+    /// Shows the next unanswered invocation once nothing is on screen. A
+    /// device that cannot send text reports the failure instead of presenting
+    /// a sheet the owner could not use, and a head whose deadline has already
+    /// passed — because it queued up behind a sheet the owner sat on for too
+    /// long — reports expired the same way, rather than presenting a sheet
+    /// whose eventual send the server can only refuse.
+    private func presentNextSmsInvocation() {
+        guard composingInvocation == nil else { return }
+        switch SmsInvocationDisposition.resolve(
+            model.pendingSmsInvocation,
+            canSendText: SmsComposeSheet.canSend
+        ) {
+        case .idle:
+            break
+        case .compose(let invocation):
+            guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
+            composingInvocation = invocation
+        case .unsupported(let invocation):
+            guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
+            answerSmsInvocation(invocation, with: .failed)
+        case .expired(let invocation):
+            guard !answeredSmsInvocationIDs.contains(invocation.id) else { return }
+            answerSmsInvocation(invocation, with: .expired)
+        }
+    }
+
+    /// Re-runs the recovery fetch when the app comes forward, when the owner
+    /// switches the integration on, and once this device knows its own id.
+    private struct SmsRecoveryKey: Equatable {
+        let deviceID: UUID?
+        let isActive: Bool
+        let isEnabled: Bool
+    }
+
+    private var smsRecoveryKey: SmsRecoveryKey {
+        SmsRecoveryKey(
+            deviceID: model.registeredDeviceID,
+            isActive: scenePhase == .active,
+            isEnabled: smsIntegration.integrationEnabled
+        )
+    }
+    #endif
 }
 
 enum SessionSidebarDestination: Hashable, Sendable {
@@ -179,12 +270,14 @@ private struct SessionSidebar: View {
             )
         }
         .toolbar {
+            #if os(macOS)
             ToolbarItem(placement: .automatic) {
                 Button(action: openSettings) {
                     Image(systemName: "gearshape")
                         .foregroundColor(AppTheme.orange)
                 }
                 .accessibilityLabel("Settings")
+                .accessibilityIdentifier("sidebar.settings")
             }
             ToolbarItem(placement: .automatic) {
                 Button {
@@ -216,6 +309,45 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Schedules")
                 .accessibilityIdentifier("sidebar.schedules")
             }
+            #else
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    Button {
+                        showingMemoryBrowser = true
+                    } label: {
+                        Label("Memory", systemImage: "brain.head.profile")
+                    }
+                    .accessibilityIdentifier("sidebar.memory")
+
+                    Button {
+                        showingScheduleBrowser = true
+                    } label: {
+                        Label("Schedules", systemImage: "calendar")
+                    }
+                    .accessibilityIdentifier("sidebar.schedules")
+
+                    Button {
+                        showingPersonaEditor = true
+                    } label: {
+                        Label("Persona", systemImage: "person.crop.circle")
+                    }
+                    .accessibilityIdentifier("sidebar.persona")
+
+                    Divider()
+
+                    Button(action: openSettings) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .accessibilityIdentifier("sidebar.settings")
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("More")
+                .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
+                .accessibilityIdentifier("sidebar.more")
+            }
+            #endif
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)

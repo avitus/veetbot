@@ -9,10 +9,29 @@ import Testing
             ConnectionSettingsSection.allCases == [
                 .connection,
                 .websiteAccess,
+                .smsIntegration,
                 .appearance,
                 .dataAndPrivacy,
             ]
         )
+    }
+
+    @Test
+    func testSmsIntegrationIsOfferedOnlyWhereTheDeviceCanSendTexts() {
+        #if os(iOS)
+        #expect(ConnectionSettingsSection.visibleCases.contains(.smsIntegration))
+        #expect(ConnectionSettingsSection.visibleCases == ConnectionSettingsSection.allCases)
+        #else
+        #expect(!ConnectionSettingsSection.visibleCases.contains(.smsIntegration))
+        #expect(
+            ConnectionSettingsSection.visibleCases == [
+                .connection,
+                .websiteAccess,
+                .appearance,
+                .dataAndPrivacy,
+            ]
+        )
+        #endif
     }
 
     @Test

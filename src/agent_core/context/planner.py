@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections import OrderedDict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from uuid import UUID
 from weakref import WeakValueDictionary
 
@@ -37,6 +37,7 @@ _SKILL_LOAD_TOOL_NAME = "skill.load"
 _SKILL_REVIEW_RUN_KIND = "skill_review"
 
 type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
+type DeviceToolAttach = Callable[[UUID, Principal], Awaitable[None]]
 
 
 class EventContextPlanner:
@@ -53,6 +54,7 @@ class EventContextPlanner:
         skill_catalogs: SkillCatalog | None = None,
         memory_retriever: MemoryRetriever | None = None,
         session_tool_filter: SessionToolFilter | None = None,
+        attach_device_tools: DeviceToolAttach | None = None,
         cache_capacity: int = 1_024,
     ) -> None:
         if cache_capacity <= 0:
@@ -67,6 +69,7 @@ class EventContextPlanner:
         self._skill_catalogs = skill_catalogs
         self._memory_retriever = memory_retriever
         self._session_tool_filter = session_tool_filter
+        self._attach_device_tools = attach_device_tools
         self._allocator = ContextBudgetAllocator(config)
         self._cache_capacity = cache_capacity
         self._cache: OrderedDict[UUID, ContextPlan] = OrderedDict()
@@ -132,6 +135,8 @@ class EventContextPlanner:
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
+                if self._attach_device_tools is not None:
+                    await self._attach_device_tools(session.id, principal)
                 if self._skill_catalogs is not None:
                     await self._skill_catalogs.open(session.id, agent, principal)
                 current_prefix = build_prefix(
@@ -266,6 +271,10 @@ class EventContextPlanner:
             if self._skill_catalogs is None
             else await self._skill_catalogs.open(session.id, agent, principal)
         )
+        # Device attach reconciles capability-derived registrations against the
+        # devices present now, for the same reason and at the same point.
+        if self._attach_device_tools is not None:
+            await self._attach_device_tools(session.id, principal)
         tools = self._registry.specs_for_session(
             agent,
             principal,

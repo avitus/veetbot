@@ -23,6 +23,12 @@ class NotificationKind(StrEnum):
     OPS_ALERT = "ops_alert"
     OPS_RECOVERED = "ops_recovered"
     TEST = "test"
+    DEVICE_INVOCATION = "device_invocation"
+
+
+DEVICE_CONFINED_KINDS: frozenset[NotificationKind] = frozenset(
+    {NotificationKind.TEST, NotificationKind.DEVICE_INVOCATION}
+)
 
 
 TEST_NOTIFICATION_DEDUPE_PREFIX = "device.test:"
@@ -67,6 +73,17 @@ class NotificationSeverity(StrEnum):
     RECOVERED = "recovered"
 
 
+class DeviceInvocationSubjectStatus(StrEnum):
+    """The device invocation's own status at the moment its wake fires.
+
+    Mirrors ``devices.DeviceInvocationStatus.PENDING`` by value. Duplicated
+    here, rather than imported, because ``domain.devices`` already imports
+    ``NotificationKind`` from this module and importing back would cycle.
+    """
+
+    PENDING = "pending"
+
+
 class NotificationPayload(BaseModel):
     """Closed, content-free payload sent through a push provider."""
 
@@ -75,7 +92,7 @@ class NotificationPayload(BaseModel):
     version: Literal[1] = 1
     kind: NotificationKind
     title: str
-    status: RunStatus | OccurrenceDisposition | None = None
+    status: RunStatus | OccurrenceDisposition | DeviceInvocationSubjectStatus | None = None
     tool_name: str | None = Field(
         default=None,
         min_length=3,
@@ -88,6 +105,8 @@ class NotificationPayload(BaseModel):
     question_id: UUID | None = None
     schedule_id: UUID | None = None
     occurrence_id: UUID | None = None
+    invocation_id: UUID | None = None
+    device_id: UUID | None = None
     notification_id: UUID
     signal: str | None = Field(
         default=None,
@@ -122,6 +141,8 @@ class NotificationPayload(BaseModel):
             "question_id": self.question_id,
             "schedule_id": self.schedule_id,
             "occurrence_id": self.occurrence_id,
+            "invocation_id": self.invocation_id,
+            "device_id": self.device_id,
         }
         present_identifiers = {name for name, value in identifiers.items() if value is not None}
         if present_identifiers != required_identifiers:
@@ -214,6 +235,27 @@ class Notification(BaseModel):
         if self.settled_at is not None and self.settled_at < self.created_at:
             raise ValueError("notification settled_at precedes creation")
         return self
+
+    def target_device_id(self) -> UUID | None:
+        """The single device this notification is confined to, if any.
+
+        Total across the closed ``NotificationKind`` vocabulary — defined for
+        every kind, not just the two that narrow — so a caller can never read
+        "broadcast to everyone" from a kind that actually means "confined,
+        but unresolvable right now": TEST narrows via its dedupe key (see
+        ``test_notification_target_device_id``, which fails closed to
+        ``None`` on a malformed key); DEVICE_INVOCATION narrows via its own
+        payload identifier; every other kind returns ``None`` because it
+        never confines to one device. Callers still gate narrowing on
+        ``kind in DEVICE_CONFINED_KINDS`` — ``None`` alone cannot distinguish
+        "broadcast" from "confined to nobody resolvable."
+        """
+
+        if self.kind is NotificationKind.TEST:
+            return test_notification_target_device_id(self.dedupe_key)
+        if self.kind is NotificationKind.DEVICE_INVOCATION:
+            return self.payload.device_id
+        return None
 
 
 class NewNotification(BaseModel):
@@ -355,6 +397,10 @@ def device_test_key(device_id: UUID, idempotency_key: str) -> str:
     return f"{TEST_NOTIFICATION_DEDUPE_PREFIX}{device_id}:{idempotency_key}"
 
 
+def device_invocation_key(invocation_id: UUID) -> str:
+    return f"device_invocation:{invocation_id}"
+
+
 def ops_alert_key(tenant_id: str, signal: str, episode: int) -> str:
     _validate_ops_key_parts(tenant_id, signal, episode)
     return f"ops.{tenant_id}.{signal}.{episode}"
@@ -373,6 +419,7 @@ NOTIFICATION_TITLES: dict[NotificationKind, str] = {
     NotificationKind.OPS_ALERT: "Production alert",
     NotificationKind.OPS_RECOVERED: "Production recovered",
     NotificationKind.TEST: "Test notification",
+    NotificationKind.DEVICE_INVOCATION: "Your device has a pending action",
 }
 
 _REQUIRED_IDENTIFIERS: dict[NotificationKind, set[str]] = {
@@ -389,11 +436,12 @@ _REQUIRED_IDENTIFIERS: dict[NotificationKind, set[str]] = {
     NotificationKind.OPS_ALERT: set(),
     NotificationKind.OPS_RECOVERED: set(),
     NotificationKind.TEST: set(),
+    NotificationKind.DEVICE_INVOCATION: {"invocation_id", "device_id"},
 }
 
 _ALLOWED_SUBJECT_STATUSES: dict[
     NotificationKind,
-    set[RunStatus | OccurrenceDisposition | None],
+    set[RunStatus | OccurrenceDisposition | DeviceInvocationSubjectStatus | None],
 ] = {
     NotificationKind.APPROVAL_REQUESTED: {RunStatus.WAITING_FOR_APPROVAL},
     NotificationKind.QUESTION_ASKED: {RunStatus.WAITING_FOR_USER},
@@ -412,6 +460,7 @@ _ALLOWED_SUBJECT_STATUSES: dict[
     NotificationKind.OPS_ALERT: {None},
     NotificationKind.OPS_RECOVERED: {None},
     NotificationKind.TEST: {None},
+    NotificationKind.DEVICE_INVOCATION: {DeviceInvocationSubjectStatus.PENDING},
 }
 
 _OPS_SIGNAL = re.compile(r"^[a-z][a-z0-9_]*$")

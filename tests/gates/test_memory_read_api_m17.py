@@ -28,7 +28,7 @@ from hypothesis import strategies as st
 from pydantic import SecretStr, ValidationError
 
 from agent_core.api import create_app
-from agent_core.api.errors import API_ERROR_STATUS, ERROR_CODE_VOCABULARY, ERROR_STATUS_MAP
+from agent_core.api.errors import ERROR_CODE_STATUSES, ERROR_CODE_VOCABULARY
 from agent_core.bootstrap import Composition, build
 from agent_core.config import AuthMode, Settings, load_settings
 from agent_core.domain.agents import Principal
@@ -1062,15 +1062,7 @@ async def test_every_error_is_a_member_of_the_closed_vocabulary() -> None:
             error = response.json()["error"]
             code = error["code"]
             assert code in ERROR_CODE_VOCABULARY, (where, code)
-            # The status the shared map documents for that code, and no other.
-            statuses = {
-                mapping.status for mapping in ERROR_STATUS_MAP.values() if mapping.code == code
-            }
-            expected_status = API_ERROR_STATUS.get(code)
-            if expected_status is None:
-                assert len(statuses) == 1, code
-                expected_status = statuses.pop()
-            assert response.status_code == expected_status, (where, code)
+            assert response.status_code in ERROR_CODE_STATUSES[code], (where, code)
             assert set(error) == {"code", "message", "details", "request_id"}
             observed.add((response.status_code, code))
 

@@ -53,6 +53,7 @@ from agent_core.adapters.determinism import (
     SystemClock,
     UUID7RequestIdFactory,
 )
+from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
 from agent_core.adapters.execution.docker import (
@@ -94,6 +95,12 @@ from agent_core.adapters.persistence.database import (
 from agent_core.adapters.persistence.delegations import (
     InMemoryDelegationRepository,
     PostgresDelegationRepository,
+)
+from agent_core.adapters.persistence.device_channel import (
+    InMemoryDeviceIngestStore,
+    InMemoryDeviceInvocationStore,
+    PostgresDeviceIngestStore,
+    PostgresDeviceInvocationStore,
 )
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
@@ -205,6 +212,7 @@ from agent_core.application.browser_management import (
     BrowserUnitOfWorkFactory,
 )
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
+from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
     DeviceManagementService,
     NotificationInboxService,
@@ -236,6 +244,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     BrowserProfileService as PublicBrowserProfileServiceContract,
+)
+from agent_core.application.services import (
+    DeviceIngestService as PublicDeviceIngestServiceContract,
 )
 from agent_core.application.services import (
     DeviceService as PublicDeviceServiceContract,
@@ -387,6 +398,7 @@ from agent_core.ports.persistence import (
     UnitOfWorkFactory,
 )
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
+from agent_core.ports.tools import DeviceChannel
 from agent_core.ports.web import WebProvider, WebProviderRouter
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
@@ -408,6 +420,7 @@ from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorki
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
+from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolRuntime
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
@@ -417,6 +430,13 @@ from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
+from agent_core.tools.schedule_lifecycle import (
+    SCHEDULE_LIFECYCLE_TOOL_NAMES,
+    ScheduleCancelTool,
+    ScheduleListTool,
+    SchedulePauseTool,
+    ScheduleResumeTool,
+)
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
     LegacySkillLoadTool,
@@ -443,6 +463,7 @@ class ApplicationServices:
     browser_grants: PublicBrowserGrantServiceContract
     schedules: PublicScheduleServiceContract
     devices: PublicDeviceServiceContract
+    device_ingest: PublicDeviceIngestServiceContract
     notifications: PublicNotificationServiceContract
     memory: PublicMemoryReadServiceContract
     persona: PublicPersonaServiceContract
@@ -633,6 +654,8 @@ def _memory_uow_repositories(
     notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     delegations = InMemoryDelegationRepository()
+    device_invocations = InMemoryDeviceInvocationStore()
+    device_ingest = InMemoryDeviceIngestStore()
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -693,6 +716,8 @@ def _memory_uow_repositories(
         schedule_admission=AllowScheduleAdmissionController(),
         devices=devices,
         device_registration_idempotency=InMemoryDeviceRegistrationIdempotencyRepository(),
+        device_invocations=device_invocations,
+        device_ingest=device_ingest,
         notification_outbox=notification_outbox,
         delegations=delegations,
         queue=None,
@@ -776,6 +801,8 @@ def _postgres_repository_factory(
             device_registration_idempotency=(
                 PostgresDeviceRegistrationIdempotencyRepository(session)
             ),
+            device_invocations=PostgresDeviceInvocationStore(session),
+            device_ingest=PostgresDeviceIngestStore(session),
             notification_outbox=PostgresNotificationOutbox(session, clock),
             delegations=PostgresDelegationRepository(session),
             queue=PostgresRunQueue(
@@ -1305,6 +1332,10 @@ async def _compose(
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
+    device_channel: DeviceChannel | None,
+    device_invocation_timeout_seconds: int,
+    device_invocation_poll_seconds: float,
+    device_ingest_daily_cap: int,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -1455,6 +1486,10 @@ async def _compose(
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
         registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
+        registry.register(ScheduleListTool(schedule_service))
+        registry.register(SchedulePauseTool(schedule_service))
+        registry.register(ScheduleResumeTool(schedule_service))
+        registry.register(ScheduleCancelTool(schedule_service))
 
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
@@ -1810,6 +1845,46 @@ async def _compose(
             policy_name=agent.model_policy,
             resolved_at=clock.now(),
         )
+        notification_producer = (
+            NotificationProducer(clock=clock, ids=ids)
+            if settings.notification_dispatch_enabled
+            else None
+        )
+        # Both flags, exactly as the schedule tool pairs its two. Without the
+        # notification producer there is no wake, so the channel stays dark.
+        device_flags_enabled = settings.device_channel_enabled and settings.device_sms_enabled
+        device_channel_ready = device_flags_enabled and (
+            device_channel is not None or notification_producer is not None
+        )
+        device_tool_runtime: DeviceToolRuntime | None = None
+        if device_flags_enabled and not device_channel_ready:
+            logger.warning("device_channel_disabled_without_notification_dispatch")
+        if device_channel_ready:
+            effective_device_channel = device_channel or PushWakeDeviceChannel(
+                uow_factory=uow_factory,
+                notification_producer=cast(NotificationProducer, notification_producer),
+                clock=clock,
+                invocation_timeout_seconds=device_invocation_timeout_seconds,
+                poll_seconds=device_invocation_poll_seconds,
+            )
+            device_tool_runtime = DeviceToolRuntime(
+                uow_factory,
+                registry,
+                effective_device_channel,
+                clock,
+                ids,
+                invocation_timeout_seconds=device_invocation_timeout_seconds,
+            )
+
+        async def attach_device_tools(session_id: UUID, session_principal: Principal) -> None:
+            if device_tool_runtime is not None:
+                await device_tool_runtime.prepare(session_id, session_principal)
+
+        async def close_session(session_id: UUID) -> None:
+            await mcp_runtime.close_session(session_id)
+            if device_tool_runtime is not None:
+                await device_tool_runtime.close_session(session_id)
+
         context_planner = EventContextPlanner(
             uow_factory,
             registry,
@@ -1821,6 +1896,7 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
             session_tool_filter=_session_tool_filter(browser_provider),
+            attach_device_tools=attach_device_tools,
         )
 
         async def session_project_scope(session_id: UUID) -> str:
@@ -1961,11 +2037,6 @@ async def _compose(
             delegations=delegation_materializer,
         )
         token_slot = _ActiveToken()
-        notification_producer = (
-            NotificationProducer(clock=clock, ids=ids)
-            if settings.notification_dispatch_enabled
-            else None
-        )
         schedule_accountant = ScheduleOutcomeAccountant(
             uow_factory=uow_factory,
             clock=clock,
@@ -2104,7 +2175,7 @@ async def _compose(
             agent,
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
-            close_session=mcp_runtime.close_session,
+            close_session=close_session,
         )
         trajectory_service = TrajectoryExportService(
             uow_factory=uow_factory,
@@ -2154,7 +2225,7 @@ async def _compose(
             agent,
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
-            close_session=mcp_runtime.close_session,
+            close_session=close_session,
             on_session_closed=consolidate_closed_session,
             trajectory_artifacts=trajectory_artifact_store,
             general_artifacts=general_artifact_store,
@@ -2162,6 +2233,13 @@ async def _compose(
 
         async def sweep_session_deletions() -> int:
             return await public_session_service.purge_pending_artifacts(principal)
+
+        async def sweep_device_invocations() -> int:
+            async with uow_factory() as uow:
+                return await uow.device_invocations.expire_overdue(
+                    now=clock.now(),
+                    timeout_seconds=device_invocation_timeout_seconds,
+                )
 
         browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
         browser_profile_service = BrowserProfileManagementService(
@@ -2184,23 +2262,36 @@ async def _compose(
             clock=clock,
             ids=ids,
             notification_expiry_seconds=notification_expiry_seconds,
+            invocation_timeout_seconds=device_invocation_timeout_seconds,
         )
         notification_inbox = NotificationInboxService(uow_factory=uow_factory)
+        public_run_service = PublicRunService(
+            uow_factory=uow_factory,
+            dispatcher=dispatcher,
+            clock=clock,
+            ids=ids,
+            seed_checkpoint=checkpoint_seeder,
+            cancel_active=token_slot.cancel,
+            cancel_parked_run=executor.cancel_parked_run,
+            resume_waiting_run=executor.requeue_after_input,
+            resolve_open_question=working_state.resolve_question,
+            trajectory_export_enabled=trajectory_export_enabled,
+            live_events=live_events,
+        )
+        device_ingest_service = DeviceMessageIngestService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            seed_checkpoint=checkpoint_seeder,
+            dispatcher=dispatcher,
+            deliver_device_message=public_run_service.deliver_device_message,
+            default_agent=agent,
+            sms_enabled=settings.device_sms_enabled,
+            ingest_daily_cap=device_ingest_daily_cap,
+        )
         public_services = ApplicationServices(
             sessions=public_session_service,
-            runs=PublicRunService(
-                uow_factory=uow_factory,
-                dispatcher=dispatcher,
-                clock=clock,
-                ids=ids,
-                seed_checkpoint=checkpoint_seeder,
-                cancel_active=token_slot.cancel,
-                cancel_parked_run=executor.cancel_parked_run,
-                resume_waiting_run=executor.requeue_after_input,
-                resolve_open_question=working_state.resolve_question,
-                trajectory_export_enabled=trajectory_export_enabled,
-                live_events=live_events,
-            ),
+            runs=public_run_service,
             approvals=PublicApprovalService(
                 uow_factory=uow_factory,
                 dispatcher=dispatcher,
@@ -2217,6 +2308,7 @@ async def _compose(
             browser_grants=browser_grant_service,
             schedules=schedule_service,
             devices=device_service,
+            device_ingest=device_ingest_service,
             notifications=notification_inbox,
             memory=PublicMemoryService(uow_factory=uow_factory),
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
@@ -2318,6 +2410,9 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    sweep_device_invocations=(
+                        sweep_device_invocations if device_flags_enabled else None
+                    ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
                     ),
@@ -2516,6 +2611,7 @@ async def build(
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
     browser_provider_override: BrowserProvider | None = None,
+    device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
     memory_distillation_evaluation_mode: bool = False,
@@ -2664,6 +2760,7 @@ async def build(
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
+    device_config = runtime_config["device"]
     delegation_config = runtime_config["delegation"]
     delegation_defaults = DelegationDefaults(
         max_steps=int(delegation_config["child_max_steps"]),
@@ -2736,13 +2833,18 @@ async def build(
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
         *(
-            [SCHEDULE_CREATE_TOOL_NAME]
+            [SCHEDULE_CREATE_TOOL_NAME, *SCHEDULE_LIFECYCLE_TOOL_NAMES]
             if effective_settings.schedule_api_enabled
             and effective_settings.schedule_worker_enabled
             else []
         ),
         *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
+        *(
+            [DEVICE_SMS_SEND_TOOL_NAME]
+            if effective_settings.device_channel_enabled and effective_settings.device_sms_enabled
+            else []
+        ),
     ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
@@ -2993,6 +3095,10 @@ async def build(
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,
+            device_channel=device_channel_override,
+            device_invocation_timeout_seconds=int(device_config["invocation_timeout_seconds"]),
+            device_invocation_poll_seconds=float(device_config["invocation_poll_seconds"]),
+            device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
         )
         yield composition
     finally:

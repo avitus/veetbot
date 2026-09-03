@@ -326,7 +326,8 @@ extension DeviceView {
     fileprivate static func fixture(
         id: UUID,
         clientDeviceID: String = "installation",
-        pushEnvironment: PushEnvironment = .sandbox
+        pushEnvironment: PushEnvironment = .sandbox,
+        capabilities: [String] = []
     ) -> DeviceView {
         DeviceView(
             id: id,
@@ -341,6 +342,7 @@ extension DeviceView {
             pushTokenUpdatedAt: Date(timeIntervalSince1970: 1),
             pushTokenInvalidatedAt: nil,
             mutedKinds: [],
+            capabilities: capabilities,
             status: .active,
             revokedAt: nil,
             lastSeenAt: Date(timeIntervalSince1970: 1),

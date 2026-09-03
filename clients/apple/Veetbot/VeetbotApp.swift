@@ -4,6 +4,7 @@ import SwiftUI
 struct VeetbotApp: App {
     @StateObject private var model: ChatViewModel
     @StateObject private var appearance = AppearancePreferences()
+    @StateObject private var smsIntegration = SmsIntegrationPreferences()
     #if os(iOS)
     @UIApplicationDelegateAdaptor(NotificationApplicationDelegate.self)
     private var notificationDelegate
@@ -27,8 +28,14 @@ struct VeetbotApp: App {
         // AppKit derives window and split-view autosave keys from the content type.
         // Keep WindowGroup's child as a stable name rather than an inline modifier chain.
         WindowGroup {
-            VeetbotSceneRoot(model: model, appearance: appearance)
-                .onAppear { notificationDelegate.attach(to: model) }
+            VeetbotSceneRoot(
+                model: model,
+                appearance: appearance,
+                smsIntegration: smsIntegration
+            )
+            .onAppear {
+                notificationDelegate.attach(to: model, smsPreferences: smsIntegration)
+            }
         }
     }
 }

@@ -16,6 +16,44 @@ import Testing
         #expect(SessionSidebarDestination.session(sessionID) == .session(sessionID))
     }
 
+    @Test
+    func testIOSSidebarUsesAnExplicitAccessibleOverflowMenu() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
+            encoding: .utf8
+        )
+        let toolbarStart = try #require(source.range(of: ".toolbar {"))
+        let firstSheet = try #require(
+            source.range(
+                of: ".sheet(isPresented: $showingMemoryBrowser)",
+                range: toolbarStart.upperBound ..< source.endIndex
+            )
+        )
+        let toolbar = source[toolbarStart.lowerBound ..< firstSheet.lowerBound]
+        let macStart = try #require(toolbar.range(of: "#if os(macOS)"))
+        let iosStart = try #require(
+            toolbar.range(of: "#else", range: macStart.upperBound ..< toolbar.endIndex)
+        )
+        let iosEnd = try #require(
+            toolbar.range(of: "#endif", range: iosStart.upperBound ..< toolbar.endIndex)
+        )
+        let iosToolbar = toolbar[iosStart.upperBound ..< iosEnd.lowerBound]
+
+        #expect(iosToolbar.contains("Menu"))
+        #expect(iosToolbar.contains("ellipsis.circle"))
+        #expect(iosToolbar.contains(".accessibilityLabel(\"More\")"))
+        #expect(iosToolbar.contains(".accessibilityHint("))
+        #expect(iosToolbar.contains("sidebar.more"))
+        #expect(iosToolbar.contains("sidebar.memory"))
+        #expect(iosToolbar.contains("sidebar.schedules"))
+        #expect(iosToolbar.contains("sidebar.persona"))
+        #expect(iosToolbar.contains("sidebar.settings"))
+    }
+
     #if os(macOS)
     @Test
     func testMacSidebarRowsActivateConversationsDirectly() throws {

@@ -61,6 +61,7 @@ TOOL_MESSAGES: dict[str, str] = {
     "policy.matrix.unknown_tool": "Not performed. The requested capability is unknown.",
     "policy.matrix.external_write": "Not performed. Approval is required.",
     "policy.matrix.workspace_read": "Not performed. The path is outside the workspace.",
+    "policy.tool.device.sms.send": "Not performed. Approval is required.",
     "policy.unclassifiable_action": "Not performed. The action could not be classified.",
     "policy.revalidation.changed": "Not performed. The approved action changed.",
     "policy.revalidation.escalated": "Not performed. Policy changed before execution.",
@@ -86,6 +87,10 @@ TOOL_MESSAGES: dict[str, str] = {
     "delegation.child_failed": (
         "A delegated child run failed or was cancelled; its reason is in the result."
     ),
+    "tool.device_offline": (
+        "The target device is offline or unreachable; the action was not performed."
+    ),
+    "tool.device_send_failed": "The device reported that the message was not sent.",
     "tool.unavailable": "The tool is unavailable in this deployment.",
     "tool.run_cancelled": "Not performed. The run was cancelled.",
 }

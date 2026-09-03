@@ -21,8 +21,8 @@ presence and a capability set, unified under one session-key resolver (DM per
 user, group per participant, thread shared)", and requires that "an unknown
 sender on a Surface is default-denied and must complete an explicit pairing
 step (one-time code, expiry, rate-limit, lockout) before any run is created on
-their behalf" (engineering-plan.md:4215-4216). Section 22 repeats the
-default-deny as a security-baseline item (engineering-plan.md:3838), ADR-0017
+their behalf" (engineering-plan.md:4361-4362). Section 22 repeats the
+default-deny as a security-baseline item (engineering-plan.md:3984), ADR-0017
 decided the pairing shape, and the seam audit found the rest: "Surfaces are
 Devices with an empty capability set", the session-key resolver is "the one
 genuinely new mechanism in Section 29", pairing "needs a home and an endpoint
@@ -256,7 +256,7 @@ class InboundDisposition(StrEnum):
 
 class InboundReceipt(BaseModel):
     surface_id: UUID
-    update_id: int
+    external_update_id: str
     received_at: datetime
     disposition: InboundDisposition
     session_id: UUID | None
@@ -264,16 +264,18 @@ class InboundReceipt(BaseModel):
     reason_code: str | None
 ```
 
-The receipt is keyed by `(surface_id, update_id)` and carries no content. It
-is the idempotency boundary for inbound delivery and the reverse map from a
-run to the chat that asked for it.
+The receipt is keyed by `(surface_id, external_update_id)`; for Telegram the
+value is the decimal `update_id`, and a webhook channel keys its provider's
+message identifier (ADR-0082). The receipt carries no content and is the
+idempotency boundary for inbound delivery and the reverse map from a run to
+the chat that asked for it.
 
 ## The ingress transaction
 
 For each update the surface role opens one short transaction and:
 
-1. Inserts the receipt keyed by `(surface_id, update_id)`; a replay returns
-   the committed disposition and does nothing else.
+1. Inserts the receipt keyed by `(surface_id, external_update_id)`; a replay
+   returns the committed disposition and does nothing else.
 2. Records `IGNORED_CHAT_KIND` for anything but a private chat and
    `IGNORED_MEDIA` for a non-text update, replying once with a bounded notice.
 3. Checks the sender's lockout and per-sender rate limit; a locked or
@@ -341,7 +343,7 @@ would be needed for.
 
 Attribution goes on the write, not on the session or run. The seed
 `user.message.created` carries `actor_type = surface`, the principal, and an
-`origin` of `{kind, surface_id, update_id}`; `run.queued` carries the same
+`origin` of `{kind, surface_id, external_update_id}`; `run.queued` carries the same
 plus the authority version; the receipt carries the reverse map; and the
 session's metadata records the surface so clients can label it. A session is
 not owned by a channel — the owner may continue the same conversation from
@@ -388,7 +390,7 @@ resolution entry point.
 
 ## Security
 
-- Default-deny and pairing before any run (engineering-plan.md:3838, ADR-0017
+- Default-deny and pairing before any run (engineering-plan.md:3984, ADR-0017
   decision 5). An unpaired sender stores no content.
 - Pairing codes: at least forty bits, salted hash, constant-time comparison,
   ten-minute expiry, five attempts, one-hour per-sender lockout, returned
@@ -408,7 +410,7 @@ resolution entry point.
   never exceeds the paired principal: `granted_scopes` is a subset of the
   minter's scopes at minting, intersected with the principal's current scopes
   at every message, and revocation is effective before the next message
-  (engineering-plan.md:3271-3273).
+  (engineering-plan.md:3285-3287).
 - Outbound redaction: secrets and raw provider errors never reach the chat;
   reasoning is never in events and so never in a reply.
 - Abuse controls: per-sender messages per minute, per-tenant active surface
@@ -473,13 +475,13 @@ surface_sessions
 
 surface_inbound_receipts
   surface_id UUID NOT NULL REFERENCES devices(id)
-  update_id BIGINT NOT NULL
+  external_update_id TEXT NOT NULL
   received_at TIMESTAMPTZ NOT NULL
   disposition TEXT NOT NULL
   session_id UUID NULL REFERENCES sessions(id) ON DELETE SET NULL
   run_id UUID NULL REFERENCES runs(id) ON DELETE SET NULL
   reason_code TEXT NULL
-  PRIMARY KEY (surface_id, update_id)
+  PRIMARY KEY (surface_id, external_update_id)
 
 surface_replies
   id UUID PRIMARY KEY

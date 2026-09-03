@@ -316,8 +316,13 @@ write covers create, update, pause, and resume, and cancel covers the terminal
 schedule transition. That was the complete Milestone 11 surface. Milestone 19
 also gives the one-time model tool `schedule.create` exactly `schedule.write`;
 its `EXTERNAL_WRITE`/`HIGH` classification makes approval mandatory under the
-existing matrix. Exact matching, MCP namespace isolation, and every other rule
-in this section are unchanged.
+existing matrix. Milestone 23 gives `schedule.list` exactly `schedule.read`,
+`schedule.pause` and `schedule.resume` exactly `schedule.write`, and
+`schedule.cancel` exactly `schedule.cancel`. The read is
+`NONE`/`LOW`; the two state writes are `EXTERNAL_WRITE`/`HIGH`; terminal
+cancellation is `EXTERNAL_DELETE`/`HIGH`. The existing matrix therefore allows
+the read and requires approval for every mutation. Exact matching, MCP
+namespace isolation, and every other rule in this section are unchanged.
 
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`
 for the device and notification routes in
@@ -347,7 +352,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1221` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1224` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -618,11 +623,50 @@ They resolve as follows, without changing any outcome the plan states.
   loaded, not about a fifth decision type — which is precisely what profiles
   are for.
 
+**Tool-name-keyed entries.** A profile may carry an optional `tool_rules`
+section, a mapping from an exact tool name to a row of the same shape as a
+side-effect row, plus the boolean `human_confirms_arguments`. When an action's
+name matches, that row decides for that one tool; every other tool in the class
+still gets the class's decision, so the matrix stays total and nothing about the
+class changes. The section exists for a tool whose own mechanism already carries
+the control the class demands, and it is the seam a milestone uses instead of
+editing a matrix row. Milestone 24's `device.sms.send` is the first and only
+entry: iOS presents the composed message and the owner's Send tap performs the
+send, so the class's approval would duplicate a confirmation the platform
+already enforces (ADR-0081 and ADR-0083, and
+[device-channel-and-sms.md](device-channel-and-sms.md)). Hardline rules run
+first and are unaffected, so a credential-shaped body is still refused before
+anything reaches the device. Two entries for one tool name, like a missing
+side-effect row, are unclassifiable and deny.
+
 **Trust overlay.** One rule applies across the table: if any argument's trust
 label is `EXTERNAL_UNTRUSTED`, or the proposing turn's origin trust is
 `EXTERNAL_UNTRUSTED`, a decision of `ALLOW` for a class other than
 `NONE`, `WORKSPACE_READ`, or `NETWORK_READ` is raised to `REQUIRE_APPROVAL`.
 This is a `max` combination like any other, so it can only tighten.
+
+A tool-name-keyed entry adjusts both halves, and only for the tool it names.
+The argument half is suppressed only when the entry declares
+`human_confirms_arguments: true` — that tool shows the arguments to the human
+who completes the action, so re-escalating on model-authored arguments would
+refuse what that person is already looking at. An entry without the flag gets
+no suppression. The origin half is *tightened*: instead of testing one label,
+it admits only the origins the trust table below marks as able to authorize
+(`PLATFORM`, `TRUSTED_CONFIGURATION`, `USER`), so `MEMORY` and `KNOWLEDGE`
+escalate exactly as `EXTERNAL_UNTRUSTED` does.
+
+**What the origin half does and does not guarantee.** It is defense in depth,
+not a containment boundary. Origin trust is scoped to the *active turn*: the
+runtime walks back only to the most recent `USER`-trust user message, so a turn
+that ingests untrusted content taints that turn and no later one. An injection
+delivered in one turn, followed by the owner typing anything at all, produces a
+`USER` origin on the next turn. Policy does not catch that, and a profile must
+not claim it does. The control that holds across turns is the tool's own
+mechanism: the entry is legitimate only for a tool that shows the human what it
+is about to do — for `device.sms.send`, the recipient and the body in the
+compose sheet, which the owner can decline. That is the property
+`human_confirms_arguments` asserts, and it is why the flag is explicit rather
+than implied by the entry's existence.
 
 **Unclassifiable actions.** Section 9.2's "Unknown tool → Deny" row looks
 unreachable, because Section 8.3 resolves the tool before policy runs and an

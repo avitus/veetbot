@@ -1,5 +1,11 @@
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
 enum MarkdownTableAlignment: Equatable, Sendable {
     case leading
     case center
@@ -633,16 +639,36 @@ private struct MarkdownCodeBlockView: View {
     let language: String?
     let code: String
 
+    @State private var copied = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let language {
-                Text(language)
+            HStack(spacing: 8) {
+                Text(language ?? "Code")
                     .appFont(.caption, weight: .semibold)
                     .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                Divider()
+                Spacer(minLength: 8)
+                Button {
+                    SystemClipboard.copy(code)
+                    copied = true
+                } label: {
+                    if copied {
+                        Label("Copied", systemImage: "checkmark")
+                    } else {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                }
+                .buttonStyle(.plain)
+                .appFont(.caption, weight: .semibold)
+                .foregroundColor(.secondary)
+                .accessibilityLabel(
+                    copied ? "Copied to clipboard" : "Copy code to clipboard"
+                )
+                .accessibilityIdentifier("markdown.code.copy")
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            Divider()
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(code.isEmpty ? " " : code)
                     .appCodeFont(.body)
@@ -657,6 +683,19 @@ private struct MarkdownCodeBlockView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.secondary.opacity(0.2))
         )
+        .onChange(of: code) { _ in copied = false }
+    }
+}
+
+private enum SystemClipboard {
+    @MainActor
+    static func copy(_ text: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = text
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #endif
     }
 }
 

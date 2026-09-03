@@ -28,6 +28,27 @@ The flow adapts the useful deployment invariants from
 [avitus/mankunku](https://github.com/avitus/mankunku) to Veetbot's Python and
 systemd runtime. ADR-0048 records the differences and security boundary.
 
+## Public website
+
+The visitor-facing homepage and Google OAuth policy pages are a separate static
+site defined under `website/`:
+
+- `https://www.veetbot.com/`
+- `https://www.veetbot.com/privacy`
+- `https://www.veetbot.com/tos`
+
+The source is a Next.js static export with no account system, analytics,
+database, object storage, or Veetbot application credential. Run
+`make website-install test-website` locally. CircleCI repeats that build in a
+credential-free Node job and passes only the generated `website/out` tree to
+release packaging.
+
+The application, documentation, and website artifacts receive the same release
+identity. The Nginx deployment validates and atomically promotes the website at
+`/opt/veetbot/shared/website/current`; configuration validation or reload
+failure restores both static-site pointers and the prior configuration. ADR-0084
+records the boundary and rationale.
+
 ## Release flow
 
 ```text
@@ -122,6 +143,7 @@ sudo usermod -aG docker veetbot-exec
 sudo mkdir -p \
   /opt/veetbot/releases \
   /opt/veetbot/shared/docs/releases \
+  /opt/veetbot/shared/website/releases \
   /opt/veetbot/shared/uv-cache \
   /etc/veetbot \
   /var/lib/veetbot/artifacts
@@ -360,14 +382,18 @@ source as `veetbot-deploy`.
 The committed Nginx virtual hosts expect Let's Encrypt certificates at
 `/etc/letsencrypt/live/api.veetbot.com/`,
 `/etc/letsencrypt/live/browser.veetbot.com/`, and
-`/etc/letsencrypt/live/docs.veetbot.com/`. The Nginx installer changes only
+`/etc/letsencrypt/live/docs.veetbot.com/`. The homepage certificate covering
+both `veetbot.com` and `www.veetbot.com` lives under
+`/etc/letsencrypt/live/veetbot.com/`. The Nginx installer changes only
 Veetbot's `sites-available` and `sites-enabled` entries; it preserves other
 virtual hosts.
 
-Before merging the documentation-hosting change to `main`:
+Before merging a new static-host configuration to `main`:
 
-1. Add a DigitalOcean DNS `A` record for `docs.veetbot.com` with the same target
-   as `api.veetbot.com`, and wait for public resolution.
+1. Confirm that `docs.veetbot.com` resolves to the same address as
+   `api.veetbot.com`. For the public website, the apex `A` record must target
+   that address and `www` must be a CNAME to the apex. Wait for public
+   resolution.
 2. Provision the dedicated certificate at the exact path above. Prefer
    Certbot's DigitalOcean DNS plugin so issuance and renewal do not depend on a
    temporary HTTP virtual host. Keep its API token in a root-owned `0600`
@@ -405,6 +431,7 @@ Create a restricted CircleCI context named `veetbot-production` with:
 | `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
 | `PRODUCTION_URL` | Optional public origin; defaults to `https://api.veetbot.com` |
 | `DOCS_URL` | Optional docs origin; defaults to `https://docs.veetbot.com` |
+| `WEBSITE_URL` | Optional website origin; defaults to `https://www.veetbot.com` |
 
 Obtain the public host-key record from the server or provider console and verify
 its fingerprint through a second trusted channel before placing it in the
@@ -505,19 +532,23 @@ that counter.
 
 An ordinary branch or pull request runs verification only. A `dev` push also
 runs the non-publishing Apple signing smoke described above. On `main`, after
-all five required verification lanes pass:
+all six required verification lanes pass:
 
+- `public-site` installs the locked Node dependencies, builds, tests, and lints
+  the static export, and exposes only that output to downstream packaging;
 - `package-release` archives the exact tested commit, builds MkDocs in strict
-  mode, and records both artifacts' SHA-256 values;
+  mode, stamps the website output, and records all three artifacts' SHA-256
+  values;
 - `deploy-app` stages the archive, verifies the checksum, and executes the
   locked server release; and
 - `deploy-nginx` follows a successful application release, takes the same host
-  lock, atomically promotes `/opt/veetbot/shared/docs/current`, and reconciles the
-  versioned virtual hosts. If a newer pipeline has already promoted another
+  lock, atomically promotes `/opt/veetbot/shared/docs/current` and
+  `/opt/veetbot/shared/website/current`, and reconciles the versioned virtual
+  hosts. If a newer pipeline has already promoted another
   application release, the older proxy job detects the release-identity
   mismatch, reports a distinct stale outcome, and exits without overwriting the
-  newer site or config. CircleCI skips that older job's documentation identity
-  probe because the newer release remains authoritative; and
+  newer sites or config. CircleCI skips that older job's documentation and
+  website identity probes because the newer release remains authoritative; and
 - `apple-testflight` follows a successful application release in a separate
   serial group, archives and verifies the macOS application with
   `pipeline.number` as its build number, creates the signed installer package
@@ -537,8 +568,9 @@ candidate file or activating its symlink. `deploy/app/release.sh` requires the
 local readiness header to identify the staged release and the authenticated
 session-index route to respond successfully; after it returns, CircleCI polls
 the public readiness endpoint for that exact identity. The Nginx job then
-requires `https://docs.veetbot.com/release.txt` to return the same identity. A
-public probe failure is therefore a post-promotion CircleCI failure boundary.
+requires both `https://docs.veetbot.com/release.txt` and
+`https://www.veetbot.com/release.txt` to return the same identity. A public
+probe failure is therefore a post-promotion CircleCI failure boundary.
 The release verifies every application process through its `/proc` working
 directory. The execution service instead relies on its checked-in `ExecStart`,
 the completed restart, and an active main PID because `DynamicUser=yes`
@@ -559,13 +591,16 @@ After the first successful pipeline, verify the active revision and services:
 curl --fail --show-error --dump-header - --output /dev/null \
   https://api.veetbot.com/health/ready
 curl --fail --show-error https://docs.veetbot.com/release.txt
+curl --fail --show-error https://www.veetbot.com/release.txt
 ssh veetbot-deploy@api.veetbot.com '
   set -eu
   app_release="$(readlink -f /opt/veetbot/current)"
   . "$app_release/.release.env"
   docs_release="$(readlink -f /opt/veetbot/shared/docs/current)"
+  website_release="$(readlink -f /opt/veetbot/shared/website/current)"
   test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"
-  printf "%s\n" "$docs_release"
+  test "$(cat "$website_release/release.txt")" = "$VEETBOT_RELEASE_ID"
+  printf "%s\n%s\n" "$docs_release" "$website_release"
 '
 ssh veetbot-deploy@api.veetbot.com \
   'systemctl is-active veetbot-execution veetbot-api veetbot-worker veetbot-async-worker veetbot-maintenance'
@@ -575,6 +610,71 @@ Then make an authenticated API request, submit a run, confirm the worker
 completes it with a real provider, and run one generated-code task through
 `runsc`. Reboot once and confirm PostgreSQL, Nginx, the execution service, and
 all application units return.
+
+## The SMS capture ceremony
+
+Milestone 24 ([device-channel-and-sms.md](plan/device-channel-and-sms.md)) lets
+the owner's iPhone act as a Veetbot SMS channel: outbound texts ride the
+system compose sheet, and inbound texts reach Veetbot only because the owner
+wires a Shortcuts personal automation to the app's "Forward Message to
+Veetbot" App Intent. Nothing enables this by default. The owner completes the
+following one-time, per-device ceremony after the app is installed and paired
+([apple-client.md](apple-client.md)), on the Milestone 18 bootstrap-ceremony
+precedent (`plan/email-integration.md`, "Credentials and the bootstrap
+ceremony"): a documented, owner-run, one-time setup step with its own
+verification, rather than something CI or the server can perform for them.
+
+1. Confirm prerequisites on the owner's iPhone: iOS 17 or later — the
+   Shortcuts "When I get a message" personal automation trigger requires it;
+   the device already paired to Veetbot and push-verified through
+   `POST /v1/devices` and the authenticated
+   `POST /v1/devices/{device_id}/test-notification` route; and, in the app's
+   connection settings, the "SMS Integration" toggle
+   (`sms-integration.enabled`) turned on. That one toggle both opens the
+   compose-sheet send path and adds `device.sms.send` to this device's
+   registered capabilities — turning it off later removes the capability and
+   the App Intent silently stops forwarding.
+2. In the Shortcuts app: Automation tab → the add control → Create Personal
+   Automation → "When I get a message" → set the automation to run
+   immediately, not "Ask Before Running" (it must fire unattended) → add the
+   "Forward Message to Veetbot" action → map the trigger's Sender variable to
+   the action's Sender parameter and its Content variable to the action's
+   Message parameter → finish and confirm the automation is enabled.
+3. Verify end to end: from a second phone, send the owner's number a short,
+   distinctive test text, then confirm capture actually happened —
+   - In Shortcuts, open the automation's run history and confirm it ran
+     without a logged failure. This is what catches iOS having silently
+     disabled the automation before the message ever reached the app.
+   - In Veetbot, confirm the standing SMS triage session shows the forwarded
+     message (device-channel-and-sms.md, "SMS ingest," which routes each
+     message into one standing session per device and channel): a new
+     conversation is seeded, or the existing standing `(device, sms)` session
+     continues, with content matching the test text sent rather than an
+     empty or truncated body.
+
+   Only a forwarded message with its real sender and body confirms, on this
+   owner's specific iOS version, the design's two open questions: that the
+   automation actually delivers both sender and body to the App Intent, and
+   that the App Intent's Keychain read succeeds with the app backgrounded,
+   which an immediately-run automation leaves it. Treat the ceremony as
+   incomplete until this step passes.
+
+Capture is deliberately best-effort, exactly as designed: iOS can silently
+disable a personal automation with no notice to the owner or to Veetbot, and
+the App Intent swallows every forwarding failure — the integration toggled
+off, the device unresolved, a network error — into a silent no-op rather than
+surfacing an error on the owner's phone. There is no retry and no alert when
+a text is silently dropped; the only signal is the absence of the triage
+session update step 3 above confirms. Re-run step 3 after an iOS upgrade, or
+whenever inbound capture seems to have gone quiet, to confirm it is still
+live. The send side has its own fragility: invocation expiry is judged
+against the device's own clock, so a phone whose clock is materially fast
+can silently expire a still-live request before the owner ever sees it.
+And a result the app could not post to the server survives only in that
+process's memory, so a crash or force-quit between the owner's Send tap
+and a successful result post can re-present an already-sent message the
+next time the app fetches, bounded by the server's five-minute invocation
+expiry.
 
 ## Manual rollback
 
@@ -601,6 +701,7 @@ fi
 target_id=YYYYMMDD-HHMMSS-abcdef0
 target="/opt/veetbot/releases/$target_id"
 docs_target="/opt/veetbot/shared/docs/releases/$target_id"
+website_target="/opt/veetbot/shared/website/releases/$target_id"
 test -d "$target"
 test -f "$target/.release.env"
 test -x "$target/.venv/bin/python"
@@ -608,10 +709,17 @@ grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"
 test -d "$docs_target"
 test -f "$docs_target/release.txt"
 test "$(cat "$docs_target/release.txt")" = "$target_id"
+test -d "$website_target"
+test -f "$website_target/release.txt"
+test "$(cat "$website_target/release.txt")" = "$target_id"
 test -L /opt/veetbot/current
 test -L /opt/veetbot/shared/docs/current
+test -L /opt/veetbot/shared/website/current
 previous_target="$(readlink -f /opt/veetbot/current)"
 previous_docs_target="$(readlink -f /opt/veetbot/shared/docs/current)"
+previous_website_target="$(readlink -f /opt/veetbot/shared/website/current)"
+test -d "$previous_website_target"
+test -f "$previous_website_target/release.txt"
 test -f "$environment_file"
 docker image inspect "agent-core-sandbox:$target_id" >/dev/null
 previous_production_image="$(
@@ -652,8 +760,10 @@ esac
 
 app_next="/opt/veetbot/.rollback-$target_id-$$"
 docs_next="/opt/veetbot/shared/docs/.rollback-$target_id-$$"
+website_next="/opt/veetbot/shared/website/.rollback-$target_id-$$"
 app_restore="/opt/veetbot/.rollback-restore-$$"
 docs_restore="/opt/veetbot/shared/docs/.rollback-restore-$$"
+website_restore="/opt/veetbot/shared/website/.rollback-restore-$$"
 health_headers=""
 
 rollback_pending=0
@@ -662,18 +772,21 @@ rollback_on_exit() {
   trap - EXIT
   if test "$status" -ne 0 && test "$rollback_pending" -eq 1; then
     set +e
-    rm -f -- "$app_restore" "$docs_restore"
+    rm -f -- "$app_restore" "$docs_restore" "$website_restore"
     ln -s "$previous_target" "$app_restore"
     ln -s "$previous_docs_target" "$docs_restore"
+    ln -s "$previous_website_target" "$website_restore"
     mv -Tf "$app_restore" /opt/veetbot/current
     mv -Tf "$docs_restore" /opt/veetbot/shared/docs/current
+    mv -Tf "$website_restore" /opt/veetbot/shared/website/current
     docker tag "$previous_production_image" agent-core-sandbox:production
     sudo systemctl restart "${managed_units[@]}"
   fi
   if test -n "$health_headers"; then
     rm -f -- "$health_headers"
   fi
-  rm -f -- "$app_next" "$docs_next" "$app_restore" "$docs_restore"
+  rm -f -- "$app_next" "$docs_next" "$website_next" \
+    "$app_restore" "$docs_restore" "$website_restore"
   exit "$status"
 }
 trap rollback_on_exit EXIT
@@ -717,11 +830,14 @@ if test "$target_calendar_compatibility" = incompatible; then
 fi
 ln -s "$target" "$app_next"
 ln -s "$docs_target" "$docs_next"
+ln -s "$website_target" "$website_next"
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
 mv -Tf "$docs_next" /opt/veetbot/shared/docs/current
 docs_next=""
+mv -Tf "$website_next" /opt/veetbot/shared/website/current
+website_next=""
 sudo systemctl restart "${managed_units[@]}"
 health_headers="$(mktemp /opt/veetbot/shared/rollback-health.XXXXXX)"
 curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
@@ -737,6 +853,7 @@ awk -F ': *' -v expected="$target_id" '
 rm -f -- "$health_headers"
 health_headers=""
 test "$(cat /opt/veetbot/shared/docs/current/release.txt)" = "$target_id"
+test "$(cat /opt/veetbot/shared/website/current/release.txt)" = "$target_id"
 for unit in "${managed_units[@]}"; do
   sudo systemctl is-active --quiet "$unit"
   pid="$(sudo systemctl show --property MainPID --value "$unit")"
@@ -748,12 +865,13 @@ rollback_pending=0
 trap - EXIT
 ```
 
-The returned `X-Veetbot-Release` must equal `target_id`, and each unit's
+The returned `X-Veetbot-Release` and both public surfaces' `release.txt` files
+must equal `target_id`, and each unit's
 `MainPID` working directory must resolve to `target`. The matching documentation
-release is a precondition, so a missing or mismatched `release.txt` fails before
-either symlink changes. Image validation and tagging also precede both pointer
-switches. If the second switch, service restart, or readiness check fails, the
-exit trap restores both previous pointers and the previous production image tag,
+releases are preconditions, so a missing or mismatched `release.txt` fails before
+any symlink changes. Image validation and tagging also precede all three pointer
+switches. If either public-surface switch, service restart, or readiness check
+fails, the exit trap restores all three previous pointers and the previous production image tag,
 then restarts the previous release; `deploy/app/rollback.test.sh` failure-injects
 the second switch to verify that recovery. If the older release image was
 pruned, rebuild it from that retained source tree before switching.

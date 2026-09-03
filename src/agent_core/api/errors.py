@@ -21,6 +21,8 @@ ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
     domain_errors.PersonaContentError: ErrorMapping("malformed_request", 400),
     domain_errors.ScheduleValidationError: ErrorMapping("schedule_validation_error", 422),
     domain_errors.DeviceValidationError: ErrorMapping("device_validation_error", 422),
+    domain_errors.DeviceIngestError: ErrorMapping("device_ingest_error", 422),
+    domain_errors.DeviceChannelUnavailable: ErrorMapping("device_channel_unavailable", 503),
     domain_errors.InvalidStateTransition: ErrorMapping("invalid_state_transition", 409),
     domain_errors.ToolNotFoundError: ErrorMapping("tool_not_found", 404),
     domain_errors.ToolValidationError: ErrorMapping("tool_validation_error", 422),
@@ -58,15 +60,40 @@ API_ERROR_STATUS: dict[str, int] = {
     "internal_error": 500,
 }
 
-ERROR_CODE_VOCABULARY = frozenset(
-    {mapping.code for mapping in ERROR_STATUS_MAP.values()} | set(API_ERROR_STATUS)
-)
+# One class, several conditions: the reason decides the status the way the
+# closed reason vocabulary already decides the `details` body.
+DEVICE_INGEST_STATUS: dict[str, int] = {
+    "ingest_daily_cap": 429,
+    "channel_disabled": 409,
+    "channel_unsupported": 422,
+    "sender_invalid": 422,
+    "body_invalid": 422,
+}
+
+
+def _code_statuses() -> dict[str, frozenset[int]]:
+    collected: dict[str, set[int]] = {}
+    for mapping in ERROR_STATUS_MAP.values():
+        collected.setdefault(mapping.code, set()).add(mapping.status)
+    for code, status in API_ERROR_STATUS.items():
+        collected.setdefault(code, set()).add(status)
+    collected["device_ingest_error"].update(DEVICE_INGEST_STATUS.values())
+    return {code: frozenset(statuses) for code, statuses in collected.items()}
+
+
+ERROR_CODE_STATUSES = _code_statuses()
+ERROR_CODE_VOCABULARY = frozenset(ERROR_CODE_STATUSES)
 INTERNAL_ONLY_ERROR_TYPES = frozenset({domain_errors.WorkerFenced, domain_errors.EmptyModelTurn})
 
 
 def mapping_for(exc: BaseException) -> ErrorMapping:
     """Resolve through the MRO so a subclass has exactly one effective map."""
 
+    if isinstance(exc, domain_errors.DeviceIngestError):
+        return ErrorMapping(
+            "device_ingest_error",
+            DEVICE_INGEST_STATUS.get(exc.reason, 422),
+        )
     for error_type in type(exc).__mro__:
         mapped = ERROR_STATUS_MAP.get(error_type)
         if mapped is not None:
@@ -87,5 +114,11 @@ def details_for(exc: BaseException, code: str) -> dict[str, object]:
     ):
         return {"reason": exc.reason}
     if code == "device_validation_error" and isinstance(exc, domain_errors.DeviceValidationError):
+        return {"reason": exc.reason}
+    if code == "device_ingest_error" and isinstance(exc, domain_errors.DeviceIngestError):
+        return {"reason": exc.reason}
+    if code == "device_channel_unavailable" and isinstance(
+        exc, domain_errors.DeviceChannelUnavailable
+    ):
         return {"reason": exc.reason}
     return {}

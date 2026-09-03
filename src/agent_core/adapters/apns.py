@@ -79,7 +79,7 @@ class APNsPushTransport:
             headers["apns-expiration"] = str(int(message.expires_at.timestamp()))
         payload = {
             "aps": {"alert": {"title": message.payload.title}},
-            "veetbot": message.payload.model_dump(mode="json"),
+            "veetbot": message.payload.model_dump(mode="json", exclude_none=True),
         }
         try:
             response = await client.post(

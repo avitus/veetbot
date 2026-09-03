@@ -1,7 +1,7 @@
 """Add content-free provider stage metrics to memory consolidation audits.
 
 Revision ID: f4a7c2d9e105
-Revises: e3a1c5d7f9b2
+Revises: f1c7a3e05b28
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "f4a7c2d9e105"
-down_revision: str | Sequence[str] | None = "e3a1c5d7f9b2"
+down_revision: str | Sequence[str] | None = "f1c7a3e05b28"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

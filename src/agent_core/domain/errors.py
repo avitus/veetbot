@@ -53,6 +53,22 @@ class DeviceValidationError(AgentCoreError):
         self.reason = reason
 
 
+class DeviceChannelUnavailable(AgentCoreError):  # noqa: N818 - normative taxonomy name
+    """A device-scoped call cannot reach the device it names."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class DeviceIngestError(AgentCoreError):
+    """An ingested device message failed one stable boundary rule."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class DelegationValidationError(AgentCoreError):
     """A delegation request failed one stable boundary rule."""
 

@@ -47,6 +47,10 @@
 		100000000000000000000027 /* ScheduleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* ScheduleDetailView.swift */; };
 		100000000000000000000028 /* PersonaViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* PersonaViewModel.swift */; };
 		100000000000000000000029 /* PersonaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* PersonaEditorView.swift */; };
+		10000000000000000000002A /* SmsIntegrationPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SmsIntegrationPreferences.swift */; };
+		10000000000000000000002B /* DeviceInvocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* DeviceInvocationService.swift */; };
+		10000000000000000000002C /* SmsComposeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* SmsComposeSheet.swift */; };
+		10000000000000000000002D /* ForwardMessageIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* ForwardMessageIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -102,6 +106,10 @@
 		200000000000000000000028 /* ScheduleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleDetailView.swift; sourceTree = "<group>"; };
 		200000000000000000000029 /* PersonaViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaViewModel.swift; sourceTree = "<group>"; };
 		20000000000000000000002A /* PersonaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaEditorView.swift; sourceTree = "<group>"; };
+		20000000000000000000002B /* SmsIntegrationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsIntegrationPreferences.swift; sourceTree = "<group>"; };
+		20000000000000000000002C /* DeviceInvocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInvocationService.swift; sourceTree = "<group>"; };
+		20000000000000000000002D /* SmsComposeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsComposeSheet.swift; sourceTree = "<group>"; };
+		20000000000000000000002E /* ForwardMessageIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardMessageIntent.swift; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A520 /* Veetbot.macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.macOS.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -147,6 +155,7 @@
 				400000000000000000000009 /* Resources */,
 				200000000000000000000022 /* NotificationApplicationDelegate.swift */,
 				20000000000000000000001C /* ConversationNavigationUITestFixture.swift */,
+				20000000000000000000002E /* ForwardMessageIntent.swift */,
 				200000000000000000000016 /* VeetbotApp.swift */,
 			);
 			path = Veetbot;
@@ -171,6 +180,7 @@
 				200000000000000000000006 /* HTTPTransport.swift */,
 				200000000000000000000007 /* VeetbotAPIClient.swift */,
 				200000000000000000000020 /* DeviceRegistrationCoordinator.swift */,
+				20000000000000000000002C /* DeviceInvocationService.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -193,6 +203,7 @@
 				20000000000000000000000D /* SessionHistoryStore.swift */,
 				20000000000000000000000E /* SwiftDataSessionHistoryStore.swift */,
 				200000000000000000000021 /* InstallationIdentityStore.swift */,
+				20000000000000000000002B /* SmsIntegrationPreferences.swift */,
 			);
 			path = Store;
 			sourceTree = "<group>";
@@ -224,6 +235,7 @@
 				20000000000000000000002A /* PersonaEditorView.swift */,
 				200000000000000000000027 /* ScheduleBrowserView.swift */,
 				200000000000000000000028 /* ScheduleDetailView.swift */,
+				20000000000000000000002D /* SmsComposeSheet.swift */,
 				200000000000000000000015 /* RootView.swift */,
 			);
 			path = Views;
@@ -362,6 +374,7 @@
 				100000000000000000000006 /* HTTPTransport.swift in Sources */,
 				100000000000000000000007 /* VeetbotAPIClient.swift in Sources */,
 				10000000000000000000001F /* DeviceRegistrationCoordinator.swift in Sources */,
+				10000000000000000000002B /* DeviceInvocationService.swift in Sources */,
 				100000000000000000000008 /* ReconnectingEventStream.swift in Sources */,
 				100000000000000000000009 /* SSEReader.swift in Sources */,
 				10000000000000000000000A /* ArtifactCache.swift in Sources */,
@@ -370,6 +383,7 @@
 				10000000000000000000000D /* SessionHistoryStore.swift in Sources */,
 				10000000000000000000000E /* SwiftDataSessionHistoryStore.swift in Sources */,
 				100000000000000000000020 /* InstallationIdentityStore.swift in Sources */,
+				10000000000000000000002A /* SmsIntegrationPreferences.swift in Sources */,
 				10000000000000000000000F /* ChatViewModel.swift in Sources */,
 				100000000000000000000022 /* MemoryViewModel.swift in Sources */,
 				100000000000000000000028 /* PersonaViewModel.swift in Sources */,
@@ -387,9 +401,11 @@
 				100000000000000000000029 /* PersonaEditorView.swift in Sources */,
 				100000000000000000000026 /* ScheduleBrowserView.swift in Sources */,
 				100000000000000000000027 /* ScheduleDetailView.swift in Sources */,
+				10000000000000000000002C /* SmsComposeSheet.swift in Sources */,
 				100000000000000000000015 /* RootView.swift in Sources */,
 				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */,
+				10000000000000000000002D /* ForwardMessageIntent.swift in Sources */,
 				100000000000000000000016 /* VeetbotApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

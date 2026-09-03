@@ -246,6 +246,60 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    public func pendingInvocations(deviceID: UUID) async throws -> DeviceInvocationList {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/devices/\(deviceID.uuidString)/invocations"
+            )
+        )
+    }
+
+    public func postInvocationResult(
+        deviceID: UUID,
+        invocationID: UUID,
+        result: DeviceInvocationResult
+    ) async throws -> DeviceInvocationResultView {
+        // No retries: a 409 here means the invocation row is already
+        // terminally settled server-side, so a retry would only replay the
+        // same conflict. The single attempt either lands or the caller
+        // re-fetches the pending queue to see what actually happened.
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path:
+                    "/v1/devices/\(deviceID.uuidString)/invocations/\(invocationID.uuidString)/result",
+                body: try JSONEncoder.server.encode(DeviceInvocationResultBody(status: result))
+            )
+        )
+    }
+
+    public func postDeviceMessage(
+        deviceID: UUID,
+        channel: String,
+        sender: String,
+        body: String,
+        receivedAt: Date
+    ) async throws -> DeviceIngestResult {
+        // Ingest is digest-idempotent server-side, so retries here are safe
+        // (unlike the result post above).
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices/\(deviceID.uuidString)/messages",
+                body: try JSONEncoder.server.encode(
+                    DeviceMessageBody(
+                        channel: channel,
+                        sender: sender,
+                        body: body,
+                        receivedAt: receivedAt
+                    )
+                ),
+                retryAttempts: 3
+            )
+        )
+    }
+
     public func getArtifact(_ artifactID: UUID) async throws -> ArtifactView {
         try await transport.send(
             TransportRequest(method: .get, path: "/v1/artifacts/\(artifactID.uuidString)")
@@ -555,4 +609,20 @@ private struct InputBody: Encodable {
 private struct ResolveApprovalBody: Encodable {
     let decision: ApprovalDecision
     let reason: String?
+}
+
+private struct DeviceInvocationResultBody: Encodable {
+    let status: DeviceInvocationResult
+}
+
+private struct DeviceMessageBody: Encodable {
+    let channel: String
+    let sender: String
+    let body: String
+    let receivedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case channel, sender, body
+        case receivedAt = "received_at"
+    }
 }
