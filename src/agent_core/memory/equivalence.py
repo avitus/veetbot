@@ -174,8 +174,14 @@ def content_terms(value: str) -> set[str]:
         if term not in _STOPWORDS
         and term not in _NEGATIONS
         and term not in _NUMBER_WORDS
-        and not (term.isdecimal() and int(term) < 100)
+        and not _is_count(term)
     }
+
+
+def _is_count(term: str) -> bool:
+    """A short decimal below one hundred; longer digit runs are never parsed."""
+
+    return term.isdecimal() and len(term) <= 3 and int(term) < 100
 
 
 def negation_terms(value: str) -> frozenset[str]:
@@ -192,9 +198,8 @@ def quantity_terms(value: str) -> frozenset[str]:
 
     quantities: set[str] = set()
     for term in _tokens(value):
-        if term.isdecimal():
-            if int(term) < 100:
-                quantities.add(str(int(term)))
+        if _is_count(term):
+            quantities.add(str(int(term)))
         elif term in _NUMBER_WORDS:
             quantities.add(_NUMBER_WORDS[term])
     if quantities == {"1"}:
@@ -232,7 +237,7 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
 def is_generic_subject(subject: str) -> bool:
     """Whether a subject names the user bucket rather than a conflict key."""
 
-    return normalized_statement(subject) in _GENERIC_SUBJECTS
+    return normalized_statement(subject.replace("\u2019", "'")) in _GENERIC_SUBJECTS
 
 
 def subject_matches(

@@ -394,3 +394,33 @@ def test_live_evaluation_refuses_a_non_commit_build_ref(
                 output=tmp_path / "evidence.json",
             )
         )
+
+
+def test_generic_subject_check_normalizes_curly_apostrophes() -> None:
+    from agent_core.memory.equivalence import is_generic_subject
+
+    assert is_generic_subject("User\u2019s")
+    assert is_generic_subject("the user")
+    assert not is_generic_subject("user\u2019s training routine")
+    with pytest.raises(ValidationError, match="specific conflict key"):
+        _case(
+            expected=[
+                {
+                    "claim_kind": "goal",
+                    "derivation": "direct",
+                    "longevity": "ongoing",
+                    "subjects": ["User\u2019s"],
+                    "statements": ["User wants to finish the marathon."],
+                    "evidence_text": ["finish the marathon"],
+                }
+            ]
+        )
+
+
+def test_equivalence_survives_oversized_digit_runs() -> None:
+    from agent_core.memory.equivalence import content_terms, quantity_terms
+
+    huge = "User's reference number is " + "9" * 5000 + "."
+    assert quantity_terms(huge) == frozenset()
+    assert "9" * 5000 in content_terms(huge)
+    assert not statements_equivalent(huge, "User's reference number is 12.")

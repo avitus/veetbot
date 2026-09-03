@@ -1185,15 +1185,10 @@ async def test_episode_integration_partitions_topics_and_anticipates_from_prefix
         {"before_event_sequence": first, "episode_index": 0},
         {"before_event_sequence": second, "episode_index": 1},
     ]
-    # The prefix is sent once, never once per episode, and stops before the
-    # last episode's own evidence.
-    assert payload["prefix_events"] == [
-        {
-            "source_event_id": first,
-            "text": "PRIOR_ACTIVITY I swim three mornings each week.",
-        }
-    ]
-    assert prompt.text.count("PRIOR_ACTIVITY") == 1
+    # One request anticipates both episodes, so the prefix stops before the
+    # earliest episode: neither episode's own evidence is present.
+    assert payload["prefix_events"] == []
+    assert "PRIOR_ACTIVITY" not in prompt.text
     assert "CURRENT_HOME" not in prompt.text
 
 
@@ -2692,3 +2687,40 @@ async def test_distillation_prompt_carries_no_owner_identifiers() -> None:
     assert PRINCIPAL_ID not in part.text
     assert str(SESSION_ID) not in part.text
     assert "derivation_key" not in part.text
+
+
+async def test_anticipation_prefix_stops_before_the_earliest_episode() -> None:
+    """With several episodes in one request, no episode's evidence is a cue.
+
+    The prefix is the batch text before the earliest episode; an earlier
+    episode's evidence must not reach the request as a later episode's cue,
+    and within one segment that means the prefix is only what precedes it.
+    """
+
+    _clock, factory, _baseline, _retriever = await formation_stack()
+    earlier = await user_event(factory, "EARLIER_CONTEXT I keep tax records in the Blue folder.")
+    first = await user_event(factory, "FIRST_EPISODE I swim three mornings each week.")
+    second = await user_event(factory, "SECOND_EPISODE I moved to Portland last month.")
+    events = await session_events(factory)
+    by_sequence = {event.sequence: event for event in events}
+    episodes = [
+        deterministic_integrated_episode(
+            [by_sequence[sequence]],
+            principal=principal(),
+            episode_id=UUID(int=910 + index),
+            created_at=NOW,
+        )
+        for index, sequence in enumerate((first, second))
+    ]
+
+    prompt = NemoriAssistedCandidateExtractor._anticipation_prompt(events, episodes, [])
+    payload = json.loads(prompt)
+
+    assert [item["source_event_id"] for item in payload["prefix_events"]] == [earlier]
+    assert payload["episode_cues"] == [
+        {"before_event_sequence": first, "episode_index": 0},
+        {"before_event_sequence": second, "episode_index": 1},
+    ]
+    assert "EARLIER_CONTEXT" in prompt
+    assert "FIRST_EPISODE" not in prompt
+    assert "SECOND_EPISODE" not in prompt

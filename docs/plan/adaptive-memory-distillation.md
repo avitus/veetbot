@@ -227,9 +227,10 @@ the event that would carry it past ninety coverage units, two hundred and
 fifty-six events, or ninety-six kilobytes of source text, and an oversized
 single event forms its own segment. Each segment makes the three calls in
 order, so a consolidation makes exactly three calls per segment and never a
-candidate-level call. The anticipation request sends the causal prefix once,
-as the events before the last episode's first source event, with each cue
-naming the sequence before which its own evidence begins. There is no cost
+candidate-level call. One anticipation request covers every episode of a
+segment, so its prefix is the user text before the segment's earliest episode
+and contains no episode's own evidence; each cue names the sequence before
+which its evidence begins. There is no cost
 ceiling on the distiller; cost is recorded per stage and reported in evidence.
 
 A directly stated claim is not suppressed merely because a general model could

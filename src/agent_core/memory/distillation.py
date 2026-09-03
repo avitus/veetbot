@@ -1275,12 +1275,13 @@ class NemoriAssistedCandidateExtractor:
             )
         if stage == "anticipation":
             return base + (
-                "This is a causally blinded anticipation step. For each episode_index, the cue "
-                "is only the prefix_events whose source_event_id is lower than that episode's "
-                "before_event_sequence. Predict only claims already represented by the supplied "
-                "prior_memories for that episode. Attribute a prediction only to the specific "
-                "memory IDs that make it predictable. An ordinary model expectation without a "
-                "supporting memory must have an empty attributed_memory_ids list."
+                "This is a causally blinded anticipation step. prefix_events is the user text "
+                "before the earliest episode in this batch; no episode's own evidence is "
+                "supplied. For each episode_index, predict only claims already represented by "
+                "the supplied prior_memories that the prefix makes predictable. Attribute a "
+                "prediction only to the specific memory IDs that make it predictable. An "
+                "ordinary model expectation without a supporting memory must have an empty "
+                "attributed_memory_ids list."
             )
         return base + (
             "Favor useful recall over timidity. Form separate claims for useful ongoing projects, "
@@ -1331,18 +1332,19 @@ class NemoriAssistedCandidateExtractor:
         episodes: Sequence[IntegratedEpisode],
         prior_memories: Sequence[MemoryRecord],
     ) -> str:
-        # The prefix is sent once. Every event in it precedes the last episode's
-        # first source event, and each cue names the sequence before which its
-        # own evidence begins; the episode being predicted, later evidence,
-        # assistant output, and labels stay absent.
+        # One request anticipates every episode of a segment, so the only
+        # prefix that blinds each cue from its own evidence is the text before
+        # the earliest episode: no event of the segment, later evidence,
+        # assistant output, or label is present. Each cue still names the
+        # sequence before which its evidence begins.
         ordered_events = sorted(events, key=lambda event: event.sequence)
-        last_start = max(episode.source_event_ids[0] for episode in episodes)
+        first_start = min(episode.source_event_ids[0] for episode in episodes)
         return json.dumps(
             {
                 "prefix_events": [
                     {"source_event_id": event.sequence, "text": _event_text(event)}
                     for event in ordered_events
-                    if event.sequence < last_start
+                    if event.sequence < first_start
                 ],
                 "episode_cues": [
                     {

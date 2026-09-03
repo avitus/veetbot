@@ -86,8 +86,9 @@ training loop, reinforcement learning, or a new dependency into this milestone.
     evaluation, and activation.
 15. **Episode output is a topical partition, not a session-sized singleton.**
     Provider fragments must form an ordered complete partition of source-event
-    provenance. Anticipation receives the actual earlier source prefix for each
-    episode and never the episode being predicted.
+    provenance. One anticipation request covers a segment's episodes and
+    receives only the source prefix before the earliest of them, never any
+    episode being predicted.
 16. **Silent omission is a protocol failure.** The distillation response
     accounts for every bounded source clause. `represented` is valid only when
     it references a same-episode prediction attributed to a live memory, and
