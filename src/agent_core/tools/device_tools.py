@@ -364,6 +364,7 @@ class DeviceToolRuntime:
                     invocation_timeout_seconds=self._invocation_timeout_seconds,
                 ),
                 tenant_id=tenant_id,
+                principal_id=device.principal_id,
             )
             registration = _Registration(device_id=device.id, owners=set())
             self._registrations[key] = registration
@@ -384,6 +385,11 @@ class DeviceToolRuntime:
         self._unregister(key)
 
     def _unregister(self, key: _RegistrationKey) -> None:
-        tenant_id, _principal_id, name, version = key
-        self._registry.unregister_dynamic(name, version, tenant_id=tenant_id)
+        tenant_id, principal_id, name, version = key
+        self._registry.unregister_dynamic(
+            name,
+            version,
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+        )
         self._registrations.pop(key, None)

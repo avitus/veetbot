@@ -19,12 +19,25 @@ class Tool(Protocol):
 
 
 class ToolRegistry(Protocol):
-    def register_dynamic(self, tool: Tool, *, tenant_id: str) -> None:
-        """Register an MCP-discovered implementation for one tenant."""
+    def register_dynamic(
+        self,
+        tool: Tool,
+        *,
+        tenant_id: str,
+        principal_id: str | None = None,
+    ) -> None:
+        """Register an MCP tool per tenant or a device tool per principal."""
         ...
 
-    def unregister_dynamic(self, name: str, version: str, *, tenant_id: str) -> None:
-        """Remove one tenant-scoped MCP registration when its last session closes."""
+    def unregister_dynamic(
+        self,
+        name: str,
+        version: str,
+        *,
+        tenant_id: str,
+        principal_id: str | None = None,
+    ) -> None:
+        """Remove one dynamic registration when its last session closes."""
         ...
 
     def get(
@@ -33,6 +46,7 @@ class ToolRegistry(Protocol):
         version: str | None = None,
         *,
         tenant_id: str | None = None,
+        principal_id: str | None = None,
         source: ToolSource | None = None,
         server_id: str | None = None,
         device_id: str | None = None,

@@ -100,6 +100,16 @@ def test_an_explicit_empty_otherwise_decision_is_rejected() -> None:
         _ruleset({TOOL_NAME: {"decision": "allow", "otherwise": ""}})
 
 
+def test_a_non_string_tool_rule_key_is_rejected_as_invalid_policy() -> None:
+    with pytest.raises(ValueError):
+        _ruleset(
+            {
+                TOOL_NAME: {"decision": "allow"},
+                7: {"decision": "deny"},
+            }
+        )
+
+
 # --- (a) the suppression is opt-in per rule ---------------------------------
 
 

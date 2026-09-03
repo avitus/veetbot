@@ -69,7 +69,9 @@ audit anticipated: the client's device registration declares
 `capabilities: ["device.sms.send"]` on the `Device.capabilities` field
 Section 29.6 defines and Milestone 12 deferred; this milestone lands it.
 The registry exposes the tool with `ToolSource.DEVICE` while
-the declaring device is registered and unrevoked. The
+the declaring device is registered and unrevoked. Dynamic device-tool
+registrations are keyed by tenant and owning principal so another principal in
+the tenant cannot advertise or resolve the device's tool. The
 [tool-system.md](tool-system.md) sentence closing registration at two
 sources gains the amendment ADR-0081 records.
 

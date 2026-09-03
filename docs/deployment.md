@@ -718,6 +718,8 @@ test -L /opt/veetbot/shared/website/current
 previous_target="$(readlink -f /opt/veetbot/current)"
 previous_docs_target="$(readlink -f /opt/veetbot/shared/docs/current)"
 previous_website_target="$(readlink -f /opt/veetbot/shared/website/current)"
+test -d "$previous_website_target"
+test -f "$previous_website_target/release.txt"
 test -f "$environment_file"
 docker image inspect "agent-core-sandbox:$target_id" >/dev/null
 previous_production_image="$(

@@ -1689,6 +1689,7 @@ class ToolPipeline:
             name,
             pinned.version if pinned is not None else checkpoint.pinned_tool_versions.get(name),
             tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
             source=None if pinned is None else pinned.source,
             server_id=None if pinned is None else pinned.server_id,
             device_id=None if pinned is None else pinned.device_id,

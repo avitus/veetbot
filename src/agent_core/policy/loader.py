@@ -64,6 +64,8 @@ def _tool_rules(value: Any) -> tuple[ToolPolicyRule, ...]:
         return ()
     if not isinstance(value, dict):
         raise ValueError("policy tool rules must be a mapping keyed on tool name")
+    if any(not isinstance(tool_name, str) for tool_name in value):
+        raise ValueError("policy tool rules must be keyed by strings")
     rules: list[ToolPolicyRule] = []
     for tool_name in sorted(value):
         if not isinstance(tool_name, str) or _TOOL_NAME.fullmatch(tool_name) is None:

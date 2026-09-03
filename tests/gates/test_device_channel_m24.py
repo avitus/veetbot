@@ -225,6 +225,7 @@ def _registered(composition: Composition) -> RegisteredTool:
         composition.tool_pipeline._registry.get(
             DEVICE_SMS_SEND_TOOL_NAME,
             tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
         ),
     )
 

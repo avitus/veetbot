@@ -280,7 +280,7 @@ citations:
   - cite: "docs/plan/notifications-and-devices.md#docs/plan/multi-device-and-surfaces.md:441"
     excerpt: "## Open questions for review"
     digest: "b6a2adc3e0938fad"
-  - cite: "docs/plan/operational-hardening.md#docs/deployment.md:888-891"
+  - cite: "docs/plan/operational-hardening.md#docs/deployment.md:890-893"
     excerpt: "This is still a single-server failure domain with no require"
     digest: "f18e7d7e9ebaaad1"
   - cite: "docs/plan/operational-hardening.md#docs/plan/event-log-and-persistence.md:962-973"

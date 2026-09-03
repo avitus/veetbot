@@ -485,6 +485,8 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert app_precondition in manual
     assert docs_precondition in manual
     assert website_precondition in manual
+    assert 'test -d "$previous_website_target"' in manual
+    assert 'test -f "$previous_website_target/release.txt"' in manual
     assert image_validation in manual
     assert image_tag in manual
     assert readiness_identity in manual
@@ -510,6 +512,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(website_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index(docs_precondition) < manual.index(website_switch)
     assert manual.index(website_precondition) < manual.index(website_switch)
     assert manual.index("flock -w 900 9") < manual.index(writer_stop)
     assert manual.index(writer_stop) < manual.index(compatibility_query)
@@ -1848,10 +1851,14 @@ def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
 
-    invocation = recipe.split("xcodebuild test-without-building", 1)[1].split(";", 1)[0]
-    assert "-testProductsPath" in invocation
-    assert "-project" not in invocation
-    assert "-scheme" not in invocation
+    invocations = [
+        tail.split(";", 1)[0] for tail in recipe.split("xcodebuild test-without-building")[1:]
+    ]
+    assert invocations
+    for invocation in invocations:
+        assert "-testProductsPath" in invocation
+        assert "-project" not in invocation
+        assert "-scheme" not in invocation
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:

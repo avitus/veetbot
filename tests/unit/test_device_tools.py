@@ -194,6 +194,7 @@ async def test_another_principals_attach_leaves_the_owners_registration_standing
     assert registry.get(
         DEVICE_SMS_SEND_TOOL_NAME,
         tenant_id=_device_principal().tenant_id,
+        principal_id=_device_principal().principal_id,
     ).spec.device_id == str(DEVICE_ID)
 
 
@@ -235,7 +236,11 @@ async def test_device_discovery_may_register_dynamically_but_other_sources_may_n
         invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     )
 
-    registry.register_dynamic(tool, tenant_id=principal().tenant_id)
+    registry.register_dynamic(
+        tool,
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+    )
 
     sandboxed = tool.spec.model_copy(
         update={
@@ -284,15 +289,78 @@ def test_dynamic_lookup_requires_the_pinned_device_identifier() -> None:
         invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
     )
     tenant_id = _device_principal().tenant_id
-    registry.register_dynamic(first, tenant_id=tenant_id)
-    registry.unregister_dynamic(first.spec.name, first.spec.version, tenant_id=tenant_id)
-    registry.register_dynamic(replacement, tenant_id=tenant_id)
+    principal_id = _device_principal().principal_id
+    registry.register_dynamic(first, tenant_id=tenant_id, principal_id=principal_id)
+    registry.unregister_dynamic(
+        first.spec.name,
+        first.spec.version,
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+    )
+    registry.register_dynamic(replacement, tenant_id=tenant_id, principal_id=principal_id)
 
     with pytest.raises(NotFoundError):
         registry.get(
             first.spec.name,
             first.spec.version,
             tenant_id=tenant_id,
+            principal_id=principal_id,
+            source=ToolSource.DEVICE,
+            device_id=str(DEVICE_ID),
+        )
+
+
+def test_dynamic_device_tools_are_isolated_between_principals_in_one_tenant() -> None:
+    registry = StaticToolRegistry()
+    first_owner = _device_principal()
+    second_owner = first_owner.model_copy(update={"principal_id": "principal-b"}, deep=True)
+    first = DeviceSmsSendTool(
+        FakeDeviceChannel(
+            clock=_clock(),
+            capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
+            owners={DEVICE_ID: first_owner},
+        ),
+        DEVICE_ID,
+        SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+    )
+    second = DeviceSmsSendTool(
+        FakeDeviceChannel(
+            clock=_clock(),
+            capabilities={SECOND_DEVICE_ID: frozenset({TOOL_NAME})},
+            owners={SECOND_DEVICE_ID: second_owner},
+        ),
+        SECOND_DEVICE_ID,
+        SequenceIdFactory(),
+        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
+    )
+
+    registry.register_dynamic(
+        first,
+        tenant_id=first_owner.tenant_id,
+        principal_id=first_owner.principal_id,
+    )
+    registry.register_dynamic(
+        second,
+        tenant_id=second_owner.tenant_id,
+        principal_id=second_owner.principal_id,
+    )
+
+    assert [spec.device_id for spec in _advertised(registry)] == [str(DEVICE_ID)]
+    assert [
+        spec.device_id
+        for spec in registry.specs_for_session(
+            agent(),
+            second_owner,
+            profile="default",
+            environment="runtime",
+        )
+    ] == [str(SECOND_DEVICE_ID)]
+    with pytest.raises(NotFoundError):
+        registry.get(
+            DEVICE_SMS_SEND_TOOL_NAME,
+            tenant_id=second_owner.tenant_id,
+            principal_id=second_owner.principal_id,
             source=ToolSource.DEVICE,
             device_id=str(DEVICE_ID),
         )
@@ -572,6 +640,7 @@ async def test_the_device_tool_is_absent_while_either_flag_is_unset() -> None:
             composition.tool_pipeline._registry.get(
                 DEVICE_SMS_SEND_TOOL_NAME,
                 tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
             )
 
 
