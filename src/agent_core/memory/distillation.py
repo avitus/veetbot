@@ -777,10 +777,12 @@ def _statements_agree_across_kinds(left: str, right: str) -> bool:
         return False
     left_terms = {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(left)}
     right_terms = {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(right)}
-    smallest = min(len(left_terms), len(right_terms))
-    if not smallest:
+    union = left_terms | right_terms
+    if not union or not left_terms or not right_terms:
         return False
-    return len(left_terms & right_terms) / smallest >= 0.75
+    # Over the union, not the smaller set: "User has a son" must not absorb
+    # "User has a son named Robert who lives in Berlin".
+    return len(left_terms & right_terms) / len(union) >= 0.75
 
 
 def _candidates_semantically_duplicate(

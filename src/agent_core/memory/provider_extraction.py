@@ -909,7 +909,13 @@ class ProviderAssistedCandidateExtractor:
                     [str(item["text"]) for item in selected],
                 )
             else:
-                related = await uow.memories.list_memories(principal, limit=50)
+                # Frozen in what it forms, not in what it may leak: the egress
+                # sensitivity rule is a safety floor shared by every policy.
+                related = [
+                    belief
+                    for belief in await uow.memories.list_memories(principal, limit=50)
+                    if belief.sensitivity in PROVIDER_EGRESS_SENSITIVITIES
+                ]
         job_id = self._ids.new_id()
         attempt_id = self._ids.new_id()
         deadline_at = self._clock.now() + timedelta(seconds=self._budget.timeout_seconds)

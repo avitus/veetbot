@@ -141,7 +141,7 @@ def test_provider_evaluation_guidance_tracks_current_corpus_cost() -> None:
     )
     assert f"current {expected_calls}-case corpus" in design
     assert re.search(
-        rf"reviewed\s+passing\s+`{re.escape(PROVIDER_FORMATION_POLICY_VERSION)}`\s+evidence\s+"
+        rf"reviewed\s+passing\s+`{re.escape(REPAIRED_PROVIDER_FORMATION_POLICY_VERSION)}`\s+evidence\s+"
         rf"from\s+the\s+checked-in\s+{expected_calls}-case\s+corpus",
         design,
     )
@@ -449,6 +449,15 @@ def test_corpus_seed_pools_are_declared_large_and_cover_most_positive_cases() ->
     small = {**base, "seed_pools": {name: pool[:3] for name, pool in base["seed_pools"].items()}}
     with pytest.raises(ValidationError, match="at least 25"):
         MemoryFormationCorpus.model_validate(small)
+    mostly_unseeded = {
+        **base,
+        "cases": [
+            {**case, "prior_beliefs_pool": None} if index % 2 else case
+            for index, case in enumerate(base["cases"])
+        ],
+    }
+    with pytest.raises(ValidationError, match="eighty percent"):
+        MemoryFormationCorpus.model_validate(mostly_unseeded)
 
 
 class TestRepairedPolicyPublication:

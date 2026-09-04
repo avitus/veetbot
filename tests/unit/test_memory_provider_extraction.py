@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 
 import agent_core.config as config_module
 from agent_core.adapters.determinism import SequenceIdFactory
@@ -52,6 +53,7 @@ from agent_core.domain.messages import (
     TextDeltaEvent,
     TextPart,
     UsageEvent,
+    UserMessage,
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
@@ -67,7 +69,7 @@ from agent_core.memory.provider_extraction import (
 )
 from agent_core.policy.loader import load_ruleset_documents
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
-from tests.contract.support import AGENT_ID, NOW, principal
+from tests.contract.support import AGENT_ID, NOW, SESSION_ID, principal
 from tests.integration.m2_support import memory_settings
 
 
@@ -3201,3 +3203,68 @@ async def test_operator_pin_to_formation10_without_its_evidence_falls_back(
     assert payload["outcome"] == "deterministic_fallback"
     assert payload["reason"] == "pinned_policy_unevidenced"
     assert payload["formation_policy_version"] == "formation@7"
+
+
+def test_repaired_evidence_must_come_from_a_populated_store() -> None:
+    """An operator-supplied formation@10 artifact cannot activate on empty-store numbers."""
+
+    with pytest.raises(ValidationError, match="populated store"):
+        _repaired_evidence().model_copy(update={"seeded_case_count": 0}).model_validate(
+            _repaired_evidence().model_dump() | {"seeded_case_count": 0}
+        )
+    assert _evidence().model_validate(_evidence().model_dump() | {"seeded_case_count": 0})
+
+
+async def test_frozen_policy_view_never_sends_sensitive_beliefs() -> None:
+    """formation@8 is frozen in what it forms, not in what it may leak."""
+
+    clock, factory, service, _retriever = await formation_stack()
+    seed = await user_event(factory, "Earlier context the seeded beliefs cite.")
+    await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User keeps the club ledger password in the red notebook.",
+        subject="club ledger password",
+        scope="project-a",
+        sensitivity=Sensitivity.SENSITIVE,
+        source_event_ids=[seed],
+    )
+    await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User's daughter runs the astronomy club newsletter.",
+        subject="astronomy club newsletter",
+        scope="project-a",
+        source_event_ids=[seed],
+    )
+    await user_event(factory, "The astronomy club was my daughter's idea.")
+    provider = FakeModelProvider(
+        FakeModelScript(turns=[ScriptedTurn(text='{"candidates":[]}')]), clock
+    )
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake", model="scripted", policy_name="fake", resolved_at=NOW
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(9_300, 9_400)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    await extractor.extract(await session_events(factory), principal=principal(), scope="project-a")
+
+    user_message = provider.requests[0].conversation[1]
+    assert isinstance(user_message, UserMessage)
+    text_part = user_message.content[0]
+    assert isinstance(text_part, TextPart)
+    prompt = text_part.text
+    assert "astronomy club newsletter" in prompt
+    assert "ledger password" not in prompt
+    assert "red notebook" not in prompt

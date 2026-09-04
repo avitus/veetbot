@@ -603,15 +603,16 @@ Connect after the first automated delivery.
 ## Verification
 
 After the first successful pipeline, verify the active revision and services.
-Substitute the account `DEPLOY_USER` names; on the current host that is
-`veetbot`, not `veetbot-deploy`:
+`DEPLOY_USER` is the account CircleCI logs in as: `veetbot` on the current
+host, `veetbot-deploy` once the host is reconciled:
 
 ```bash
+DEPLOY_USER=veetbot
 curl --fail --show-error --dump-header - --output /dev/null \
   https://api.veetbot.com/health/ready
 curl --fail --show-error https://docs.veetbot.com/release.txt
 curl --fail --show-error https://www.veetbot.com/release.txt
-ssh veetbot-deploy@api.veetbot.com '
+ssh "$DEPLOY_USER@api.veetbot.com" '
   set -eu
   app_release="$(readlink -f /opt/veetbot/current)"
   . "$app_release/.release.env"
@@ -621,7 +622,7 @@ ssh veetbot-deploy@api.veetbot.com '
   test "$(cat "$website_release/release.txt")" = "$VEETBOT_RELEASE_ID"
   printf "%s\n%s\n" "$docs_release" "$website_release"
 '
-ssh veetbot-deploy@api.veetbot.com \
+ssh "$DEPLOY_USER@api.veetbot.com" \
   'systemctl is-active veetbot-execution veetbot-api veetbot-worker veetbot-async-worker veetbot-maintenance'
 ```
 

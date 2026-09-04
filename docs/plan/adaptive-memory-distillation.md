@@ -117,9 +117,10 @@ is not the current one, and the build reference names the commit the
 evaluated tree was committed as. A running process cannot compare that
 reference against itself, because the artifact is necessarily bundled in a
 later commit than the one it evaluated.
-Until such evidence exists, `auto` keeps the currently evidenced
-`formation@8`; `required` refuses rather than claiming an unevaluated policy is
-active. A content-free selection audit records the decision.
+Until such evidence exists, `auto` keeps the newest evidenced provider-assisted
+policy, `formation@10` where its artifact matches and otherwise `formation@8`;
+`required` refuses rather than claiming an unevaluated policy is active. A
+content-free selection audit records the decision and the policy it chose.
 
 ## The integrated episode
 

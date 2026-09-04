@@ -1671,6 +1671,23 @@ def test_semantic_duplicate_detection_merges_provider_paraphrases_only() -> None
     )
     assert _candidates_semantically_duplicate(routine_project, routine_habit)
     assert not _candidates_semantically_duplicate(routine_habit, routine_goal)
+    # An elaboration is more memory, not the same memory: the shorter claim
+    # must not absorb the one that names Robert and Berlin.
+    son = _candidate(
+        subject="son",
+        statement="User has a son.",
+        claim_kind="relationship",
+        source_event_ids=[3],
+        evidence_spans=[{"source_event_id": 3, "text": "my son Robert"}],
+    )
+    son_in_berlin = son.model_copy(
+        update={
+            "subject": "son Robert",
+            "statement": "User has a son named Robert who lives in Berlin.",
+            "claim_kind": MemoryClaimKind.PROJECT_FACT,
+        }
+    )
+    assert not _candidates_semantically_duplicate(son, son_in_berlin)
 
 
 @pytest.mark.parametrize(

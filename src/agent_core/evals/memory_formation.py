@@ -118,6 +118,13 @@ class MemoryFormationCorpus(BaseModel):
                 raise ValueError(
                     f"case {case.id} names undeclared seed pool {case.prior_beliefs_pool!r}"
                 )
+        positives = [case for case in self.cases if case.expected]
+        seeded = [case for case in positives if case.prior_beliefs_pool is not None]
+        if len(seeded) < 0.8 * len(positives):
+            raise ValueError(
+                f"only {len(seeded)} of {len(positives)} positive cases name a seed pool; "
+                "the corpus must seed at least eighty percent of them"
+            )
         return self
 
     def seeds_for(self, case: MemoryFormationCase) -> list[SeedBelief]:

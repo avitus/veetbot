@@ -48,8 +48,11 @@ The owner authorized both repairs on 2026-09-03.
    sharing the most content with the batch, drawn from the five hundred most
    recent, restricted to public and internal sensitivity, with store order
    breaking ties.
-2. **`formation@8` stays frozen and its artifact is withdrawn.** Its code path
-   is byte-identical and still gated by `gate.memory.distill_versions_frozen`.
+2. **`formation@8` stays frozen and its artifact is withdrawn.** What it forms
+   is byte-identical and still gated by `gate.memory.distill_versions_frozen`;
+   its compact belief view now applies the same public-or-internal egress
+   filter as every other provider policy, because a sensitivity leak is a
+   safety floor rather than a formation semantic.
    Its bundled evidence was bound to a policy version the tree no longer
    compiles, could not activate anywhere, and would have been the first thing
    the new guard rejected. Regenerating it would certify a starved policy, so
@@ -63,8 +66,9 @@ The owner authorized both repairs on 2026-09-03.
    artifact type. The selection audit records the formation policy it chose.
 4. **`formation@10` evidence comes from a populated store.** The 25-case
    formation corpus declares a thirty-belief seed pool whose subjects never
-   touch a case's expectation, every case names it, and the evidence records
-   the seeded case count. `agent eval memory-formation` gains
+   touch a case's expectation, at least eighty percent of positive cases name
+   it, and the evidence records the seeded case count; a `formation@10`
+   artifact with no seeded case is rejected at the schema. `agent eval memory-formation` gains
    `--formation-policy`, resolves its build reference from a clean committed
    checkout the way distillation does, and publishes only a passing artifact.
 5. **Bundled evidence is bound to the policy the tree compiles.** The bundle

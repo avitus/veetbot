@@ -390,6 +390,10 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
         required_coverage = minimum_supported_case_count(self.positive_case_count)
         if self.minimum_supported_case_count != required_coverage:
             raise ValueError("minimum supported case count must equal eighty percent coverage")
+        if self.formation_policy_version == "formation@10" and self.seeded_case_count < 1:
+            # The repaired policy exists because an empty store hid the frozen
+            # one's starvation; its evidence is meaningless without a populated store.
+            raise ValueError("formation@10 evidence must come from a populated store")
         if (
             self.deterministic_supported_case_count > self.positive_case_count
             or self.provider_supported_case_count > self.positive_case_count
