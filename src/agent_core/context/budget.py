@@ -26,7 +26,13 @@ class ContextBudgetAllocator:
             raise ValueError(f"context configuration {key} must be a nonnegative integer")
         return value
 
-    def allocate(self, model: ResolvedModel, *, prefix_tokens: int) -> ContextBudget:
+    def allocate(
+        self,
+        model: ResolvedModel,
+        *,
+        prefix_tokens: int,
+        memory_snapshot_tokens: int | None = None,
+    ) -> ContextBudget:
         classes = self._mapping(self._config.get("classes"), "classes")
         output = self._mapping(self._config.get("output"), "output")
         estimator = self._mapping(self._config.get("estimator"), "estimator")
@@ -58,6 +64,10 @@ class ContextBudgetAllocator:
             if raw_memory is None
             else self._integer(self._mapping(raw_memory, "classes.memory_snapshot"), "max_tokens")
         )
+        if memory_snapshot_tokens is not None:
+            if memory_snapshot_tokens < 0:
+                raise ValueError("memory snapshot token allocation must be nonnegative")
+            memory = memory_snapshot_tokens
         recall = self._integer(class_config("in_turn_recall"), "max_tokens")
         working = self._integer(class_config("working_state"), "max_tokens")
         knowledge = self._integer(class_config("knowledge_passages"), "max_tokens")

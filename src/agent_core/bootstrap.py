@@ -1925,6 +1925,7 @@ async def _compose(
             memory_retriever=memory_retriever,
             session_tool_filter=_session_tool_filter(browser_provider),
             attach_device_tools=attach_device_tools,
+            snapshot_profiles=memory_profiles.snapshots,
         )
 
         async def session_project_scope(session_id: UUID) -> str:

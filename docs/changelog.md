@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-04 — Memory snapshots fit their final context class
+
+- Memory retrieval now applies the context planner's model-specific token
+  measurement to the complete rendered snapshot, including the memory wrapper,
+  trust envelope, and serialized message framing, before it records the faithful
+  recall trace. Verbose accumulated memories therefore trim at the configured
+  boundary instead of making a new session fail with `context_overflow`.
+- Scheduled sessions now use the configured async snapshot profile, delegated
+  sessions use the child profile, and all session classes enforce their absolute
+  item and token caps together with the two-percent model-window ceiling.
+
 ## 2026-09-03 — Repaired provider-assisted memory formation and policy-bound evidence
 
 - Added `formation@10` under ADR-0086: the provider-assisted extractor's

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -188,6 +188,7 @@ class MemoryRetriever(Protocol):
         turn_id: UUID | None = None,
         moment: str = "in_turn",
         surface_id: str = "private",
+        measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult: ...
 
     async def corrections(

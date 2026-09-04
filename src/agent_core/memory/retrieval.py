@@ -7,6 +7,7 @@ import html
 import math
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -153,6 +154,7 @@ class HybridMemoryRetriever:
         turn_id: UUID | None = None,
         moment: str = "in_turn",
         surface_id: str = "private",
+        measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
@@ -224,7 +226,7 @@ class HybridMemoryRetriever:
             collapsed.append(item)
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
-        used_tokens = 0
+        measure_tokens = measure_rendered_tokens or _token_estimate
         reserve = _durable_reserve(
             effective_query,
             collapsed,
@@ -234,22 +236,22 @@ class HybridMemoryRetriever:
         durable_ahead = _durable_ahead(collapsed, durable_ids)
         durable_selected = 0
         for index, item in enumerate(collapsed):
-            estimate = _token_estimate(_line(item))
             durable = item.belief_id in durable_ids
             # A slot is held for a durable belief further down the ranking only
             # while one is actually still pending, so the reservation never
             # shrinks a snapshot that has no durable belief left to seat.
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
+            candidate_tokens = measure_tokens(render_memory([*selected, item], as_of=now))
             if (
                 len(selected) + held >= effective_query.max_items
-                or used_tokens + estimate > effective_query.budget_tokens
+                or candidate_tokens > effective_query.budget_tokens
             ):
                 dropped.append(item.belief_id)
                 continue
             selected.append(item)
             durable_selected += int(durable)
-            used_tokens += estimate
         rendered = render_memory(selected, as_of=now)
+        rendered_tokens = measure_tokens(rendered) if selected else 0
         rendered_bytes = rendered.encode("utf-8")
         trace_id = self._ids.new_id()
         trace = RecallTrace(
@@ -296,7 +298,7 @@ class HybridMemoryRetriever:
         return RecallResult(
             items=selected,
             rendered=rendered,
-            tokens=_token_estimate(rendered),
+            tokens=rendered_tokens,
             truncated=bool(dropped),
             trace_id=trace_id,
             watermark=head,

@@ -11,6 +11,7 @@ budget pressure cannot yield them.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -173,8 +174,9 @@ class _Retriever:
         turn_id: UUID | None = None,
         moment: str = "in_turn",
         surface_id: str = "private",
+        measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
-        del session_id, run_id, turn_id, surface_id
+        del session_id, run_id, turn_id, surface_id, measure_rendered_tokens
         self.calls += 1
         self.queries.append(query)
         assert moment == "in_turn"
