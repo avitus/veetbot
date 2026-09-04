@@ -209,6 +209,20 @@ async def _create_resources(
     return session_id, run_id, approval_id, artifact_id
 
 
+async def test_public_session_creation_rejects_scheduler_owned_metadata(tmp_path: Path) -> None:
+    async with _composition(tmp_path) as composition, _client(composition) as client:
+        response = await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": "general",
+                "metadata": {"schedule_id": str(UUID(int=411))},
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "malformed_request"
+
+
 async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
     expected = {
         "authentication_error",

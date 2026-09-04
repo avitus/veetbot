@@ -13,7 +13,9 @@ title: Changelog
   boundary instead of making a new session fail with `context_overflow`.
 - Scheduled sessions now use the configured async snapshot profile, delegated
   sessions use the child profile, and all session classes enforce their absolute
-  item and token caps together with the two-percent model-window ceiling.
+  item and token caps together with the two-percent model-window ceiling. Public
+  session creation rejects the scheduler-owned `schedule_id` metadata key, so an
+  interactive caller cannot select the larger async profile.
 
 ## 2026-09-03 — Repaired provider-assisted memory formation and policy-bound evidence
 

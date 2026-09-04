@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 SESSION_TITLE_MAX_LENGTH = 64
 SESSION_BROWSER_PROFILE_METADATA_KEY = "browser_profile_id"
+SESSION_SCHEDULE_ID_METADATA_KEY = "schedule_id"
 SESSION_PROJECT_SCOPE_METADATA_KEY = "project_scope"
 DEFAULT_PROJECT_SCOPE = "general"
 
