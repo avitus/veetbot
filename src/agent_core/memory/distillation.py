@@ -18,6 +18,7 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
     INTEGRATED_EPISODE_MAX_SUBJECTS,
     MEMORY_SUBJECT_MAX_LENGTH,
+    PROVIDER_EGRESS_SENSITIVITIES,
     SENSITIVITY_ORDER,
     BeliefType,
     EvidenceSpan,
@@ -42,7 +43,13 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.equivalence import statement_supports_clause, statements_equivalent
+from agent_core.memory.equivalence import (
+    content_terms,
+    negation_terms,
+    quantity_terms,
+    statement_supports_clause,
+    statements_equivalent,
+)
 from agent_core.memory.formation import (
     HighRecallCandidateExtractor,
     _event_text,
@@ -68,7 +75,6 @@ DISTILLATION_MAXIMUM_OUTPUT_TOKENS = 16_384
 DISTILLATION_CALLS_PER_SEGMENT = 3
 # Only beliefs at or below internal sensitivity may leave the platform as
 # anticipation cues; sensitive and restricted beliefs never reach a provider.
-PROVIDER_EGRESS_SENSITIVITIES = frozenset({Sensitivity.PUBLIC, Sensitivity.INTERNAL})
 # A coverage disposition costs roughly thirty output tokens and a candidate
 # roughly one hundred and ten. Ninety clauses with one candidate each stay
 # under eighty percent of the output ceiling.
@@ -754,6 +760,31 @@ def _subject_tokens(subject: str) -> set[str]:
     }
 
 
+def _statements_agree_across_kinds(left: str, right: str) -> bool:
+    """Whether two statements of different claim kinds assert one claim.
+
+    Content is compared rather than raw tokens: a light verb is not content, a
+    digit range and a spelled-out range are the same count, and the two must
+    agree on every count and negation before overlap is measured. Production
+    once formed "follows the 5x5 routine 2\u20133 times per week" as an ongoing
+    project beside "does the 5x5 routine two to three times per week" as a habit
+    because raw tokens could not see that those are one memory.
+    """
+
+    if negation_terms(left) != negation_terms(right):
+        return False
+    if quantity_terms(left) != quantity_terms(right):
+        return False
+    left_terms = {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(left)}
+    right_terms = {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(right)}
+    union = left_terms | right_terms
+    if not union or not left_terms or not right_terms:
+        return False
+    # Over the union, not the smaller set: "User has a son" must not absorb
+    # "User has a son named Robert who lives in Berlin".
+    return len(left_terms & right_terms) / len(union) >= 0.75
+
+
 def _candidates_semantically_duplicate(
     left: MemoryCandidate,
     right: MemoryCandidate,
@@ -809,12 +840,12 @@ def _candidates_semantically_duplicate(
         _SUBJECT_SYNONYMS.get(token, token)
         for token in _SEMANTIC_MEMORY_TOKEN.findall(normalized_right)
     } - _SEMANTIC_MEMORY_STOPWORDS
+    if left.claim_kind is not right.claim_kind:
+        return _statements_agree_across_kinds(left.statement, right.statement)
     smaller = min(len(left_tokens), len(right_tokens))
     if not smaller:
         return False
     overlap = len(left_tokens & right_tokens) / smaller
-    if left.claim_kind is not right.claim_kind:
-        return overlap >= 0.75
     if (
         normalized_left_subject not in generic_subjects
         and normalized_right_subject not in generic_subjects

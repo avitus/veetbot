@@ -1,5 +1,6 @@
 """Deployment configuration validation tests."""
 
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import replace
@@ -1039,31 +1040,77 @@ def test_memory_profiles_knob_paths_match_document() -> None:
     assert len(declared) == 37
 
 
-def test_required_mode_judges_evidence_under_the_operator_pin() -> None:
+def _provider_artifact(tmp_path: Path, formation_policy_version: str) -> Path:
+    repaired = formation_policy_version == "formation@10"
+    artifact = {
+        "schema_version": 2,
+        "extractor_version": "provider-assisted-v3" if repaired else "provider-assisted-v2",
+        "formation_policy_version": formation_policy_version,
+        "model_policy": "balanced",
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "policy_profile": "default",
+        "policy_version": "default@test",
+        "build_ref": "a" * 40,
+        "corpus_sha256": "a" * 64,
+        "sample_count": 25,
+        "positive_case_count": 21,
+        "minimum_supported_case_count": 17,
+        "deterministic_supported_case_count": 9,
+        "provider_supported_case_count": 18,
+        "deterministic_supported_candidates": 12,
+        "provider_supported_candidates": 20,
+        "deterministic_fabricated_candidates": 0,
+        "provider_fabricated_candidates": 0,
+        "deterministic_policy_failures": 0,
+        "provider_policy_failures": 0,
+        "seeded_case_count": 21 if repaired else 0,
+        "evaluated_at": "2026-09-03T00:00:00+00:00",
+    }
+    path = tmp_path / f"{formation_policy_version.replace('@', '')}.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    return path
+
+
+def test_required_mode_judges_evidence_under_the_operator_pin(tmp_path: Path) -> None:
     """Startup validation must agree with composition about which artifact counts."""
 
-    bundled_provider_evidence = (
-        config_module.PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT
-        / "openai-balanced-gpt-5.6-sol-default-formation8.json"
-    )
-    assert bundled_provider_evidence.exists()
+    formation8 = _provider_artifact(tmp_path, "formation@8")
+    formation10 = _provider_artifact(tmp_path, "formation@10")
 
-    with pytest.raises(ConfigurationError, match="evaluation evidence did not pass"):
-        load_settings(
-            {
-                **base_environment(),
-                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
-                "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(bundled_provider_evidence),
-                "AGENT_MEMORY_FORMATION_POLICY_PIN": "formation@9",
-            }
-        )
+    for artifact, wrong_pin in (
+        (formation8, "formation@9"),
+        (formation8, "formation@10"),
+        (formation10, "formation@8"),
+        (formation10, "formation@9"),
+    ):
+        with pytest.raises(ConfigurationError, match="evaluation evidence did not pass"):
+            load_settings(
+                {
+                    **base_environment(),
+                    "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+                    "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(artifact),
+                    "AGENT_MEMORY_FORMATION_POLICY_PIN": wrong_pin,
+                }
+            )
 
     settings = load_settings(
         {
             **base_environment(),
             "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(bundled_provider_evidence),
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(formation8),
             "AGENT_MEMORY_FORMATION_POLICY_PIN": "formation@8",
         }
     )
     assert settings.memory_formation_policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(formation10),
+            "AGENT_MEMORY_FORMATION_POLICY_PIN": "formation@10",
+        }
+    )
+    assert (
+        settings.memory_formation_policy_pin is MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED
+    )

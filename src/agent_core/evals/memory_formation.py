@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
+import re
 import tempfile
 from dataclasses import replace
 from datetime import datetime
@@ -27,13 +28,20 @@ from agent_core.domain.memory import (
     ProviderExtractionEvaluationEvidence,
     minimum_supported_case_count,
 )
+from agent_core.evals.memory_distillation import (
+    SeedBelief,
+    require_committed_tree,
+    seed_prior_beliefs,
+)
 from agent_core.memory.provider_extraction import (
-    PROVIDER_EXTRACTOR_VERSION,
     PROVIDER_FORMATION_POLICY_VERSION,
+    PROVIDER_FORMATION_POLICY_VERSIONS,
+    provider_extractor_version,
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 CORPUS_PATH = Path("evals/capability/memory-formation.v2.json")
+_BUILD_REF = re.compile(r"^[0-9a-f]{40}$")
 EVALUATION_SCOPE = "memory-formation-evaluation"
 
 
@@ -60,6 +68,7 @@ class MemoryFormationCase(BaseModel):
     episodes: list[str] = Field(min_length=1)
     expected: list[ExpectedBelief]
     must_remain_empty: bool = False
+    prior_beliefs_pool: str | None = None
 
     @model_validator(mode="after")
     def labeled_outcome(self) -> MemoryFormationCase:
@@ -70,10 +79,14 @@ class MemoryFormationCase(BaseModel):
         return self
 
 
+MINIMUM_SEED_POOL_SIZE = 25
+
+
 class MemoryFormationCorpus(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     schema_version: Literal[1] = 1
+    seed_pools: dict[str, list[SeedBelief]] = Field(default_factory=dict)
     cases: list[MemoryFormationCase] = Field(min_length=20)
 
     @model_validator(mode="after")
@@ -81,6 +94,43 @@ class MemoryFormationCorpus(BaseModel):
         if len({case.id for case in self.cases}) != len(self.cases):
             raise ValueError("memory-formation case ids must be unique")
         return self
+
+    @model_validator(mode="after")
+    def seed_pools_are_declared_and_populated(self) -> MemoryFormationCorpus:
+        """A populated store is the whole point of seeding, so a pool is never small.
+
+        formation@8's starvation was invisible because every case ran against an
+        empty store; the repaired policy's evidence must come from one that is
+        not.
+        """
+
+        for name, pool in self.seed_pools.items():
+            if len(pool) < MINIMUM_SEED_POOL_SIZE:
+                raise ValueError(
+                    f"seed pool {name!r} holds {len(pool)} beliefs; at least "
+                    f"{MINIMUM_SEED_POOL_SIZE} are required"
+                )
+        for case in self.cases:
+            if (
+                case.prior_beliefs_pool is not None
+                and case.prior_beliefs_pool not in self.seed_pools
+            ):
+                raise ValueError(
+                    f"case {case.id} names undeclared seed pool {case.prior_beliefs_pool!r}"
+                )
+        positives = [case for case in self.cases if case.expected]
+        seeded = [case for case in positives if case.prior_beliefs_pool is not None]
+        if len(seeded) < 0.8 * len(positives):
+            raise ValueError(
+                f"only {len(seeded)} of {len(positives)} positive cases name a seed pool; "
+                "the corpus must seed at least eighty percent of them"
+            )
+        return self
+
+    def seeds_for(self, case: MemoryFormationCase) -> list[SeedBelief]:
+        if case.prior_beliefs_pool is None:
+            return []
+        return list(self.seed_pools[case.prior_beliefs_pool])
 
 
 class FormationScore(BaseModel):
@@ -217,6 +267,8 @@ async def _evaluate_case(
     model_policy: str,
     policy_profile: str,
     provider_assisted: bool,
+    formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
+    seeds: list[SeedBelief] | None = None,
 ) -> FormationArmResult:
     principal = Principal(
         tenant_id="evaluation",
@@ -233,7 +285,9 @@ async def _evaluate_case(
         policy_profile=policy_profile,
         model_policy=model_policy,
         memory_provider_evaluation_mode=provider_assisted,
+        memory_provider_evaluation_policy=formation_policy_version,
     ) as composition:
+        await seed_prior_beliefs(composition, seeds or [], principal=principal)
         session_id = await composition.sessions.create()
         async with composition.uow_factory() as uow:
             for episode in case.episodes:
@@ -354,6 +408,7 @@ async def run_live_evaluation(
     policy_profile: str,
     build_ref: str,
     output: Path,
+    formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
 ) -> MemoryFormationEvaluationResult | None:
     """Run paired cases and atomically publish only evidence that passes the gate."""
 
@@ -361,6 +416,11 @@ async def run_live_evaluation(
         return None
     if not model_policy.strip() or not policy_profile.strip() or not build_ref.strip():
         raise ValueError("model policy, policy profile, and build ref must be non-empty")
+    if formation_policy_version not in PROVIDER_FORMATION_POLICY_VERSIONS:
+        raise ValueError(f"unknown provider-assisted formation policy {formation_policy_version!r}")
+    if _BUILD_REF.match(build_ref.strip()) is None:
+        raise ValueError("build ref must be the full forty-character commit sha")
+    require_committed_tree(repository_root, build_ref.strip())
     if output.resolve().exists():
         raise ValueError(f"refusing to overwrite existing evaluation evidence: {output.resolve()}")
 
@@ -383,15 +443,21 @@ async def run_live_evaluation(
     missing_expected_case_ids: list[str] = []
     case_results: list[MemoryFormationCaseResult] = []
     evaluated_at: datetime | None = None
+    seeded_case_count = 0
     with tempfile.TemporaryDirectory(prefix="agent-memory-eval-") as temporary_root:
         settings = _evaluation_settings(base_settings, Path(temporary_root) / "artifacts")
         for case in corpus.cases:
+            seeds = corpus.seeds_for(case)
+            if seeds:
+                seeded_case_count += 1
             deterministic = await _evaluate_case(
                 settings,
                 case,
                 model_policy=model_policy,
                 policy_profile=policy_profile,
                 provider_assisted=False,
+                formation_policy_version=formation_policy_version,
+                seeds=seeds,
             )
             provider = await _evaluate_case(
                 settings,
@@ -399,6 +465,8 @@ async def run_live_evaluation(
                 model_policy=model_policy,
                 policy_profile=policy_profile,
                 provider_assisted=True,
+                formation_policy_version=formation_policy_version,
+                seeds=seeds,
             )
             if provider.identity is None:
                 raise ValueError("provider evaluation did not resolve a model")
@@ -484,8 +552,8 @@ async def run_live_evaluation(
             cases=case_results,
         )
     evidence = ProviderExtractionEvaluationEvidence(
-        extractor_version=PROVIDER_EXTRACTOR_VERSION,
-        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
+        extractor_version=provider_extractor_version(formation_policy_version),
+        formation_policy_version=formation_policy_version,
         model_policy=model_policy,
         provider=provider_name,
         model=model_name,
@@ -504,6 +572,7 @@ async def run_live_evaluation(
         provider_fabricated_candidates=provider_fabricated,
         deterministic_policy_failures=deterministic_policy_failures,
         provider_policy_failures=provider_policy_failures,
+        seeded_case_count=seeded_case_count,
         evaluated_at=evaluated_at,
     )
     _write_evidence(output, evidence)

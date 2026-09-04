@@ -533,3 +533,15 @@
   spec: docs/plan/adaptive-memory-distillation.md#hard-gates
   statement: "**Long batches segment into bounded three-call rounds.** A batch beyond one ledger's clause bound runs exactly three calls per segment, persists one episode set per segment, and records per-segment stage metrics; a segment's ledger and candidates fit the output ceiling."
   check: tests/gates/test_memory_m21.py::test_long_batches_are_segmented_into_bounded_three_call_rounds
+- id: gate.memory.provider_budget_repaired
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**The repaired provider-assisted policy never starves.** On a populated store where the frozen formation@8 control cannot afford one output token and skips its call, formation@10 makes its single call with the full output ceiling, ranks its compact belief view by relevance to the batch rather than recency, and sends only public or internal beliefs to the provider."
+  check: tests/gates/test_memory_m21.py::test_repaired_provider_policy_never_starves_on_a_populated_store
+- id: gate.memory.provider_policy_precedence
+  milestone: 21
+  kind: case
+  spec: docs/plan/adaptive-memory-distillation.md#hard-gates
+  statement: "**Automatic selection prefers the newest evidenced policy and honors a pin.** With every artifact present composition activates formation@9; without it formation@10 outranks formation@8; a pin holds any one of the three; and a pin to an unevidenced policy falls back deterministically with a content-free audit rather than activating another policy."
+  check: tests/gates/test_memory_m21.py::test_automatic_selection_prefers_the_newest_evidenced_policy_and_honors_a_pin

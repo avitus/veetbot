@@ -20,6 +20,7 @@ from agent_core.config import ConfigurationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope, ProcessEvent
 from agent_core.domain.memory import (
+    PROVIDER_EGRESS_SENSITIVITIES,
     SENSITIVITY_ORDER,
     BeliefType,
     EvidenceSpan,
@@ -36,6 +37,7 @@ from agent_core.domain.messages import (
     ModelAttempt,
     ModelEvent,
     ModelFailedEvent,
+    ModelLimits,
     ModelRequest,
     ModelTurn,
     ModelUsage,
@@ -49,6 +51,7 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.memory.equivalence import content_terms
 from agent_core.memory.formation import contains_memory_injection, grounding_tokens
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamError, collect_turn
@@ -59,6 +62,16 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 
 PROVIDER_EXTRACTOR_VERSION = "provider-assisted-v2"
 PROVIDER_FORMATION_POLICY_VERSION = "formation@8"
+REPAIRED_PROVIDER_EXTRACTOR_VERSION = "provider-assisted-v3"
+REPAIRED_PROVIDER_FORMATION_POLICY_VERSION = "formation@10"
+PROVIDER_FORMATION_POLICY_VERSIONS = frozenset(
+    {PROVIDER_FORMATION_POLICY_VERSION, REPAIRED_PROVIDER_FORMATION_POLICY_VERSION}
+)
+REPAIRED_MAXIMUM_OUTPUT_TOKENS = 16_384
+REPAIRED_MAXIMUM_COST_USD = Decimal("10")
+REPAIRED_TIMEOUT_SECONDS = 120.0
+RELATED_BELIEF_VIEW_SIZE = 50
+RELATED_BELIEF_CANDIDATES = 500
 
 logger = logging.getLogger(__name__)
 
@@ -108,15 +121,27 @@ def _safe_provider_failure(exc: Exception, *, stream_had_output: bool) -> Provid
     )
 
 
+def provider_extractor_version(formation_policy_version: str) -> str:
+    """The extractor version that implements one provider-assisted formation policy."""
+
+    if formation_policy_version == PROVIDER_FORMATION_POLICY_VERSION:
+        return PROVIDER_EXTRACTOR_VERSION
+    if formation_policy_version == REPAIRED_PROVIDER_FORMATION_POLICY_VERSION:
+        return REPAIRED_PROVIDER_EXTRACTOR_VERSION
+    raise ValueError(f"unknown provider-assisted formation policy {formation_policy_version!r}")
+
+
 def provider_extraction_evidence_matches(
     evidence: ProviderExtractionEvaluationEvidence,
     resolved_model: ResolvedModel,
     policy_profile: str,
     policy_version: str,
+    *,
+    formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
 ) -> bool:
     expected = {
-        "extractor_version": PROVIDER_EXTRACTOR_VERSION,
-        "formation_policy_version": PROVIDER_FORMATION_POLICY_VERSION,
+        "extractor_version": provider_extractor_version(formation_policy_version),
+        "formation_policy_version": formation_policy_version,
         "model_policy": resolved_model.policy_name,
         "provider": resolved_model.provider,
         "model": resolved_model.model,
@@ -136,6 +161,28 @@ class ProviderExtractionBudget(BaseModel):
     maximum_output_tokens: int = 4_096
     maximum_cost_usd: Decimal = Decimal("0.05")
     timeout_seconds: float = 30.0
+
+    @classmethod
+    def repaired(cls, limits: ModelLimits) -> ProviderExtractionBudget:
+        """The formation@10 ceiling: bounded by the model, never by a price.
+
+        formation@8's five-cent ceiling shrank the affordable output to a few
+        hundred tokens once a store held a dozen beliefs and skipped the call
+        entirely past about twenty, so production formed nothing from rich
+        conversations. formation@10 keeps one call, lets the input grow to the
+        model's window less the output reserve, requests the same output
+        ceiling as distillation, records cost, and gates on it only as a
+        sanity bound two orders of magnitude above a real consolidation.
+        """
+
+        output = min(REPAIRED_MAXIMUM_OUTPUT_TOKENS, limits.max_output_tokens)
+        return cls(
+            maximum_model_calls=1,
+            maximum_input_tokens=max(1, limits.context_window_tokens - output),
+            maximum_output_tokens=output,
+            maximum_cost_usd=REPAIRED_MAXIMUM_COST_USD,
+            timeout_seconds=REPAIRED_TIMEOUT_SECONDS,
+        )
 
 
 class MemoryClaimKind(StrEnum):
@@ -699,6 +746,29 @@ def _merge_candidates(
     return merged
 
 
+def _related_beliefs(beliefs: list[MemoryRecord], texts: list[str]) -> list[MemoryRecord]:
+    """The compact belief view formation@10 sends: related, not merely recent.
+
+    Only public and internal beliefs may leave for the provider. Among those,
+    the view holds the beliefs sharing the most content with the batch, with
+    the store's own order breaking ties, so an old belief the conversation
+    returns to is present and a sensitive one never is.
+    """
+
+    batch_terms: set[str] = set()
+    for text in texts:
+        batch_terms |= content_terms(text)
+    eligible = [belief for belief in beliefs if belief.sensitivity in PROVIDER_EGRESS_SENSITIVITIES]
+    ranked = sorted(
+        enumerate(eligible),
+        key=lambda item: (
+            -len(content_terms(f"{item[1].subject} {item[1].statement}") & batch_terms),
+            item[0],
+        ),
+    )
+    return [belief for _index, belief in ranked[:RELATED_BELIEF_VIEW_SIZE]]
+
+
 class ProviderAssistedCandidateExtractor:
     """Make one governed structured-output call, then fall back deterministically."""
 
@@ -719,7 +789,12 @@ class ProviderAssistedCandidateExtractor:
         fallback: MemoryCandidateExtractor,
         evaluation_mode: bool = False,
         budget: ProviderExtractionBudget | None = None,
+        formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
     ) -> None:
+        if formation_policy_version not in PROVIDER_FORMATION_POLICY_VERSIONS:
+            raise ValueError(
+                f"unknown provider-assisted formation policy {formation_policy_version!r}"
+            )
         if not evaluation_mode and (
             evidence is None
             or not provider_extraction_evidence_matches(
@@ -727,6 +802,7 @@ class ProviderAssistedCandidateExtractor:
                 resolved_model,
                 policy_profile,
                 policy_version,
+                formation_policy_version=formation_policy_version,
             )
         ):
             raise ConfigurationError(
@@ -737,7 +813,10 @@ class ProviderAssistedCandidateExtractor:
             raise ValueError(
                 "provider extraction evaluation mode must not carry activation evidence"
             )
-        self.name = f"{PROVIDER_EXTRACTOR_VERSION}:{resolved_model.provider}:{resolved_model.model}"
+        self._formation_policy_version = formation_policy_version
+        self._extractor_version = provider_extractor_version(formation_policy_version)
+        self._repaired = formation_policy_version == REPAIRED_PROVIDER_FORMATION_POLICY_VERSION
+        self.name = f"{self._extractor_version}:{resolved_model.provider}:{resolved_model.model}"
         self._provider = provider
         self._resolved_model = resolved_model
         self._uow_factory = uow_factory
@@ -751,7 +830,16 @@ class ProviderAssistedCandidateExtractor:
         self._evidence = evidence
         self._evaluation_mode = evaluation_mode
         self._fallback = fallback
-        self._budget = budget or ProviderExtractionBudget()
+        if budget is not None:
+            self._budget = budget
+        elif self._repaired:
+            self._budget = ProviderExtractionBudget.repaired(resolved_model.limits)
+        else:
+            self._budget = ProviderExtractionBudget()
+
+    @property
+    def formation_policy_version(self) -> str:
+        return self._formation_policy_version
 
     @classmethod
     def for_evaluation(
@@ -768,6 +856,7 @@ class ProviderAssistedCandidateExtractor:
         policy_profile: str,
         policy_version: str,
         fallback: MemoryCandidateExtractor,
+        formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
     ) -> Self:
         """Construct an extractor that can gather evidence but cannot activate production."""
 
@@ -785,6 +874,7 @@ class ProviderAssistedCandidateExtractor:
             evidence=None,
             fallback=fallback,
             evaluation_mode=True,
+            formation_policy_version=formation_policy_version,
         )
 
     async def extract(
@@ -813,7 +903,19 @@ class ProviderAssistedCandidateExtractor:
             return deterministic
 
         async with self._uow_factory() as uow:
-            related = await uow.memories.list_memories(principal, limit=50)
+            if self._repaired:
+                related = _related_beliefs(
+                    await uow.memories.list_memories(principal, limit=RELATED_BELIEF_CANDIDATES),
+                    [str(item["text"]) for item in selected],
+                )
+            else:
+                # Frozen in what it forms, not in what it may leak: the egress
+                # sensitivity rule is a safety floor shared by every policy.
+                related = [
+                    belief
+                    for belief in await uow.memories.list_memories(principal, limit=50)
+                    if belief.sensitivity in PROVIDER_EGRESS_SENSITIVITIES
+                ]
         job_id = self._ids.new_id()
         attempt_id = self._ids.new_id()
         deadline_at = self._clock.now() + timedelta(seconds=self._budget.timeout_seconds)
@@ -842,7 +944,7 @@ class ProviderAssistedCandidateExtractor:
             metadata={
                 "prefix_sha256": prompt_sha256,
                 "execution_kind": "memory_provider_extraction",
-                "formation_policy_version": PROVIDER_FORMATION_POLICY_VERSION,
+                "formation_policy_version": self._formation_policy_version,
             },
             timeout_seconds=self._budget.timeout_seconds,
             stream_idle_seconds=min(10.0, self._budget.timeout_seconds),
@@ -863,47 +965,20 @@ class ProviderAssistedCandidateExtractor:
             )
             return deterministic
 
-        pricing = self._resolved_model.pricing
-        input_rate = max(
-            pricing.input_per_mtok,
-            pricing.cached_input_per_mtok,
-            pricing.cache_write_per_mtok or pricing.input_per_mtok,
-        )
-        output_rate = pricing.output_per_mtok
-        if pricing.reasoning_priced_separately:
-            output_rate = max(
-                output_rate,
-                pricing.reasoning_per_mtok or pricing.output_per_mtok,
-            )
-        million = Decimal(1_000_000)
-        estimated_input_cost = Decimal(estimated_input) * input_rate / million
-        affordable_output = request.maximum_output_tokens or 0
-        if estimated_input_cost >= self._budget.maximum_cost_usd:
-            affordable_output = 0
-        elif output_rate > 0:
-            remaining = self._budget.maximum_cost_usd - estimated_input_cost
-            affordable_output = int(
-                (remaining * million / output_rate).to_integral_value(rounding=ROUND_FLOOR)
-            )
-        if affordable_output < 1:
-            await self._audit(
-                job_id=job_id,
-                attempt_id=attempt_id,
-                events=events,
-                scope=scope,
-                deadline_at=deadline_at,
-                prompt_sha256=prompt_sha256,
-                outcome="cost_budget_exceeded",
-            )
-            return deterministic
-        request = request.model_copy(
-            update={
-                "maximum_output_tokens": min(
-                    request.maximum_output_tokens or affordable_output,
-                    affordable_output,
+        if not self._repaired:
+            fitted = self._fit_output_to_cost_ceiling(request, estimated_input)
+            if fitted is None:
+                await self._audit(
+                    job_id=job_id,
+                    attempt_id=attempt_id,
+                    events=events,
+                    scope=scope,
+                    deadline_at=deadline_at,
+                    prompt_sha256=prompt_sha256,
+                    outcome="cost_budget_exceeded",
                 )
-            }
-        )
+                return deterministic
+            request = fitted
 
         attempt = ModelAttempt(
             attempt_id=attempt_id,
@@ -1046,6 +1121,44 @@ class ProviderAssistedCandidateExtractor:
             grounded_candidate_count=len(grounded),
         )
         return _merge_candidates(grounded, deterministic)
+
+    def _fit_output_to_cost_ceiling(
+        self, request: ModelRequest, estimated_input: int
+    ) -> ModelRequest | None:
+        """formation@8 only: shrink the requested output to the cost ceiling, or refuse."""
+
+        pricing = self._resolved_model.pricing
+        input_rate = max(
+            pricing.input_per_mtok,
+            pricing.cached_input_per_mtok,
+            pricing.cache_write_per_mtok or pricing.input_per_mtok,
+        )
+        output_rate = pricing.output_per_mtok
+        if pricing.reasoning_priced_separately:
+            output_rate = max(
+                output_rate,
+                pricing.reasoning_per_mtok or pricing.output_per_mtok,
+            )
+        million = Decimal(1_000_000)
+        estimated_input_cost = Decimal(estimated_input) * input_rate / million
+        affordable_output = request.maximum_output_tokens or 0
+        if estimated_input_cost >= self._budget.maximum_cost_usd:
+            affordable_output = 0
+        elif output_rate > 0:
+            remaining = self._budget.maximum_cost_usd - estimated_input_cost
+            affordable_output = int(
+                (remaining * million / output_rate).to_integral_value(rounding=ROUND_FLOOR)
+            )
+        if affordable_output < 1:
+            return None
+        return request.model_copy(
+            update={
+                "maximum_output_tokens": min(
+                    request.maximum_output_tokens or affordable_output,
+                    affordable_output,
+                )
+            }
+        )
 
     @staticmethod
     def _claim_is_grounded(
@@ -1210,11 +1323,11 @@ class ProviderAssistedCandidateExtractor:
             "agent_version": self._agent_version,
             "policy_profile": self._policy_profile,
             "policy_version": self._policy_version,
-            "formation_policy_version": PROVIDER_FORMATION_POLICY_VERSION,
+            "formation_policy_version": self._formation_policy_version,
             "authorized_scope": scope,
             "principal_scopes": sorted(self._principal.scopes),
             "tool_scopes": [],
-            "extractor_version": PROVIDER_EXTRACTOR_VERSION,
+            "extractor_version": self._extractor_version,
             "provider": self._resolved_model.provider,
             "model": self._resolved_model.model,
             "model_policy": self._resolved_model.policy_name,

@@ -582,11 +582,13 @@ Those tests are not production activation evidence. Accepted ADR-0057 supersedes
 the earlier routed-policy selection rule. Normal composition does not select a
 provider extractor until a version-bound artifact for the exact runtime tuple
 passes startup validation. The balanced OpenAI `gpt-5.6-sol` and default-policy
-tuple has reviewed passing `formation@8` evidence from the checked-in 25-case
-corpus, so `auto` activates provider assistance for exactly that tuple and stays
-on deterministic `formation@7` for every other one. The superseded `formation@4`
-artifact was deleted when its replacement was published, because two artifacts
-for one tuple would leave the activated policy version ambiguous.
+tuple has reviewed passing `formation@10` evidence from the checked-in 25-case
+corpus, gathered on a populated store, so `auto` activates provider assistance
+for exactly that tuple, preferring `formation@9` where its comparative evidence
+also matches, and stays on deterministic `formation@7` for every other one. The
+frozen `formation@8` artifact for that tuple was withdrawn under ADR-0086, as the
+superseded `formation@4` artifact was deleted before it, because a stale or
+duplicate artifact would leave the activated policy version wrong or ambiguous.
 
 ### Evaluation-gated provider assistance (`formation@8`)
 
@@ -657,7 +659,11 @@ A cancelled call records the cancellation and propagates it rather than disguisi
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through
 the same service gates. Provider-assisted consolidations and beliefs record
-`formation@8`; the default deterministic path records `formation@7`. The
+`formation@8`, or `formation@10` under the repaired budget and related-belief
+view that adaptive-memory-distillation.md specifies and ADR-0086 records; the
+frozen `formation@8` budget above is the reason production formed almost
+nothing from populated stores, and its artifact is withdrawn. The default
+deterministic path records `formation@7`. The
 activation decision is recorded in ADR-0057, and the retry, diagnosis, replay,
 and policy-version correction is recorded in ADR-0068. Admitting working-state
 established facts as `AFFIRMED` candidates advanced those versions from

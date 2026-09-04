@@ -70,6 +70,10 @@ class Sensitivity(StrEnum):
     RESTRICTED = "restricted"
 
 
+# The only sensitivities a memory may carry when its statement leaves for a provider.
+PROVIDER_EGRESS_SENSITIVITIES = frozenset({Sensitivity.PUBLIC, Sensitivity.INTERNAL})
+
+
 SENSITIVITY_ORDER: dict[Sensitivity, int] = {
     Sensitivity.PUBLIC: 0,
     Sensitivity.INTERNAL: 1,
@@ -372,6 +376,7 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
     provider_fabricated_candidates: int = Field(ge=0)
     deterministic_policy_failures: int = Field(ge=0)
     provider_policy_failures: int = Field(ge=0)
+    seeded_case_count: int = Field(default=0, ge=0)
     evaluated_at: datetime
 
     @model_validator(mode="after")
@@ -385,6 +390,10 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
         required_coverage = minimum_supported_case_count(self.positive_case_count)
         if self.minimum_supported_case_count != required_coverage:
             raise ValueError("minimum supported case count must equal eighty percent coverage")
+        if self.formation_policy_version == "formation@10" and self.seeded_case_count < 1:
+            # The repaired policy exists because an empty store hid the frozen
+            # one's starvation; its evidence is meaningless without a populated store.
+            raise ValueError("formation@10 evidence must come from a populated store")
         if (
             self.deterministic_supported_case_count > self.positive_case_count
             or self.provider_supported_case_count > self.positive_case_count
