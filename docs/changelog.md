@@ -14,8 +14,9 @@ title: Changelog
 - Scheduled sessions now use the configured async snapshot profile, delegated
   sessions use the child profile, and all session classes enforce their absolute
   item and token caps together with the two-percent model-window ceiling. Public
-  session creation rejects the scheduler-owned `schedule_id` metadata key, so an
-  interactive caller cannot select the larger async profile.
+  session creation rejects the scheduler-owned `schedule_id` and
+  delegation-owned `run_kind` metadata keys, so an interactive caller cannot
+  select another run class's profile.
 
 ## 2026-09-03 — Repaired provider-assisted memory formation and policy-bound evidence
 

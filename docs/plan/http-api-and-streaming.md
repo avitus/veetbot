@@ -647,6 +647,9 @@ error, because the identifier names a resource that does not exist.
 the server stores it, returns it, and does not interpret it. It must be a JSON
 object at the top level, and its serialized form must not exceed 8 KiB. A
 client-supplied reserved key or either bound violation is `validation_error`.
+The scheduler-owned `schedule_id` and delegation-owned `run_kind` keys are
+reserved provenance: public session creation rejects both, and only their
+trusted internal materializers write them.
 
 The important rule is the third one and it is a security rule.
 **Session metadata is never placed in a model prompt.** It is client

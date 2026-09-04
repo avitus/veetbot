@@ -71,7 +71,7 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
-    SESSION_SCHEDULE_ID_METADATA_KEY,
+    SESSION_RESERVED_METADATA_KEYS,
     Session,
     SessionCursor,
     SessionStatus,
@@ -385,10 +385,7 @@ class PublicSessionService:
         browser_profile_id: UUID | None = None,
     ) -> SessionView:
         require_scope(principal, "session.write")
-        if (
-            SESSION_BROWSER_PROFILE_METADATA_KEY in metadata
-            or SESSION_SCHEDULE_ID_METADATA_KEY in metadata
-        ):
+        if SESSION_RESERVED_METADATA_KEYS.intersection(metadata):
             raise SessionMetadataValidationError(
                 "session metadata key is reserved for trusted platform binding"
             )

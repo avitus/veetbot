@@ -21,7 +21,12 @@ from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, S
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.persona import render_persona
 from agent_core.domain.runs import RunKind
-from agent_core.domain.sessions import SESSION_SCHEDULE_ID_METADATA_KEY, Session, project_scope
+from agent_core.domain.sessions import (
+    SESSION_RUN_KIND_METADATA_KEY,
+    SESSION_SCHEDULE_ID_METADATA_KEY,
+    Session,
+    project_scope,
+)
 from agent_core.domain.tools import ToolSpec
 from agent_core.memory.profiles import SnapshotProfile, SnapshotProfiles
 from agent_core.ports.context import TokenEstimator
@@ -443,7 +448,7 @@ class EventContextPlanner:
         session: Session,
         interactive_config: Mapping[str, object],
     ) -> SnapshotProfile:
-        if session.metadata.get("run_kind") == RunKind.DELEGATED.value:
+        if session.metadata.get(SESSION_RUN_KIND_METADATA_KEY) == RunKind.DELEGATED.value:
             return self._snapshot_profiles.child
         if SESSION_SCHEDULE_ID_METADATA_KEY in session.metadata:
             return self._snapshot_profiles.async_

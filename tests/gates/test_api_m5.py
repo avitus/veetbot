@@ -223,6 +223,20 @@ async def test_public_session_creation_rejects_scheduler_owned_metadata(tmp_path
     assert response.json()["error"]["code"] == "malformed_request"
 
 
+async def test_public_session_creation_rejects_delegation_owned_metadata(tmp_path: Path) -> None:
+    async with _composition(tmp_path) as composition, _client(composition) as client:
+        response = await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": "general",
+                "metadata": {"run_kind": "delegated"},
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "malformed_request"
+
+
 async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
     expected = {
         "authentication_error",

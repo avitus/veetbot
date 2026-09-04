@@ -43,7 +43,12 @@ from agent_core.domain.runs import (
     RunUsage,
 )
 from agent_core.domain.security import contains_credential
-from agent_core.domain.sessions import Session, SessionStatus, conversation_title
+from agent_core.domain.sessions import (
+    SESSION_RUN_KIND_METADATA_KEY,
+    Session,
+    SessionStatus,
+    conversation_title,
+)
 from agent_core.domain.tools import (
     ToolInvocation,
     ToolInvocationStatus,
@@ -407,7 +412,7 @@ class DelegationMaterializer:
             status=SessionStatus.ACTIVE,
             title=conversation_title(brief.objective.splitlines()[0]),
             metadata={
-                "run_kind": RunKind.DELEGATED.value,
+                SESSION_RUN_KIND_METADATA_KEY: RunKind.DELEGATED.value,
                 "parent_run_id": str(run.id),
                 "parent_session_id": str(run.session_id),
                 "delegation_id": str(delegation_id),
