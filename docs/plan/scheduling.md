@@ -364,7 +364,12 @@ blocking an unrelated occurrence, and bounds conversational history.
 The session stores `schedule_id`, `schedule_revision`, `occurrence_id`, and
 `nominal_fire_at` in metadata. Its agent ID and version match the revision. The
 instruction is appended as the session's first user event and seeds the run in
-the same transaction.
+the same transaction. Its scheduler actor marks it as durable model context,
+not a chat message: public transcript reads and run streams omit that seed
+event while retaining the completed assistant response. The authorized
+schedule point read remains the surface for inspecting the complete
+instruction. This presentation rule applies to every cadence and does not
+remove the instruction from context, persistence, audit, or title generation.
 
 `schedule_id` is a reserved platform metadata key. Public session creation
 rejects a caller-supplied value; `ScheduleMaterializer` is the trusted path that
@@ -435,7 +440,7 @@ opens one short transaction and:
 4. Checks overlap, grace, configuration, scopes, and budgets.
 5. Inserts the unique occurrence disposition.
 6. For `MATERIALIZED`, creates the dedicated session, appends `session.created`
-   and the user message, creates the priority-10 `QUEUED` run with
+   and the context-only scheduler-authored user message, creates the priority-10 `QUEUED` run with
    `scheduled_for = now`, seeds its checkpoint, and appends `run.queued`.
 7. Advances `next_fire_at`, applies the one-time terminal transition where
    required, and appends schedule audit events.

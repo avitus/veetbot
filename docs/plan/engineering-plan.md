@@ -1977,8 +1977,11 @@ GET /v1/sessions/{session_id}/messages?limit=100&cursor=<opaque>
 Return an oldest-first, keyset-paginated page of the authenticated principal's
 durable user and completed-assistant messages. Each item carries its immutable
 session sequence, role, and public content blocks. Exclude tool lifecycle and
-system events, provider continuation state, private reasoning, and transient
-deltas. Missing, cross-tenant, and differently owned sessions return `404`.
+system events, provider continuation state, private reasoning, transient
+deltas, and the scheduler-authored user event that seeds a scheduled run. That
+scheduled instruction remains durable user context and is available from the
+authorized schedule point read, but chat surfaces present only the run's
+response. Missing, cross-tenant, and differently owned sessions return `404`.
 Clients restore all pages before attaching to the active or last run and use the
 message sequences to deduplicate that run's persisted replay.
 

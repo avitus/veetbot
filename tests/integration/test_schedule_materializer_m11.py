@@ -13,6 +13,8 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.events import NewEvent
+from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.schedules import (
     DailyCadence,
@@ -160,6 +162,39 @@ async def test_concurrent_schedulers_materialize_once() -> None:
         occurrence = first or second
         assert occurrence is not None
         await _assert_complete(composition, schedule_id, occurrence)
+
+
+async def test_postgres_public_transcript_omits_scheduled_seed_instruction() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        schedule_id = uuid4()
+        await _create_due_schedule(composition, schedule_id)
+        occurrence = await _materializer(composition).materialize(schedule_id)
+        assert occurrence is not None
+        assert occurrence.session_id is not None
+        assert occurrence.run_id is not None
+        answer = AssistantMessage(content=[TextPart(text="The scheduled result.")])
+        async with composition.uow_factory() as uow:
+            await uow.events.append(
+                NewEvent(
+                    session_id=occurrence.session_id,
+                    run_id=occurrence.run_id,
+                    event_type="assistant.message.completed",
+                    actor_type="runtime",
+                    payload={"message": answer.model_dump(mode="json")},
+                )
+            )
+
+        transcript = await composition.services.sessions.messages(
+            composition.principal,
+            occurrence.session_id,
+            limit=1,
+            cursor=None,
+        )
+
+        assert [(item.sequence, item.role) for item in transcript.items] == [(5, "assistant")]
+        assert transcript.next_cursor is None
 
 
 async def test_materialization_rolls_back_at_every_write_boundary_and_retries() -> None:
