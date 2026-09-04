@@ -111,7 +111,6 @@ to the pre-Milestone-24 policy version and was regenerated on the deployed
 tree; the bundle test now refuses that mismatch, and the starved
 `formation@8` artifact is withdrawn in favor of `formation@10`. Remaining:
 
-- [ ] Bundle the formation@10 activation evidence evaluated on the deployed tree
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 
 ### Milestone 22 — Persona surface and curated belief promotion

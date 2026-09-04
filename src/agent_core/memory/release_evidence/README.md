@@ -19,9 +19,24 @@ The frozen `formation@8` artifact, produced from the 25-case corpus at build
 bound to the pre-Milestone-24 policy version, could not activate anywhere, and
 the policy it certified cannot complete a call on a populated store (ADR-0086).
 `formation@8` remains the frozen control arm of the three-policy comparison
-without an activation artifact. Its repair is `formation@10`, whose artifact for
-this tuple is bundled once `agent eval memory-formation --formation-policy
-formation@10` passes on the deployed tree.
+without an activation artifact.
+
+`openai-balanced-gpt-5.6-sol-default-formation10.json` is the activation
+evidence for the repaired provider-assisted `formation@10` on the same tuple,
+the fallback when `formation@9` is pinned off or its evidence is absent. It was
+produced on 2026-09-04 by `agent eval memory-formation --formation-policy
+formation@10` against the 25-case formation corpus at commit
+`bf7fef592e8d132d7d7792d92d6f6f1fb3c406ff`, with every case run on the
+corpus's thirty-belief seeded store and bound to the compiled policy
+`default@19be675c1b3c+hb03f69cf`. All twenty-five provider calls completed,
+where the frozen `formation@8` budget skips the call on a store that size;
+seventeen of twenty-one positive cases were fully supported, exactly the
+eighty-percent floor the schema derives; the provider supported twenty
+candidates against the deterministic baseline's twelve; and neither arm
+fabricated a candidate or added a policy failure. The four partially supported
+cases (pets, diet, a project fact, and a goal) are the same shape of gap the
+frozen policy showed on an empty store, so the floor is met rather than
+exceeded, and that is stated here instead of rounded up.
 
 `openai-balanced-gpt-5.6-sol-default-formation9.json` is the active comparative
 evidence for Nemori-assisted `formation@9` on the same tuple. It was produced on

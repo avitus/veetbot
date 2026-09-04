@@ -619,9 +619,21 @@ milestones:
       - temporal entity graphs, persona editing, and global consolidation
       - a public memory-write API
     open_items:
-      - Bundle the formation@10 activation evidence evaluated on the deployed tree
       - Run hosted CI and the CodeRabbit review loop on the final head
     evidence:
+      - check: formation@10 activation evidence on a populated store
+        outcome: passed
+        detail: >-
+          The 2026-09-04 run of agent eval memory-formation --formation-policy
+          formation@10 at commit bf7fef5, bound to the deployed compiled policy
+          default@19be675c1b3c+hb03f69cf, ran all twenty-five cases on the
+          corpus's thirty-belief seeded store. Every provider call completed
+          where the frozen formation@8 budget skips the call; seventeen of
+          twenty-one positive cases were fully supported, exactly the derived
+          eighty-percent floor; the provider supported twenty candidates against
+          twelve deterministic; and neither arm fabricated a candidate or added
+          a policy failure. The artifact is bundled for the balanced OpenAI
+          gpt-5.6-sol default tuple as the fallback below formation@9.
       - check: formation@10 repair, policy precedence, and the evidence guard
         outcome: passed_locally
         detail: >-
