@@ -21,7 +21,7 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:773), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:714).
+recall of consequential facts (memory-formation-and-consolidation.md:718).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
@@ -32,13 +32,13 @@ utility without ever raising confidence (memory-retrieval-and-ranking.md:815-818
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:96), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:810), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:741) are
+that is opt-in per principal (memory-formation-and-consolidation.md:745) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
 lifecycle second, so that every lifecycle change is a measured change and the
 plan's standing rule that a capability enters on evaluation evidence rather
-than on argument (engineering-plan.md:2897) has something to read.
+than on argument (engineering-plan.md:2899) has something to read.
 
 Milestone 16 is authorized as a parallel workstream alongside Milestones 12
 through 15. Its gates may become green independently, but the verified gate
@@ -936,7 +936,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:741), so it is a command and it demands
+(memory-formation-and-consolidation.md:745), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

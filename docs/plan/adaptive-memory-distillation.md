@@ -95,6 +95,7 @@ Milestone 21 does not mutate the meaning of the completed policies:
 formation@7   deterministic-v2       frozen deterministic control
 formation@8   provider-assisted-v2   frozen provider control
 formation@9   nemori-assisted-v1     new candidate policy
+formation@10  provider-assisted-v3   repaired provider control (ADR-0086)
 retrieval@3   renders derivation and uses evidence age
 lifecycle@2   evidence expiry is independent of use
 ```
@@ -514,12 +515,55 @@ memory.
 
 There is no shadow, canary, or manual opt-in phase after passing evidence is
 bundled. `auto` selects `formation@9` immediately for the exact production
-tuple. `formation@8` remains an honest control and the fallback for a different
-or unevidenced tuple, not a conservative rollout stage. The operator pin
-`AGENT_MEMORY_FORMATION_POLICY_PIN` holds the selection at `formation@8` or
-`formation@9` without deleting either artifact; a pin to an unevidenced policy
-falls back to deterministic formation with a content-free
-`pinned_policy_unevidenced` audit, and `required` still refuses.
+tuple, then the repaired `formation@10` below, then the frozen `formation@8`
+control, whichever artifact matches first. `formation@8` remains an honest
+control in the comparison, not a conservative rollout stage. The operator pin
+`AGENT_MEMORY_FORMATION_POLICY_PIN` holds the selection at `formation@8`,
+`formation@9`, or `formation@10` without deleting an artifact; a pin narrows
+the search to exactly that policy, a pin to an unevidenced policy falls back
+to deterministic formation with a content-free `pinned_policy_unevidenced`
+audit, `required` judges the pinned policy's own artifact and still refuses,
+and every selection audit records the formation policy it chose.
+
+Every bundled artifact is bound to the compiled policy version of the tree
+that ships it. `tests/unit/test_release_evidence_bundle.py` compares each
+artifact against the shipped policy documents and fails, naming the file and
+both versions, when they differ. A change to the policy documents therefore
+regenerates the evidence on that tree or withdraws the artifact and records
+the interregnum in project state; it cannot merge and silently fall back to
+deterministic formation in production, which is what happened once on
+2026-09-03 (ADR-0086).
+
+### The repaired provider-assisted control (`formation@10`)
+
+`formation@8` is frozen, and its fixed budget is why production formed almost
+nothing before `formation@9`: a USD 0.05 ceiling, a one-byte-per-token
+preflight, and a compact view of the fifty most recent beliefs shrink the
+affordable output to a few hundred tokens once a store holds a dozen beliefs
+and skip the call past about twenty. The production audit of 2026-09-03
+recorded exactly that as truncated streams and `integer_below_min_value`
+refusals. `formation@10`, implemented by `provider-assisted-v3` in the same
+extractor and the same single schema-constrained call, repairs only that:
+
+- the input ceiling is the model's context window less the output reserve,
+  still estimated at one byte per token;
+- the output ceiling is 16,384 tokens, the distillation ceiling, and the
+  timeout is 120 seconds;
+- cost is recorded in the audit and bounded only by a USD 10 sanity ceiling;
+  it never shrinks or skips the call;
+- the compact belief view is the fifty beliefs sharing the most content with
+  the batch, chosen from the five hundred most recent, restricted to public and
+  internal sensitivity, with store order breaking ties, so an old belief the
+  conversation returns to is present and a sensitive one never leaves.
+
+Rendering, grounding, the claim vocabulary, merging with the deterministic
+fallback, and every service gate are unchanged. Its activation evidence is the
+same schema `formation@8` used, produced by `agent eval memory-formation
+--formation-policy formation@10` against the 25-case corpus with every case run
+on a thirty-belief seeded store whose subjects never touch an expectation, and
+it records the seeded case count. `formation@10` is not a fourth comparative
+arm; the frozen `formation@8` remains the control the `formation@9` lift is
+measured against.
 
 ## Persistence and migration
 
@@ -693,6 +737,19 @@ short units of work with idempotent derivation keys.
     episode set per segment, and records per-segment stage metrics; a segment's
     ledger and candidates fit the output ceiling. Registered as
     `gate.memory.distill_segmentation`, case. **M21.**
+30. **The repaired provider-assisted policy never starves.** On a populated
+    store where the frozen `formation@8` control cannot afford one output token
+    and skips its call, `formation@10` makes its single call with the full
+    output ceiling, ranks its compact belief view by relevance to the batch
+    rather than recency, and sends only public or internal beliefs to the
+    provider. Registered as `gate.memory.provider_budget_repaired`, case.
+    **M21.**
+31. **Automatic selection prefers the newest evidenced policy and honors a
+    pin.** With every artifact present composition activates `formation@9`;
+    without it `formation@10` outranks `formation@8`; a pin holds any one of
+    the three; and a pin to an unevidenced policy falls back deterministically
+    with a content-free audit rather than activating another policy.
+    Registered as `gate.memory.provider_policy_precedence`, case. **M21.**
 
 ## Tracked metrics
 

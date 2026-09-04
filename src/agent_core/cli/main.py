@@ -149,6 +149,7 @@ class _MemoryFormationEvalModule(Protocol):
         policy_profile: str,
         build_ref: str,
         output: Path,
+        formation_policy_version: str,
     ) -> Any | None: ...
 
 
@@ -1016,14 +1017,24 @@ def eval_memory_formation(
         str,
         typer.Option("--policy-profile", help="Evaluate one policy profile."),
     ],
-    build_ref: Annotated[
-        str,
-        typer.Option("--build-ref", help="Commit or immutable build identifier."),
-    ],
     output: Annotated[
         Path,
         typer.Option("--output", help="Write passing activation evidence to this path."),
     ],
+    build_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--build-ref",
+            help="Commit under evaluation; defaults to HEAD, which must be a clean checkout.",
+        ),
+    ] = None,
+    formation_policy: Annotated[
+        str,
+        typer.Option(
+            "--formation-policy",
+            help="The provider-assisted policy to evaluate: formation@8 or formation@10.",
+        ),
+    ] = "formation@8",
 ) -> None:
     """Compare provider-assisted formation with the deterministic baseline."""
 
@@ -1032,13 +1043,19 @@ def eval_memory_formation(
             _MemoryFormationEvalModule,
             importlib.import_module("agent_core.evals.memory_formation"),
         )
+        capability = cast(
+            _CapabilityModule,
+            importlib.import_module("agent_core.evals.capability"),
+        )
+        resolved_build_ref = capability.resolve_build_ref(Path.cwd(), build_ref)
         result = asyncio.run(
             module.run_live_evaluation(
                 Path.cwd(),
                 model_policy=model_policy,
                 policy_profile=policy_profile,
-                build_ref=build_ref,
+                build_ref=resolved_build_ref,
                 output=output,
+                formation_policy_version=formation_policy,
             )
         )
     except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:

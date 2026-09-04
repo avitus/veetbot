@@ -363,6 +363,7 @@ from agent_core.memory.formation import (
 from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
+    REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
     provider_extraction_evidence_matches,
 )
@@ -1328,6 +1329,7 @@ async def _compose(
     web_search_provider: WebProvider | WebProviderRouter | None,
     web_fetch_provider: WebProvider | WebProviderRouter | None,
     memory_provider_evaluation_mode: bool,
+    memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
@@ -1611,6 +1613,7 @@ async def _compose(
                     policy_profile=agent.policy_profile,
                     policy_version=ruleset.policy_version,
                     fallback=DeterministicCandidateExtractor(),
+                    formation_policy_version=memory_provider_evaluation_policy,
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_evaluation_mode"
@@ -1631,8 +1634,13 @@ async def _compose(
                 selected_distillation_evidence = None
                 evidence_paths = provider_extraction_evidence_paths(settings)
                 policy_pin = settings.memory_formation_policy_pin
+                provider_pins = (
+                    MemoryFormationPolicyPin.PROVIDER_ASSISTED,
+                    MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
+                )
+                selected_provider_policy = PROVIDER_FORMATION_POLICY_VERSION
                 for evidence_path in evidence_paths:
-                    if policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED:
+                    if policy_pin in provider_pins:
                         break
                     try:
                         candidate_distillation_evidence = load_memory_distillation_evidence(
@@ -1654,27 +1662,44 @@ async def _compose(
                                 else "release"
                             )
                             break
-                if (
-                    selected_distillation_evidence is None
-                    and policy_pin is not MemoryFormationPolicyPin.DISTILLATION
-                ):
-                    for evidence_path in evidence_paths:
-                        try:
-                            candidate_evidence = load_provider_extraction_evidence(evidence_path)
-                        except ConfigurationError:
-                            continue
-                        if provider_extraction_evidence_matches(
-                            candidate_evidence,
-                            extraction_model,
-                            agent.policy_profile,
-                            ruleset.policy_version,
-                        ):
-                            selected_evidence = candidate_evidence
-                            evidence_source = (
-                                "operator"
-                                if evidence_path == settings.memory_provider_extraction_evidence
-                                else "release"
-                            )
+                # The repaired policy outranks the frozen control; a pin narrows
+                # the search to exactly one provider-assisted policy.
+                if policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED:
+                    provider_policies: tuple[str, ...] = (PROVIDER_FORMATION_POLICY_VERSION,)
+                elif policy_pin is MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED:
+                    provider_policies = (REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,)
+                elif policy_pin is MemoryFormationPolicyPin.DISTILLATION:
+                    provider_policies = ()
+                else:
+                    provider_policies = (
+                        REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+                        PROVIDER_FORMATION_POLICY_VERSION,
+                    )
+                if selected_distillation_evidence is None:
+                    for provider_policy in provider_policies:
+                        for evidence_path in evidence_paths:
+                            try:
+                                candidate_evidence = load_provider_extraction_evidence(
+                                    evidence_path
+                                )
+                            except ConfigurationError:
+                                continue
+                            if provider_extraction_evidence_matches(
+                                candidate_evidence,
+                                extraction_model,
+                                agent.policy_profile,
+                                ruleset.policy_version,
+                                formation_policy_version=provider_policy,
+                            ):
+                                selected_evidence = candidate_evidence
+                                selected_provider_policy = provider_policy
+                                evidence_source = (
+                                    "operator"
+                                    if evidence_path == settings.memory_provider_extraction_evidence
+                                    else "release"
+                                )
+                                break
+                        if selected_evidence is not None:
                             break
                 if selected_distillation_evidence is None and selected_evidence is None:
                     if memory_mode is MemoryProviderExtractionMode.REQUIRED:
@@ -1717,14 +1742,15 @@ async def _compose(
                             policy_version=ruleset.policy_version,
                             evidence=selected_evidence,
                             fallback=DeterministicCandidateExtractor(),
+                            formation_policy_version=selected_provider_policy,
                         )
-                        memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+                        memory_policy_version = selected_provider_policy
                         evidence_build_ref = selected_evidence.build_ref
                         evidence_corpus_sha256 = selected_evidence.corpus_sha256
                     selection_outcome = "activated"
                     selection_reason = "matching_evidence"
         if memory_provider_evaluation_mode:
-            memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+            memory_policy_version = memory_provider_evaluation_policy
         elif memory_distillation_evaluation_mode:
             memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
     selection_identity = ":".join(
@@ -1737,6 +1763,7 @@ async def _compose(
             agent.policy_profile,
             ruleset.policy_version,
             memory_mode.value,
+            memory_policy_version,
             selection_outcome,
             selection_reason,
             evidence_source or "none",
@@ -1767,6 +1794,7 @@ async def _compose(
                     "agent_version": agent.version,
                     "policy_profile": agent.policy_profile,
                     "policy_version": ruleset.policy_version,
+                    "formation_policy_version": memory_policy_version,
                     "model_policy": agent.model_policy,
                     "provider": None if extraction_model is None else extraction_model.provider,
                     "model": None if extraction_model is None else extraction_model.model,
@@ -2614,6 +2642,7 @@ async def build(
     device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
+    memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
@@ -3097,6 +3126,7 @@ async def build(
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
+            memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,

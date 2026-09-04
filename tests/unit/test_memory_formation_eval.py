@@ -7,20 +7,26 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from pydantic import ValidationError
 
 import agent_core.evals.memory_formation as memory_eval
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
+from agent_core.evals.memory_distillation import SeedBelief
 from agent_core.evals.memory_formation import (
     EvaluationBelief,
     ExpectedBelief,
     FormationArmResult,
     FormationScore,
     MemoryFormationCase,
+    MemoryFormationCorpus,
     ProviderExtractionDiagnostics,
     load_corpus,
     score_case,
 )
-from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
+from agent_core.memory.provider_extraction import (
+    PROVIDER_FORMATION_POLICY_VERSION,
+    REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+)
 
 
 def test_score_case_counts_grounded_support_and_fabrication_once() -> None:
@@ -205,6 +211,7 @@ class TestProviderEvidencePublicationGate:
     ) -> None:
         monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
         monkeypatch.setattr(memory_eval, "load_settings", _settings)
+        monkeypatch.setattr(memory_eval, "require_committed_tree", lambda _root, _ref: None)
 
         async def evaluate(
             _settings: Settings,
@@ -213,6 +220,8 @@ class TestProviderEvidencePublicationGate:
             model_policy: str,
             policy_profile: str,
             provider_assisted: bool,
+            formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
+            seeds: list[SeedBelief] | None = None,
         ) -> FormationArmResult:
             assert (model_policy, policy_profile) == ("balanced", "default")
             supported = len(_case.expected) if provider_assisted else 0
@@ -237,7 +246,7 @@ class TestProviderEvidencePublicationGate:
             Path(__file__).resolve().parents[2],
             model_policy="balanced",
             policy_profile="default",
-            build_ref="abc123",
+            build_ref="a" * 40,
             output=output,
         )
 
@@ -288,6 +297,7 @@ class TestProviderEvidencePublicationGate:
     ) -> None:
         monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
         monkeypatch.setattr(memory_eval, "load_settings", _settings)
+        monkeypatch.setattr(memory_eval, "require_committed_tree", lambda _root, _ref: None)
 
         async def evaluate(
             _settings: Settings,
@@ -296,6 +306,8 @@ class TestProviderEvidencePublicationGate:
             model_policy: str,
             policy_profile: str,
             provider_assisted: bool,
+            formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
+            seeds: list[SeedBelief] | None = None,
         ) -> FormationArmResult:
             del model_policy, policy_profile
             supported = not _case.must_remain_empty
@@ -339,7 +351,7 @@ class TestProviderEvidencePublicationGate:
             Path(__file__).resolve().parents[2],
             model_policy="balanced",
             policy_profile="default",
-            build_ref="abc123",
+            build_ref="a" * 40,
             output=output,
         )
 
@@ -366,6 +378,7 @@ class TestProviderEvidencePublicationGate:
     ) -> None:
         monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
         monkeypatch.setattr(memory_eval, "load_settings", _settings)
+        monkeypatch.setattr(memory_eval, "require_committed_tree", lambda _root, _ref: None)
 
         async def evaluate(
             _settings: Settings,
@@ -374,6 +387,8 @@ class TestProviderEvidencePublicationGate:
             model_policy: str,
             policy_profile: str,
             provider_assisted: bool,
+            formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
+            seeds: list[SeedBelief] | None = None,
         ) -> FormationArmResult:
             del model_policy, policy_profile
             supported = provider_assisted and _case.id == "relationship-daughter-001"
@@ -397,7 +412,7 @@ class TestProviderEvidencePublicationGate:
             Path(__file__).resolve().parents[2],
             model_policy="balanced",
             policy_profile="default",
-            build_ref="abc123",
+            build_ref="a" * 40,
             output=output,
         )
 
@@ -406,3 +421,95 @@ class TestProviderEvidencePublicationGate:
         assert result.failure_summary is not None
         assert "positive coverage 1/21" in result.failure_summary
         assert not output.exists()
+
+
+def test_corpus_seed_pools_are_declared_large_and_cover_most_positive_cases() -> None:
+    """The bundled formation@10 evidence must come from a populated store.
+
+    A case may name only a declared pool, a pool holds at least twenty-five
+    beliefs, and the checked-in corpus seeds at least eighty percent of its
+    positive cases, since an empty store is exactly the blind spot that hid
+    formation@8's starvation.
+    """
+
+    corpus, _digest = load_corpus(Path(__file__).resolve().parents[2])
+    positives = [case for case in corpus.cases if case.expected]
+    seeded = [case for case in positives if case.prior_beliefs_pool is not None]
+    assert corpus.seed_pools
+    assert all(len(pool) >= 25 for pool in corpus.seed_pools.values())
+    assert len(seeded) >= 0.8 * len(positives)
+
+    base = corpus.model_dump(mode="json")
+    undeclared = {
+        **base,
+        "cases": [{**base["cases"][0], "prior_beliefs_pool": "missing"}, *base["cases"][1:]],
+    }
+    with pytest.raises(ValidationError, match="undeclared seed pool"):
+        MemoryFormationCorpus.model_validate(undeclared)
+    small = {**base, "seed_pools": {name: pool[:3] for name, pool in base["seed_pools"].items()}}
+    with pytest.raises(ValidationError, match="at least 25"):
+        MemoryFormationCorpus.model_validate(small)
+
+
+class TestRepairedPolicyPublication:
+    async def test_pass_publishes_formation10_with_its_seeded_case_count(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+        monkeypatch.setattr(memory_eval, "load_settings", _settings)
+        monkeypatch.setattr(memory_eval, "require_committed_tree", lambda _root, _ref: None)
+        repository_root = Path(__file__).resolve().parents[2]
+        corpus, _digest = load_corpus(repository_root)
+        seeded_ids = {case.id for case in corpus.cases if case.prior_beliefs_pool is not None}
+        seen: dict[str, int] = {}
+
+        async def evaluate(
+            _settings: Settings,
+            case: MemoryFormationCase,
+            *,
+            model_policy: str,
+            policy_profile: str,
+            provider_assisted: bool,
+            formation_policy_version: str,
+            seeds: list[SeedBelief],
+        ) -> FormationArmResult:
+            assert formation_policy_version == REPAIRED_PROVIDER_FORMATION_POLICY_VERSION
+            assert bool(seeds) == (case.id in seeded_ids)
+            if provider_assisted:
+                seen[case.id] = len(seeds)
+            supported = len(case.expected) if provider_assisted else 0
+            return TestProviderEvidencePublicationGate._arm(
+                FormationScore(
+                    supported_candidates=supported,
+                    fabricated_candidates=0,
+                    policy_failures=0,
+                ),
+                identity=(
+                    ("openai", "gpt-memory", "default@profile+hline") if provider_assisted else None
+                ),
+                candidate_count=supported,
+                grounded_candidate_count=supported,
+            )
+
+        monkeypatch.setattr(memory_eval, "_evaluate_case", evaluate)
+        output = tmp_path / "formation10.json"
+
+        result = await memory_eval.run_live_evaluation(
+            repository_root,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="a" * 40,
+            output=output,
+            formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+        )
+
+        assert result is not None and result.passed and result.evidence is not None
+        evidence = result.evidence
+        assert evidence.extractor_version == "provider-assisted-v3"
+        assert evidence.formation_policy_version == "formation@10"
+        assert evidence.seeded_case_count == len(seeded_ids)
+        assert evidence.seeded_case_count == sum(1 for count in seen.values() if count)
+        persisted = type(evidence).model_validate_json(output.read_text(encoding="utf-8"))
+        assert persisted == evidence

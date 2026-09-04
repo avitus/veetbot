@@ -130,7 +130,9 @@ Version 3.0 (adaptive memory distillation pass, 2026-08-31):
   hypotheses retire after thirty days and ongoing observations after ninety.
 - The completed `formation@7` and `formation@8` policies remain frozen controls.
   The new `formation@9`, `retrieval@3`, and `lifecycle@2` policies activate only
-  on comparative evidence from a corpus of at least sixty cases.
+  on comparative evidence from a corpus of at least sixty cases. The repaired
+  provider-assisted `formation@10` (ADR-0086) activates only on its own
+  seeded-store evidence and ranks below `formation@9`.
 
 Version 3.1 (conversational schedule lifecycle pass, 2026-09-02):
 
@@ -3684,10 +3686,12 @@ Acceptance criteria:
 - Corrections, edits, retractions, and deletions remain durable through
   integration, retry, replay, and policy upgrades.
 - `formation@9` activates only for the exact comparative-evidence tuple; until
-  then automatic composition retains the evidenced `formation@8` behavior.
-  Once the passing artifact is bundled, automatic composition activates it
-  immediately for that tuple without a shadow or canary phase; an operator pin
-  may hold or roll back the selection without deleting an artifact.
+  then automatic composition retains the evidenced `formation@10` behavior, or
+  `formation@8` where only its evidence matches. Once the passing artifact is
+  bundled, automatic composition activates it immediately for that tuple
+  without a shadow or canary phase; an operator pin may hold or roll back the
+  selection to any evidenced policy without deleting an artifact, and every
+  bundled artifact is bound to the compiled policy version the tree ships.
 
 The milestone does not include reinforcement learning, fine-tuning, embeddings,
 `pgvector`, a temporal entity graph, a persona editor, an external memory

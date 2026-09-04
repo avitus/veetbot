@@ -492,7 +492,7 @@ def _case_evidence_units(
     return len(evidence_units), formed
 
 
-async def _seed_prior_beliefs(
+async def seed_prior_beliefs(
     composition: object,
     seeds: list[SeedBelief],
     *,
@@ -574,7 +574,7 @@ async def _evaluate_case(
         memory_provider_evaluation_mode=policy_version == "formation@8",
         memory_distillation_evaluation_mode=policy_version == "formation@9",
     ) as composition:
-        seeded = await _seed_prior_beliefs(composition, seeds or [], principal=principal)
+        seeded = await seed_prior_beliefs(composition, seeds or [], principal=principal)
         session_id = await composition.sessions.create()
         async with composition.uow_factory() as uow:
             for event in case.events:

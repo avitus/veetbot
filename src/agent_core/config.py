@@ -71,15 +71,16 @@ class MemoryProviderExtractionMode(StrEnum):
 class MemoryFormationPolicyPin(StrEnum):
     """An operator's choice between the evidenced provider formation policies.
 
-    Automatic selection prefers ``formation@9`` whenever its artifact matches.
-    A pin lets a deploy hold or roll back to one policy without deleting an
-    artifact: ``formation@8`` ignores distillation evidence, ``formation@9``
-    ignores provider-assisted evidence and falls back to deterministic
-    formation when its own evidence is missing.
+    Automatic selection prefers ``formation@9``, then the repaired
+    provider-assisted ``formation@10``, then the frozen ``formation@8``
+    control, whichever artifact matches first. A pin lets a deploy hold or
+    roll back to exactly one policy without deleting an artifact; a pin to a
+    policy whose evidence is missing falls back to deterministic formation.
     """
 
     PROVIDER_ASSISTED = "formation@8"
     DISTILLATION = "formation@9"
+    REPAIRED_PROVIDER_ASSISTED = "formation@10"
 
 
 class BrowserProviderKind(StrEnum):
@@ -895,6 +896,28 @@ def _validate_release_id(release_id: str | None) -> None:
         )
 
 
+def shipped_policy_version(policy_profile: str = "default") -> str:
+    """The compiled policy version the shipped documents produce for a profile.
+
+    Release evidence binds to this value, so a change to the shipped policy
+    documents invalidates every bundled artifact; the bundle test compares each
+    artifact against it. Operator overlays under ``AGENT_CONFIG_DIR`` are not
+    part of the shipped tree and are deliberately outside this computation.
+    """
+
+    from agent_core.policy.loader import load_ruleset_documents
+
+    profile = _read_yaml(PACKAGE_ROOT / "policy" / "default.yaml")
+    hardline = _read_yaml(PACKAGE_ROOT / "policy" / "hardline.yaml")
+    ruleset = load_ruleset_documents(profile, hardline)
+    if ruleset.profile_name != policy_profile:
+        raise ConfigurationError(
+            f"no shipped policy profile named {policy_profile!r}; "
+            f"the shipped profile is {ruleset.profile_name!r}"
+        )
+    return ruleset.policy_version
+
+
 def load_provider_extraction_evidence(
     path: Path,
 ) -> ProviderExtractionEvaluationEvidence:
@@ -951,16 +974,21 @@ def _provider_extraction_evidence_is_valid(
 ) -> bool:
     """Whether an artifact can satisfy required mode under the operator's pin.
 
-    Composition skips distillation evidence when pinned to ``formation@8`` and
-    provider-assisted evidence when pinned to ``formation@9``, so startup must
-    judge the same evidence type or it approves a configuration that then
-    fails one layer later.
+    Composition skips distillation evidence under a provider-assisted pin and
+    provider-assisted evidence when pinned to ``formation@9``, and a pin to
+    ``formation@8`` or ``formation@10`` accepts only that policy's artifact, so
+    startup must judge the same evidence or it approves a configuration that
+    then fails one layer later.
     """
 
     try:
-        if policy_pin is MemoryFormationPolicyPin.PROVIDER_ASSISTED:
-            load_provider_extraction_evidence(path)
-        elif policy_pin is MemoryFormationPolicyPin.DISTILLATION:
+        if policy_pin in (
+            MemoryFormationPolicyPin.PROVIDER_ASSISTED,
+            MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
+        ):
+            evidence = load_provider_extraction_evidence(path)
+            return evidence.formation_policy_version == policy_pin.value
+        if policy_pin is MemoryFormationPolicyPin.DISTILLATION:
             load_memory_distillation_evidence(path)
         else:
             load_memory_release_evidence(path)

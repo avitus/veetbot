@@ -603,7 +603,7 @@ milestones:
     authorized_on: 2026-08-31
     design: docs/plan/adaptive-memory-distillation.md
     adr: docs/adr/0077-milestone-21-adaptive-memory-distillation.md
-    gates_registered: 29
+    gates_registered: 31
     authorized_scope:
       - persisted provenance-complete integrated episodes
       - three-call Nemori-style formation at formation@9
@@ -611,14 +611,35 @@ milestones:
       - bounded high-recall candidate ranking and decision telemetry
       - evidence-based lifecycle@2 and uncertainty-aware retrieval@3
       - comparative formation corpus and exact-tuple activation evidence
+      - the repaired provider-assisted formation@10 control, policy precedence,
+        and policy-bound release evidence (owner-authorized 2026-09-03, ADR-0086)
     deferred_scope:
       - reinforcement learning, fine-tuning, or a learned memory policy
       - embeddings, pgvector, an external memory provider, or new retrieval arms
       - temporal entity graphs, persona editing, and global consolidation
       - a public memory-write API
     open_items:
+      - Bundle the formation@10 activation evidence evaluated on the deployed tree
       - Run hosted CI and the CodeRabbit review loop on the final head
     evidence:
+      - check: formation@10 repair, policy precedence, and the evidence guard
+        outcome: passed_locally
+        detail: >-
+          The production audit of 2026-09-03 recorded every formation@8 attempt
+          for the strength-training session as a truncated stream or a permanent
+          integer_below_min_value refusal, the symptoms of its five-cent budget.
+          formation@10 keeps one call, bounds input by the model window, requests
+          16,384 output tokens, records cost without gating on it, and sends a
+          relevance-ranked, sensitivity-filtered fifty-belief view; on a
+          sixty-belief store the frozen control skips its call and formation@10
+          completes. Automatic selection prefers formation@9, then formation@10,
+          then formation@8, a pin holds any one of them, required mode judges the
+          pinned artifact, and the bundle test now fails when any artifact is
+          bound to a policy version the tree no longer compiles, which is the
+          regression that silently disabled formation@9 after the Milestone 24
+          policy change. The frozen formation@8 artifact is withdrawn. A digit
+          range and a spelled-out range of the same count now merge across claim
+          kinds, closing the duplicate the production replay exposed.
       - check: local Milestone 21 behavior and contracts
         outcome: passed_locally
         detail: >-
