@@ -317,11 +317,11 @@ schedule transition. That was the complete Milestone 11 surface. Milestone 19
 also gives the one-time model tool `schedule.create` exactly `schedule.write`;
 its `EXTERNAL_WRITE`/`HIGH` classification makes approval mandatory under the
 existing matrix. Milestone 23 gives `schedule.list` exactly `schedule.read`,
-`schedule.pause` and `schedule.resume` exactly `schedule.write`, and
-`schedule.cancel` exactly `schedule.cancel`. The read is
-`NONE`/`LOW`; the two state writes are `EXTERNAL_WRITE`/`HIGH`; terminal
-cancellation is `EXTERNAL_DELETE`/`HIGH`. The existing matrix therefore allows
-the read and requires approval for every mutation. Exact matching, MCP
+`schedule.update`, `schedule.pause`, and `schedule.resume` exactly
+`schedule.write`, and `schedule.cancel` exactly `schedule.cancel`. The read is
+`NONE`/`LOW`; the three state writes are `EXTERNAL_WRITE`/`HIGH`; terminal
+cancellation is `EXTERNAL_DELETE`/`HIGH`. The existing matrix therefore
+allows the read and requires approval for every mutation. Exact matching, MCP
 namespace isolation, and every other rule in this section are unchanged.
 
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`

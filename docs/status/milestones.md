@@ -135,8 +135,9 @@ Remaining:
 ### Milestone 23 — Conversational schedule lifecycle
 
 An eighth parallel workstream adding bounded summary discovery and
-approval-gated pause, resume, and terminal cancellation through the existing
-schedule service. Its seven `gate.schedule.*` checks pass locally, including
+approval-gated update, pause, resume, and terminal cancellation through the
+existing schedule service. All twelve `gate.schedule.*` checks pass locally,
+covering immutable content/cadence edits with preserved execution authority,
 no-backfill resume, audit-preserving cancellation, exact-scope denial,
 fail-closed revision handling, and idempotent retry. Remaining:
 

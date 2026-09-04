@@ -19,7 +19,7 @@ The plan designed subagents under Milestone 10 and deferred them behind a gate:
 "add subagents only when evaluation evidence shows that a single agent fails"
 for one of five reasons — independent parallel work, context isolation,
 specialized permissions, specialized tools, or independent verification
-(engineering-plan.md:3060-3068). This document honours that gate as written.
+(engineering-plan.md:3074-3082). This document honours that gate as written.
 Construction is authorized now; tenant activation requires the evidence the
 gate names, and the evidence is part of the milestone rather than a
 precondition for starting it, because the platform has to be able to delegate
@@ -39,12 +39,12 @@ instruction and recalls under its own, smaller, recall class
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:1001-1008): the
-objective had a carrier and no schema, the child budget was additive with no
-rule deriving a child's own limits, the separate trace and the artifact
-references were picked up by no specification, and a child run could not be
-inserted into its parent's session. This document supplies those four and
-resolves the fifth.
+The readiness review measured what was left (readiness.md:1002-1005,
+readiness.md:1006-1007, and readiness.md:1008): the objective had a carrier and no schema, the child
+budget was additive with no rule deriving a child's own limits, the separate
+trace and the artifact references were picked up by no specification, and a
+child run could not be inserted into its parent's session. This document
+supplies those four and resolves the fifth.
 
 ## Scope
 
@@ -71,8 +71,8 @@ materializes bounded child runs. It includes:
   failures.
 
 The milestone does not include handoffs (the parent retains the user
-interaction and the final response, engineering-plan.md:3058); role-named
-agents for planning, writing, or criticism (engineering-plan.md:3070);
+interaction and the final response, engineering-plan.md:3072); role-named
+agents for planning, writing, or criticism (engineering-plan.md:3084);
 delegation deeper than one level; cross-tenant or cross-principal delegation;
 any change to model routing; a new `WAITING_FOR_CHILD` run status; a child that
 may itself call `delegate.run` or `skill.manage`; or push notification of child
@@ -278,7 +278,7 @@ completes once and the parent re-queues once.
 ## Limits, budget, and deadline
 
 The plan requires a child budget and a child deadline and says fan-out usage
-is additive (engineering-plan.md:652). The rule that derives a child's own
+is additive (engineering-plan.md:666). The rule that derives a child's own
 limits — the partial the readiness review named — is:
 
 ```text

@@ -21,6 +21,7 @@ from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.schedules import (
     ScheduleDefinition,
+    ScheduleDefinitionPatch,
     ScheduleOccurrence,
     ScheduleRecord,
 )
@@ -234,6 +235,15 @@ class ScheduleService(Protocol):
         schedule_id: UUID,
         expected_revision: int,
         definition: ScheduleDefinition,
+    ) -> ScheduleRecord: ...
+
+    async def patch(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        expected_revision: int,
+        patch: ScheduleDefinitionPatch,
+        idempotency_key: str,
     ) -> ScheduleRecord: ...
 
     async def pause(

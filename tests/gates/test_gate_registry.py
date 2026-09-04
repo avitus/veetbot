@@ -98,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 439
+    assert len(entries) == 444
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -169,7 +169,7 @@ def test_census_is_derived() -> None:
         20: 6,
         21: 31,
         22: 14,
-        23: 7,
+        23: 12,
         24: 12,
         25: 12,
     }
@@ -461,7 +461,7 @@ def test_schedule_lifecycle_has_complete_milestone_23_gate_area() -> None:
     assert errors == []
     schedule_entries = [entry for entry in entries if entry.milestone == 23]
 
-    assert len(schedule_entries) == 7
+    assert len(schedule_entries) == 12
     assert all(entry.id.startswith("gate.schedule.model_") for entry in schedule_entries)
     assert all(entry.spec == "docs/plan/scheduling.md#hard-gates" for entry in schedule_entries)
     assert all(GATE_ID.fullmatch(entry.id) for entry in schedule_entries)

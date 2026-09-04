@@ -42,9 +42,10 @@ title: Current Milestone
   fourteen gates and is a seventh parallel workstream, adding an owner-edited
   trusted prefix row that a formed belief reaches only through explicit
   owner affirmation. Milestone 23 — conversational schedule lifecycle — is
-  specified by [scheduling.md](scheduling.md) with seven gates and is an eighth
-  parallel workstream, adding summary-only discovery and approval-gated pause,
-  resume, and terminal cancellation through the existing schedule service.
+  specified by [scheduling.md](scheduling.md) with twelve gates and is an eighth
+  parallel workstream, adding summary-only discovery and approval-gated update,
+  pause, resume, and terminal cancellation through the existing schedule
+  service.
   Milestone 24 — SMS through the owner's iPhone — is specified by
   [device-channel-and-sms.md](device-channel-and-sms.md) with twelve gates
   and is a ninth parallel workstream on the same terms and is in progress,
@@ -73,7 +74,8 @@ title: Current Milestone
   Milestone 22, the persona surface and curated belief promotion, was
   authorized on 2026-09-01 as a seventh (ADR-0079), again without advancing
   the verified ceiling. Milestone 23, conversational schedule lifecycle, was
-  authorized on 2026-09-02 as an eighth (ADR-0080) on the same terms.
+  authorized on 2026-09-02 as an eighth (ADR-0080) on the same terms and
+  expanded to conversational definition update on 2026-09-04 (ADR-0088).
   Milestone 24, SMS through the owner's iPhone, was authorized on
   2026-08-26 as a ninth (ADR-0081), and Milestone 25, the WhatsApp
   business surface, on 2026-08-26 as a tenth (ADR-0082), on the same
@@ -170,8 +172,8 @@ title: Current Milestone
   prefix row, curated promotion, the routes, the CLI, and the native editor
   are implemented, with only hosted CI and the final CodeRabbit review
   outstanding. Milestone 23, the eighth parallel workstream, is in progress
-  with seven registered gates for summary-only discovery and approved pause,
-  resume, and terminal cancellation. Each in-progress
+  with all twelve registered gates passing locally for summary-only discovery
+  and approved update, pause, resume, and terminal cancellation. Each in-progress
   milestone's remaining work is itemized on the
   [milestones page](../status/milestones.md), which `make docs-check`
   reconciles against the project state.

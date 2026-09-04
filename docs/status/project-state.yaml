@@ -465,8 +465,9 @@ milestones:
       - empty delegated scopes and finite per-occurrence limits
       - direct reuse of the existing ScheduleService and notification lifecycle
     deferred_scope:
-      - recurring schedule creation through the model
-      - schedule update, pause, resume, delete, occurrence list, and run list tools
+      - recurring schedule creation through the model (subsequently authorized in Milestone 20)
+      - schedule update, pause, resume, and delete tools (subsequently authorized in Milestone 23)
+      - occurrence list and run list tools
       - a separate reminder record or notification payload with user content
       - notification transports beyond the existing Milestone 12 delivery path
     open_items:
@@ -539,7 +540,8 @@ milestones:
     deferred_scope:
       - arbitrary cron or RFC 5545 input and interval multipliers
       - continuous-session recurrence, dependency graphs, and workflow DAGs
-      - model-callable lifecycle mutation and delegated tool scopes
+      - model-callable lifecycle mutation (subsequently authorized in Milestone 23)
+      - delegated tool scopes
       - content-bearing notifications or new delivery transports
     open_items:
       - Hosted CI and the CodeRabbit review loop on the dev to main pull request
@@ -814,19 +816,21 @@ milestones:
     authorized_on: 2026-09-02
     design: docs/plan/scheduling.md
     adr: docs/adr/0080-milestone-23-conversational-schedule-lifecycle.md
-    gates_registered: 7
+    gates_registered: 12
     authorized_scope:
       - bounded summary-only model discovery through schedule.list
       - approval-gated schedule.pause and schedule.resume
+      - approval-gated schedule.update for title, instruction, and cadence
       - conversational delete through terminal schedule.cancel
       - stable schedule IDs and optimistic expected revisions
       - exact schedule.read, schedule.write, and schedule.cancel scopes
       - direct reuse of the existing ScheduleService and audit lifecycle
+      - immutable update revisions with preserved execution authority and idempotent replay
     deferred_scope:
-      - model-callable content or cadence update
       - occurrence or run history tools and hard deletion
       - delegated scheduled-run scopes and new cadence kinds
       - native lifecycle controls or new notification payloads
+      - model-callable mutation of execution authority, policy, or finite limits
     open_items:
       - Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
     evidence:
@@ -840,27 +844,38 @@ milestones:
           schedule.resume, or schedule.cancel, and conversational calls could
           not reach an approval. The earlier pytest-not-installed environment
           error was discarded and is not red evidence.
-      - check: seven Milestone 23 gate.schedule.* gates
+      - check: Milestone 23 conversational-update red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After the locked development groups were installed, uv run pytest
+          tests/gates/test_schedule_update_tool_m23.py -q failed all five
+          cases at the intended boundary because schedule.update was absent;
+          the chat case could not reach approval. The preceding
+          pytest-not-installed environment error was discarded and is not red
+          evidence.
+      - check: twelve Milestone 23 gate.schedule.* gates
         outcome: passed_locally
         detail: >-
-          All seven registered entries resolve to the ten cases in
-          tests/gates/test_schedule_lifecycle_tool_m23.py. The focused suite
-          passes locally, covering feature gating and classification,
-          summary-only pagination, approval-gated pause/resume with no
-          backfill, terminal cancellation with retained history and an
-          unchanged active run, exact-scope denial, fail-closed validation,
-          and state-idempotent retry.
+          All twelve registered entries resolve to fifteen cases across
+          tests/gates/test_schedule_lifecycle_tool_m23.py and
+          tests/gates/test_schedule_update_tool_m23.py. The focused suites
+          pass locally, covering feature gating and classification,
+          summary-only pagination, immutable content/cadence update with
+          preserved execution authority and at-most-once recovery,
+          approval-gated pause/resume with no backfill, terminal cancellation
+          with retained history and an unchanged active run, exact-scope
+          denial, fail-closed validation, and state-idempotent retry.
       - check: repository verification
         outcome: passed_locally
         detail: >-
-          make check passes with Ruff formatting and linting, mypy over 573
-          source files, 1,460 static tests, 420 contract tests, deployment
-          script checks, strict documentation validation, 192 live citation
-          targets, and 404 reconciled gate entries. A fresh UTF-8 PostgreSQL 16
-          database migrated through head and the complete integration and
-          resilience lane passes with 160 tests, including the conversational
-          lifecycle journey. The scheduling and policy risk partition also
-          passes with 96 tests.
+          make check passes with Ruff formatting and linting, mypy over 592
+          source files, 1,721 static tests, 442 contract tests, deployment
+          script checks, strict documentation validation, 194 live citation
+          targets, and 444 reconciled gate entries. A fresh UTF-8 PostgreSQL
+          database migrated from base through head and the complete
+          integration and resilience lane passes with 169 tests, including
+          conversational resume and update journeys. The focused scheduling
+          partition passes all 35 selected tests.
   "24":
     title: SMS through the owner's iPhone
     status: in_progress
@@ -1041,10 +1056,12 @@ readiness:
     affirmation; persona-surface.md declares its fourteen `gate.persona.*`
     entries in a new persona area.
     On 2026-09-02 the owner authorized Milestone 23, conversational schedule
-    lifecycle, as an eighth parallel workstream (ADR-0080). scheduling.md
-    declares seven more `gate.schedule.*` entries for bounded model discovery,
-    approved pause, resume, and terminal cancellation, exact scopes,
-    fail-closed selection, and retry safety.
+    lifecycle, as an eighth parallel workstream (ADR-0080), and on 2026-09-04
+    expanded it to conversational definition update (ADR-0088). scheduling.md
+    declares twelve more `gate.schedule.*` entries for bounded model discovery,
+    approved content/cadence update, pause, resume, and terminal cancellation,
+    exact scopes, preserved hidden execution authority, fail-closed selection,
+    and retry safety.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
