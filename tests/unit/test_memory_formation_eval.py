@@ -485,8 +485,14 @@ class TestRepairedPolicyPublication:
             seeds: list[SeedBelief],
         ) -> FormationArmResult:
             assert formation_policy_version == REPAIRED_PROVIDER_FORMATION_POLICY_VERSION
-            # The exact configured pool, not merely something non-empty.
-            assert seeds == corpus.seeds_for(case)
+            # The exact configured pool, resolved here from the raw fields rather
+            # than through the accessor the evaluator itself calls.
+            expected_seeds = (
+                []
+                if case.prior_beliefs_pool is None
+                else list(corpus.seed_pools[case.prior_beliefs_pool])
+            )
+            assert seeds == expected_seeds
             assert bool(seeds) == (case.id in seeded_ids)
             if provider_assisted:
                 seen[case.id] = len(seeds)
