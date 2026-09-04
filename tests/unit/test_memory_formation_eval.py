@@ -485,6 +485,8 @@ class TestRepairedPolicyPublication:
             seeds: list[SeedBelief],
         ) -> FormationArmResult:
             assert formation_policy_version == REPAIRED_PROVIDER_FORMATION_POLICY_VERSION
+            # The exact configured pool, not merely something non-empty.
+            assert seeds == corpus.seeds_for(case)
             assert bool(seeds) == (case.id in seeded_ids)
             if provider_assisted:
                 seen[case.id] = len(seeds)
@@ -522,3 +524,43 @@ class TestRepairedPolicyPublication:
         assert evidence.seeded_case_count == sum(1 for count in seen.values() if count)
         persisted = type(evidence).model_validate_json(output.read_text(encoding="utf-8"))
         assert persisted == evidence
+
+
+class TestCommittedTreeBinding:
+    """The stubs above must never be the only thing between evidence and a real commit."""
+
+    async def test_a_reference_that_is_not_the_checked_out_head_is_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+        monkeypatch.setattr(memory_eval, "load_settings", _settings)
+
+        with pytest.raises(ValueError, match="checked-out HEAD"):
+            await memory_eval.run_live_evaluation(
+                Path(__file__).resolve().parents[2],
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref="a" * 40,
+                output=tmp_path / "never-written.json",
+                formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+            )
+        assert not (tmp_path / "never-written.json").exists()
+
+    async def test_a_label_is_not_a_build_reference(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+        monkeypatch.setattr(memory_eval, "load_settings", _settings)
+
+        with pytest.raises(ValueError, match="forty-character commit sha"):
+            await memory_eval.run_live_evaluation(
+                Path(__file__).resolve().parents[2],
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref="abc123",
+                output=tmp_path / "never-written.json",
+            )
