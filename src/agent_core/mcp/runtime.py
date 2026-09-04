@@ -52,6 +52,7 @@ _SKILL_CHARACTERS = re.compile(r"[^a-z0-9-]")
 _SKILL_HYPHENS = re.compile(r"-+")
 type _RegistrationKey = tuple[str, str, str]
 logger = logging.getLogger(__name__)
+_MAXIMUM_PARALLEL_PREPARATIONS = 8
 
 _GMAIL_FAILURE_CODES = frozenset(
     {
@@ -75,6 +76,12 @@ class _Connection:
     report: MCPMappingReport
     reauthentication_attempted: bool = False
     unavailable_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _DisconnectedServer:
+    config: MCPServerConfig
+    reason_code: str
 
 
 class MCPTool:
@@ -183,6 +190,89 @@ class MCPRuntime:
             return build_stdio_environment(config, credential)
         return {}
 
+    async def _prepare_server(
+        self,
+        session_id: UUID,
+        config: MCPServerConfig,
+        semaphore: asyncio.Semaphore,
+    ) -> _Connection | _DisconnectedServer:
+        async with semaphore:
+            client: MCPClient | None = None
+            entered: MCPClient | None = None
+            try:
+                credential = await self._credential(config)
+                client = self._clients(
+                    config,
+                    credential,
+                    self._environment(config, credential),
+                )
+                async with asyncio.timeout(self._connect_timeout_seconds):
+                    entered = await client.__aenter__()
+                    discovery = await entered.discover()
+            except (MCPUnauthorizedError, PermissionError):
+                target = entered or client
+                if target is not None:
+                    with suppress(Exception):
+                        await target.__aexit__(None, None, None)
+                return _DisconnectedServer(config, "tool.auth_failed")
+            except (MCPTransportError, TimeoutError):
+                target = entered or client
+                if target is not None:
+                    with suppress(Exception):
+                        await target.__aexit__(None, None, None)
+                return _DisconnectedServer(config, "tool.server_unreachable")
+            except BaseException:
+                target = entered or client
+                if target is not None:
+                    with suppress(BaseException):
+                        await target.__aexit__(None, None, None)
+                raise
+            try:
+                report = map_discovered_tools(config, discovery.tools)
+            except BaseException:
+                with suppress(BaseException):
+                    await entered.__aexit__(None, None, None)
+                raise
+            if discovery.resources:
+                resource_name = f"mcp.{config.server_id}.read_resource"
+                shadowed = tuple(
+                    mapped for mapped in report.accepted if mapped.spec.name == resource_name
+                )
+                if shadowed:
+                    report = replace(
+                        report,
+                        accepted=tuple(
+                            mapped
+                            for mapped in report.accepted
+                            if mapped.spec.name != resource_name
+                        ),
+                        rejected=tuple(
+                            sorted(
+                                {
+                                    *report.rejected,
+                                    *(mapped.remote_name for mapped in shadowed),
+                                }
+                            )
+                        ),
+                    )
+            return _Connection(
+                session_id=session_id,
+                config=config,
+                client=entered,
+                discovery=discovery,
+                report=report,
+            )
+
+    @staticmethod
+    async def _close_prepared_connections(
+        prepared: list[_Connection | _DisconnectedServer],
+    ) -> None:
+        for result in prepared:
+            if not isinstance(result, _Connection):
+                continue
+            with suppress(BaseException):
+                await result.client.__aexit__(None, None, None)
+
     async def prepare(self, session_id: UUID, principal: Principal) -> None:
         if session_id in self._prepared:
             return
@@ -195,89 +285,45 @@ class MCPRuntime:
                     await uow.sessions.get(session_id, principal)
                 except NotFoundError:
                     self._deferred_events.add(session_id)
+            semaphore = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
+            tasks = [
+                asyncio.create_task(self._prepare_server(session_id, config, semaphore))
+                for config in configs
+            ]
+            try:
+                prepared = await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                completed: list[_Connection | _DisconnectedServer] = []
+                for task in tasks:
+                    if task.cancelled():
+                        continue
+                    try:
+                        completed.append(task.result())
+                    except BaseException:
+                        continue
+                await self._close_prepared_connections(completed)
+                self._unregister_session(session_id)
+                raise
             connections: dict[str, _Connection] = {}
             try:
-                for config in configs:
-                    client: MCPClient | None = None
-                    entered: MCPClient | None = None
-                    try:
-                        credential = await self._credential(config)
-                        client = self._clients(
-                            config,
-                            credential,
-                            self._environment(config, credential),
-                        )
-                        async with asyncio.timeout(self._connect_timeout_seconds):
-                            entered = await client.__aenter__()
-                            discovery = await entered.discover()
-                    except (MCPUnauthorizedError, PermissionError):
-                        target = entered or client
-                        if target is not None:
-                            with suppress(Exception):
-                                await target.__aexit__(None, None, None)
-                        await self._event(
-                            session_id,
-                            "mcp.server.disconnected",
-                            {"server_id": config.server_id, "reason_code": "tool.auth_failed"},
-                        )
-                        continue
-                    except (MCPTransportError, TimeoutError):
-                        target = entered or client
-                        if target is not None:
-                            with suppress(Exception):
-                                await target.__aexit__(None, None, None)
+                for result in prepared:
+                    if isinstance(result, _DisconnectedServer):
                         await self._event(
                             session_id,
                             "mcp.server.disconnected",
                             {
-                                "server_id": config.server_id,
-                                "reason_code": "tool.server_unreachable",
+                                "server_id": result.config.server_id,
+                                "reason_code": result.reason_code,
                             },
                         )
                         continue
-                    except BaseException:
-                        target = entered or client
-                        if target is not None:
-                            with suppress(BaseException):
-                                await target.__aexit__(None, None, None)
-                        raise
-                    try:
-                        report = map_discovered_tools(config, discovery.tools)
-                    except BaseException:
-                        with suppress(BaseException):
-                            await entered.__aexit__(None, None, None)
-                        raise
-                    if discovery.resources:
-                        resource_name = f"mcp.{config.server_id}.read_resource"
-                        shadowed = tuple(
-                            mapped
-                            for mapped in report.accepted
-                            if mapped.spec.name == resource_name
-                        )
-                        if shadowed:
-                            report = replace(
-                                report,
-                                accepted=tuple(
-                                    mapped
-                                    for mapped in report.accepted
-                                    if mapped.spec.name != resource_name
-                                ),
-                                rejected=tuple(
-                                    sorted(
-                                        {
-                                            *report.rejected,
-                                            *(mapped.remote_name for mapped in shadowed),
-                                        }
-                                    )
-                                ),
-                            )
-                    connection = _Connection(
-                        session_id=session_id,
-                        config=config,
-                        client=entered,
-                        discovery=discovery,
-                        report=report,
-                    )
+                    connection = result
+                    config = connection.config
+                    discovery = connection.discovery
+                    report = connection.report
                     connections[config.server_id] = connection
                     await self._record_catalog(connection)
                     for mapped in report.accepted:
@@ -317,9 +363,7 @@ class MCPRuntime:
                         },
                     )
             except BaseException:
-                for connection in connections.values():
-                    with suppress(BaseException):
-                        await connection.client.__aexit__(None, None, None)
+                await self._close_prepared_connections(prepared)
                 self._unregister_session(session_id)
                 raise
             self._sessions[session_id] = connections

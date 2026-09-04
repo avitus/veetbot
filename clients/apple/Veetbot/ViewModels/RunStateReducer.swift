@@ -154,6 +154,7 @@ public final class RunStateReducer: ObservableObject {
     @Published public private(set) var failure: RunFailureView?
 
     private var persistedSequences: Set<Int> = []
+    private var pendingUserMessageID: String?
     private var streamingMessageID: String?
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
@@ -189,6 +190,7 @@ public final class RunStateReducer: ObservableObject {
         reasoningActive = false
         failure = nil
         persistedSequences = []
+        pendingUserMessageID = nil
         streamingMessageID = nil
         toolIndex = [:]
         pendingApprovalIDs = []
@@ -219,6 +221,27 @@ public final class RunStateReducer: ObservableObject {
         activeRunID = runID
         runStatus = status
         failure = nil
+    }
+
+    func beginPendingUserMessage(content: [ContentBlock], submissionID: String) {
+        guard pendingUserMessageID == nil else { return }
+        let id = "pending-user-\(submissionID)"
+        pendingUserMessageID = id
+        activityOrder.append(.message(id))
+        timeline.append(TimelineItem(id: id, role: .user, content: content))
+    }
+
+    func discardPendingUserMessage(submissionID: String) {
+        let id = "pending-user-\(submissionID)"
+        guard pendingUserMessageID == id else { return }
+        timeline.removeAll { $0.id == id }
+        activityOrder.removeAll { reference in
+            if case .message(let messageID) = reference {
+                return messageID == id
+            }
+            return false
+        }
+        pendingUserMessageID = nil
     }
 
     public func reduce(_ frame: SSEFrame) {
@@ -327,6 +350,21 @@ public final class RunStateReducer: ObservableObject {
         guard let content = frame.data["content"].flatMap({ decode([ContentBlock].self, from: $0) })
         else { return }
         let id = frameID(frame)
+        if let pendingUserMessageID,
+            let timelineIndex = timeline.firstIndex(where: { $0.id == pendingUserMessageID })
+        {
+            timeline[timelineIndex] = TimelineItem(id: id, role: .user, content: content)
+            if let activityIndex = activityOrder.firstIndex(where: { reference in
+                if case .message(let messageID) = reference {
+                    return messageID == pendingUserMessageID
+                }
+                return false
+            }) {
+                activityOrder[activityIndex] = .message(id)
+            }
+            self.pendingUserMessageID = nil
+            return
+        }
         activityOrder.append(.message(id))
         timeline.append(
             TimelineItem(id: id, role: .user, content: content)

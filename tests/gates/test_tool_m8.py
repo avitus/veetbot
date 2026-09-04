@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
@@ -183,6 +184,67 @@ class _TrackedFactory:
         return client
 
 
+class _DiscoveryBarrier:
+    def __init__(self, expected: int, *, hold_until_released: bool = False) -> None:
+        self.expected = expected
+        self.hold_until_released = hold_until_released
+        self.started = 0
+        self.in_flight = 0
+        self.maximum_in_flight = 0
+        self.all_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+
+class _BarrierClient(_TrackedClient):
+    def __init__(self, barrier: _DiscoveryBarrier) -> None:
+        super().__init__(fail_discovery=False)
+        self.barrier = barrier
+
+    async def __aenter__(self) -> _BarrierClient:
+        self.entered = True
+        return self
+
+    async def discover(self) -> MCPDiscovery:
+        self.barrier.started += 1
+        self.barrier.in_flight += 1
+        self.barrier.maximum_in_flight = max(
+            self.barrier.maximum_in_flight,
+            self.barrier.in_flight,
+        )
+        if self.barrier.started == self.barrier.expected:
+            self.barrier.all_started.set()
+        try:
+            if self.barrier.hold_until_released:
+                await self.barrier.release.wait()
+            else:
+                await asyncio.wait_for(self.barrier.all_started.wait(), timeout=0.2)
+        except TimeoutError:
+            pass
+        finally:
+            self.barrier.in_flight -= 1
+        return _discovery()
+
+
+class _BarrierFactory:
+    def __init__(self, expected: int, *, hold_until_released: bool = False) -> None:
+        self.barrier = _DiscoveryBarrier(
+            expected,
+            hold_until_released=hold_until_released,
+        )
+        self.clients: list[_BarrierClient] = []
+
+    def __call__(
+        self,
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> _BarrierClient:
+        del config, credential, environment
+        client = _BarrierClient(self.barrier)
+        self.clients.append(client)
+        return client
+
+
 async def test_dynamic_registry_is_tenant_scoped() -> None:
     spec = map_discovered_tools(_server("shared"), _discovery().tools).accepted[0].spec
     first = _TenantTool(spec, "first")
@@ -311,6 +373,37 @@ async def test_prepare_closes_all_clients_after_unexpected_discovery_failure() -
             await composition.sessions.create()
     assert len(factory.clients) == 2
     assert all(client.closed and not client.entered for client in factory.clients)
+
+
+async def test_prepare_discovers_independent_servers_concurrently() -> None:
+    factory = _BarrierFactory(expected=3)
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("first"), _server("second"), _server("third")),
+        mcp_client_factory=factory,
+    ) as composition:
+        await composition.sessions.create()
+    assert factory.barrier.maximum_in_flight == 3
+
+
+async def test_prepare_bounds_server_discovery_fan_out() -> None:
+    factory = _BarrierFactory(expected=8, hold_until_released=True)
+    configs = tuple(_server(f"server_{index}") for index in range(9))
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=configs,
+        mcp_client_factory=factory,
+    ) as composition:
+        startup = asyncio.create_task(composition.sessions.create())
+        try:
+            await asyncio.wait_for(factory.barrier.all_started.wait(), timeout=1)
+            assert factory.barrier.started == 8
+        finally:
+            factory.barrier.release.set()
+            await startup
+    assert factory.barrier.maximum_in_flight == 8
 
 
 async def test_dynamic_registrations_are_owned_by_live_sessions() -> None:

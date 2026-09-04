@@ -635,6 +635,10 @@ public final class ChatViewModel: ObservableObject {
             idempotencyKey = UUID().uuidString.lowercased()
             pendingSubmission = (text, idempotencyKey)
         }
+        runState.beginPendingUserMessage(
+            content: [.text(text)],
+            submissionID: idempotencyKey
+        )
         do {
             let session: SessionView
             if let selectedSessionID {
@@ -668,6 +672,7 @@ public final class ChatViewModel: ObservableObject {
             pendingSubmission = nil
             return true
         } catch {
+            runState.discardPendingUserMessage(submissionID: idempotencyKey)
             if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 apiError.details.reason == "active_run_exists",

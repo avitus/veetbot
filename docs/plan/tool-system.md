@@ -1208,6 +1208,12 @@ context engine pins the tool set and the pin must include MCP tools or they
 cannot be advertised. For each configured server: connect, `initialize`,
 `tools/list`, map, register, hash.
 
+Independent server connection, initialization, and discovery operations use a
+process-local bounded fan-out of eight. Catalog persistence, registry mutation,
+and connection or rejection events still commit in configured-server order, so
+startup latency follows the slowest batch member without making the pinned
+catalog or event sequence scheduling-dependent.
+
 Mapping a remote tool declaration into a `ToolSpec` is where the untrusted
 input meets our type system, and every field is either derived or forced:
 

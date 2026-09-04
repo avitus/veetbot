@@ -62,7 +62,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:2005` states that device tools are *"a reserved
+    `tool-system.md:2011` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -575,7 +575,7 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:729`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1380`.
+bridge Section 8.5 requires is specified from `tool-system.md:1386`.
 
 Two further items deserved naming.
 
@@ -734,7 +734,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1311-1358` draws the line between
+had to be written. `tool-system.md:1317-1364` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -1556,8 +1556,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1463` does open a *"Device-scoped tools"* section, and
-`tool-system.md:2005` states that device tools are *"a reserved seam,
+`tool-system.md:1469` does open a *"Device-scoped tools"* section, and
+`tool-system.md:2011` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1597,7 +1597,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1477` reserved by name —
+one of them the question `tool-system.md:1483` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
