@@ -17,6 +17,7 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.tools import ToolFailureKind
 from agent_core.domain.web import WebPage, WebProviderError, WebSearchRequest, WebSearchResult
+from agent_core.tools.messages import message_for
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
 from tests.contract.support import tool_context
@@ -186,6 +187,13 @@ async def test_provider_failures_keep_their_stable_kind_and_retryability(
         assert result.failure.external_text == '{"provider":"fake-web"}'
         assert result.structured == {"provider": "fake-web"}
         assert result.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+def test_provider_rejection_message_explains_the_likely_refusal() -> None:
+    assert message_for("tool.web.provider_rejected") == (
+        "The selected web provider rejected this request; the target or requested capability "
+        "may be unsupported or blocked."
+    )
 
 
 @dataclass

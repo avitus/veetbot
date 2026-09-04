@@ -22,6 +22,7 @@ async def post_json(
     credential_name: str,
     url: str,
     payload: Mapping[str, object],
+    auth_failure_statuses: frozenset[int] = frozenset({401, 403}),
 ) -> dict[str, Any]:
     """POST one bounded JSON request without exposing upstream response text."""
 
@@ -32,6 +33,7 @@ async def post_json(
         method="POST",
         url=url,
         payload=payload,
+        auth_failure_statuses=auth_failure_statuses,
     )
 
 

@@ -1360,7 +1360,11 @@ is `modify_arguments` as **Needs correction**. When the immediately following
 invocation of the same tool completes, that earlier card becomes **Corrected and
 retried**. The original `tool.call.failed` event and its result remain intact;
 an intervening activity or a non-argument failure is never presented as
-recovered.
+recovered. Presentation preserves that same durable record while using its
+more specific outcome vocabulary: `unavailable` renders as **Unavailable**, and
+`tool.web.provider_rejected` renders as **Rejected** even though the executed
+invocation remains a failed invocation under the tool-system contract. The
+downloadable terminal client applies the same labels to its activity line.
 
 ## Approvals
 

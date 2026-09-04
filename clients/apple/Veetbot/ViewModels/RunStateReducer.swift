@@ -28,6 +28,8 @@ public enum ToolActivityStatus: String, Sendable {
     case completed
     case needsCorrection = "needs correction"
     case correctedAndRetried = "corrected and retried"
+    case rejected
+    case unavailable
     case failed
     case denied
     case uncertain
@@ -407,8 +409,8 @@ public final class RunStateReducer: ObservableObject {
             decode(ToolResultPayload.self, from: $0)
         })
         let presentedStatus =
-            status == .failed && result?.needsArgumentCorrection == true
-            ? ToolActivityStatus.needsCorrection
+            status == .failed
+            ? result?.failurePresentationStatus ?? status
             : status
         ensureTool(
             callID: callID,
@@ -599,18 +601,34 @@ private struct ToolResultPayload: Decodable {
     let isError: Bool
     let trust: TrustLabel?
 
-    var needsArgumentCorrection: Bool {
+    private var outcome: ToolOutcomePayload? {
         guard
             isError,
             let text = content.compactMap(\.text).first,
-            let data = text.data(using: .utf8),
-            let outcome = try? JSONDecoder.server.decode(ToolOutcomePayload.self, from: data)
-        else { return false }
-        return outcome.status == "failed"
+            let data = text.data(using: .utf8)
+        else { return nil }
+        return try? JSONDecoder.server.decode(ToolOutcomePayload.self, from: data)
+    }
+
+    var failurePresentationStatus: ToolActivityStatus? {
+        guard let outcome else { return nil }
+        if outcome.status == "failed"
             && outcome.retryable
             && outcome.remediation == "modify_arguments"
             && (outcome.reasonCode == "tool.arguments_invalid"
                 || outcome.reasonCode.hasPrefix("tool.invalid_arguments."))
+        {
+            return .needsCorrection
+        }
+        if outcome.reasonCode == "tool.web.provider_rejected" {
+            return .rejected
+        }
+        switch outcome.status {
+        case "unavailable": return .unavailable
+        case "uncertain": return .uncertain
+        case "denied": return .denied
+        default: return nil
+        }
     }
 
     enum CodingKeys: String, CodingKey {
