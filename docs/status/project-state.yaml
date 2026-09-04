@@ -619,8 +619,40 @@ milestones:
       - temporal entity graphs, persona editing, and global consolidation
       - a public memory-write API
     open_items:
-      - Run hosted CI and the CodeRabbit review loop on the final head
+      - >-
+        Run hosted CI and the CodeRabbit review loop on the final head
+      - >-
+        Re-evaluate formation@9 under distillation-scorer@3 on the deploying tree and rebundle its artifact; formation@10 serves the tuple until then
+      - >-
+        Author a frozen holdout corpus, never edited after observing model output, and require it before a formation@9 artifact activates (ADR-0087)
+      - >-
+        Decide how anticipation obtains a cue on single-segment consolidations, where the blinded prefix is empty by construction
     evidence:
+      - check: independent review of the formation@9 branch (2026-09-04)
+        outcome: passed_locally
+        detail: >-
+          A staff-level review of 6082006 reproduced eight release-blocking
+          defects on the deployed tree, and every one now has a regression
+          test and a fix (ADR-0087): corrections are formed only as retractions
+          that supersede the belief they name and never create one, through the
+          provider's new polarity field and the fallback's own recognition; a
+          forty-kilobyte turn no longer crashes consolidation because the
+          episode narrative bound covers any single API message; the scorer,
+          now distillation-scorer@3, compares polarity, counts, large numbers,
+          and shared directional markers, so tea-over-coffee never equals
+          coffee-over-tea and one hundred miles never equals two hundred;
+          represented-clause verification applies the same floor, so a
+          correction cannot be labelled already known; publication requires a
+          seeded case whose restated clause was verifiably represented across a
+          segment boundary; a retryable provider failure schedules a bounded
+          re-pass over the consumed range after the fallback completes; and
+          the fallback resolves a pronoun only to the adjacent clause. The
+          runtime combiner keeps contradictions apart, the anticipation prefix
+          is bounded, the bundle test checks build-ref ancestry, and the
+          artifact schema refuses an implausible cost. The 2026-09-03
+          formation@9 artifact was published under the superseded scorer and
+          is withdrawn; formation@10 serves the production tuple until the
+          re-evaluation above passes.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-
@@ -1000,7 +1032,8 @@ readiness:
     distillation, as a sixth parallel workstream (ADR-0077), explicitly
     accepting some provisional false positives in exchange for materially
     higher useful recall and evidence-based forgetting; adaptive-memory-
-    distillation.md declares its twenty-four `gate.memory.*` entries.
+    distillation.md declared twenty-four `gate.memory.*` entries, thirty-one
+    after ADR-0086 and ADR-0087.
     On 2026-09-01 the owner authorized Milestone 22, the persona surface and
     curated belief promotion, as a seventh parallel workstream (ADR-0079),
     resolving the readiness review's last memory partial: a formed belief

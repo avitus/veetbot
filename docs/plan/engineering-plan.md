@@ -3628,16 +3628,16 @@ formation remained dramatically too timid for a personal agent. It is a
 parallel workstream and does not advance the verified sequential ceiling past
 unfinished Milestones 13 through 15. The detailed design is
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and
-ADR-0077; it declares twenty-four gates before implementation begins.
+ADR-0077; it declared twenty-four gates, thirty-one after ADR-0086 and ADR-0087.
 
 Implement:
 
 - Persisted, provenance-complete integrated episodes derived from ordered
   trusted user events and deleted with their session or principal.
 - `nemori-assisted-v1` at `formation@9`, making exactly three batched provider
-  calls per eligible consolidation: episode integration, causally blinded
-  anticipation from the prefix and existing memory, and prediction-error
-  distillation with exact source spans.
+  calls per planned segment of an eligible consolidation (ADR-0077): episode
+  integration, causally blinded anticipation from the prefix and existing
+  memory, and prediction-error distillation with exact source spans.
 - Direct observations and tentative hypotheses across ongoing projects, goals,
   roles, skills, interests, habits, constraints, recurring states,
   relationships, preferences, resources, and project facts.
@@ -3676,10 +3676,10 @@ Acceptance criteria:
   credential storage, PII storage beyond explicit policy, and cross-principal
   or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
   state, or sensitivity permitted by policy alone is not a rejection reason.
-- Every eligible provider consolidation makes exactly three batched calls and
-  every failed or structurally invalid stage falls back deterministically with
-  content-free audit metadata. Candidate-local invalidity rejects and counts
-  that proposal without discarding valid siblings.
+- Every eligible provider consolidation makes three batched calls per planned
+  segment; a failed or structurally invalid stage falls back deterministically
+  with content-free audit metadata, and a retryable failure also schedules a
+  bounded re-pass (ADR-0087); an invalid candidate is rejected and counted alone.
 - Repeated recall or citation cannot extend evidence lifetime; later supporting
   user evidence refreshes and may promote a hypothesis without duplicating the
   live belief.

@@ -114,9 +114,13 @@ profile, and compiled policy version. The corpus digest, scorer version, and
 build reference bind the artifact at bundle time instead: the bundle test
 refuses an artifact whose digest is not the checked-in corpus or whose scorer
 is not the current one, and the build reference names the commit the
-evaluated tree was committed as. A running process cannot compare that
-reference against itself, because the artifact is necessarily bundled in a
-later commit than the one it evaluated.
+evaluated tree was committed as and must be an ancestor of the tree that
+bundles it. A running process cannot compare that reference against itself,
+because the artifact is necessarily bundled in a later commit than the one it
+evaluated. A change to the scorer withdraws every artifact published under
+the previous scorer; the `formation@9` artifact of 2026-09-03 was withdrawn on
+2026-09-04 for that reason (ADR-0087), and `auto` selects `formation@10` for
+the production tuple until a re-evaluation under the current scorer passes.
 Until such evidence exists, `auto` keeps the newest evidenced provider-assisted
 policy, `formation@10` where its artifact matches and otherwise `formation@8`;
 `required` refuses rather than claiming an unevaluated policy is active. A
@@ -137,7 +141,9 @@ IntegratedEpisode
   source_event_ids           ordered unique positive sequences
   source_started_at          aware datetime
   source_ended_at            aware datetime
-  narrative                  bounded text
+  narrative                  bounded text; the bound holds the largest single
+                             user message the API accepts plus one citation
+                             prefix per event of a full segment
   subjects                   ordered unique bounded strings
   integration_policy_version "episode-integration@1"
   derivation_key             sha256(policy + owner + session + source ids)
@@ -157,7 +163,10 @@ citations. Validation failure falls back to one deterministic episode whose
 narrative is the ordered source text joined under the same bounds.
 
 `IntegratedEpisodeStore` has `put`, `get`, `for_session`, and
-`delete_for_session`. `put` is idempotent on `derivation_key`; both in-memory
+`delete_for_session`. `put` is idempotent on `derivation_key`, and a pass that
+re-derives a key an earlier pass already stored under different content, as a
+provider re-pass does after the fallback, keeps the stored episode and records
+`derivation_conflict` rather than rewriting it or failing; both in-memory
 and PostgreSQL implementations run one contract. Principal and tenant erasure
 delete integrated episodes in the same transaction family as beliefs and
 formation audits. Because episodes are derived, rebuild never rewrites source
@@ -165,9 +174,10 @@ events and deletion never leaves the narrative behind.
 
 ## Three fixed batched calls
 
-One `formation@9` consolidation performs exactly three provider calls when it
-has at least one eligible new user event. No candidate, sentence, or category
-may create an additional call.
+One `formation@9` consolidation performs exactly three provider calls per
+planned segment when it has at least one eligible new user event, and most
+consolidations are one segment. No candidate, sentence, or category may create
+an additional call.
 
 ### Call 1: episode integration
 
@@ -234,7 +244,10 @@ order, so a consolidation makes exactly three calls per segment and never a
 candidate-level call. One anticipation request covers every episode of a
 segment, so its prefix is the user text before the segment's earliest episode
 and contains no episode's own evidence; each cue names the sequence before
-which its evidence begins. There is no cost
+which its evidence begins. The prefix keeps the most recent text under a bound
+of twice the segment byte limit, so a long consolidation's later segments do
+not resend the whole session; blinding is unaffected because nothing at or
+after the earliest episode is ever sent. There is no cost
 ceiling on the distiller; cost is recorded per stage and reported in evidence.
 
 A directly stated claim is not suppressed merely because a general model could
@@ -282,6 +295,16 @@ constraint/direct          User cannot take meetings on Fridays.
 Hypothesis renderers use uncertainty language (`likely`, `may`, or
 `tentatively`). A provider cannot turn `hypothesis` into an unqualified fact by
 choosing its own sentence.
+
+A candidate also carries `polarity`, `assert` or `retract`. A correction ("I
+don't drive my BMW anymore", "I gave up swimming", "I no longer take meetings
+on Fridays") may yield only a retraction: the provider names the subject of the
+belief it ends with polarity `retract`, the deterministic fallback recognizes
+the same forms itself, and local validation rejects an assertion that cites a
+correction clause as well as a retraction that cites none. At commit, a
+retraction supersedes the live belief under its conflict key and, when nothing
+live matches, is counted as `skipped_unmatched_retraction` and forms nothing.
+A correction can therefore update memory but never create it.
 
 ## Capacity and ranking
 
@@ -390,6 +413,13 @@ Formation rejects only the following trust-boundary failures before ranking:
 - a durable rejection, deletion, correction, or newer higher-authority belief
   forbids the candidate.
 
+A retryable provider failure does not lose evidence. `formation@9` completes
+the consolidation with its audited fallback and advances the watermark, then
+schedules a bounded provider re-pass over the same source range with the
+`formation@8` attempt limit and backoff; the re-pass re-reads that range,
+commits what the provider adds, resolves what the fallback already formed as
+the same source, and audits exhaustion after the last attempt.
+
 Sensitivity permitted by explicit policy is not itself a reason to reject a
 useful memory. It is classified and governed by the existing surface ceilings.
 Inference is not itself a reason
@@ -439,12 +469,17 @@ populated production store. At least one positive multi-event case and the
 rich production conversation run against a pool of at least twenty-five
 beliefs.
 
-Scoring is `distillation-scorer@2`. A belief matches a gold claim when its
+Scoring is `distillation-scorer@3`. A belief matches a gold claim when its
 closed fields agree, its subject names the gold conflict key, and its statement
 is equivalent: equal after normalization, or sharing three quarters of the
-combined content terms with the same negations and quantities and at most one
-term the gold lacks. Elaborations, negations, different counts, and sibling
-activities never match. The frozen `formation@7` and `formation@8` controls
+combined content terms with the same polarity, the same counts, the same large
+numbers when both carry one, the same object after every directional marker
+both share, and at most one term the gold lacks. Elaborations, negations,
+different counts or distances, reversed comparisons or origins, and sibling
+activities never match; a negation inside a subordinate circumstance
+qualifies a claim rather than denying it. The same compatibility floor decides
+whether a live memory represents a clause and whether two candidates in one
+batch are one memory. The frozen `formation@7` and `formation@8` controls
 cannot express the closed fields, so they are scored on statement equivalence
 alone and the lift threshold compares `formation@9` strict recall against that
 lenient control recall. The scorer version is recorded in every result and
@@ -503,11 +538,14 @@ Publication requires:
 - at least three quarters of the clauses the gold labels as evidence are formed
   or verifiably represented rather than labelled transient, unsafe, or not
   memory;
-- at least one positive case ran against a populated store;
+- at least one positive case ran against a populated store, and at least one
+  seeded case that restates a seeded belief across a segment boundary had that
+  clause verifiably represented by an anticipation attributed to the seed;
 - every eligible consolidation made exactly three calls per planned segment,
   and the artifact records the measured call and consolidation totals;
 - all lifecycle timing, promotion, and self-citation checks pass, and the
-  measured provider cost is recorded;
+  measured provider cost is recorded and below a sanity ceiling of one
+  thousand US dollars;
 - the exact version and provider tuple matches the artifact.
 
 The thresholds intentionally tolerate some provisional false positives. The
@@ -585,7 +623,8 @@ short units of work with idempotent derivation keys.
 ## Build sequence
 
 1. This design, ADR-0077, the project-state authorization, the milestone map,
-   readiness verdict, registry entries, and all twenty-four red gates. **M21.**
+   readiness verdict, registry entries, and all red gates: twenty-four at
+   authorization, thirty-one after ADR-0086 and ADR-0087. **M21.**
 2. Candidate, episode, evidence-clock, telemetry, and evidence-artifact domain
    values plus shared port contracts. **M21.**
 3. The in-memory episode store and `formation@9` deterministic fallback,
@@ -631,8 +670,10 @@ short units of work with idempotent derivation keys.
    permanent, protocol, or structural validation failure records only normalized
    metadata and completes with locally derived episodes and candidates. After
    structural validation, an invalid candidate is rejected and counted without
-   discarding valid siblings. Registered as `gate.memory.distill_fallback`,
-   case. **M21.**
+   discarding valid siblings. A retryable failure additionally schedules a
+   bounded provider re-pass over the consumed range, so an outage delays the
+   provider's contribution without discarding it. Registered as
+   `gate.memory.distill_fallback`, case. **M21.**
 7. **Rich direct evidence forms at high recall.** The personal-agent core
    statement forms `User is building a personal AI agent.` as a direct ongoing
    project with exact user provenance, and the production training conversation
@@ -690,8 +731,10 @@ short units of work with idempotent derivation keys.
     `gate.memory.uncertainty_rendered`, case. **M21.**
 20. **Corrections remain durable through the new pipeline.** A rejection,
     edit, retraction, or deletion cannot be recreated by episode integration,
-    distillation, retry, or replay. Registered as
-    `gate.memory.correction_durable_v3`, case. **M21.**
+    distillation, retry, or replay, and a stated correction retracts the
+    belief it names through the provider and the fallback alike without
+    creating one. Registered as `gate.memory.correction_durable_v3`, case.
+    **M21.**
 21. **The schema migration and backfill preserve history.** Clean and stepwise
     upgrades create episodes and new fields, bounded backfill gives every old
     belief valid conservative values without changing its statement,
@@ -713,9 +756,10 @@ short units of work with idempotent derivation keys.
     `auto` otherwise keeps the evidenced older policy and `required` refuses.
     Registered as `gate.memory.distill_activation_bound`, property. **M21.**
 25. **The comparative scorer cannot be fooled.** A belief that elaborates
-    beyond, negates, recounts, or names a sibling activity of a gold claim never
-    scores as a match, and a generic user subject never matches a specific
-    conflict key. Registered as `gate.memory.scorer_symmetric`, case. **M21.**
+    beyond, negates, recounts, reverses the direction of, or names a sibling
+    activity of a gold claim never scores as a match, and a generic user
+    subject never matches a specific conflict key. Registered as
+    `gate.memory.scorer_symmetric`, case. **M21.**
 26. **Comparative evidence runs against a populated store.** The corpus declares
     a seed pool of at least twenty-five prior beliefs, the rich production
     conversation and another multi-event case run against it, and the evaluator
@@ -729,10 +773,11 @@ short units of work with idempotent derivation keys.
     **M21.**
 28. **A represented clause is verified against the memory it cites.** A
     coverage unit marked represented counts only when the attributed live
-    memory asserts the same claim and is about that clause; otherwise it is
-    recorded as unverified and the stage completes partially rather than
-    trusting the label. Registered as
-    `gate.memory.coverage_dispositions_verified`, case. **M21.**
+    memory asserts the same claim and is about that clause with the same
+    polarity, count, number, and direction; otherwise it is recorded as
+    unverified and the stage completes partially rather than trusting the
+    label, so a correction can never be labelled away as already known.
+    Registered as `gate.memory.coverage_dispositions_verified`, case. **M21.**
 29. **Long batches segment into bounded three-call rounds.** A batch beyond one
     ledger's clause bound runs exactly three calls per segment, persists one
     episode set per segment, and records per-segment stage metrics; a segment's

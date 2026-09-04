@@ -38,25 +38,25 @@ cases (pets, diet, a project fact, and a goal) are the same shape of gap the
 frozen policy showed on an empty store, so the floor is met rather than
 exceeded, and that is stated here instead of rounded up.
 
-`openai-balanced-gpt-5.6-sol-default-formation9.json` is the active comparative
-evidence for Nemori-assisted `formation@9` on the same tuple. It was produced on
-2026-09-03 by `agent eval memory-distillation` under `distillation-scorer@2`
-against the 66-case formation-v3 corpus at commit
-`a904417ff95882cccc922095b02b1702849027f0`, the deployed `main` head, so its
-compiled policy version `default@19be675c1b3c+hb03f69cf` matches the running
-composition after the Milestone 24 device-channel policy rules changed it. Five
-cases run against a populated store: 97.7 percent direct and 100 percent
-hypothesis must-form recall, 94.8 percent benign precision, 100 percent
-evidence-disposition precision, a 65.4 percentage-point useful-recall lift over
-the leniently scored `formation@8` control, exactly three provider calls per
-segment (183 calls over 61 eligible consolidations), zero boundary failures,
-and USD 0.99 of provider cost. Automatic selection activates it for that exact
-tuple.
+No `formation@9` artifact is bundled. The artifact produced on 2026-09-03 at
+commit `a904417ff95882cccc922095b02b1702849027f0` under `distillation-scorer@2`
+(97.7 percent direct and 100 percent hypothesis must-form recall, 94.8 percent
+benign precision, a 65.4 percentage-point useful-recall lift, 183 calls over 61
+consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
+showed its scorer credited reversed comparisons and mismatched large numbers,
+its represented-clause check ignored polarity, and its populated-store gate
+never required anticipation to attribute anything (ADR-0087). The scorer is now
+`distillation-scorer@3`, the evidence schema is version 3 with a required
+`represented_case_count`, and the 67-case corpus carries a seeded case whose
+restated clause must be verifiably represented. Automatic selection therefore
+activates `formation@10` for the production tuple until `agent eval
+memory-distillation` is re-run on the tree that deploys and its artifact is
+bundled here.
 
 An earlier `formation@9` artifact was evaluated at commit `9013d20`, before the
 Milestone 24 policy rules merged, so its compiled policy version no longer
 matched the deployed composition and activation correctly refused it; it was
-replaced by this artifact. The `formation@8` control remains bound to the older
+replaced by the artifact of 2026-09-03, itself withdrawn above. The `formation@8` control remains bound to the older
 `default@8905b6f85895+hb03f69cf` policy for the same reason and no longer
 activated; its repair as `formation@10` is recorded in ADR-0086.
 
@@ -65,7 +65,9 @@ scorer equated negations, counts, supersets, and sibling activities, its corpus
 had been edited toward the implementation, every case ran against an empty
 store, and its build reference was an operator-typed label. A `formation@9`
 artifact may be bundled only when it carries `scorer_version`
-`distillation-scorer@2`, a forty-character commit `build_ref`, the digest of the
-checked-in corpus, at least one seeded case, the evidence-disposition precision,
-and the measured provider cost, all of which
-`tests/unit/test_release_evidence_bundle.py` checks against this tree.
+`distillation-scorer@3`, a forty-character commit `build_ref` that is an
+ancestor of the bundling tree, the digest of the checked-in corpus, at least
+one seeded case, at least one verifiably represented seeded case, the
+evidence-disposition precision, and the measured provider cost under the
+sanity ceiling, all of which `tests/unit/test_release_evidence_bundle.py` and
+the artifact schema check against this tree.

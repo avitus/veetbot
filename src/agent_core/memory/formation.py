@@ -82,6 +82,25 @@ SESSION_IDLE_SECONDS = 30
 TRACE_EXPIRY_SWEEP_LIMIT = 500
 PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
 PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
+
+
+def _provider_repass_floor(requests: list[EventEnvelope], watermark: int) -> int | None:
+    """The watermark a pending provider re-pass must read from, if it names one below."""
+
+    if not requests:
+        return None
+    latest = requests[-1]
+    floor = latest.payload.get("source_watermark_before")
+    if (
+        latest.payload.get("trigger") == "provider_retry"
+        and isinstance(floor, int)
+        and not isinstance(floor, bool)
+        and 0 <= floor < watermark
+    ):
+        return floor
+    return None
+
+
 WORKING_STATE_EVENT = "context.working_state.updated"
 # Who is speaking, in the order resolution trusts them: what the user said
 # outranks what the agent concluded, which outranks what an extractor guessed.
@@ -962,12 +981,75 @@ _EXPLICIT_EXPERIENCE = re.compile(
     re.IGNORECASE,
 )
 _AUTOMATIC_CORRECTION_CUE = re.compile(
-    r"\b(?:no\s+longer|do\s+not|don't|never|stopped|quit)\s+"
+    r"\b(?:no\s+longer|do\s+not|don't|never|stopped|quit|gave\s+up|given\s+up)\s+"
     r"(?:have|own|use|wear|drive|live|work|like|want|need|play|eat|drink|smoke|run|swim"
-    r"|bike|train|go)\b"
+    r"|bike|train|go|take|attend|practice|do|follow|teach|coach|study|read|watch|visit"
+    r"|cook|bake|lift|climb|ride|cycle|meditate|volunteer|commute)\b"
+    r"|\b(?:stopped|quit|gave\s+up|given\s+up)\s+[a-z]+ing\b"
     r"|\b(?:not|don't|no\s+longer)\b[^.!?;]{0,40}\banymore\b"
     r"|\b(?:old\s+memory|memory\s+saying)\b.*\b(?:wrong|incorrect)\b",
     re.IGNORECASE,
+)
+# A stated end to an activity: "I gave up swimming", "I stopped attending yoga",
+# "I no longer take meetings on Fridays". Ownership verbs are left to the
+# completed extractor, whose retraction the fallback passes through.
+_RETRACTION_LEAD = (
+    r"\bi\s+(?:no\s+longer|don't|do\s+not|have\s+stopped|stopped|have\s+quit|quit"
+    r"|gave\s+up|have\s+given\s+up)\s+"
+)
+_RETRACTED_ACTIVITY = re.compile(
+    _RETRACTION_LEAD
+    + r"(?P<verb>[a-z]+)(?:\s+(?P<object>[^,;]{1,80}?))?"
+    + r"(?:\s+(?:anymore|any\s+more|now|these\s+days))?\s*$",
+    re.IGNORECASE,
+)
+_RETRACTION_TRAILER = re.compile(r"\s+(?:anymore|any\s+more)(?=\.?$)", re.IGNORECASE)
+_NON_RETRACTABLE_VERBS = frozenset(
+    {
+        "believe",
+        "care",
+        "expect",
+        "feel",
+        "get",
+        "guess",
+        "know",
+        "like",
+        "mean",
+        "mind",
+        "need",
+        "remember",
+        "see",
+        "suppose",
+        "think",
+        "understand",
+        "want",
+        *_OWNERSHIP_VERBS,
+    }
+)
+_DETERMINERS = frozenset({"a", "an", "the", "my", "our", "this", "that", "these", "those", "it"})
+_RETRACTABLE_VERB_BASES = frozenset(
+    {
+        *_ACTIVITY_VERBS,
+        "attend",
+        "commute",
+        "coach",
+        "do",
+        "drink",
+        "eat",
+        "follow",
+        "go",
+        "jog",
+        "meditate",
+        "play",
+        "smoke",
+        "take",
+        "teach",
+        "travel",
+        "visit",
+        "volunteer",
+        "watch",
+        "work",
+    }
 )
 _LEADS_TEAM = re.compile(
     r"\bi\s+lead\s+(?:the|an?)\s+(?P<team>[^,;]{1,80}?\s+team)\b",
@@ -1093,6 +1175,30 @@ def split_source_clauses(text: str) -> list[str]:
     return clauses
 
 
+def _clause_starts(text: str, clauses: list[str]) -> list[int]:
+    """The offset at which each clause begins, in order; each is an exact substring."""
+
+    starts: list[int] = []
+    position = 0
+    for clause in clauses:
+        found = text.find(clause, position)
+        if found < 0:  # pragma: no cover - clauses are exact substrings of the text
+            found = position
+        starts.append(found)
+        position = found + len(clause)
+    return starts
+
+
+def _clause_ordinal(clause_starts: list[int], offset: int) -> int:
+    """The clause containing an offset; the first clause when nothing precedes it."""
+
+    ordinal = 0
+    for index, start in enumerate(clause_starts):
+        if start <= offset:
+            ordinal = index
+    return ordinal
+
+
 def _frequency_words(value: str) -> str:
     compact = " ".join(value.split())
     range_match = re.fullmatch(
@@ -1162,6 +1268,21 @@ _PRONOUN_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def _gerund_base(word: str) -> str | None:
+    """The base verb of a gerund ("attending" gives "attend"), or nothing."""
+
+    lowered = word.casefold()
+    known = {_gerund(verb): verb for verb in _RETRACTABLE_VERB_BASES}
+    if lowered in known:
+        return known[lowered]
+    if not lowered.endswith("ing") or len(lowered) < 6:
+        return None
+    base = lowered[:-3]
+    if base[-1] == base[-2] and base[-1] not in "aeiou":
+        base = base[:-1]
+    return base
+
+
 def _third_person(value: str) -> str:
     """Rewrite first-person pronouns so a rendered statement is about the user."""
 
@@ -1212,6 +1333,72 @@ def _legacy_evidence_clause(event: EventEnvelope, candidate: MemoryCandidate) ->
     return best[:_MAX_CLAUSE_CHARS]
 
 
+def _render_retraction(
+    event: EventEnvelope, clause: str, match: re.Match[str], scope: str
+) -> MemoryCandidate | None:
+    """Render "I gave up swimming" as a retraction of the swimming habit.
+
+    The statement is the user's own claim negated, the subject is the thing
+    given up, and the polarity tells consolidation to update rather than
+    create. A lead followed by a determiner or a verb of thought ("I don't
+    think", "I quit my job") is not an activity the fallback can name safely
+    and renders nothing.
+    """
+
+    verb = match.group("verb").casefold()
+    raw_object = " ".join((match.group("object") or "").split()).strip(_CLAUSE_STRIP)
+    if verb in _NON_RETRACTABLE_VERBS or verb in _DETERMINERS or verb in _DIRECTION_WORDS:
+        return None
+    base = _gerund_base(verb)
+    if base is None and verb.endswith("ing"):
+        return None
+    if base is None:
+        if verb not in _RETRACTABLE_VERB_BASES:
+            return None
+        base = verb
+    if raw_object and raw_object.split()[0].casefold() in _DETERMINERS - {"it"}:
+        subject = " ".join(raw_object.split()[1:])
+    else:
+        subject = raw_object
+    if raw_object and raw_object.casefold() in {"it", "that", "this"}:
+        return None
+    if not subject:
+        subject = _gerund(base)
+    rendered_object = f" {_third_person(raw_object)}" if raw_object else ""
+    statement = f"User no longer {_third_person_verb(base)}{rendered_object}."
+    body = statement.removeprefix("User ")
+    if _RESIDUAL_FIRST_PERSON.search(body) is not None or _REQUEST_SHAPED.search(body) is not None:
+        return None
+    try:
+        return MemoryCandidate(
+            belief_type=_belief_type_for_claim_kind(MemoryClaimKind.HABIT),
+            subject=subject[:MEMORY_SUBJECT_MAX_LENGTH],
+            statement=statement[:8192],
+            polarity=Polarity.RETRACT,
+            source_event_ids=[event.sequence],
+            model_confidence=0.65,
+            proposed_scope=scope,
+            proposed_portability=portability_ceiling(
+                _belief_type_for_claim_kind(MemoryClaimKind.HABIT)
+            ),
+            sensitivity_guess=Sensitivity.INTERNAL,
+            claim_kind=MemoryClaimKind.HABIT,
+            derivation=MemoryDerivation.DIRECT,
+            longevity=_DIRECT_LONGEVITY_BY_CLAIM_KIND[MemoryClaimKind.HABIT],
+            evidence_spans=[
+                EvidenceSpan(
+                    source_event_id=event.sequence,
+                    text=clause[match.start() : match.end()].strip(_CLAUSE_STRIP)[:8192],
+                )
+            ],
+        )
+    except ValueError:
+        return None
+
+
+_DIRECTION_WORDS = frozenset({"to", "for", "with", "at", "in", "on", "of", "up", "out"})
+
+
 class HighRecallCandidateExtractor:
     """Deterministic formation@9 fallback with broad ongoing-activity recall.
 
@@ -1246,8 +1433,6 @@ class HighRecallCandidateExtractor:
         legacy = list(await self._legacy.extract(events, principal=principal, scope=scope))
         proposed: list[MemoryCandidate] = []
         for candidate in legacy:
-            if candidate.polarity is Polarity.RETRACT:
-                continue
             source = next(
                 (
                     by_sequence[source_id]
@@ -1259,6 +1444,23 @@ class HighRecallCandidateExtractor:
             if source is None:
                 continue
             clause = _legacy_evidence_clause(source, candidate)
+            if candidate.polarity is Polarity.RETRACT:
+                # A retraction is the one thing a correction clause may
+                # produce: it updates the belief it names and, at commit,
+                # never creates one. The completed extractor's rendering
+                # keeps the user's "anymore"; the fallback drops it.
+                proposed.append(
+                    candidate.model_copy(
+                        update={
+                            "subject": _RETRACTION_TRAILER.sub("", candidate.subject),
+                            "statement": _RETRACTION_TRAILER.sub("", candidate.statement),
+                            "evidence_spans": [
+                                EvidenceSpan(source_event_id=source.sequence, text=clause)
+                            ],
+                        }
+                    )
+                )
+                continue
             if contains_automatic_memory_correction(clause):
                 continue
             if candidate.statement.startswith("User has a ") and (
@@ -1326,6 +1528,7 @@ class HighRecallCandidateExtractor:
             claim_kind: MemoryClaimKind,
             evidence_spans: list[EvidenceSpan],
             derivation: MemoryDerivation = MemoryDerivation.DIRECT,
+            polarity: Polarity = Polarity.ASSERT,
         ) -> MemoryCandidate | None:
             """Build one grounded candidate, or nothing when the rendering is unsafe."""
 
@@ -1346,6 +1549,7 @@ class HighRecallCandidateExtractor:
                     belief_type=belief_type,
                     subject=compact_subject[:MEMORY_SUBJECT_MAX_LENGTH],
                     statement=compact_statement[:8192],
+                    polarity=polarity,
                     source_event_ids=[event.sequence],
                     model_confidence=0.35 if hypothesis else 0.65,
                     proposed_scope=scope,
@@ -1371,15 +1575,41 @@ class HighRecallCandidateExtractor:
             ):
                 continue
             text = _event_text(event)
-            event_subjects: list[tuple[MemoryClaimKind, str]] = []
+            clauses = split_source_clauses(text)
+            clause_starts = _clause_starts(text, clauses)
+            # Subjects are recorded with the clause that stated them so that a
+            # pronoun resolves only to the clause it follows: "that" after an
+            # unrecognized sentence refers to that sentence, not to whatever
+            # the fallback last happened to recognize.
+            event_subjects: list[tuple[MemoryClaimKind, str, int]] = []
+            current_clause = [-1]
 
             def note(
                 candidate: MemoryCandidate | None,
-                event_subjects: list[tuple[MemoryClaimKind, str]] = event_subjects,
+                event_subjects: list[tuple[MemoryClaimKind, str, int]] = event_subjects,
+                current_clause: list[int] = current_clause,
             ) -> bool:
                 if candidate is not None:
-                    event_subjects.append((candidate.claim_kind, candidate.subject))
+                    event_subjects.append(
+                        (candidate.claim_kind, candidate.subject, current_clause[0])
+                    )
                 return append(candidate)
+
+            def adjacent_subjects(
+                kinds: frozenset[MemoryClaimKind],
+                event_subjects: list[tuple[MemoryClaimKind, str, int]] = event_subjects,
+                current_clause: list[int] = current_clause,
+            ) -> str | None:
+                """The latest subject of a wanted kind from this clause or the one before."""
+
+                return next(
+                    (
+                        subject
+                        for claim_kind, subject, ordinal in reversed(event_subjects)
+                        if claim_kind in kinds and ordinal >= current_clause[0] - 1
+                    ),
+                    None,
+                )
 
             for match in _ONGOING_BUILD.finditer(text):
                 activity = " ".join(match.group("activity").casefold().split())
@@ -1387,6 +1617,7 @@ class HighRecallCandidateExtractor:
                 if not raw_object or contains_automatic_memory_correction(match.group(0)):
                     continue
                 evidence = _exact_evidence(event, match.start("activity"), match.end("object"))
+                current_clause[0] = _clause_ordinal(clause_starts, match.start("activity"))
                 subject = re.sub(r"^(?:a|an|the)\s+", "", raw_object, flags=re.IGNORECASE)
                 rendered_activity = "building" if activity == "working on" else activity
                 if note(
@@ -1411,7 +1642,16 @@ class HighRecallCandidateExtractor:
                 ):
                     return proposed
 
-            for clause in split_source_clauses(text):
+            for clause_ordinal, clause in enumerate(clauses):
+                current_clause[0] = clause_ordinal
+                retraction_match = _RETRACTED_ACTIVITY.fullmatch(clause)
+                if retraction_match is not None:
+                    retracted = _render_retraction(event, clause, retraction_match, scope)
+                    if retracted is not None and append(retracted):
+                        return proposed
+                    # Whether or not it rendered, a correction clause forms
+                    # nothing else.
+                    continue
                 if contains_automatic_memory_correction(clause):
                     continue
 
@@ -1532,14 +1772,7 @@ class HighRecallCandidateExtractor:
                     value = " ".join(match.group("value").split()).strip(_CLAUSE_STRIP)
                     if _TRANSIENT_GOAL_VERB.match(value) is not None:
                         continue
-                    referent = next(
-                        (
-                            subject
-                            for claim_kind, subject in reversed(event_subjects)
-                            if claim_kind is MemoryClaimKind.ONGOING_PROJECT
-                        ),
-                        None,
-                    )
+                    referent = adjacent_subjects(frozenset({MemoryClaimKind.ONGOING_PROJECT}))
                     if referent is not None:
                         value = re.sub(
                             r"\bit\b", f"the {referent}", value, count=1, flags=re.IGNORECASE
@@ -1559,20 +1792,16 @@ class HighRecallCandidateExtractor:
                 for match in _IMPROVEMENT_QUESTION.finditer(clause):
                     raw_object = match.group("object").strip(_CLAUSE_STRIP)
                     if raw_object.casefold() in {"that", "it", "this"}:
-                        referent = next(
-                            (
-                                subject
-                                for claim_kind, subject in reversed(event_subjects)
-                                if claim_kind
-                                in {
+                        referent = adjacent_subjects(
+                            frozenset(
+                                {
                                     MemoryClaimKind.HABIT,
                                     MemoryClaimKind.ONGOING_PROJECT,
                                     MemoryClaimKind.RECURRING_STATE,
                                     MemoryClaimKind.RESOURCE,
                                     MemoryClaimKind.PROJECT_FACT,
                                 }
-                            ),
-                            None,
+                            )
                         )
                         if referent is None:
                             continue
@@ -2541,6 +2770,16 @@ class GovernedMemoryService:
                 else since_watermark
             )
             events = await uow.events.list_after(session_id, watermark, self._principal)
+            pending_requests = [
+                event for event in events if event.event_type == "memory.formation.requested"
+            ]
+            # A formation@9 consolidation completes with its fallback and moves
+            # the watermark, so a provider re-pass names the range it must read
+            # again; the request itself sits above the watermark and is what
+            # made the session due.
+            repass_floor = _provider_repass_floor(pending_requests, watermark)
+            if since_watermark is None and repass_floor is not None:
+                events = await uow.events.list_after(session_id, repass_floor, self._principal)
         extracted = await self._extractor.extract(
             events,
             principal=self._principal,
@@ -2575,12 +2814,9 @@ class GovernedMemoryService:
             )
         by_sequence = {event.sequence: event for event in events}
         after = max((event.sequence for event in events), default=watermark)
-        formation_requests = [
-            event for event in events if event.event_type == "memory.formation.requested"
-        ]
         retry_attempts = [
             attempt
-            for event in formation_requests
+            for event in pending_requests
             if event.payload.get("trigger") == "provider_retry"
             and isinstance((attempt := event.payload.get("attempt_number")), int)
             and 1 <= attempt <= PROVIDER_MAX_ATTEMPTS
@@ -2590,12 +2826,20 @@ class GovernedMemoryService:
         if retry_attempts:
             effective_trigger = "provider_retry"
             current_attempt = max(retry_attempts)
-        should_retry = (
-            self._policy_version != NEMORI_FORMATION_POLICY_VERSION
-            and since_watermark is None
+        retryable_failure = (
+            since_watermark is None
             and provider_failure is not None
             and provider_failure.retryable
             and current_attempt < PROVIDER_MAX_ATTEMPTS
+        )
+        # The completed provider policies hold their watermark and retry the
+        # whole consolidation. formation@9 instead completes with its audited
+        # fallback now and schedules a bounded re-pass over the same evidence,
+        # so an outage delays the provider's contribution without discarding
+        # either the fallback's memories or the evidence the provider missed.
+        should_retry = retryable_failure and self._policy_version != NEMORI_FORMATION_POLICY_VERSION
+        should_repass = (
+            retryable_failure and self._policy_version == NEMORI_FORMATION_POLICY_VERSION
         )
 
         def no_work(at_watermark: int) -> ConsolidationResult:
@@ -2671,6 +2915,24 @@ class GovernedMemoryService:
                             else "rejected_injection"
                         ] += 1
                         continue
+                    if (
+                        self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                        and candidate.polarity is Polarity.RETRACT
+                        and authority is not MemoryAuthority.USER
+                    ):
+                        # A correction may update the belief it names and
+                        # never create one: with nothing live to retract,
+                        # the candidate is counted and dropped.
+                        related = await uow.memories.related(
+                            self._principal.tenant_id,
+                            self._principal.principal_id,
+                            " ".join(candidate.subject.split()),
+                            candidate.belief_type,
+                        )
+                        if not any(current.polarity is Polarity.ASSERT for current in related):
+                            rejected += 1
+                            decisions["skipped_unmatched_retraction"] += 1
+                            continue
                     source_events = [
                         event
                         for sequence in candidate.source_event_ids
@@ -2747,7 +3009,10 @@ class GovernedMemoryService:
                 if not should_retry:
                     await self._nominate_persona_candidates(uow, beliefs, consolidation_id)
                 watermark_after = watermark if should_retry else after
-                if should_retry:
+
+                async def schedule_provider_retry(
+                    uow: RepositoryUnitOfWork, source_before: int
+                ) -> None:
                     assert provider_failure is not None
                     next_attempt = current_attempt + 1
                     retry_at = self._clock.now() + timedelta(
@@ -2771,7 +3036,7 @@ class GovernedMemoryService:
                                 "trigger": "provider_retry",
                                 "attempt_number": next_attempt,
                                 "not_before": retry_at.isoformat(),
-                                "source_watermark_before": watermark,
+                                "source_watermark_before": source_before,
                                 "source_watermark_after": after,
                                 "failure_kind": provider_failure.failure_kind,
                             },
@@ -2781,10 +3046,17 @@ class GovernedMemoryService:
                             ),
                         )
                     )
+
+                if should_retry:
+                    await schedule_provider_retry(uow, watermark)
                 else:
                     await uow.memories.set_consolidation_watermark(
                         session_id, self._principal, after
                     )
+                    if should_repass:
+                        await schedule_provider_retry(
+                            uow, watermark if repass_floor is None else repass_floor
+                        )
                     if (
                         since_watermark is None
                         and provider_failure is not None

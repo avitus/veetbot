@@ -35,7 +35,7 @@ title: Current Milestone
   creation for all four recurring calendar kinds. Milestone 21 — adaptive
   memory distillation — is specified by
   [adaptive-memory-distillation.md](adaptive-memory-distillation.md) with
-  twenty-nine gates and is a sixth parallel workstream, adding integrated
+  thirty-one gates and is a sixth parallel workstream, adding integrated
   episodes, high-recall direct and hypothesis formation, and evidence-based
   forgetting. Milestone 22 — the persona surface and curated belief
   promotion — is specified by [persona-surface.md](persona-surface.md) with
@@ -231,7 +231,7 @@ Milestone 20 reuses the same design and gate area under ADR-0073, adding six
 gates for calendar recurrence and recurring conversational creation.
 Milestone 21's
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and ADR-0077
-add twenty-nine `gate.memory.*` entries for integrated episodes, high-recall
+add thirty-one `gate.memory.*` entries for integrated episodes, high-recall
 formation, evidence-based forgetting, comparative evidence, and activation.
 Milestone 22's [persona-surface.md](persona-surface.md) and ADR-0079 landed
 with that milestone's authorization on 2026-09-01, adding fourteen
@@ -329,7 +329,7 @@ its five new `gate.schedule.*` entries plus the plan's acceptance criteria and
 the [scheduling design](scheduling.md#model-callable-creation). Milestone 20's
 contract is its six new `gate.schedule.*` entries plus the plan's acceptance
 criteria and the same scheduling design.
-Milestone 21's contract is its twenty-nine new `gate.memory.*` entries plus the
+Milestone 21's contract is its thirty-one new `gate.memory.*` entries plus the
 plan's acceptance criteria and the
 [adaptive-memory-distillation design](adaptive-memory-distillation.md).
 Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
@@ -396,7 +396,7 @@ head, and the final CodeRabbit review is clean. Because it is a parallel
 workstream, completion does not advance the verified gate ceiling past the
 sequential milestones.
 
-Milestone 21 completes when its twenty-nine gates and the cumulative registry
+Milestone 21 completes when its thirty-one gates and the cumulative registry
 pass, comparative `formation@7`/`formation@8`/`formation@9` evidence for the
 intended production tuple is published, all relevant local, PostgreSQL, and
 hosted lanes pass on the final head, and the final CodeRabbit review is clean.

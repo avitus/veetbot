@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -35,6 +36,15 @@ class MemoryStatus(StrEnum):
 LIVE_MEMORY_STATUSES: tuple[MemoryStatus, ...] = (MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL)
 LIFECYCLE_POLICY_VERSION = "lifecycle@2"
 INTEGRATED_EPISODE_MAX_SUBJECTS = 64
+# The lossless fallback episode cites every owned event of its segment on one
+# line each, and segmentation never splits an event, so this must hold the
+# largest single user message the public API accepts (a one-mebibyte body)
+# plus a citation prefix per line of a full segment. A forty-kilobyte turn
+# once failed here and took the whole consolidation down with it.
+INTEGRATED_EPISODE_NARRATIVE_MAX_LENGTH = 2**20 + 2**16
+# A whole comparative evaluation costs about a dollar; an artifact claiming a
+# thousand times that describes a run nobody made, not a run to activate on.
+MAXIMUM_DISTILLATION_EVIDENCE_COST_USD = Decimal("1000")
 MEMORY_SUBJECT_MAX_LENGTH = 512
 
 
@@ -155,7 +165,7 @@ class IntegratedEpisode(BaseModel):
     source_event_ids: list[PositiveInt] = Field(min_length=1, max_length=256)
     source_started_at: datetime
     source_ended_at: datetime
-    narrative: str = Field(min_length=1, max_length=32768)
+    narrative: str = Field(min_length=1, max_length=INTEGRATED_EPISODE_NARRATIVE_MAX_LENGTH)
     subjects: list[str] = Field(default_factory=list, max_length=INTEGRATED_EPISODE_MAX_SUBJECTS)
     integration_policy_version: Literal["episode-integration@1"] = "episode-integration@1"
     derivation_key: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -415,8 +425,8 @@ class MemoryDistillationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[2] = 2
-    scorer_version: Literal["distillation-scorer@2"]
+    schema_version: Literal[3] = 3
+    scorer_version: Literal["distillation-scorer@3"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
     model_policy: str = Field(min_length=1)
@@ -432,6 +442,10 @@ class MemoryDistillationEvidence(BaseModel):
     # Every positive case that ran against a populated store; zero would mean the
     # belief view, anticipation, and attributed redundancy were never exercised.
     seeded_case_count: int = Field(ge=1)
+    # Positive cases in which a seeded prior belief verifiably represented a
+    # clause the gold labels as already known; zero would mean anticipation
+    # never attributed a redundancy and the populated store proved nothing.
+    represented_case_count: int = Field(ge=1)
     direct_must_form_recall: float = Field(ge=0.95, le=1)
     hypothesis_must_form_recall: float = Field(ge=0.8, le=1)
     benign_precision: float = Field(ge=0.9, le=1)
@@ -466,6 +480,10 @@ class MemoryDistillationEvidence(BaseModel):
             self.consolidations_measured
         ):
             raise ValueError("measured provider calls fall short of one segment per consolidation")
+        if self.represented_case_count > self.seeded_case_count:
+            raise ValueError("represented cases exceed the seeded cases")
+        if Decimal(self.provider_cost_usd) > MAXIMUM_DISTILLATION_EVIDENCE_COST_USD:
+            raise ValueError("distillation evidence cost exceeds the sanity ceiling")
         return self
 
 
