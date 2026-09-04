@@ -256,8 +256,40 @@ async def test_recall_token_budget_binds_before_the_item_cap() -> None:
         await uow.memories.upsert_belief(memory())
     result = await retriever.recall(recall_query(budget_tokens=1), session_id=SESSION_ID)
     assert result.items == []
+    assert result.tokens == 0
     assert result.truncated is True
     assert "[m:" not in result.rendered
+
+
+async def test_recall_uses_the_complete_rendered_block_measurement() -> None:
+    _clock, factory, _service, retriever = await formation_stack()
+    records = [
+        memory(belief_id=614 + index).model_copy(
+            update={"subject": f"style-{index}", "store_position": index}
+        )
+        for index in range(1, 3)
+    ]
+    async with factory() as uow:
+        for record in records:
+            await uow.memories.upsert_belief(record)
+
+    measured: list[str] = []
+
+    def measure_rendered_tokens(rendered: str) -> int:
+        measured.append(rendered)
+        return 400 if rendered.count("[m:") == 1 else 600
+
+    result = await retriever.recall(
+        recall_query(budget_tokens=500),
+        session_id=SESSION_ID,
+        measure_rendered_tokens=measure_rendered_tokens,
+    )
+
+    assert len(result.items) == 1
+    assert result.tokens == 400
+    assert result.truncated is True
+    assert measured
+    assert all(value.startswith("<memory ") and value.endswith("</memory>") for value in measured)
 
 
 async def test_per_subject_cap_and_duplicate_collapse() -> None:

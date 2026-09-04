@@ -366,6 +366,11 @@ The session stores `schedule_id`, `schedule_revision`, `occurrence_id`, and
 instruction is appended as the session's first user event and seeds the run in
 the same transaction.
 
+`schedule_id` is a reserved platform metadata key. Public session creation
+rejects a caller-supplied value; `ScheduleMaterializer` is the trusted path that
+writes it, so downstream context planning can use its presence as scheduled-run
+provenance.
+
 Cross-occurrence continuity comes from the principal's governed long-term
 memory and knowledge stores, not from reusing a conversation session. Provider
 opaque continuation state never crosses occurrences.

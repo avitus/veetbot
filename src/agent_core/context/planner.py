@@ -20,8 +20,15 @@ from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.persona import render_persona
-from agent_core.domain.sessions import Session, project_scope
+from agent_core.domain.runs import RunKind
+from agent_core.domain.sessions import (
+    SESSION_RUN_KIND_METADATA_KEY,
+    SESSION_SCHEDULE_ID_METADATA_KEY,
+    Session,
+    project_scope,
+)
 from agent_core.domain.tools import ToolSpec
+from agent_core.memory.profiles import SnapshotProfile, SnapshotProfiles
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryRetriever
@@ -29,7 +36,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@4"
+BUILDER_VERSION = "context-builder@5"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
@@ -55,6 +62,7 @@ class EventContextPlanner:
         memory_retriever: MemoryRetriever | None = None,
         session_tool_filter: SessionToolFilter | None = None,
         attach_device_tools: DeviceToolAttach | None = None,
+        snapshot_profiles: SnapshotProfiles | None = None,
         cache_capacity: int = 1_024,
     ) -> None:
         if cache_capacity <= 0:
@@ -70,6 +78,9 @@ class EventContextPlanner:
         self._memory_retriever = memory_retriever
         self._session_tool_filter = session_tool_filter
         self._attach_device_tools = attach_device_tools
+        self._snapshot_profiles = (
+            SnapshotProfiles() if snapshot_profiles is None else snapshot_profiles
+        )
         self._allocator = ContextBudgetAllocator(config)
         self._cache_capacity = cache_capacity
         self._cache: OrderedDict[UUID, ContextPlan] = OrderedDict()
@@ -293,21 +304,45 @@ class EventContextPlanner:
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
+        model_id = f"{model.provider}:{model.model}"
+        base_prefix = build_prefix(agent, tools)
+        persona_prefix = build_prefix(agent, tools, persona=persona_text)
+        catalog_prefix = build_prefix(agent, tools, catalog_metadata, persona=persona_text)
         memory_config = classes.get("memory_snapshot")
         if self._memory_retriever is not None and not isinstance(memory_config, dict):
             raise ValueError("memory-snapshot context configuration must be a mapping")
         if self._memory_retriever is None:
             snapshot = None
+            memory_token_cap = 0
         else:
             assert isinstance(memory_config, dict)
+            snapshot_profile = self._snapshot_profile(session, memory_config)
+            memory_token_cap = min(
+                snapshot_profile.max_tokens,
+                max(
+                    1,
+                    int(model.limits.context_window_tokens * snapshot_profile.max_window_ratio),
+                ),
+            )
+
+            def measure_memory_tokens(rendered: str) -> int:
+                candidate_prefix = build_prefix(
+                    agent,
+                    tools,
+                    catalog_metadata,
+                    rendered,
+                    persona=persona_text,
+                )
+                return self._estimator.estimate(candidate_prefix[len(catalog_prefix) :], model_id)
+
             snapshot = await self._memory_retriever.recall(
                 RecallQuery(
                     tenant_id=principal.tenant_id,
                     principal_id=principal.principal_id,
                     current_scope=project_scope(session.metadata),
                     profile=RecallProfile.CORE,
-                    budget_tokens=int(memory_config["max_tokens"]),
-                    max_items=int(memory_config["max_items"]),
+                    budget_tokens=memory_token_cap,
+                    max_items=snapshot_profile.max_items,
                     min_score=0.1,
                     sensitivity_ceiling=Sensitivity.RESTRICTED,
                     # Beliefs the persona row already carries never occupy a
@@ -316,13 +351,10 @@ class EventContextPlanner:
                 ),
                 session_id=session.id,
                 moment=RecallMoment.SNAPSHOT.value,
+                measure_rendered_tokens=measure_memory_tokens,
             )
         memory_snapshot = "" if snapshot is None or not snapshot.items else snapshot.rendered
         prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot, persona=persona_text)
-        base_prefix = build_prefix(agent, tools)
-        persona_prefix = build_prefix(agent, tools, persona=persona_text)
-        catalog_prefix = build_prefix(agent, tools, catalog_metadata, persona=persona_text)
-        model_id = f"{model.provider}:{model.model}"
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
         # The persona row sits at index 2 of the full prefix when present;
@@ -362,7 +394,7 @@ class EventContextPlanner:
             raise ValueError("skill-catalog context configuration must be a mapping")
         if skill_catalog_tokens > int(skill_config["max_tokens"]):
             raise ContextOverflow("context prefix class skill_catalog exceeds its cap")
-        if isinstance(memory_config, dict) and memory_tokens > int(memory_config["max_tokens"]):
+        if isinstance(memory_config, dict) and memory_tokens > memory_token_cap:
             raise ContextOverflow("context prefix class memory_snapshot exceeds its cap")
         encoded_prefix = prefix_bytes(prefix, tools)
         prefix_tokens = (
@@ -378,7 +410,11 @@ class EventContextPlanner:
             raise ValueError("context prefix configuration must be a mapping")
         if prefix_tokens > int(prefix_config["ceiling_tokens"]):
             raise ContextOverflow("context frozen prefix exceeds its aggregate cap")
-        budget = self._allocator.allocate(model, prefix_tokens=prefix_tokens)
+        budget = self._allocator.allocate(
+            model,
+            prefix_tokens=prefix_tokens,
+            memory_snapshot_tokens=memory_token_cap,
+        )
         schema_bytes = canonical_json_bytes([tool.model_dump(mode="json") for tool in tools])
         plan = ContextPlan(
             session_id=session.id,
@@ -406,6 +442,23 @@ class EventContextPlanner:
             created_at=self._clock.now(),
         )
         return await self._append(plan, event_type, reason)
+
+    def _snapshot_profile(
+        self,
+        session: Session,
+        interactive_config: Mapping[str, object],
+    ) -> SnapshotProfile:
+        if session.metadata.get(SESSION_RUN_KIND_METADATA_KEY) == RunKind.DELEGATED.value:
+            return self._snapshot_profiles.child
+        if SESSION_SCHEDULE_ID_METADATA_KEY in session.metadata:
+            return self._snapshot_profiles.async_
+        return SnapshotProfile.model_validate(
+            {
+                "max_items": interactive_config["max_items"],
+                "max_tokens": interactive_config["max_tokens"],
+                "max_window_ratio": interactive_config["max_window_ratio"],
+            }
+        )
 
     async def _append(self, plan: ContextPlan, event_type: str, reason: str) -> ContextPlan:
         candidate = plan

@@ -154,7 +154,9 @@ async def test_due_schedule_materializes_one_complete_ordinary_run() -> None:
         assert occurrence.session_id is not None
         assert occurrence.run_id is not None
         async with composition.uow_factory() as uow:
+            session = await uow.sessions.get(occurrence.session_id, _principal())
             run = await uow.runs.get(occurrence.run_id, _principal())
+            assert session.metadata["schedule_id"] == str(SCHEDULE_ID)
             assert run.status is RunStatus.QUEUED
             assert run.priority == 10
             assert run.principal_scopes == {"memory.read"}

@@ -381,6 +381,11 @@ sessions already do — with metadata a client can label or fold. Hiding them
 by default was considered and rejected: a child that ends suspended on an
 approval would become invisible.
 
+The child session's `run_kind` is a reserved platform metadata key. Public
+session creation rejects a caller-supplied value; `DelegationMaterializer` is
+the trusted path that writes it, so downstream context planning can use it as
+delegated-run provenance.
+
 ## The delegation ledger
 
 The plan requires a separate trace and artifact references rather than a

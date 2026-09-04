@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -14,11 +15,14 @@ from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
+from agent_core.context.rendering import build_prefix
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.memory import MemoryCorrection, RecallQuery, RecallResult
-from agent_core.domain.messages import ResolvedModel
+from agent_core.domain.messages import ModelLimits, ResolvedModel
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
+from agent_core.memory.profiles import SnapshotProfiles
 from agent_core.tools.registry import StaticToolRegistry
+from tests.contract.memory_fixtures import formation_stack, memory
 from tests.contract.support import NOW, agent, memory_stack, principal, session
 
 
@@ -199,6 +203,71 @@ async def test_context_planner_does_not_require_snapshot_config_without_memory()
     assert created.budget.retrieved_context_tokens == 2_000
 
 
+async def test_context_planner_sizes_snapshot_from_final_model_visible_bytes() -> None:
+    clock, factory, _service, retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        memory_retriever=retriever,
+    )
+    model = ResolvedModel(
+        provider="fake",
+        model="scripted",
+        limits=ModelLimits(context_window_tokens=200_000),
+        resolved_at=NOW,
+    )
+    records = [
+        memory(
+            belief_id=600 + index,
+            statement=(
+                f"Standing news briefing preference {index}: "
+                + "compare primary reporting with independent corroboration " * 7
+            ),
+        ).model_copy(update={"subject": f"news preference {index}", "store_position": index})
+        for index in range(1, 16)
+    ]
+    async with factory() as uow:
+        for record in records:
+            await uow.memories.upsert_belief(record)
+
+    plan = await planner.plan(session(), agent(), principal(), model)
+
+    assert plan.memory_snapshot
+    assert plan.snapshot_id is not None
+    prefix = build_prefix(
+        agent(),
+        plan.tool_specs,
+        plan.skill_catalog,
+        plan.memory_snapshot,
+        persona=plan.persona_text,
+    )
+    prefix_without_memory = build_prefix(
+        agent(),
+        plan.tool_specs,
+        plan.skill_catalog,
+        persona=plan.persona_text,
+    )
+    memory_tokens = ConservativeTokenEstimator().estimate(
+        prefix[len(prefix_without_memory) :], plan.model_id
+    )
+    assert memory_tokens <= int(config["classes"]["memory_snapshot"]["max_tokens"])
+    async with factory() as uow:
+        trace = await uow.traces.get(plan.snapshot_id, principal())
+    assert trace.rendered == plan.memory_snapshot
+    assert trace.returned == [item.belief_id for item in trace.beliefs]
+    assert 0 < len(trace.returned) < len(records)
+    assert set(trace.dropped_for_budget) == {record.id for record in records} - set(trace.returned)
+    assert plan.prefix_tokens <= int(config["prefix"]["ceiling_tokens"])
+
+
 async def test_context_planner_rotates_when_the_persona_changes() -> None:
     clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(
@@ -340,7 +409,9 @@ class _SpyRetriever:
         turn_id: UUID | None = None,
         moment: str = "in_turn",
         surface_id: str = "private",
+        measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
+        del measure_rendered_tokens
         self.queries.append(query)
         return RecallResult(
             items=[],
@@ -350,6 +421,82 @@ class _SpyRetriever:
             trace_id=UUID(int=999),
             watermark=0,
         )
+
+
+@pytest.mark.parametrize(
+    (
+        "metadata",
+        "context_window_tokens",
+        "snapshot_profiles",
+        "expected_items",
+        "expected_tokens",
+    ),
+    [
+        ({}, 200_000, None, 40, 1_500),
+        ({"schedule_id": str(UUID(int=701))}, 200_000, None, 80, 3_000),
+        ({"run_kind": "delegated"}, 200_000, None, 15, 500),
+        ({"schedule_id": str(UUID(int=702))}, 50_000, None, 80, 1_000),
+        (
+            {"schedule_id": str(UUID(int=703))},
+            200_000,
+            SnapshotProfiles.model_validate(
+                {"async": {"max_items": 23, "max_tokens": 777, "max_window_ratio": 0.5}}
+            ),
+            23,
+            777,
+        ),
+    ],
+)
+async def test_context_planner_selects_the_session_snapshot_profile(
+    metadata: dict[str, str],
+    context_window_tokens: int,
+    snapshot_profiles: SnapshotProfiles | None,
+    expected_items: int,
+    expected_tokens: int,
+) -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    spy = _SpyRetriever()
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        memory_retriever=spy,
+        snapshot_profiles=snapshot_profiles,
+    )
+    model = ResolvedModel(
+        provider="fake",
+        model="scripted",
+        limits=ModelLimits(context_window_tokens=context_window_tokens),
+        resolved_at=NOW,
+    )
+
+    plan = await planner.plan(
+        session().model_copy(update={"metadata": metadata}),
+        agent(),
+        principal(),
+        model,
+    )
+
+    assert spy.queries[0].max_items == expected_items
+    assert spy.queries[0].budget_tokens == expected_tokens
+    assert plan.budget.retrieved_context_tokens == expected_tokens + 2_000
 
 
 async def test_context_planner_excludes_affirmed_beliefs_from_the_snapshot() -> None:

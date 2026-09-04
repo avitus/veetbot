@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -180,8 +181,9 @@ class _StaticMemoryRetriever:
         turn_id: UUID | None = None,
         moment: str = "in_turn",
         surface_id: str = "private",
+        measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
-        del query, session_id, run_id, turn_id, moment, surface_id
+        del query, session_id, run_id, turn_id, moment, surface_id, measure_rendered_tokens
         return RecallResult(
             items=[
                 RecalledBelief(
@@ -234,6 +236,7 @@ class _CountingMemoryRetriever(_StaticMemoryRetriever):
         turn_id: UUID | None = None,
         moment: str = "in_turn",
         surface_id: str = "private",
+        measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
         self.calls += 1
         if self._fail:
@@ -245,6 +248,7 @@ class _CountingMemoryRetriever(_StaticMemoryRetriever):
             turn_id=turn_id,
             moment=moment,
             surface_id=surface_id,
+            measure_rendered_tokens=measure_rendered_tokens,
         )
 
 

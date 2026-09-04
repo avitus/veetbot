@@ -22,7 +22,7 @@ from agent_core.domain.schedules import (
     ScheduleRevision,
     ScheduleState,
 )
-from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.sessions import SESSION_SCHEDULE_ID_METADATA_KEY, Session, SessionStatus
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import (
@@ -242,7 +242,7 @@ class ScheduleMaterializer:
                 status=SessionStatus.ACTIVE,
                 title=revision.title,
                 metadata={
-                    "schedule_id": str(schedule.id),
+                    SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),
                     "schedule_revision": revision.revision,
                     "schedule_occurrence_id": str(occurrence.id),
                     "nominal_fire_at": nominal.isoformat(),
