@@ -132,6 +132,23 @@ do not replace services used by other applications on the Droplet.
 Create separate deployment, application, and sandbox-execution identities plus
 the persistent paths:
 
+!!! warning "Current production host (verified 2026-09-03)"
+
+    The Droplet was not provisioned with the separate `veetbot-deploy`
+    identity below. CircleCI logs in as the `veetbot` service account: its key
+    is in `/home/veetbot/.ssh/authorized_keys`, `veetbot` owns `/opt/veetbot`
+    and `/opt/veetbot/shared/deploy.lock`, and the sudo contract is installed
+    for `veetbot`. Because that account is also the `User=` of the API, worker,
+    and maintenance units, it carries the deploy identity's Docker-group
+    membership into every application process, which is the boundary ADR-0067
+    decision 1 draws to keep application services away from the Docker socket.
+    Until the host is reconciled, read every `veetbot-deploy` below as
+    `veetbot` when operating the current Droplet, and treat "create the
+    `veetbot-deploy` account, move the CircleCI key and sudo contract to it,
+    and remove `veetbot` from the `docker` group" as the open operations item
+    that restores the documented boundary. The account name is not visible to
+    CI: `DEPLOY_USER` in the `veetbot-production` context selects it.
+
 ```bash
 sudo useradd --system --create-home --shell /bin/bash veetbot-deploy
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin veetbot
@@ -426,7 +443,7 @@ Create a restricted CircleCI context named `veetbot-production` with:
 | Variable | Value |
 | --- | --- |
 | `DEPLOY_HOST` | SSH hostname or IP for the Droplet |
-| `DEPLOY_USER` | Dedicated deploy account, normally `veetbot-deploy` |
+| `DEPLOY_USER` | Dedicated deploy account, `veetbot-deploy` once provisioned; `veetbot` on the current host |
 | `DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH known-hosts record verified out of band |
 | `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
 | `PRODUCTION_URL` | Optional public origin; defaults to `https://api.veetbot.com` |
@@ -585,7 +602,9 @@ Connect after the first automated delivery.
 
 ## Verification
 
-After the first successful pipeline, verify the active revision and services:
+After the first successful pipeline, verify the active revision and services.
+Substitute the account `DEPLOY_USER` names; on the current host that is
+`veetbot`, not `veetbot-deploy`:
 
 ```bash
 curl --fail --show-error --dump-header - --output /dev/null \

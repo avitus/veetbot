@@ -93,19 +93,23 @@ fresh PostgreSQL integration lane pass locally. Remaining:
 ### Milestone 21 — Adaptive memory distillation
 
 A sixth parallel workstream making memory formation materially less timid.
-Its twenty-nine gates cover integrated episodes, the fixed three-call
+Its thirty-one gates cover integrated episodes, the fixed three-call
 prediction-error pipeline, direct and hypothesis recall, evidence-based
-forgetting, persistence, comparative activation evidence, and the honesty of
+forgetting, persistence, comparative activation evidence, the honesty of
 that evidence: a scorer that cannot be fooled, a seeded evaluation store, a
 fallback that never fabricates, verified coverage dispositions, and bounded
-segmentation. The local implementation, static and contract suites, strict
+segmentation, and the repaired provider-assisted `formation@10` control with
+its explicit policy precedence (ADR-0086). The local implementation, static and contract suites, strict
 documentation build, and Apple package tests pass locally; the fresh
 PostgreSQL 16 integration lane passed in hosted CI on pull request 90
 (CircleCI build 2668); and the 2026-09-03 three-arm live production-tuple
 corpus under distillation-scorer@2 passed. The 2026-09-02 artifact was withdrawn
 because its scorer, corpus, empty store, and build reference could not
 support the numbers it carried; the replacement is bundled for immediate
-exact-tuple activation. Remaining:
+exact-tuple activation. On 2026-09-03 the deployed artifact was found bound
+to the pre-Milestone-24 policy version and was regenerated on the deployed
+tree; the bundle test now refuses that mismatch, and the starved
+`formation@8` artifact is withdrawn in favor of `formation@10`. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 

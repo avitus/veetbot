@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -11,10 +12,17 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from agent_core.adapters.determinism import FixedClock
+import agent_core.config as config_module
+from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.persistence.memory_repositories import _memory_values
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.bootstrap import build
+from agent_core.config import (
+    MemoryFormationPolicyPin,
+    MemoryProviderExtractionMode,
+    load_config_document,
+)
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
@@ -28,11 +36,14 @@ from agent_core.domain.memory import (
     MemoryLongevity,
     MemoryRecord,
     MemoryStatus,
+    ProviderExtractionEvaluationEvidence,
     RejectionKind,
     Sensitivity,
 )
 from agent_core.domain.messages import (
     FakeModelScript,
+    ModelLimits,
+    ModelPricing,
     ModelTransientError,
     ModelUsage,
     ResolvedModel,
@@ -65,9 +76,12 @@ from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.model_extraction import ModelAssistedCandidateExtractor
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
+    REPAIRED_PROVIDER_EXTRACTOR_VERSION,
+    REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
 )
 from agent_core.memory.retrieval import _score, render_memory
+from agent_core.policy.loader import load_ruleset_documents
 from tests.contract.memory_fixtures import (
     formation_stack,
     memory,
@@ -75,7 +89,8 @@ from tests.contract.memory_fixtures import (
     session_events,
     user_event,
 )
-from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
+from tests.contract.support import AGENT_ID, NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
+from tests.integration.m2_support import memory_settings
 
 
 def _candidate(**overrides: object) -> MemoryCandidate:
@@ -1619,6 +1634,43 @@ def test_semantic_duplicate_detection_merges_provider_paraphrases_only() -> None
         hyphenated_cross_kind_paraphrase,
     )
     assert _candidates_semantically_duplicate(specific_interest, generic_interest)
+    # Production formed both of these from one sentence of the 5x5 conversation:
+    # a digit range and a spelled-out range are the same count, and a light
+    # verb is not content, so they are one memory. A goal about the routine
+    # carries no count and stays separate.
+    routine_project = _candidate(
+        subject="5x5 strength training routine",
+        statement=(
+            "User currently follows the standard 5x5 strength training routine "
+            "2\u20133 times per week."
+        ),
+        claim_kind="ongoing_project",
+        source_event_ids=[2],
+        evidence_spans=[
+            {
+                "source_event_id": 2,
+                "text": "standard 5x5 strength training routine 2-3 times per week",
+            }
+        ],
+    )
+    routine_habit = routine_project.model_copy(
+        update={
+            "subject": "standard 5x5 strength training routine",
+            "statement": (
+                "User does the standard 5x5 strength training routine two to three times per week."
+            ),
+            "claim_kind": MemoryClaimKind.HABIT,
+        }
+    )
+    routine_goal = routine_project.model_copy(
+        update={
+            "subject": "standard 5x5 strength training routine improvement",
+            "statement": "User wants to improve their standard 5x5 strength training routine.",
+            "claim_kind": MemoryClaimKind.GOAL,
+        }
+    )
+    assert _candidates_semantically_duplicate(routine_project, routine_habit)
+    assert not _candidates_semantically_duplicate(routine_habit, routine_goal)
 
 
 @pytest.mark.parametrize(
@@ -2802,3 +2854,288 @@ async def test_anticipation_never_sends_sensitive_or_restricted_memories() -> No
                 if isinstance(content, TextPart):
                     assert "DAUGHTER_SENTINEL" not in content.text
                     assert "RESTRICTED_SENTINEL" not in content.text
+
+
+def _provider_evidence(
+    formation_policy_version: str,
+    *,
+    policy_version: str = "default@test",
+    build_ref: str = "test-build",
+    model_policy: str = "fake",
+) -> ProviderExtractionEvaluationEvidence:
+    repaired = formation_policy_version == REPAIRED_PROVIDER_FORMATION_POLICY_VERSION
+    return ProviderExtractionEvaluationEvidence(
+        extractor_version=(
+            REPAIRED_PROVIDER_EXTRACTOR_VERSION if repaired else "provider-assisted-v2"
+        ),
+        formation_policy_version=formation_policy_version,
+        model_policy=model_policy,
+        provider="fake",
+        model="scripted",
+        policy_profile="default",
+        policy_version=policy_version,
+        build_ref=build_ref,
+        corpus_sha256="a" * 64,
+        sample_count=25,
+        positive_case_count=21,
+        minimum_supported_case_count=17,
+        deterministic_supported_case_count=9,
+        provider_supported_case_count=18,
+        deterministic_supported_candidates=12,
+        provider_supported_candidates=20,
+        deterministic_fabricated_candidates=0,
+        provider_fabricated_candidates=0,
+        deterministic_policy_failures=0,
+        provider_policy_failures=0,
+        seeded_case_count=21 if repaired else 0,
+        evaluated_at=NOW,
+    )
+
+
+def _populated_store_response(source: int) -> str:
+    return json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "relationship",
+                    "subject": "daughter",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "my daughter",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.92,
+                    "proposed_portability": "contextual",
+                    "sensitivity_guess": "sensitive",
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+
+
+async def test_repaired_provider_policy_never_starves_on_a_populated_store() -> None:
+    """gate.memory.provider_budget_repaired.
+
+    On a store of sixty beliefs the frozen formation@8 control cannot afford one
+    output token and skips its call; formation@10 makes the call with the full
+    output ceiling, ranks its compact belief view by relevance to the batch
+    instead of recency, and sends only public or internal beliefs.
+    """
+
+    clock, factory, service, _retriever = await formation_stack()
+    seed = await user_event(factory, "Some earlier context the seeded beliefs cite.")
+    # Oldest first: recency alone would push the relevant belief out of a
+    # fifty-belief window, and the sensitive beliefs must never leave the store.
+    await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User's daughter started an astronomy club at her school last spring.",
+        subject="astronomy club",
+        scope="project-a",
+        source_event_ids=[seed],
+    )
+    for index in range(3):
+        await service.remember(
+            session_id=SESSION_ID,
+            run_id=None,
+            statement=f"User keeps the private ledger number {index} for the astronomy club.",
+            subject=f"private ledger {index}",
+            scope="project-a",
+            sensitivity=Sensitivity.SENSITIVE,
+            source_event_ids=[seed],
+        )
+    for index in range(56):
+        await service.remember(
+            session_id=SESSION_ID,
+            run_id=None,
+            statement=f"User files maintenance report {index} in the shared operations folder.",
+            subject=f"maintenance report {index}",
+            scope="project-a",
+            source_event_ids=[seed],
+        )
+    source = await user_event(factory, "The astronomy club was my daughter's idea.")
+    resolved = ResolvedModel(
+        provider="fake",
+        model="scripted",
+        policy_name="fake",
+        pricing=ModelPricing(input_per_mtok=Decimal("5.00"), output_per_mtok=Decimal("30.00")),
+        limits=ModelLimits(context_window_tokens=200_000, max_output_tokens=128_000),
+        resolved_at=NOW,
+    )
+
+    def extractor(
+        policy: str, provider: FakeModelProvider, first_id: int
+    ) -> ProviderAssistedCandidateExtractor:
+        return ProviderAssistedCandidateExtractor(
+            provider=provider,
+            resolved_model=resolved,
+            uow_factory=factory,
+            clock=clock,
+            ids=SequenceIdFactory(UUID(int=value) for value in range(first_id, first_id + 100)),
+            principal=principal(),
+            agent_id=AGENT_ID,
+            agent_version="1.0.0",
+            policy_profile="default",
+            policy_version="default@test",
+            evidence=_provider_evidence(policy),
+            fallback=formation.DeterministicCandidateExtractor(),
+            formation_policy_version=policy,
+        )
+
+    frozen_provider = FakeModelProvider(
+        FakeModelScript(turns=[ScriptedTurn(text=_populated_store_response(source))]), clock
+    )
+    await extractor(PROVIDER_FORMATION_POLICY_VERSION, frozen_provider, 7_000).extract(
+        await session_events(factory), principal=principal(), scope="project-a"
+    )
+    assert frozen_provider.requests == []
+    async with factory() as uow:
+        failed = await uow.process_events.list("memory.provider_extraction.failed")
+    assert [audit.payload["outcome"] for audit in failed] == ["cost_budget_exceeded"]
+
+    repaired_provider = FakeModelProvider(
+        FakeModelScript(turns=[ScriptedTurn(text=_populated_store_response(source))]), clock
+    )
+    candidates = await extractor(
+        REPAIRED_PROVIDER_FORMATION_POLICY_VERSION, repaired_provider, 7_200
+    ).extract(await session_events(factory), principal=principal(), scope="project-a")
+
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
+    request = repaired_provider.requests[0]
+    assert request.maximum_output_tokens == 16_384
+    assert request.metadata["formation_policy_version"] == "formation@10"
+    user_message = request.conversation[1]
+    assert isinstance(user_message, UserMessage)
+    text_part = user_message.content[0]
+    assert isinstance(text_part, TextPart)
+    prompt = text_part.text
+    payload = json.loads(prompt[prompt.index("{") : prompt.rindex("}") + 1])
+    related = payload["related_beliefs"]
+    assert 1 <= len(related) <= 50
+    assert related[0]["subject"] == "astronomy club"
+    assert all("private ledger" not in belief["statement"] for belief in related)
+    assert all("private ledger" not in belief["subject"] for belief in related)
+    async with factory() as uow:
+        completed = await uow.process_events.list("memory.provider_extraction.completed")
+    assert len(completed) == 1
+    audit = completed[0].payload
+    assert audit["formation_policy_version"] == "formation@10"
+    assert audit["extractor_version"] == REPAIRED_PROVIDER_EXTRACTOR_VERSION
+    assert audit["budget"]["maximum_output_tokens"] == 16_384
+    assert audit["selected_source_event_ids"] == [seed, source]
+    assert "private ledger" not in json.dumps(audit)
+
+
+def _runtime_policy_version() -> str:
+    settings = memory_settings()
+    return load_ruleset_documents(
+        load_config_document(settings, "policy/default.yaml"),
+        load_config_document(settings, "policy/hardline.yaml"),
+    ).policy_version
+
+
+async def _select_with(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    policies: tuple[str, ...],
+    pin: MemoryFormationPolicyPin | None,
+) -> dict[str, object]:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir(parents=True, exist_ok=True)
+    for index, policy in enumerate(policies):
+        if policy == "formation@9":
+            artifact = MemoryDistillationEvidence(
+                model_policy="fake-balanced",
+                provider="fake",
+                model="scripted",
+                policy_profile="default",
+                policy_version=_runtime_policy_version(),
+                scorer_version="distillation-scorer@2",
+                build_ref="9" * 40,
+                corpus_sha256="b" * 64,
+                sample_count=61,
+                positive_case_count=49,
+                seeded_case_count=5,
+                direct_must_form_recall=1,
+                hypothesis_must_form_recall=1,
+                benign_precision=0.96,
+                useful_recall_lift_percentage_points=90,
+                correction_rate_per_hundred=0,
+                evidence_disposition_precision=0.9,
+                provider_calls_per_segment=3,
+                provider_calls_measured=183,
+                consolidations_measured=61,
+                provider_cost_usd="2.5",
+                evaluated_at=NOW,
+            ).model_dump_json()
+        else:
+            artifact = _provider_evidence(
+                policy,
+                policy_version=_runtime_policy_version(),
+                build_ref=policy.replace("@", "-"),
+                model_policy="fake-balanced",
+            ).model_dump_json()
+        (release_root / f"{index}-{policy.replace('@', '')}.json").write_text(
+            artifact, encoding="utf-8"
+        )
+    monkeypatch.setattr(config_module, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", release_root)
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        memory_formation_policy_pin=pin,
+        artifact_root=tmp_path / "artifacts",
+    )
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+    assert len(selections) == 1
+    return dict(selections[0].payload)
+
+
+async def test_automatic_selection_prefers_the_newest_evidenced_policy_and_honors_a_pin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """gate.memory.provider_policy_precedence.
+
+    With every artifact present automatic selection activates formation@9;
+    without it, formation@10 outranks the frozen formation@8 control; a pin
+    holds any one of the three; and a pin to an unevidenced policy falls back
+    deterministically with a content-free audit rather than activating another.
+    """
+
+    everything = ("formation@8", "formation@10", "formation@9")
+    newest = await _select_with(monkeypatch, tmp_path / "a", policies=everything, pin=None)
+    assert (newest["outcome"], newest["formation_policy_version"]) == ("activated", "formation@9")
+
+    repaired = await _select_with(
+        monkeypatch, tmp_path / "b", policies=("formation@8", "formation@10"), pin=None
+    )
+    assert (repaired["outcome"], repaired["formation_policy_version"]) == (
+        "activated",
+        "formation@10",
+    )
+    assert repaired["evidence_build_ref"] == "formation-10"
+
+    for pin, expected in (
+        (MemoryFormationPolicyPin.PROVIDER_ASSISTED, "formation@8"),
+        (MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED, "formation@10"),
+        (MemoryFormationPolicyPin.DISTILLATION, "formation@9"),
+    ):
+        pinned = await _select_with(monkeypatch, tmp_path / pin.value, policies=everything, pin=pin)
+        assert (pinned["outcome"], pinned["formation_policy_version"]) == ("activated", expected)
+        assert pinned["policy_pin"] == pin.value
+
+    unevidenced = await _select_with(
+        monkeypatch,
+        tmp_path / "d",
+        policies=("formation@8", "formation@9"),
+        pin=MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
+    )
+    assert unevidenced["outcome"] == "deterministic_fallback"
+    assert unevidenced["reason"] == "pinned_policy_unevidenced"
+    assert unevidenced["formation_policy_version"] == "formation@7"

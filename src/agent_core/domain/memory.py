@@ -70,6 +70,10 @@ class Sensitivity(StrEnum):
     RESTRICTED = "restricted"
 
 
+# The only sensitivities a memory may carry when its statement leaves for a provider.
+PROVIDER_EGRESS_SENSITIVITIES = frozenset({Sensitivity.PUBLIC, Sensitivity.INTERNAL})
+
+
 SENSITIVITY_ORDER: dict[Sensitivity, int] = {
     Sensitivity.PUBLIC: 0,
     Sensitivity.INTERNAL: 1,
@@ -372,6 +376,7 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
     provider_fabricated_candidates: int = Field(ge=0)
     deterministic_policy_failures: int = Field(ge=0)
     provider_policy_failures: int = Field(ge=0)
+    seeded_case_count: int = Field(default=0, ge=0)
     evaluated_at: datetime
 
     @model_validator(mode="after")

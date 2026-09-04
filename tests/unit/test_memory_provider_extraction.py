@@ -39,6 +39,7 @@ from agent_core.domain.messages import (
     ModelAttempt,
     ModelEvent,
     ModelFailedEvent,
+    ModelLimits,
     ModelPermanentError,
     ModelPricing,
     ModelRequest,
@@ -55,6 +56,8 @@ from agent_core.domain.messages import (
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
+    REPAIRED_PROVIDER_EXTRACTOR_VERSION,
+    REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
     MemoryClaimKind,
     ProviderAssistedCandidateExtractor,
     ProviderExtractionBudget,
@@ -215,6 +218,16 @@ def _evidence() -> ProviderExtractionEvaluationEvidence:
         deterministic_policy_failures=0,
         provider_policy_failures=0,
         evaluated_at=NOW,
+    )
+
+
+def _repaired_evidence() -> ProviderExtractionEvaluationEvidence:
+    return _evidence().model_copy(
+        update={
+            "extractor_version": REPAIRED_PROVIDER_EXTRACTOR_VERSION,
+            "formation_policy_version": REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+            "seeded_case_count": 20,
+        }
     )
 
 
@@ -2914,3 +2927,277 @@ def test_provider_occupation_retractions_require_a_bound_first_person_negation(
     )
 
     assert ProviderAssistedCandidateExtractor._claim_is_grounded(claim, {1: source}) is grounded
+
+
+_SINGLE_CLAIM_RESPONSE = json.dumps(
+    {
+        "candidates": [
+            {
+                "claim_kind": "relationship",
+                "subject": "daughter",
+                "value": None,
+                "context": None,
+                "quantity": 1,
+                "evidence_quote": "my daughter",
+                "polarity": "assert",
+                "source_event_ids": [1],
+                "model_confidence": 0.92,
+                "proposed_portability": "contextual",
+                "sensitivity_guess": "sensitive",
+                "valid_from": None,
+                "expires_hint": None,
+            }
+        ]
+    }
+)
+
+
+async def test_repaired_policy_never_gates_on_cost_and_keeps_the_full_output_ceiling() -> None:
+    """formation@10 records cost; it never shrinks or skips the call to fit a ceiling."""
+
+    clock, factory, _service, _retriever = await formation_stack()
+    await user_event(factory, "The astronomy club was my daughter's idea.")
+    provider = FakeModelProvider(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    text=_SINGLE_CLAIM_RESPONSE,
+                    usage=ModelUsage(input_tokens=3_000, output_tokens=900, cost=Decimal("0.60")),
+                )
+            ]
+        ),
+        clock,
+    )
+    resolved = ResolvedModel(
+        provider="fake",
+        model="scripted",
+        policy_name="fake",
+        pricing=ModelPricing(input_per_mtok=Decimal("5.00"), output_per_mtok=Decimal("30.00")),
+        limits=ModelLimits(context_window_tokens=200_000, max_output_tokens=128_000),
+        resolved_at=NOW,
+    )
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=resolved,
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(9_100, 9_200)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_repaired_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+        formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
+    assert provider.requests[0].maximum_output_tokens == 16_384
+    assert provider.requests[0].timeout_seconds == 120.0
+    assert provider.requests[0].metadata["formation_policy_version"] == "formation@10"
+    async with factory() as uow:
+        completed = await uow.process_events.list("memory.provider_extraction.completed")
+        failed = await uow.process_events.list("memory.provider_extraction.failed")
+    assert failed == []
+    assert len(completed) == 1
+    payload = completed[0].payload
+    assert payload["formation_policy_version"] == "formation@10"
+    assert payload["extractor_version"] == "provider-assisted-v3"
+    assert payload["usage"]["cost"] == "0.60"
+    assert payload["budget"]["maximum_output_tokens"] == 16_384
+    assert Decimal(payload["budget"]["maximum_cost_usd"]) > Decimal("0.60")
+
+
+def test_activation_evidence_binds_the_formation_policy_it_was_gathered_for() -> None:
+    resolved = ResolvedModel(provider="fake", model="scripted", policy_name="fake", resolved_at=NOW)
+
+    assert provider_extraction_evidence_matches(_evidence(), resolved, "default", "default@test")
+    assert not provider_extraction_evidence_matches(
+        _evidence(),
+        resolved,
+        "default",
+        "default@test",
+        formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+    assert provider_extraction_evidence_matches(
+        _repaired_evidence(),
+        resolved,
+        "default",
+        "default@test",
+        formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+    assert not provider_extraction_evidence_matches(
+        _repaired_evidence(), resolved, "default", "default@test"
+    )
+
+
+async def test_repaired_policy_refuses_formation8_evidence() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    with pytest.raises(ConfigurationError, match="does not match"):
+        ProviderAssistedCandidateExtractor(
+            provider=FakeModelProvider(FakeModelScript(turns=[]), clock),
+            resolved_model=ResolvedModel(
+                provider="fake", model="scripted", policy_name="fake", resolved_at=NOW
+            ),
+            uow_factory=factory,
+            clock=clock,
+            ids=SequenceIdFactory(UUID(int=value) for value in range(9_200, 9_300)),
+            principal=principal(),
+            agent_id=AGENT_ID,
+            agent_version="1.0.0",
+            policy_profile="default",
+            policy_version="default@test",
+            evidence=_evidence(),
+            fallback=DeterministicCandidateExtractor(),
+            formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+        )
+
+
+def _write_release_evidence(
+    release_root: Path,
+    *,
+    formation8: bool = False,
+    formation10: bool = False,
+    formation9: bool = False,
+) -> None:
+    release_root.mkdir(exist_ok=True)
+    if formation8:
+        (release_root / "a-formation8.json").write_text(
+            _evidence()
+            .model_copy(
+                update={
+                    "model_policy": "fake-balanced",
+                    "policy_version": _runtime_policy_version(),
+                    "build_ref": "eight",
+                }
+            )
+            .model_dump_json(),
+            encoding="utf-8",
+        )
+    if formation10:
+        (release_root / "b-formation10.json").write_text(
+            _repaired_evidence()
+            .model_copy(
+                update={
+                    "model_policy": "fake-balanced",
+                    "policy_version": _runtime_policy_version(),
+                    "build_ref": "ten",
+                }
+            )
+            .model_dump_json(),
+            encoding="utf-8",
+        )
+    if formation9:
+        (release_root / "c-formation9.json").write_text(
+            _distillation_evidence().model_dump_json(),
+            encoding="utf-8",
+        )
+
+
+async def _selection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    pin: MemoryFormationPolicyPin | None,
+    formation8: bool = False,
+    formation10: bool = False,
+    formation9: bool = False,
+) -> dict[str, object]:
+    release_root = tmp_path / "release-evidence"
+    _write_release_evidence(
+        release_root,
+        formation8=formation8,
+        formation10=formation10,
+        formation9=formation9,
+    )
+    monkeypatch.setattr(config_module, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", release_root)
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        memory_formation_policy_pin=pin,
+        artifact_root=tmp_path / "artifacts",
+    )
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+    assert len(selections) == 1
+    return dict(selections[0].payload)
+
+
+async def test_auto_mode_prefers_formation10_over_formation8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = await _selection(monkeypatch, tmp_path, pin=None, formation8=True, formation10=True)
+
+    assert payload["outcome"] == "activated"
+    assert payload["formation_policy_version"] == "formation@10"
+    assert payload["evidence_build_ref"] == "ten"
+
+
+async def test_formation9_still_outranks_formation10(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = await _selection(
+        monkeypatch, tmp_path, pin=None, formation8=True, formation10=True, formation9=True
+    )
+
+    assert payload["outcome"] == "activated"
+    assert payload["formation_policy_version"] == "formation@9"
+    assert payload["evidence_build_ref"] == _DISTILLATION_BUILD_REF
+
+
+async def test_operator_pin_to_formation10_holds_it_while_formation9_evidence_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = await _selection(
+        monkeypatch,
+        tmp_path,
+        pin=MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
+        formation8=True,
+        formation10=True,
+        formation9=True,
+    )
+
+    assert payload["outcome"] == "activated"
+    assert payload["formation_policy_version"] == "formation@10"
+    assert payload["policy_pin"] == "formation@10"
+
+
+async def test_operator_pin_to_formation8_ignores_formation10_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = await _selection(
+        monkeypatch,
+        tmp_path,
+        pin=MemoryFormationPolicyPin.PROVIDER_ASSISTED,
+        formation8=True,
+        formation10=True,
+    )
+
+    assert payload["outcome"] == "activated"
+    assert payload["formation_policy_version"] == "formation@8"
+    assert payload["evidence_build_ref"] == "eight"
+
+
+async def test_operator_pin_to_formation10_without_its_evidence_falls_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = await _selection(
+        monkeypatch,
+        tmp_path,
+        pin=MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
+        formation8=True,
+        formation9=True,
+    )
+
+    assert payload["outcome"] == "deterministic_fallback"
+    assert payload["reason"] == "pinned_policy_unevidenced"
+    assert payload["formation_policy_version"] == "formation@7"

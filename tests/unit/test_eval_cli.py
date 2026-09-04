@@ -186,6 +186,7 @@ def test_eval_memory_formation_generates_evidence_artifact(
         policy_profile: str,
         build_ref: str,
         output: object,
+        formation_policy_version: str = "formation@8",
     ) -> SimpleNamespace:
         observed.append((model_policy, policy_profile, build_ref))
         return SimpleNamespace(

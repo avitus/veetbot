@@ -4,6 +4,28 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-03 — Repaired provider-assisted memory formation and policy-bound evidence
+
+- Added `formation@10` under ADR-0086: the provider-assisted extractor's
+  five-cent budget, byte-per-token preflight, and most-recent belief view had
+  starved every call on a populated store, which the production audit of the
+  strength-training conversation confirmed. `formation@10` keeps one call,
+  bounds input by the model window, requests 16,384 output tokens, records
+  cost without gating on it, and sends a relevance-ranked, sensitivity-filtered
+  belief view. Automatic selection prefers `formation@9`, then `formation@10`,
+  then the frozen `formation@8`; the operator pin accepts all three.
+- The bundled `formation@9` artifact was found bound to the pre-Milestone-24
+  compiled policy version, so the first deploy silently ran deterministic
+  formation. The evidence was regenerated on the deployed tree, and the bundle
+  test now fails any artifact whose policy binding the tree no longer compiles.
+  The stale `formation@8` artifact is withdrawn.
+- A digit range and a spelled-out range of the same count now merge across
+  claim kinds, closing the duplicate the production replay exposed.
+- `docs/deployment.md` now records that the production host deploys and runs
+  the application as one `veetbot` account, in place of the separate
+  `veetbot-deploy` identity it describes, and lists reconciling that as an
+  open operations item.
+
 ## 2026-09-03 — Operator-managed Gmail accounts
 
 - Extended Milestone 18 under ADR-0085 so one Veetbot principal can use up to

@@ -657,7 +657,11 @@ A cancelled call records the cancellation and propagates it rather than disguisi
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through
 the same service gates. Provider-assisted consolidations and beliefs record
-`formation@8`; the default deterministic path records `formation@7`. The
+`formation@8`, or `formation@10` under the repaired budget and related-belief
+view that adaptive-memory-distillation.md specifies and ADR-0086 records; the
+frozen `formation@8` budget above is the reason production formed almost
+nothing from populated stores, and its artifact is withdrawn. The default
+deterministic path records `formation@7`. The
 activation decision is recorded in ADR-0057, and the retry, diagnosis, replay,
 and policy-version correction is recorded in ADR-0068. Admitting working-state
 established facts as `AFFIRMED` candidates advanced those versions from
