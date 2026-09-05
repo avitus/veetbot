@@ -95,3 +95,5 @@ implementation without one.
 - [ADR-0084 — Atomic public website publication on DigitalOcean](0084-public-website-and-oauth-policy-pages.md)
 - [ADR-0085 — Operator-managed multi-account Gmail (Proposed)](0085-operator-managed-multi-account-gmail.md)
 - [ADR-0086 — Repaired provider-assisted formation@10 and policy-bound release evidence (Proposed)](0086-repaired-provider-assisted-formation.md)
+- [ADR-0087 — Corrections retract, a provider re-pass recovers evidence, and the formation@9 artifact is withdrawn under distillation-scorer@3 (Proposed)](0087-formation9-corrections-repass-and-scorer3.md)
+- [ADR-0088 — Milestone 23 conversational schedule update (Proposed)](0088-milestone-23-conversational-schedule-update.md)

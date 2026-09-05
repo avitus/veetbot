@@ -5,7 +5,10 @@ claim, and the distiller decides whether a live memory already represents a
 clause. Both need the same answer to the same question, and both must say no
 when a candidate negates, recounts, or elaborates beyond the claim it is
 compared with. An overlap ratio over the smaller term set cannot say no to any
-of those, so this module compares symmetric content, negation, and quantity.
+of those, so this module compares symmetric content, negation, quantity, and
+direction: a bag of words cannot tell tea-over-coffee from coffee-over-tea, and
+a count check that ignores large numbers cannot tell one hundred miles from two
+hundred, so both are compared explicitly.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@2"]] = "distillation-scorer@2"
+DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@3"]] = "distillation-scorer@3"
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)*")
 _STOPWORDS = frozenset(
@@ -140,6 +143,90 @@ _NUMBER_WORDS = {
     "dozen": "12",
 }
 _GENERIC_SUBJECTS = frozenset({"user", "the user", "users", "me", "i", "myself", "user's"})
+# "without" states an absence inside a claim rather than negating the claim:
+# "runs without music" is a superset of "runs", not its denial.
+_ABSENCE = frozenset({"non", "without"})
+_ABSENCE_FILLERS = frozenset({"all", "any"})
+# A negation after one of these qualifies a circumstance ("bikes on days when
+# not lifting") rather than denying the claim itself.
+_SUBORDINATORS = frozenset(
+    {
+        "although",
+        "because",
+        "except",
+        "if",
+        "since",
+        "though",
+        "unless",
+        "when",
+        "whenever",
+        "where",
+        "whereas",
+        "while",
+    }
+)
+# A marker whose object gives a statement its direction. Each is normalized to
+# a class so that "over", "than", and a preference's "to" compare with one
+# another while an unrelated marker in only one statement is not compared.
+_DIRECTION_CLASSES = {
+    "than": "than",
+    "over": "than",
+    "versus": "than",
+    "vs": "than",
+    "above": "than",
+    "before": "before",
+    "after": "after",
+    "from": "from",
+    "to": "to",
+    "into": "to",
+    "onto": "to",
+    "toward": "to",
+    "towards": "to",
+    "instead": "instead",
+    "rather": "instead",
+    "until": "until",
+    "till": "until",
+}
+_PREFERENCE_VERB_PREFIXES = ("prefer", "favor", "favour")
+# "to" after one of these introduces an infinitive, not a destination.
+_INFINITIVE_LEADS = frozenset(
+    {
+        "able",
+        "aim",
+        "aims",
+        "decided",
+        "going",
+        "hope",
+        "hopes",
+        "how",
+        "intend",
+        "intends",
+        "learn",
+        "learning",
+        "like",
+        "likes",
+        "love",
+        "loves",
+        "need",
+        "needs",
+        "plan",
+        "plans",
+        "prefer",
+        "prefers",
+        "start",
+        "started",
+        "starting",
+        "tries",
+        "try",
+        "trying",
+        "used",
+        "want",
+        "wanted",
+        "wants",
+        "wish",
+        "wishes",
+    }
+)
 
 
 def normalized_statement(value: str) -> str:
@@ -160,6 +247,15 @@ def _stem(term: str) -> str:
     return term
 
 
+def _is_content(term: str) -> bool:
+    return (
+        term not in _STOPWORDS
+        and (term not in _NEGATIONS or term in _ABSENCE)
+        and term not in _NUMBER_WORDS
+        and not _is_count(term)
+    )
+
+
 def content_terms(value: str) -> set[str]:
     """The stemmed content-bearing terms, without negation or count markers.
 
@@ -169,12 +265,9 @@ def content_terms(value: str) -> set[str]:
     """
 
     return {
-        _stem(term)
+        "without" if term in _ABSENCE else _stem(term)
         for term in _tokens(value)
-        if term not in _STOPWORDS
-        and term not in _NEGATIONS
-        and term not in _NUMBER_WORDS
-        and not _is_count(term)
+        if _is_content(term)
     }
 
 
@@ -186,6 +279,124 @@ def _is_count(term: str) -> bool:
 
 def negation_terms(value: str) -> frozenset[str]:
     return frozenset(term for term in _tokens(value) if term in _NEGATIONS)
+
+
+def negated(value: str) -> bool:
+    """Whether a statement denies its claim.
+
+    Polarity is compared as parity rather than by the negation word used, so
+    "does not drive" and "doesn't drive" agree while either disagrees with
+    "drives". An absence such as "without" is content, not polarity, and a
+    negation inside a subordinate circumstance ("on days when not lifting")
+    qualifies the claim rather than denying it.
+    """
+
+    for clause in re.split(r"[,;]", value):
+        terms = _tokens(clause)
+        if terms and terms[0] in _SUBORDINATORS:
+            continue
+        for term in terms:
+            if term in _SUBORDINATORS:
+                break
+            if term in _NEGATIONS and term not in _ABSENCE:
+                return True
+    return False
+
+
+def absence_terms(value: str) -> frozenset[str]:
+    """Normalized objects of absence conditions inside a positive claim."""
+
+    tokens = _tokens(value)
+    conditions: set[str] = set()
+    for index, term in enumerate(tokens):
+        if term not in _ABSENCE:
+            continue
+        following = next(
+            (
+                _stem(later)
+                for later in tokens[index + 1 :]
+                if later not in _ABSENCE_FILLERS
+                and later not in _ABSENCE
+                and not any(character.isdigit() for character in later)
+                and _is_content(later)
+            ),
+            "without",
+        )
+        conditions.add(following)
+    return frozenset(conditions)
+
+
+def large_numbers(value: str) -> frozenset[str]:
+    """Numbers of one hundred or more: years, amounts, distances, identifiers."""
+
+    return frozenset(term for term in _tokens(value) if term.isdecimal() and not _is_count(term))
+
+
+def numbers_agree(left: str, right: str) -> bool:
+    """Whether two statements assert the same counts and the same numbers.
+
+    Counts must match exactly, so "two sisters" never equals "sisters". A large
+    number is compared only when both statements carry one: an elaboration
+    that adds a year passes, but one hundred miles never equals two hundred.
+    """
+
+    if quantity_terms(left) != quantity_terms(right):
+        return False
+    left_numbers = large_numbers(left)
+    right_numbers = large_numbers(right)
+    return not left_numbers or not right_numbers or left_numbers == right_numbers
+
+
+def directional_terms(value: str) -> dict[str, tuple[str, ...]]:
+    """The object following each directional marker, keyed by marker class.
+
+    "prefers tea to coffee" yields ``{"than": ("coffee",)}`` and "moved from
+    Paris to Rome" yields ``{"from": ("pari",), "to": ("rome",)}``. An
+    infinitive "to" has no object and is skipped.
+    """
+
+    tokens = _tokens(value)
+    objects: dict[str, list[str]] = {}
+    preferring = False
+    for index, token in enumerate(tokens):
+        if token.startswith(_PREFERENCE_VERB_PREFIXES):
+            preferring = True
+        marker = _DIRECTION_CLASSES.get(token)
+        if marker is None:
+            continue
+        if token == "to":
+            if index and tokens[index - 1] in _INFINITIVE_LEADS:
+                continue
+            if preferring:
+                marker = "than"
+        following = next(
+            (
+                _stem(later)
+                for later in tokens[index + 1 :]
+                if _is_content(later) and later not in _DIRECTION_CLASSES
+            ),
+            None,
+        )
+        if following is None:
+            continue
+        objects.setdefault(marker, []).append(following)
+    return {marker: tuple(terms) for marker, terms in objects.items()}
+
+
+def directions_agree(left: str, right: str) -> bool:
+    """Whether every directional marker both statements share points the same way.
+
+    Only shared marker classes are compared, so a paraphrase that drops or
+    changes a preposition is not penalized, while a reversed comparison,
+    origin and destination, or ordering never agrees.
+    """
+
+    left_directions = directional_terms(left)
+    right_directions = directional_terms(right)
+    return all(
+        left_directions[marker] == right_directions[marker]
+        for marker in left_directions.keys() & right_directions.keys()
+    )
 
 
 def quantity_terms(value: str) -> frozenset[str]:
@@ -211,10 +422,12 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     """Whether a candidate statement asserts the same claim as a reference.
 
     Equal normalized text always matches. Otherwise both statements must carry
-    the same negations and the same quantities, share at least three quarters of
-    their combined content terms, and the candidate may introduce at most one
-    content term the reference lacks, so a paraphrased verb passes while an
-    elaboration, a negation, a different count, or a sibling activity does not.
+    the same polarity, the same counts and numbers, and the same direction on
+    every marker they share, share at least three quarters of their combined
+    content terms, and the candidate may introduce at most one content term the
+    reference lacks, so a paraphrased verb passes while an elaboration, a
+    negation, a different count or distance, a reversed comparison, or a
+    sibling activity does not.
     """
 
     if normalized_statement(candidate) == normalized_statement(reference):
@@ -223,9 +436,7 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     reference_terms = content_terms(reference)
     if not candidate_terms or not reference_terms:
         return False
-    if negation_terms(candidate) != negation_terms(reference):
-        return False
-    if quantity_terms(candidate) != quantity_terms(reference):
+    if not statements_compatible(candidate, reference):
         return False
     union = candidate_terms | reference_terms
     shared = candidate_terms & reference_terms
@@ -268,12 +479,32 @@ def subject_matches(
     return any(terms & content_terms(statement) for statement in expected_statements)
 
 
+def statements_compatible(left: str, right: str) -> bool:
+    """Whether two statements could assert one claim: no contradiction in kind.
+
+    Polarity, absence conditions, counts and numbers, and shared directions
+    must agree. This is the floor under every equivalence, duplicate, and representation check: a
+    comparison that passes it may still be about different things, but one
+    that fails it is a correction, a recount, or a reversal and must never be
+    merged away.
+    """
+
+    return (
+        negated(left) == negated(right)
+        and absence_terms(left) == absence_terms(right)
+        and numbers_agree(left, right)
+        and directions_agree(left, right)
+    )
+
+
 def statement_supports_clause(statement: str, clause: str) -> bool:
-    """Whether a memory statement plausibly represents a source clause.
+    """Whether a memory statement represents a source clause.
 
     Used to verify that a clause a provider marks as already represented is in
-    fact about the memory it cites: at least a third of the memory's content
-    terms must appear in the clause.
+    fact asserted by the memory it cites. A memory whose polarity, count,
+    number, or direction differs from the clause is being corrected by it, not
+    represented in it, so those must agree; then at least half of the memory's
+    content terms must appear in the clause.
     """
 
     if normalized_statement(statement) == normalized_statement(clause):
@@ -281,5 +512,7 @@ def statement_supports_clause(statement: str, clause: str) -> bool:
     statement_terms = content_terms(statement)
     if not statement_terms:
         return False
+    if not statements_compatible(statement, clause):
+        return False
     clause_terms = content_terms(clause)
-    return len(statement_terms & clause_terms) / len(statement_terms) >= 0.34
+    return len(statement_terms & clause_terms) / len(statement_terms) >= 0.5

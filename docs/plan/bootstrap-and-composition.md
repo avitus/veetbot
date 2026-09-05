@@ -309,8 +309,9 @@ environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 worker feature flags, and Milestone 13 the default-off delegation flag.
 Milestones 19 and 23 reuse the schedule pair: the composition root registers
 `schedule.create`, `schedule.list`, `schedule.pause`, `schedule.resume`, and
-`schedule.cancel` only when both are enabled, so it cannot create or reactivate
-work that no materializer will claim. Those facts are not in tension by
+`schedule.cancel`, plus Milestone 23's `schedule.update`, only when both are
+enabled, so it cannot create, alter, or reactivate work that no materializer
+will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
 `MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 17,000-token

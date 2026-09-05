@@ -21,6 +21,7 @@ from agent_core.domain.schedules import (
     ScheduleCursor,
     ScheduleDefinition,
     ScheduleDefinitionLimits,
+    ScheduleDefinitionPatch,
     ScheduleIdempotencyRecord,
     ScheduleOccurrence,
     SchedulePauseReason,
@@ -201,6 +202,127 @@ class ScheduleService:
             await self._event(uow, "schedule.updated", principal, updated, current)
         await self._wake()
         return ScheduleRecord(schedule=updated, revision=revision)
+
+    async def patch(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        expected_revision: int,
+        patch: ScheduleDefinitionPatch,
+        idempotency_key: str,
+    ) -> ScheduleRecord:
+        """Apply one model-visible patch without exposing hidden definition fields."""
+
+        require_scope(principal, "schedule.write")
+        key = _idempotency_key(idempotency_key)
+        request_hash = _patch_hash(schedule_id, expected_revision, patch)
+        try:
+            record, changed = await self._patch_once(
+                principal,
+                schedule_id,
+                expected_revision,
+                patch,
+                key,
+                request_hash,
+            )
+        except ConflictError as exc:
+            async with self._uow_factory() as uow:
+                existing = await uow.schedule_idempotency.get(
+                    principal.tenant_id, principal.principal_id, key
+                )
+                if existing is None:
+                    raise
+                if existing.request_hash != request_hash or existing.schedule_id != schedule_id:
+                    raise _idempotency_mismatch() from exc
+                return await self._record(uow, principal, schedule_id, replayed=True)
+        if changed:
+            await self._wake()
+        return record
+
+    async def _patch_once(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        expected_revision: int,
+        patch: ScheduleDefinitionPatch,
+        key: str,
+        request_hash: str,
+    ) -> tuple[ScheduleRecord, bool]:
+        async with self._uow_factory() as uow:
+            existing = await uow.schedule_idempotency.get(
+                principal.tenant_id, principal.principal_id, key
+            )
+            if existing is not None:
+                if existing.request_hash != request_hash or existing.schedule_id != schedule_id:
+                    raise _idempotency_mismatch()
+                return (
+                    await self._record(uow, principal, schedule_id, replayed=True),
+                    False,
+                )
+
+            current = await uow.schedules.get(schedule_id, principal)
+            _expected(current, expected_revision)
+            if current.state in {ScheduleState.COMPLETED, ScheduleState.CANCELLED}:
+                raise ConflictError(
+                    "terminal schedule cannot be updated", reason="schedule.terminal"
+                )
+            current_revision = await uow.schedules.get_revision(
+                schedule_id, current.current_revision, principal
+            )
+            current_definition = _definition_from_revision(current_revision)
+            definition = current_definition.model_copy(
+                update={
+                    **({"title": patch.title} if patch.title is not None else {}),
+                    **({"instruction": patch.instruction} if patch.instruction is not None else {}),
+                    **({"cadence": patch.cadence} if patch.cadence is not None else {}),
+                }
+            )
+            await _validate_definition(uow, principal, definition, self._limits)
+            now = self._clock.now()
+            if definition == current_definition:
+                await uow.schedule_idempotency.create(
+                    ScheduleIdempotencyRecord(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        key=key,
+                        request_hash=request_hash,
+                        schedule_id=schedule_id,
+                        created_at=now,
+                    )
+                )
+                return ScheduleRecord(schedule=current, revision=current_revision), False
+
+            next_fire_at = (
+                RecurrenceCalculator.next_after(definition.cadence, now)
+                if current.state is ScheduleState.ACTIVE
+                else None
+            )
+            if current.state is ScheduleState.ACTIVE and next_fire_at is None:
+                raise ScheduleValidationError(
+                    "schedule.no_future_occurrence",
+                    "schedule cadence has no occurrence after update",
+                )
+            updated = current.model_copy(
+                update={
+                    "current_revision": current.current_revision + 1,
+                    "next_fire_at": next_fire_at,
+                    "updated_at": now,
+                }
+            )
+            revision = _revision(updated, definition, principal, now)
+            updated = await uow.schedules.replace(current, updated, revision)
+            await uow.schedule_idempotency.create(
+                ScheduleIdempotencyRecord(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    key=key,
+                    request_hash=request_hash,
+                    schedule_id=schedule_id,
+                    created_at=now,
+                )
+            )
+            await self._event(uow, "schedule.updated", principal, updated, current)
+        return ScheduleRecord(schedule=updated, revision=revision), True
 
     async def pause(
         self, principal: Principal, schedule_id: UUID, expected_revision: int
@@ -400,6 +522,22 @@ def _revision(
     )
 
 
+def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
+    return ScheduleDefinition(
+        title=revision.title,
+        instruction=revision.instruction,
+        agent_id=revision.agent_id,
+        agent_version=revision.agent_version,
+        policy_profile=revision.policy_profile,
+        requested_scopes=revision.requested_scopes,
+        limits=revision.limits,
+        run_timeout_seconds=revision.run_timeout_seconds,
+        cadence=revision.cadence,
+        misfire_grace_seconds=revision.misfire_grace_seconds,
+        max_consecutive_failures=revision.max_consecutive_failures,
+    )
+
+
 async def _validate_definition(
     uow: RepositoryUnitOfWork,
     principal: Principal,
@@ -490,6 +628,31 @@ def _definition_hash(definition: ScheduleDefinition) -> str:
         sort_keys=True,
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _patch_hash(
+    schedule_id: UUID,
+    expected_revision: int,
+    patch: ScheduleDefinitionPatch,
+) -> str:
+    encoded = json.dumps(
+        {
+            "schedule_id": str(schedule_id),
+            "expected_revision": expected_revision,
+            "patch": patch.model_dump(mode="json", exclude_none=True),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _idempotency_mismatch() -> ConflictError:
+    return ConflictError(
+        "schedule idempotency key was reused with different content",
+        reason="schedule.idempotency_mismatch",
+    )
 
 
 def _encode_cursor(value: dict[str, str]) -> str:

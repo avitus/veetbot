@@ -801,17 +801,20 @@ is 100 and the server clamps it to 200. The cursor is opaque and identifies the
 last returned message sequence; an invalid cursor is `malformed_request`. As on
 the point read, a missing, cross-tenant, or differently owned session is 404.
 
-The route is a transcript projection rather than an event-log export. Only
-`user.message.created` and `assistant.message.completed` produce items, and the
-response converts their content to the public content-block vocabulary. Tool
+The route is a transcript projection rather than an event-log export. Ordinary
+`user.message.created` and `assistant.message.completed` events produce items,
+and the response converts their content to the public content-block vocabulary.
+The scheduler-authored `user.message.created` event that seeds a scheduled run
+is context-only and does not produce a transcript item; its complete
+instruction remains available through the authorized schedule point read. Tool
 lifecycle events, system events, provider continuation data, private reasoning,
-and transient stream deltas are excluded. Persistence applies that event-type
-filter and the page's `limit + 1` bound before hydrating events, so unrelated
-internal events cannot expand one transcript request into an unbounded scan. A
-client restores every page before attaching to `active_run_id` or `last_run_id`
-and records the returned sequences in the same persisted-event deduplication set
-used by SSE replay. Replaying the latest run therefore fills current run state
-without duplicating its durable messages.
+and transient stream deltas are excluded. Persistence applies those filters and
+the page's `limit + 1` bound before hydrating events, so hidden or unrelated
+internal events cannot shrink a page or expand one transcript request into an
+unbounded scan. A client restores every page before attaching to `active_run_id`
+or `last_run_id` and records the returned sequences in the same persisted-event
+deduplication set used by SSE replay. Replaying the latest run therefore fills
+current run state without duplicating its durable messages.
 
 ## Submitting a message, and the two mechanisms that share the name
 
@@ -1206,6 +1209,11 @@ session. A stream that shows 41, 42, then 57 is a correct stream: 43
 through 56 belong to a different run, or to session-level events this
 endpoint does not carry.
 
+The scheduler-authored user event that seeds a scheduled run is also omitted
+from this public stream. The server still advances its internal replay
+watermark across that durable sequence, so it appears only as another legal
+gap; the completed assistant message remains public and replayable.
+
 **A client must never infer a gap from non-contiguous ids.** This is
 the first of the four non-inferences, and it is the one a client author
 gets wrong by default, because a monotonically increasing integer
@@ -1360,7 +1368,11 @@ is `modify_arguments` as **Needs correction**. When the immediately following
 invocation of the same tool completes, that earlier card becomes **Corrected and
 retried**. The original `tool.call.failed` event and its result remain intact;
 an intervening activity or a non-argument failure is never presented as
-recovered.
+recovered. Presentation preserves that same durable record while using its
+more specific outcome vocabulary: `unavailable` renders as **Unavailable**, and
+`tool.web.provider_rejected` renders as **Rejected** even though the executed
+invocation remains a failed invocation under the tool-system contract. The
+downloadable terminal client applies the same labels to its activity line.
 
 ## Approvals
 

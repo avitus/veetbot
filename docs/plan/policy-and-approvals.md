@@ -317,11 +317,11 @@ schedule transition. That was the complete Milestone 11 surface. Milestone 19
 also gives the one-time model tool `schedule.create` exactly `schedule.write`;
 its `EXTERNAL_WRITE`/`HIGH` classification makes approval mandatory under the
 existing matrix. Milestone 23 gives `schedule.list` exactly `schedule.read`,
-`schedule.pause` and `schedule.resume` exactly `schedule.write`, and
-`schedule.cancel` exactly `schedule.cancel`. The read is
-`NONE`/`LOW`; the two state writes are `EXTERNAL_WRITE`/`HIGH`; terminal
-cancellation is `EXTERNAL_DELETE`/`HIGH`. The existing matrix therefore allows
-the read and requires approval for every mutation. Exact matching, MCP
+`schedule.update`, `schedule.pause`, and `schedule.resume` exactly
+`schedule.write`, and `schedule.cancel` exactly `schedule.cancel`. The read is
+`NONE`/`LOW`; the three state writes are `EXTERNAL_WRITE`/`HIGH`; terminal
+cancellation is `EXTERNAL_DELETE`/`HIGH`. The existing matrix therefore
+allows the read and requires approval for every mutation. Exact matching, MCP
 namespace isolation, and every other rule in this section are unchanged.
 
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`
@@ -352,7 +352,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1224` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1236` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal

@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "3.1"
+version: "3.2"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -147,6 +147,20 @@ Version 3.1 (conversational schedule lifecycle pass, 2026-09-02):
   retained, future occurrences stop, and an already materialized run remains
   separate. Every mutation requires a stable schedule ID, an expected
   revision, its exact scope, and ordinary approval.
+
+Version 3.2 (conversational schedule update pass, 2026-09-04):
+
+- Milestone 23 expands by owner authorization to include model-callable
+  `schedule.update`, specified by the scheduling design with five additional
+  gates (ADR-0088).
+- A conversational edit may replace the title, instruction, cadence, or any
+  combination of them after bounded discovery and ordinary approval. The
+  stable schedule ID and expected revision remain mandatory.
+- The application service preserves the existing revision's pinned agent,
+  policy, requested scopes, execution limits, timeout, misfire grace, and
+  failure policy. An update writes one immutable revision, recomputes only a
+  future active firing, and replays safely through the schedule idempotency
+  ledger.
 
 ## 1. Mission
 
@@ -1977,8 +1991,11 @@ GET /v1/sessions/{session_id}/messages?limit=100&cursor=<opaque>
 Return an oldest-first, keyset-paginated page of the authenticated principal's
 durable user and completed-assistant messages. Each item carries its immutable
 session sequence, role, and public content blocks. Exclude tool lifecycle and
-system events, provider continuation state, private reasoning, and transient
-deltas. Missing, cross-tenant, and differently owned sessions return `404`.
+system events, provider continuation state, private reasoning, transient
+deltas, and the scheduler-authored user event that seeds a scheduled run. That
+scheduled instruction remains durable user context and is available from the
+authorized schedule point read, but chat surfaces present only the run's
+response. Missing, cross-tenant, and differently owned sessions return `404`.
 Clients restore all pages before attaching to the active or last run and use the
 message sequences to deduplicate that run's persisted replay.
 
@@ -3615,11 +3632,12 @@ Acceptance criteria:
   impossible calendar values, and idempotency-key content mismatches fail
   closed without duplicate schedule state.
 
-Arbitrary cron or RFC 5545 input; interval multipliers; model-callable update,
-continuous-session recurrence; dependency graphs; workflow DAGs; delegated
-scopes; and content-bearing notifications remain later extensions.
+Arbitrary cron or RFC 5545 input; interval multipliers; continuous-session
+recurrence; dependency graphs; workflow DAGs; delegated scopes; and
+content-bearing notifications remain later extensions.
 Model-callable list, pause, resume, and cancel entered Milestone 23 on
-2026-09-02.
+2026-09-02; owner-authorized content and cadence update followed under
+ADR-0088.
 
 ### Milestone 21: Adaptive memory distillation
 
@@ -3628,16 +3646,16 @@ formation remained dramatically too timid for a personal agent. It is a
 parallel workstream and does not advance the verified sequential ceiling past
 unfinished Milestones 13 through 15. The detailed design is
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and
-ADR-0077; it declares twenty-four gates before implementation begins.
+ADR-0077; it declared twenty-four gates, thirty-one after ADR-0086 and ADR-0087.
 
 Implement:
 
 - Persisted, provenance-complete integrated episodes derived from ordered
   trusted user events and deleted with their session or principal.
 - `nemori-assisted-v1` at `formation@9`, making exactly three batched provider
-  calls per eligible consolidation: episode integration, causally blinded
-  anticipation from the prefix and existing memory, and prediction-error
-  distillation with exact source spans.
+  calls per planned segment of an eligible consolidation (ADR-0077): episode
+  integration, causally blinded anticipation from the prefix and existing
+  memory, and prediction-error distillation with exact source spans.
 - Direct observations and tentative hypotheses across ongoing projects, goals,
   roles, skills, interests, habits, constraints, recurring states,
   relationships, preferences, resources, and project facts.
@@ -3676,10 +3694,10 @@ Acceptance criteria:
   credential storage, PII storage beyond explicit policy, and cross-principal
   or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
   state, or sensitivity permitted by policy alone is not a rejection reason.
-- Every eligible provider consolidation makes exactly three batched calls and
-  every failed or structurally invalid stage falls back deterministically with
-  content-free audit metadata. Candidate-local invalidity rejects and counts
-  that proposal without discarding valid siblings.
+- Every eligible provider consolidation makes three batched calls per planned
+  segment; a failed or structurally invalid stage falls back deterministically
+  with content-free audit metadata, and a retryable failure also schedules a
+  bounded re-pass (ADR-0087); an invalid candidate is rejected and counted alone.
 - Repeated recall or citation cannot extend evidence lifetime; later supporting
   user evidence refreshes and may promote a hypothesis without duplicating the
   live belief.
@@ -3763,7 +3781,7 @@ had no scheduling tool with which to resume it. This is an eighth parallel
 workstream and does not advance the verified sequential ceiling past unfinished
 Milestones 13 through 15. The detailed design is
 [scheduling.md](scheduling.md#model-callable-lifecycle) and ADR-0080; it
-declares seven gates before implementation begins.
+declares twelve gates after the ADR-0088 update expansion.
 
 Implement:
 
@@ -3774,13 +3792,18 @@ Implement:
 - Approval-gated `schedule.pause` and `schedule.resume` capabilities requiring
   exactly `schedule.write`, plus approval-gated `schedule.cancel` requiring
   exactly `schedule.cancel`.
+- An approval-gated `schedule.update` capability requiring exactly
+  `schedule.write`. Its closed patch may replace title, instruction, and/or
+  cadence while preserving every execution-authority and finite-limit field
+  from the current immutable revision.
 - Closed mutation inputs containing only a stable `schedule_id` and positive
-  `expected_revision`; title matching happens in conversation, ambiguity asks
-  the owner, and no mutation selects by title.
+  `expected_revision`, plus only the explicit patch fields for update; title
+  matching happens in conversation, ambiguity asks the owner, and no mutation
+  selects by title.
 - Direct reuse of the existing principal-explicit `ScheduleService` lifecycle,
-  optimistic concurrency, audit events, no-backfill resume, and schedule/run
-  cancellation separation.
-- Registration and default-agent advertisement of all four tools only when
+  optimistic concurrency, request idempotency, audit events, no-backfill
+  resume, and schedule/run cancellation separation.
+- Registration and default-agent advertisement of all five tools only when
   both `AGENT_SCHEDULE_API_ENABLED` and `AGENT_SCHEDULE_WORKER_ENABLED` are
   enabled.
 
@@ -3793,6 +3816,9 @@ Acceptance criteria:
   first cadence instant strictly after the current time.
 - Pause, resume, and conversational delete each wait for a concrete ordinary
   approval and use the exact write or cancellation scope.
+- Conversational update waits for a concrete ordinary approval, creates one
+  immutable revision, affects only future occurrences, and preserves pinned
+  execution authority and bounds that were not exposed to the model.
 - Conversational delete invokes terminal schedule cancellation, preserves the
   retained schedule and occurrence ledger, and never cancels an already
   materialized run.
@@ -3800,9 +3826,10 @@ Acceptance criteria:
   ambiguous discovery, illegal terminal transitions, and identical retries
   fail closed without changing the wrong schedule or duplicating an effect.
 
-The milestone does not include model-callable content or cadence update,
-occurrence or run history tools, hard deletion, delegated scheduled-run scopes,
-new cadence kinds, new notification payloads, or native lifecycle controls.
+The milestone does not include occurrence or run history tools, hard deletion,
+delegated scheduled-run scopes, new cadence kinds, new notification payloads,
+native lifecycle controls, or model-callable mutation of execution authority,
+policy, limits, timeout, misfire grace, or failure policy.
 
 ### Milestone 24: SMS through the owner's iPhone
 

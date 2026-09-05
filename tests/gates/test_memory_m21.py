@@ -36,6 +36,7 @@ from agent_core.domain.memory import (
     MemoryLongevity,
     MemoryRecord,
     MemoryStatus,
+    Polarity,
     ProviderExtractionEvaluationEvidence,
     RejectionKind,
     Sensitivity,
@@ -71,7 +72,11 @@ from agent_core.memory.distillation import (
     select_distillation_policy,
     validate_integrated_episode,
 )
-from agent_core.memory.equivalence import statements_equivalent, subject_matches
+from agent_core.memory.equivalence import (
+    statement_supports_clause,
+    statements_equivalent,
+    subject_matches,
+)
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.model_extraction import ModelAssistedCandidateExtractor
 from agent_core.memory.provider_extraction import (
@@ -304,22 +309,109 @@ async def test_explicit_experience_is_repaired_as_a_skill_without_an_article() -
 
 
 @pytest.mark.parametrize(
-    "message",
+    ("message", "retraction"),
     [
-        "I do not use Redis anymore.",
-        "That old memory saying I live in Rome is wrong.",
+        ("I do not use Redis anymore.", "User no longer uses a Redis."),
+        ("I don't drive my BMW anymore.", "User no longer drives a BMW."),
+        ("I no longer take meetings on Fridays.", "User no longer takes meetings on Fridays."),
+        ("I stopped attending yoga.", "User no longer attends yoga."),
+        ("I gave up swimming.", "User no longer swims."),
+        ("I quit smoking.", "User no longer smokes."),
+        ("That old memory saying I live in Rome is wrong.", None),
     ],
 )
-async def test_high_recall_fallback_does_not_form_corrections_as_new_memories(
-    message: str,
+async def test_high_recall_fallback_forms_corrections_only_as_retractions(
+    message: str, retraction: str | None
 ) -> None:
+    """A correction may update an existing belief but never create one.
+
+    formation@7 recognized "I don't drive my BMW anymore" as a retraction while
+    the formation@9 fallback dropped it, so a provider outage silently left the
+    old belief live after the watermark advanced. The fallback now emits the
+    retraction, and only the retraction: the same turn's "my BMW" must not
+    become a fresh possession.
+    """
+
     event = _personal_agent_event().model_copy(update={"payload": {"content": message}})
 
     candidates = await formation.HighRecallCandidateExtractor().extract(
         [event], principal=principal(), scope="general"
     )
 
-    assert candidates == []
+    assert formation.contains_automatic_memory_correction(message)
+    if retraction is None:
+        assert candidates == []
+        return
+    assert [(candidate.statement, candidate.polarity) for candidate in candidates] == [
+        (retraction, Polarity.RETRACT)
+    ]
+    assert all(span.text in message for span in candidates[0].evidence_spans)
+
+
+async def test_fallback_retraction_supersedes_the_belief_it_corrects() -> None:
+    """Under formation@9 a retraction updates its subject and never creates memory."""
+
+    clock, factory, baseline, _retriever = await formation_stack()
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        baseline._ids,
+        principal(),
+        extractor=formation.HighRecallCandidateExtractor(),
+        policy_version="formation@9",
+    )
+    await user_event(factory, "I drive a BMW.")
+    first = await service.run(trigger="session_closed", scope="general", session_id=SESSION_ID)
+    assert [belief.statement for belief in first.beliefs] == ["User drives a BMW."]
+
+    clock.advance(timedelta(days=1))
+    await user_event(factory, "I don't drive my BMW anymore. I gave up smoking.")
+    second = await service.run(trigger="session_closed", scope="general", session_id=SESSION_ID)
+
+    live = await service.list_memories()
+    assert "User drives a BMW." not in {belief.statement for belief in live}
+    assert second.run.superseded == 1
+    assert second.run.decision_counts["superseded"] == 1
+    # Nothing ever said the user smoked, so the retraction has nothing to update
+    # and must not become a belief of its own.
+    assert second.run.decision_counts["skipped_unmatched_retraction"] == 1
+    assert sum(second.run.decision_counts.values()) == second.run.candidates_proposed
+    assert not any("smok" in belief.statement for belief in live)
+
+
+def test_provider_candidates_carry_polarity_and_corrections_pass_only_as_retractions() -> None:
+    """The provider can name a correction, and only a retraction may cite one."""
+
+    from agent_core.memory.distillation import _DistilledCandidate, _normalize_distilled_candidate
+
+    schema = _DistilledCandidate.model_json_schema()
+    assert schema["properties"]["polarity"]["enum"] == ["assert", "retract"]
+    event = _personal_agent_event().model_copy(
+        update={"payload": {"content": "I don't drive my BMW anymore."}}
+    )
+    proposal = {
+        "subject": "BMW",
+        "statement": "User no longer drives their BMW.",
+        "source_event_ids": [7],
+        "sensitivity_guess": "internal",
+        "claim_kind": "resource",
+        "derivation": "direct",
+        "evidence_spans": [{"source_event_id": 7, "text": "don't drive my BMW anymore"}],
+    }
+
+    retraction = _normalize_distilled_candidate(
+        _DistilledCandidate.model_validate({**proposal, "polarity": "retract"}),
+        by_sequence={7: event},
+        scope="general",
+    )
+    assert retraction.polarity is Polarity.RETRACT
+    assert retraction.statement == "User no longer drives their BMW."
+    with pytest.raises(ValueError, match="local validation"):
+        _normalize_distilled_candidate(
+            _DistilledCandidate.model_validate(proposal),
+            by_sequence={7: event},
+            scope="general",
+        )
 
 
 @pytest.mark.parametrize(
@@ -1809,40 +1901,150 @@ async def test_invalid_provider_episode_subjects_use_the_validated_fallback() ->
     assert episode.subjects == ["personal AI agent", "software-development experience"]
 
 
-async def test_provider_fallback_completes_without_scheduling_legacy_retries() -> None:
+async def test_provider_fallback_completes_and_schedules_a_provider_repass() -> None:
+    """A retryable failure keeps the fallback's memories and re-reads the evidence later.
+
+    formation@9 completes every consolidation with its audited fallback, so the
+    watermark advances; before this change that made a provider outage
+    permanently consume the richest evidence, the failure that lost the
+    production strength-training session. Now the same run also schedules a
+    bounded re-pass over the consumed range, and the re-pass adds what the
+    provider finds without duplicating what the fallback already formed.
+    """
+
     extractor, provider, factory = await _distillation_extractor(
         ["not-json", "also-not-json", "still-not-json"]
     )
-    await user_event(factory, "I am building a personal AI agent.")
-    clock, _ignored_factory, baseline, _retriever = await formation_stack()
+    source_id = await user_event(factory, "I am building a personal AI agent.")
+    clock = extractor._clock
+    assert isinstance(clock, FixedClock)
+    ids = extractor._ids
     service = GovernedMemoryService(
         factory,
         clock,
-        baseline._ids,
+        ids,
         principal(),
         extractor=extractor,
         policy_version="formation@9",
     )
 
-    result = await service.run(
-        trigger="session_closed",
-        scope="general",
-        session_id=SESSION_ID,
-    )
+    result = await service.run(trigger="session_closed", scope="general", session_id=SESSION_ID)
 
     assert len(provider.requests) == 3
-    assert result.run.watermark_after == 1
+    assert result.run.watermark_after == source_id
     assert result.run.committed == 2
     assert result.run.fallback_stages == [
         "episode_integration",
         "anticipation",
         "prediction_error_distillation",
     ]
-    assert not any(
-        event.event_type == "memory.formation.requested"
-        and event.payload.get("trigger") == "provider_retry"
+    [request] = [
+        event
         for event in await session_events(factory)
+        if event.event_type == "memory.formation.requested"
+        and event.payload.get("trigger") == "provider_retry"
+    ]
+    assert request.sequence > source_id
+    assert request.payload["attempt_number"] == 2
+    assert request.payload["source_watermark_before"] == 0
+    assert request.payload["source_watermark_after"] == source_id
+    diagnosis = await service.diagnose(SESSION_ID)
+    assert diagnosis.pending_retry
+
+    provider._script.turns = [
+        *provider._script.turns,
+        ScriptedTurn(text=_scripted_episode([source_id], ["I am building a personal AI agent."])),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(
+            text=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "subject": "AI agents",
+                            "statement": "User is interested in AI agents.",
+                            "source_event_ids": [source_id],
+                            "sensitivity_guess": "internal",
+                            "claim_kind": "interest",
+                            "derivation": "direct",
+                            "evidence_spans": [
+                                {"source_event_id": source_id, "text": "personal AI agent"}
+                            ],
+                        }
+                    ],
+                    "coverage": [
+                        {
+                            "coverage_unit_id": f"{source_id}:1",
+                            "decision": "formed",
+                            "candidate_indexes": [0],
+                            "prediction_indexes": [],
+                        }
+                    ],
+                }
+            )
+        ),
+    ]
+    clock.advance(timedelta(minutes=2))
+
+    repass = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+
+    assert len(provider.requests) == 6
+    assert repass.run.trigger == "provider_retry"
+    assert repass.run.fallback_stages == []
+    assert repass.run.watermark_after == request.sequence
+    live = {belief.statement for belief in await service.list_memories()}
+    assert "User is interested in AI agents." in live
+    assert (
+        sum(
+            belief.statement == "User is building a personal AI agent."
+            for belief in await service.list_memories()
+        )
+        == 1
     )
+    assert not (await service.diagnose(SESSION_ID)).pending_retry
+
+
+async def test_provider_repass_exhausts_after_bounded_attempts() -> None:
+    extractor, provider, factory = await _distillation_extractor(["not-json"] * 9)
+    clock = extractor._clock
+    assert isinstance(clock, FixedClock)
+    source_id = await user_event(factory, "I am building a personal AI agent.")
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        extractor._ids,
+        principal(),
+        extractor=extractor,
+        policy_version="formation@9",
+    )
+
+    attempts = []
+    for _attempt in range(formation.PROVIDER_MAX_ATTEMPTS):
+        attempts.append(
+            await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+        )
+        clock.advance(timedelta(minutes=10))
+
+    assert [run.run.trigger for run in attempts] == [
+        "session_idle",
+        "provider_retry",
+        "provider_retry",
+    ]
+    assert len(provider.requests) == 3 * formation.PROVIDER_MAX_ATTEMPTS
+    assert attempts[0].run.committed == 2
+    assert all(run.run.committed == 0 for run in attempts[1:])
+    async with factory() as uow:
+        exhausted = await uow.process_events.list("memory.provider_extraction.retry_exhausted")
+    assert len(exhausted) == 1
+    assert exhausted[0].payload["attempt_number"] == formation.PROVIDER_MAX_ATTEMPTS
+    assert not (await service.diagnose(SESSION_ID)).pending_retry
+    assert (
+        sum(
+            belief.statement == "User is building a personal AI agent."
+            for belief in await service.list_memories()
+        )
+        == 1
+    )
+    del source_id
 
 
 async def test_integrated_episodes_are_coherent_and_grounded() -> None:
@@ -2122,12 +2324,13 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version="policy@1",
-        scorer_version="distillation-scorer@2",
+        scorer_version="distillation-scorer@3",
         build_ref="0123456789abcdef0123456789abcdef01234567",
         corpus_sha256="a" * 64,
         sample_count=60,
         positive_case_count=48,
         seeded_case_count=12,
+        represented_case_count=3,
         direct_must_form_recall=0.96,
         hypothesis_must_form_recall=0.82,
         benign_precision=0.92,
@@ -2229,6 +2432,8 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "boundary_failures": 1,
         "evidence_disposition_precision": 0.74,
         "seeded_case_count": 0,
+        "represented_case_count": 0,
+        "provider_cost_usd": "999999999",
         "build_ref": "content-6973e8ddc75c6e40947e1f368abf2a96",
         "scorer_version": "distillation-scorer@1",
     }
@@ -2319,6 +2524,130 @@ async def test_high_recall_fallback_never_fabricates_from_control_turns() -> Non
     statements = [candidate.statement for candidate in candidates]
     assert not any("5x5" in statement or "strength" in statement for statement in statements)
     assert statements == ["User wants recommendations that account for their age."], statements
+
+
+def test_fallback_episode_holds_any_single_owned_event() -> None:
+    """An oversized event forms its own segment, so its lossless episode must fit.
+
+    The API accepts a one-mebibyte body and segmentation never splits an event,
+    so the narrative bound must hold that event plus a citation prefix per line;
+    a forty-kilobyte turn once raised an uncaught validation error here and
+    crashed the whole consolidation.
+    """
+
+    from agent_core.api.middleware import MAX_BODY_BYTES
+    from agent_core.domain.memory import INTEGRATED_EPISODE_NARRATIVE_MAX_LENGTH
+    from agent_core.memory.distillation import MAX_SEGMENT_SOURCE_EVENTS
+
+    assert (
+        MAX_BODY_BYTES + MAX_SEGMENT_SOURCE_EVENTS * len("[e:18446744073709551615] \n")
+    ) <= INTEGRATED_EPISODE_NARRATIVE_MAX_LENGTH
+    event = _personal_agent_event().model_copy(update={"payload": {"content": "x" * 40_000}})
+    [segment] = plan_segments([event])
+
+    episode = deterministic_integrated_episode(
+        segment, principal=principal(), episode_id=UUID(int=9), created_at=NOW
+    )
+
+    assert episode.narrative == f"[e:7] {'x' * 40_000}"
+
+
+async def test_oversized_event_completes_through_the_audited_fallback() -> None:
+    extractor, _provider, factory = await _distillation_extractor(["not-json"] * 3)
+    await user_event(factory, "x" * 40_000)
+
+    result = await extractor.extract(
+        await session_events(factory), principal=principal(), scope="general"
+    )
+
+    assert list(result) == []
+    assert extractor.last_audit.segment_count == 1
+    assert extractor.last_audit.episode_count == 1
+
+
+async def test_fallback_resolves_a_pronoun_only_to_the_adjacent_clause() -> None:
+    """ "That" after an unrecognized clause refers to that clause, not an earlier one."""
+
+    ambiguous = (
+        "I swim every week. Here is my sourdough recipe. "
+        "What would be the best modification to improve that?"
+    )
+    adjacent = "I swim every week. What would be the best modification to improve that?"
+
+    def turn(text: str) -> EventEnvelope:
+        return _personal_agent_event().model_copy(update={"payload": {"content": text}})
+
+    ambiguous_candidates = await formation.HighRecallCandidateExtractor().extract(
+        [turn(ambiguous)], principal=principal(), scope="general"
+    )
+    adjacent_candidates = await formation.HighRecallCandidateExtractor().extract(
+        [turn(adjacent)], principal=principal(), scope="general"
+    )
+
+    assert [candidate.statement for candidate in ambiguous_candidates] == ["User swims every week."]
+    assert "User wants to improve their swimming." in {
+        candidate.statement for candidate in adjacent_candidates
+    }
+
+
+def test_semantic_duplicate_detection_compares_assertions_not_only_subjects() -> None:
+    """Two candidates about one subject are one memory only when they say one thing."""
+
+    red = _candidate(
+        subject="BMW",
+        statement="User's BMW is red.",
+        claim_kind="resource",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "my BMW is red"}],
+    )
+    tires = red.model_copy(update={"statement": "User's BMW needs new tires."})
+    can_meet = _candidate(
+        subject="Friday meetings",
+        statement="User can take meetings on Fridays.",
+        claim_kind="constraint",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "meetings on Fridays"}],
+    )
+    cannot_meet = can_meet.model_copy(update={"statement": "User cannot take meetings on Fridays."})
+    hundred = _candidate(
+        subject="User",
+        statement="User ran 100 miles in training last month.",
+        claim_kind="habit",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "ran 100 miles in training last month"}],
+    )
+    two_hundred = hundred.model_copy(
+        update={"statement": "User ran 200 miles in training last month."}
+    )
+    tea = _candidate(
+        subject="hot drinks",
+        statement="User prefers tea to coffee.",
+        claim_kind="preference",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "prefer tea to coffee"}],
+    )
+    coffee = tea.model_copy(
+        update={"subject": "beverage preference", "statement": "User prefers coffee to tea."}
+    )
+    with_music = _candidate(
+        subject="running music",
+        statement="User runs with music.",
+        claim_kind="habit",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "run with music"}],
+    )
+    without_music = with_music.model_copy(update={"statement": "User runs without music."})
+
+    # One subject and claim kind is one conflict key, so wording alone merges...
+    assert _candidates_semantically_duplicate(red, tires)
+    # ...but a contradiction never does; consolidation resolves it instead.
+    assert not _candidates_semantically_duplicate(can_meet, cannot_meet)
+    assert not _candidates_semantically_duplicate(hundred, two_hundred)
+    assert not _candidates_semantically_duplicate(tea, coffee)
+    assert not _candidates_semantically_duplicate(with_music, without_music)
+    assert _candidates_semantically_duplicate(
+        red, red.model_copy(update={"statement": "The user's BMW is red."})
+    )
 
 
 async def test_high_recall_fallback_survives_a_long_unterminated_turn() -> None:
@@ -2545,6 +2874,34 @@ async def test_represented_coverage_is_verified_against_the_cited_memory() -> No
     )
 
 
+def test_anticipation_prefix_is_bounded_to_the_most_recent_text() -> None:
+    """The blinded prefix keeps the latest text under a byte bound, never the whole session."""
+
+    from agent_core.memory.distillation import MAX_ANTICIPATION_PREFIX_BYTES
+
+    sizes = [100_000, 100_000, 50_000]
+    prefix_events = [
+        _personal_agent_event().model_copy(
+            update={"id": sequence, "sequence": sequence, "payload": {"content": "x" * size}}
+        )
+        for sequence, size in enumerate(sizes, start=1)
+    ]
+    current = _personal_agent_event().model_copy(update={"id": 4, "sequence": 4})
+    episode = deterministic_integrated_episode(
+        [current], principal=principal(), episode_id=UUID(int=9), created_at=NOW
+    )
+
+    prompt = json.loads(
+        NemoriAssistedCandidateExtractor._anticipation_prompt(
+            [*prefix_events, current], [episode], []
+        )
+    )
+
+    assert sizes[1] + sizes[2] <= MAX_ANTICIPATION_PREFIX_BYTES < sum(sizes)
+    assert [event["source_event_id"] for event in prompt["prefix_events"]] == [2, 3]
+    assert prompt["episode_cues"] == [{"episode_index": 0, "before_event_sequence": 4}]
+
+
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
     """A batch beyond one ledger's worth of clauses runs three calls per segment."""
 
@@ -2653,6 +3010,25 @@ def test_formation_corpus_v3_runs_against_a_populated_store() -> None:
     assert any(case.scenario == "rich-conversation" for case in seeded)
     assert sum(sum(event.actor == "user" for event in case.events) >= 2 for case in seeded) >= 2
     assert all(case.label != "must_not_form" for case in seeded)
+    # A populated store must also be asked about: some seeded case restates a
+    # seed, spans two segments so the blinded prefix carries a cue, and the
+    # provider has to mark that clause represented by the seed that asserts it.
+    represented = [case for case in seeded if case.represented_text]
+    assert represented, "no seeded case labels a clause a seed represents"
+    for case in represented:
+        assert len(plan_segments(_corpus_events(case))) >= 2, case.id
+        for text in case.represented_text:
+            assert any(statement_supports_clause(seed.statement, text) for seed in pool), text
+
+
+def _corpus_events(case: MemoryDistillationCase) -> list[EventEnvelope]:
+    return [
+        _personal_agent_event().model_copy(
+            update={"id": sequence, "sequence": sequence, "payload": {"content": event.text}}
+        )
+        for sequence, event in enumerate(case.events, start=1)
+        if event.actor == "user"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2739,6 +3115,7 @@ async def test_distillation_prompt_carries_no_owner_identifiers() -> None:
     extractor, provider, factory = await _distillation_extractor([])
     source_id = await user_event(factory, "I am building a personal AI agent.")
     provider._script.turns = [
+        *provider._script.turns,
         ScriptedTurn(text=_scripted_episode([source_id], ["I am building a personal AI agent."])),
         ScriptedTurn(text='{"predictions":[]}'),
         ScriptedTurn(text=_empty_distillation(source_id)),
@@ -3073,12 +3450,13 @@ async def _select_with(
                 model="scripted",
                 policy_profile="default",
                 policy_version=_runtime_policy_version(),
-                scorer_version="distillation-scorer@2",
+                scorer_version="distillation-scorer@3",
                 build_ref="9" * 40,
                 corpus_sha256="b" * 64,
                 sample_count=61,
                 positive_case_count=49,
                 seeded_case_count=5,
+                represented_case_count=1,
                 direct_must_form_recall=1,
                 hypothesis_must_form_recall=1,
                 benign_precision=0.96,

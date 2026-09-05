@@ -198,8 +198,13 @@ disallowed fetch URL; arguments that fail the tool schema return the platform's
 ordinary `tool.arguments_invalid`. HTTP 402 and Tavily's documented 432/433
 usage-limit responses become `tool.web.quota_exceeded` with an operator-action
 message and without the upstream body. Keenable's documented malformed-key
-400 and its 401/403 responses become `tool.web.auth_failed`. Timeouts,
-transport failures, HTTP
+400 and its 401/403 responses become `tool.web.auth_failed`. Firecrawl's 401
+becomes `tool.web.auth_failed`, while its 403 becomes the non-retryable
+`tool.web.provider_rejected`: Firecrawl uses forbidden responses for request-
+and target-specific refusals as well as account permissions, so a 403 alone is
+not evidence that the credential was invalid. Its fixed message says the target
+or requested capability may be unsupported or blocked without copying the
+upstream response. Timeouts, transport failures, HTTP
 408/425/429, and server errors are retryable; auth, exhausted quota, other
 client errors, schema failures, and local URL refusals are not. The tool
 pipeline retains ownership of any retry decision within the run deadline.

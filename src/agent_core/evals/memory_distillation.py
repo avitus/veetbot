@@ -39,6 +39,7 @@ from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
     is_generic_subject,
     normalized_statement,
+    statement_supports_clause,
     statements_equivalent,
     subject_matches,
 )
@@ -114,6 +115,10 @@ class MemoryDistillationCase(BaseModel):
     events: list[DistillationEvent] = Field(min_length=1)
     expected: list[ExpectedDistilledCandidate] = Field(default_factory=list)
     prior_beliefs_pool: str | None = None
+    # Exact user clauses a seeded prior belief already asserts. The provider
+    # must mark each `represented` by an anticipation attributed to that
+    # belief; a case may only label them when it runs against a seed pool.
+    represented_text: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def label_matches_candidates(self) -> MemoryDistillationCase:
@@ -128,6 +133,10 @@ class MemoryDistillationCase(BaseModel):
             for evidence in candidate.evidence_text
         ):
             raise ValueError("expected evidence text is not an exact user substring")
+        if self.represented_text and self.prior_beliefs_pool is None:
+            raise ValueError("represented text requires a seed pool that represents it")
+        if any(text not in user_text for text in self.represented_text):
+            raise ValueError("represented text is not an exact user substring")
         return self
 
 
@@ -202,6 +211,23 @@ class MemoryDistillationCorpus(BaseModel):
             for case in positives
         ):
             raise ValueError("the rich-conversation scenario must run against a populated store")
+        # A populated store proves nothing about anticipation unless some case
+        # restates what a seed already asserts and the provider must say so.
+        if not any(
+            case.represented_text
+            and case.prior_beliefs_pool is not None
+            and all(
+                any(
+                    statement_supports_clause(seed.statement, text)
+                    for seed in self.seed_pools[case.prior_beliefs_pool]
+                )
+                for text in case.represented_text
+            )
+            for case in seeded_positives
+        ):
+            raise ValueError(
+                "a seeded positive case must label a clause that one of its seeds represents"
+            )
         return self
 
     def seeds_for(self, case: MemoryDistillationCase) -> list[SeedBelief]:
@@ -225,7 +251,7 @@ class DistillationEvaluationBelief(BaseModel):
 class DistillationCaseScore(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    scorer_version: Literal["distillation-scorer@2"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@3"] = DISTILLATION_SCORER_VERSION
     scoring: Literal["strict", "lenient"] = "strict"
     expected: int = Field(ge=0)
     matched: int = Field(ge=0)
@@ -251,6 +277,12 @@ class DistillationArmResult(BaseModel):
     expected_provider_calls: int = Field(ge=0)
     provider_cost_usd: str = Field(default="0", pattern=r"^\d+(?:\.\d+)?$")
     seeded_beliefs: int = Field(default=0, ge=0)
+    # Candidates the provider withheld because an anticipation attributed to a
+    # live memory already asserted them, and the labelled represented clauses
+    # with how many of them the verification upheld.
+    attributed_redundancies: int = Field(default=0, ge=0)
+    represented_units: int = Field(default=0, ge=0)
+    represented_units_verified: int = Field(default=0, ge=0)
     evaluated_at: datetime
 
 
@@ -287,7 +319,7 @@ class MemoryDistillationEvaluationResult(BaseModel):
 
     passed: bool
     failure_summary: str | None
-    scorer_version: Literal["distillation-scorer@2"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@3"] = DISTILLATION_SCORER_VERSION
     cases: list[DistillationCaseResult]
     policies: dict[PolicyVersion, DistillationPolicyMetrics]
     evidence: MemoryDistillationEvidence | None = None
@@ -492,6 +524,40 @@ def _case_evidence_units(
     return len(evidence_units), formed
 
 
+def _case_represented_units(
+    case: MemoryDistillationCase,
+    units: list[tuple[str, str]],
+    dispositions: dict[str, str],
+) -> tuple[int, int]:
+    """Count clauses a seed already asserts, and how many the provider verifiably represented.
+
+    Only the verified `represented` disposition counts: a label the local check
+    could not uphold is recorded as `represented_unverified` and counts as a
+    failure to represent, exactly as it does at runtime.
+    """
+
+    if not case.represented_text:
+        return 0, 0
+    represented = [
+        unit_id
+        for unit_id, text in units
+        if any(labelled in text or text in labelled for labelled in case.represented_text)
+    ]
+    verified = sum(dispositions.get(unit_id) == "represented" for unit_id in represented)
+    return len(represented), verified
+
+
+def represented_case_count(results: list[DistillationCaseResult]) -> int:
+    """Cases in which every labelled represented clause was verifiably represented."""
+
+    return sum(
+        result.arms["formation@9"].represented_units > 0
+        and result.arms["formation@9"].represented_units_verified
+        == result.arms["formation@9"].represented_units
+        for result in results
+    )
+
+
 async def seed_prior_beliefs(
     composition: object,
     seeds: list[SeedBelief],
@@ -620,6 +686,9 @@ async def _evaluate_case(
         expected_calls = 0
         evidence_units = 0
         evidence_units_formed = 0
+        attributed_redundancies = 0
+        represented_units = 0
+        represented_units_verified = 0
         cost = Decimal(0)
         if policy_version == "formation@9" and owned:
             expected_calls = 3 * len(distillation.plan_segments(owned))
@@ -630,6 +699,12 @@ async def _evaluate_case(
                 for unit in distillation.coverage_units(owned)
             ]
             evidence_units, evidence_units_formed = _case_evidence_units(case, units, dispositions)
+            attributed_redundancies = int(
+                getattr(audit, "prediction_attributed_redundancies", 0) or 0
+            )
+            represented_units, represented_units_verified = _case_represented_units(
+                case, units, dispositions
+            )
         for stage in formed.run.provider_stage_metrics.values():
             raw_cost = stage.get("cost_usd")
             if isinstance(raw_cost, str) and raw_cost:
@@ -659,6 +734,9 @@ async def _evaluate_case(
         expected_provider_calls=expected_calls,
         provider_cost_usd=format(cost, "f"),
         seeded_beliefs=seeded,
+        attributed_redundancies=attributed_redundancies,
+        represented_units=represented_units,
+        represented_units_verified=represented_units_verified,
         evaluated_at=evaluated_at,
     )
 
@@ -830,6 +908,7 @@ async def run_live_evaluation(
                 "seeded_case_count": sum(
                     result.arms["formation@9"].seeded_beliefs > 0 for result in results
                 ),
+                "represented_case_count": represented_case_count(results),
                 "boundary_failures": current.boundary_failures,
             },
             evaluated_at=evaluated_at,
@@ -916,6 +995,17 @@ def evaluate_publication_gates(
             )
     if not any(result.arms["formation@9"].seeded_beliefs for result in results):
         failures.append("no case ran against a populated store")
+    cases_by_id = {case.id: case for case in corpus.cases}
+    for result in results:
+        arm = result.arms["formation@9"]
+        if cases_by_id[result.case_id].represented_text and (
+            arm.represented_units == 0 or arm.represented_units_verified < arm.represented_units
+        ):
+            failures.append(
+                f"{result.case_id} restates a seeded belief that was not verifiably represented"
+            )
+    if not represented_case_count(results):
+        failures.append("no seeded case demonstrated attributed representation")
     personal_core = [result for result in results if result.scenario == "personal-agent"]
     if not personal_core or any(
         result.arms["formation@9"].score.matched != result.arms["formation@9"].score.expected

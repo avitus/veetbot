@@ -437,6 +437,7 @@ from agent_core.tools.schedule_lifecycle import (
     ScheduleListTool,
     SchedulePauseTool,
     ScheduleResumeTool,
+    ScheduleUpdateTool,
 )
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
@@ -1489,6 +1490,7 @@ async def _compose(
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
         registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
         registry.register(ScheduleListTool(schedule_service))
+        registry.register(ScheduleUpdateTool(schedule_service))
         registry.register(SchedulePauseTool(schedule_service))
         registry.register(ScheduleResumeTool(schedule_service))
         registry.register(ScheduleCancelTool(schedule_service))

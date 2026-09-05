@@ -36,6 +36,7 @@ SCHEDULE_ID = UUID("00000000-0000-0000-0000-000000002300")
 OTHER_SCHEDULE_ID = UUID("00000000-0000-0000-0000-000000002301")
 LIFECYCLE_NAMES = (
     "schedule.list",
+    "schedule.update",
     "schedule.pause",
     "schedule.resume",
     "schedule.cancel",
@@ -134,6 +135,11 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
     assert specs["schedule.list"].risk is RiskLevel.LOW
     assert specs["schedule.list"].idempotency is IdempotencyClass.READ_ONLY
     assert specs["schedule.list"].allow_parallel is True
+    assert specs["schedule.update"].required_scopes == {"schedule.write"}
+    assert specs["schedule.update"].side_effect is SideEffectClass.EXTERNAL_WRITE
+    assert specs["schedule.update"].risk is RiskLevel.HIGH
+    assert specs["schedule.update"].idempotency is IdempotencyClass.CONDITIONALLY_IDEMPOTENT
+    assert specs["schedule.update"].allow_parallel is False
     for name in ("schedule.pause", "schedule.resume"):
         assert specs[name].required_scopes == {"schedule.write"}
         assert specs[name].side_effect is SideEffectClass.EXTERNAL_WRITE

@@ -14,7 +14,9 @@ the durable run queue, run loop, policy engine, event log, and HTTP boundary.
 decisions for the control plane, ADR-0072 records the original one-time
 conversational bridge, ADR-0073 records the calendar-recurrence extension,
 ADR-0075 records the transport-only Apple inspection surface, and ADR-0080
-records the conversational lifecycle extension.
+records the conversational lifecycle extension. ADR-0088 records the owner's
+2026-09-04 expansion of that extension to conversational content and cadence
+updates.
 
 The scheduling entry condition is satisfied: PostgreSQL-backed on-demand runs,
 leases, fencing, checkpoints, recovery, cancellation, and the public run API
@@ -53,9 +55,11 @@ schedules. Arbitrary cron or RFC 5545 input, interval multipliers, dependency
 graphs, workflow DAGs, and continuous-session recurrence remain outside the
 closed extension. Milestone 23, authorized by the owner on 2026-09-02 and
 recorded in ADR-0080, brings the existing list, pause, resume, and cancel
-service operations into the governed model-tool pipeline. Schedule content and
-cadence update, occurrence and run listing, and hard deletion remain outside
-that extension.
+service operations into the governed model-tool pipeline. The owner expanded
+Milestone 23 on 2026-09-04 through ADR-0088: `schedule.update` adds a closed,
+approval-gated title, instruction, and cadence patch while the application
+service preserves hidden authority and execution fields. Occurrence and run
+listing and hard deletion remain outside that extension.
 
 The owner authorized a native Apple schedule browser on 2026-08-29. It reuses
 the existing Milestone 11 list and point-read routes and therefore adds no
@@ -364,7 +368,12 @@ blocking an unrelated occurrence, and bounds conversational history.
 The session stores `schedule_id`, `schedule_revision`, `occurrence_id`, and
 `nominal_fire_at` in metadata. Its agent ID and version match the revision. The
 instruction is appended as the session's first user event and seeds the run in
-the same transaction.
+the same transaction. Its scheduler actor marks it as durable model context,
+not a chat message: public transcript reads and run streams omit that seed
+event while retaining the completed assistant response. The authorized
+schedule point read remains the surface for inspecting the complete
+instruction. This presentation rule applies to every cadence and does not
+remove the instruction from context, persistence, audit, or title generation.
 
 `schedule_id` is a reserved platform metadata key. Public session creation
 rejects a caller-supplied value; `ScheduleMaterializer` is the trusted path that
@@ -435,7 +444,7 @@ opens one short transaction and:
 4. Checks overlap, grace, configuration, scopes, and budgets.
 5. Inserts the unique occurrence disposition.
 6. For `MATERIALIZED`, creates the dedicated session, appends `session.created`
-   and the user message, creates the priority-10 `QUEUED` run with
+   and the context-only scheduler-authored user message, creates the priority-10 `QUEUED` run with
    `scheduled_for = now`, seeds its checkpoint, and appends `run.queued`.
 7. Advances `next_fire_at`, applies the one-time terminal transition where
    required, and appends schedule audit events.
@@ -493,7 +502,11 @@ GET    /v1/schedules/{schedule_id}/occurrences
 stored separately from run-submission idempotency under the composite key
 `(tenant_id, principal_id, key)`, with a request hash and resulting schedule
 ID. Same key and same hash returns the existing schedule; same key and different
-hash is a conflict.
+hash is a conflict. Conversational `schedule.update` reuses this ledger with a
+canonical hash over its stable ID, expected revision, and explicit patch. The
+idempotency row commits with the new immutable revision, so recovery after an
+unknown commit returns the existing schedule instead of applying the patch
+again.
 
 `PATCH`, pause, resume, and delete require `expected_revision` and apply the
 state rules above. List routes use opaque stable cursors and bounded limits.
@@ -864,19 +877,20 @@ the duration of the scheduled run.
 ## Model-callable lifecycle
 
 Milestone 23 closes the remaining operational gap between a conversational
-schedule and its lifecycle. Four builtin capabilities are registered beside
+schedule and its lifecycle. Five builtin capabilities are registered beside
 `schedule.create`:
 
 ```text
 name              side_effect      risk  idempotency  scope            parallel
 ----------------  ---------------  ----  -----------  ---------------  --------
 schedule.list     none             low   read_only    schedule.read     true
+schedule.update   external_write   high  conditional  schedule.write    false
 schedule.pause    external_write   high  idempotent   schedule.write    false
 schedule.resume   external_write   high  idempotent   schedule.write    false
 schedule.cancel   external_delete  high  idempotent   schedule.cancel   false
 ```
 
-All four use `target_kind: in_process`, `output_trust: internal_tool`, and a
+All five use `target_kind: in_process`, `output_trust: internal_tool`, and a
 15-second timeout. Discovery has a 524,288-byte output ceiling so the bounded
 fifty-record page remains valid even when every record carries the largest
 legal yearly selector; one mutation has a 4,096-byte ceiling. They register and
@@ -922,6 +936,49 @@ audit, stops future occurrences, and does not cancel an occurrence's already
 materialized run. Resume preserves the existing no-backfill rule: it chooses
 the first occurrence strictly after the current instant.
 
+`schedule.update` accepts the same stable identity fields plus a closed patch:
+
+```json
+{
+  "schedule_id": "66af9c8d-d71c-4b36-bb06-cd44d4800bad",
+  "expected_revision": 3,
+  "instruction": "Summarize only security and infrastructure news.",
+  "cadence": {
+    "kind": "WEEKLY",
+    "local_time": "08:00:00",
+    "weekdays": [1, 3, 5],
+    "timezone": "America/Los_Angeles"
+  }
+}
+```
+
+At least one of `title`, `instruction`, `at`, or `cadence` is required. `at`
+and `cadence` are mutually exclusive and use the same closed values as
+`schedule.create`; omitted patch fields retain their current values. The
+approval view shows the exact ID, expected revision, and complete supplied
+patch, identifying omitted fields as unchanged rather than inventing their
+current content.
+
+The tool passes its invocation idempotency key to a write-authorized
+`ScheduleService` patch operation. In one application transaction, the service
+checks the key and expected revision, loads the current immutable revision,
+and constructs the complete next definition. It preserves `agent_id`,
+`agent_version`, `policy_profile`, `requested_scopes`, `limits`,
+`run_timeout_seconds`, `misfire_grace_seconds`, and
+`max_consecutive_failures`; those fields are neither tool inputs nor tool
+outputs. The ordinary definition validator, secret scanner, recurrence
+calculator, immutable revision repository, and `schedule.updated` audit event
+remain authoritative.
+
+A valid ACTIVE edit creates revision N+1 and sets `next_fire_at` to the first
+instant strictly after the update time. A valid PAUSED edit also creates N+1
+but remains PAUSED with no next firing; later resume uses the new cadence. A
+COMPLETED or CANCELLED schedule remains terminal. A patch whose normalized
+definition is unchanged records the idempotency key but writes no revision or
+transition event. Identical recovery returns the current schedule with
+`replayed: true`; key reuse with different content, a stale revision, or
+invalid content fails closed without another revision.
+
 ## Build sequence
 
 1. Add the domain values, recurrence calculator, and deterministic civil-time
@@ -958,14 +1015,14 @@ the first occurrence strictly after the current instant.
 15. Run the six Milestone 20 gates, every scheduling partition, the complete
     non-live suite, PostgreSQL integration, hosted CI, and the CodeRabbit loop
     on the final head. **M20.**
-16. Add the summary-only `schedule.list` schema and the three revision-guarded
+16. Add the summary-only `schedule.list` schema and the four revision-guarded
     lifecycle schemas, classifications, approval views, and direct
     application-service adapters. **M23.**
-17. Register all four tools under the existing schedule flag pair, add them to
+17. Register all five tools under the existing schedule flag pair, add them to
     the default agent on the same condition, and prove exact-scope denial,
     ambiguity-safe discovery, conflict behavior, approval, and retry safety
     through the ordinary pipeline. **M23.**
-18. Run the seven Milestone 23 gates, every scheduling partition, the complete
+18. Run the twelve Milestone 23 gates, every scheduling partition, the complete
     non-live suite, PostgreSQL integration, hosted CI, and the CodeRabbit loop
     on the final head. **M23.**
 
@@ -1128,8 +1185,8 @@ the first occurrence strictly after the current instant.
     `gate.schedule.model_create_recurring_validation`, case. **M20.**
 35. **Conversational lifecycle tools are feature-gated and honestly
     classified.** The schedule flag pair registers and advertises exactly
-    `schedule.list`, `schedule.pause`, `schedule.resume`, and
-    `schedule.cancel` beside creation, with the declared effects, risks,
+    `schedule.list`, `schedule.update`, `schedule.pause`, `schedule.resume`,
+    and `schedule.cancel` beside creation, with the declared effects, risks,
     idempotency, scopes, and parallelism. Registered as
     `gate.schedule.model_lifecycle_contract`, structural. **M23.**
 36. **Conversational discovery is bounded and summary-only.** A
@@ -1159,6 +1216,31 @@ the first occurrence strictly after the current instant.
     identical authorized invocation cannot duplicate a transition event or
     move a schedule beyond the requested legal state. Registered as
     `gate.schedule.model_lifecycle_retry`, case. **M23.**
+42. **Conversational update is a closed, governed patch.** `schedule.update`
+    is feature-gated, approval-gated, conditionally idempotent, non-parallel,
+    and exactly scoped by `schedule.write`; its input accepts only a stable ID,
+    expected revision, and title, instruction, or one closed cadence
+    replacement. Registered as `gate.schedule.model_update_contract`,
+    structural. **M23.**
+43. **A conversational edit writes one future immutable revision.** After
+    summary discovery and ordinary approval, changing content and cadence
+    leaves the prior revision unchanged, creates N+1, and recomputes an active
+    schedule's first strictly future firing. Registered as
+    `gate.schedule.model_update_happy_path`, case. **M23.**
+44. **Conversational update cannot widen hidden execution authority.** A patch
+    preserves the current agent, policy, requested scopes, finite limits,
+    timeout, misfire grace, and failure policy; updating while paused keeps the
+    schedule paused with no next firing. Registered as
+    `gate.schedule.model_update_preserves_authority`, case. **M23.**
+45. **Conversational update authorization and validation fail closed.** A
+    missing `schedule.write` scope is denied before approval, and an empty or
+    malformed patch, secret-like content, unknown or terminal schedule, or
+    stale revision writes no revision or event. Registered as
+    `gate.schedule.model_update_validation`, case. **M23.**
+46. **Conversational update recovery applies at most once.** An identical
+    idempotency-key replay returns the schedule without another revision or
+    event, while the same key with changed content conflicts without an
+    effect. Registered as `gate.schedule.model_update_retry`, case. **M23.**
 
 ## Open questions
 

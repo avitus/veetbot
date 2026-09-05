@@ -443,6 +443,29 @@ import Testing
     }
 
     @Test
+    func testFailedToolEventsUseTheirMoreSpecificOutcomePresentation() {
+        let reducer = RunStateReducer()
+        reducer.reduce(
+            failedToolOutcomeFrame(
+                id: 1,
+                callID: "fetch-rejected",
+                status: "failed",
+                reasonCode: "tool.web.provider_rejected"
+            )
+        )
+        reducer.reduce(
+            failedToolOutcomeFrame(
+                id: 2,
+                callID: "fetch-unavailable",
+                status: "unavailable",
+                reasonCode: "tool.web.provider_unavailable"
+            )
+        )
+
+        #expect(reducer.tools.map(\.status) == [.rejected, .unavailable])
+    }
+
+    @Test
     func testRetryableArgumentFailureRendersAsCorrectedAfterSuccessfulRetry() {
         let reducer = RunStateReducer()
         let failedOutcome = retryableArgumentFailureOutcome
@@ -670,6 +693,36 @@ import Testing
                     ]),
                     "is_error": .bool(true),
                     "trust": .string("internal_tool"),
+                ]),
+            ]
+        )
+    }
+
+    private func failedToolOutcomeFrame(
+        id: Int,
+        callID: String,
+        status: String,
+        reasonCode: String
+    ) -> SSEFrame {
+        let outcome =
+            """
+            {"status":"\(status)","action":"web.fetch","reason_code":"\(reasonCode)","message":"A stable message.","retryable":false,"remediation":"none"}
+            """
+        return SSEFrame(
+            id: id,
+            event: "tool.call.failed",
+            data: [
+                "call_id": .string(callID),
+                "name": .string("web.fetch"),
+                "result_item": .object([
+                    "content": .array([
+                        .object([
+                            "type": .string("text"),
+                            "text": .string(outcome),
+                        ]),
+                    ]),
+                    "is_error": .bool(true),
+                    "trust": .string("external_untrusted"),
                 ]),
             ]
         )

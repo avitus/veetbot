@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from agent_core.application.services import ScheduleService
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -14,7 +16,7 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.schedules import ScheduleRecord
+from agent_core.domain.schedules import ScheduleDefinitionPatch, ScheduleRecord
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
@@ -22,13 +24,20 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSpec,
 )
+from agent_core.tools.schedule_create import (
+    RECURRING_CADENCE_INPUT_SCHEMA,
+    CadenceInputError,
+    parse_cadence,
+)
 
 SCHEDULE_LIST_TOOL_NAME = "schedule.list"
+SCHEDULE_UPDATE_TOOL_NAME = "schedule.update"
 SCHEDULE_PAUSE_TOOL_NAME = "schedule.pause"
 SCHEDULE_RESUME_TOOL_NAME = "schedule.resume"
 SCHEDULE_CANCEL_TOOL_NAME = "schedule.cancel"
 SCHEDULE_LIFECYCLE_TOOL_NAMES = (
     SCHEDULE_LIST_TOOL_NAME,
+    SCHEDULE_UPDATE_TOOL_NAME,
     SCHEDULE_PAUSE_TOOL_NAME,
     SCHEDULE_RESUME_TOOL_NAME,
     SCHEDULE_CANCEL_TOOL_NAME,
@@ -209,6 +218,37 @@ MUTATION_OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+UPDATE_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "schedule_id": {"type": "string", "format": "uuid"},
+        "expected_revision": {"type": "integer", "minimum": 1},
+        "title": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "instruction": {"type": "string", "minLength": 1, "maxLength": 65_536},
+        "at": {"type": "string", "format": "date-time"},
+        "cadence": RECURRING_CADENCE_INPUT_SCHEMA,
+    },
+    "required": ["schedule_id", "expected_revision"],
+    "anyOf": [
+        {"required": ["title"]},
+        {"required": ["instruction"]},
+        {"required": ["at"]},
+        {"required": ["cadence"]},
+    ],
+    "not": {"required": ["at", "cadence"]},
+    "additionalProperties": False,
+}
+
+UPDATE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        **MUTATION_OUTPUT_SCHEMA["properties"],
+        "replayed": {"type": "boolean"},
+    },
+    "required": [*MUTATION_OUTPUT_SCHEMA["required"], "replayed"],
+    "additionalProperties": False,
+}
+
 
 def _failure(
     kind: ToolFailureKind,
@@ -273,9 +313,9 @@ class ScheduleListTool:
         name=SCHEDULE_LIST_TOOL_NAME,
         version="1.0.0",
         description=(
-            "List the user's schedules as bounded summaries. Use this before pause, resume, "
-            "or cancel to resolve a description to one stable schedule ID and revision; ask "
-            "the user if zero or multiple summaries match."
+            "List the user's schedules as bounded summaries. Use this before update, pause, "
+            "resume, or cancel to resolve a description to one stable schedule ID and "
+            "revision; ask the user if zero or multiple summaries match."
         ),
         input_schema=LIST_INPUT_SCHEMA,
         output_schema=LIST_OUTPUT_SCHEMA,
@@ -341,6 +381,183 @@ class ScheduleListTool:
         return ToolResult(
             ok=True,
             content=[TextPart(text=f"Found {len(page.items)} schedule summaries.")],
+            structured=structured,
+        )
+
+
+class ScheduleUpdateTool:
+    """Patch model-visible schedule fields without exposing execution authority."""
+
+    spec = ToolSpec(
+        name=SCHEDULE_UPDATE_TOOL_NAME,
+        version="1.0.0",
+        description=(
+            "Update a schedule title, instruction, cadence, or any combination after using "
+            "schedule.list to resolve one stable ID and revision. Omitted fields stay "
+            "unchanged; ask the user when the intended schedule or time is ambiguous."
+        ),
+        input_schema=UPDATE_INPUT_SCHEMA,
+        output_schema=UPDATE_OUTPUT_SCHEMA,
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
+        risk=RiskLevel.HIGH,
+        idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+        required_scopes={SCHEDULE_WRITE_SCOPE},
+        timeout_seconds=15,
+        maximum_output_bytes=4096,
+        allow_parallel=False,
+        output_trust=TrustLevel.INTERNAL_TOOL,
+    )
+
+    def __init__(self, service: ScheduleService) -> None:
+        self._service = service
+
+    async def approval_view(
+        self,
+        arguments: dict[str, Any],
+        *,
+        tenant_id: str,
+    ) -> tuple[str, dict[str, Any]]:
+        del tenant_id
+        schedule_id = str(arguments.get("schedule_id", "<invalid>"))
+        expected_revision = arguments.get("expected_revision", "<invalid>")
+        return (
+            f"Update schedule {schedule_id} at revision {expected_revision}",
+            arguments,
+        )
+
+    async def execute(
+        self,
+        arguments: dict[str, Any],
+        context: ToolExecutionContext,
+    ) -> ToolResult:
+        allowed = {
+            "schedule_id",
+            "expected_revision",
+            "title",
+            "instruction",
+            "at",
+            "cadence",
+        }
+        if not set(arguments) <= allowed:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.update_fields_invalid",
+                "schedule update contains an unknown field",
+                message="The schedule was not updated.",
+            )
+        try:
+            schedule_id = UUID(str(arguments["schedule_id"]))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.id_invalid",
+                "schedule_id must be a UUID",
+                message="The schedule was not updated.",
+            )
+        expected_revision = arguments.get("expected_revision")
+        if (
+            not isinstance(expected_revision, int)
+            or isinstance(expected_revision, bool)
+            or expected_revision < 1
+        ):
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.revision_invalid",
+                "expected_revision must be a positive integer",
+                message="The schedule was not updated.",
+            )
+        changed_fields = {"title", "instruction", "at", "cadence"} & set(arguments)
+        if not changed_fields:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.update_empty",
+                "provide at least one title, instruction, at, or cadence change",
+                message="The schedule was not updated.",
+            )
+        try:
+            cadence = (
+                parse_cadence(arguments) if "at" in arguments or "cadence" in arguments else None
+            )
+            patch = ScheduleDefinitionPatch(
+                title=arguments.get("title"),
+                instruction=arguments.get("instruction"),
+                cadence=cadence,
+            )
+        except CadenceInputError as exc:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                exc.reason_code,
+                str(exc),
+                message="The schedule was not updated.",
+            )
+        except ValidationError as exc:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.update_invalid",
+                str(exc),
+                message="The schedule was not updated.",
+            )
+        try:
+            await context.mark_effect_sent()
+            record = await self._service.patch(
+                context.principal,
+                schedule_id,
+                expected_revision,
+                patch,
+                context.idempotency_key,
+            )
+        except NotFoundError as exc:
+            return _failure(
+                ToolFailureKind.NOT_FOUND,
+                "schedule.not_found",
+                str(exc),
+                message="The schedule was not updated.",
+            )
+        except AuthorizationError as exc:
+            return _failure(
+                ToolFailureKind.PERMISSION,
+                "policy.scope.missing",
+                str(exc),
+                message="The schedule was not updated.",
+            )
+        except ScheduleValidationError as exc:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                exc.reason,
+                str(exc),
+                message="The schedule was not updated.",
+            )
+        except ConflictError as exc:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                exc.reason or "schedule.update_conflict",
+                str(exc),
+                message="The schedule was not updated.",
+            )
+
+        schedule = record.schedule
+        structured = {
+            "schedule_id": str(schedule.id),
+            "current_revision": schedule.current_revision,
+            "state": schedule.state.value,
+            "pause_reason": (
+                None if schedule.pause_reason is None else schedule.pause_reason.value
+            ),
+            "next_fire_at": (
+                None if schedule.next_fire_at is None else schedule.next_fire_at.isoformat()
+            ),
+            "replayed": record.replayed,
+        }
+        return ToolResult(
+            ok=True,
+            content=[
+                TextPart(
+                    text=(
+                        f"Schedule {schedule.id} is at revision "
+                        f"{schedule.current_revision} after update."
+                    )
+                )
+            ],
             structured=structured,
         )
 

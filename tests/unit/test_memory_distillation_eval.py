@@ -161,6 +161,14 @@ def test_distillation_scorer_rejects_a_generic_user_subject() -> None:
         ("User no longer drives to work.", "User drives to work."),
         ("User was promoted in 2019.", "User was promoted in 2024."),
         ("User pays 1500 per month in rent.", "User pays 2500 per month in rent."),
+        ("User prefers tea to coffee.", "User prefers coffee to tea."),
+        ("User prefers coffee over tea.", "User prefers tea to coffee."),
+        ("User moved from Paris to Rome.", "User moved from Rome to Paris."),
+        ("User prefers examples before theory.", "User prefers theory before examples."),
+        (
+            "User ran 100 miles in training for the marathon last month.",
+            "User ran 200 miles in training for the marathon last month.",
+        ),
     ],
 )
 def test_scorer_never_equates_supersets_negations_counts_or_siblings(
@@ -186,6 +194,8 @@ def test_scorer_never_equates_supersets_negations_counts_or_siblings(
             "User's daughter starts college next year, in 2027.",
             "User's daughter starts college next year.",
         ),
+        ("User prefers tea over coffee.", "User prefers tea to coffee."),
+        ("User does not drive to work.", "User doesn't drive to work."),
     ],
 )
 def test_scorer_accepts_equivalent_wording(candidate: str, reference: str) -> None:
@@ -294,9 +304,11 @@ def _corpus_payload(**overrides: object) -> dict[str, Any]:
             "label": "must_form",
             "scenario": "rich-conversation",
             "prior_beliefs_pool": "populated",
+            "represented_text": ["I keep seed 1 in the Blue folder"],
             "events": [
                 {"actor": "user", "text": "I swim, run, or bike most days."},
                 {"actor": "user", "text": "I lift weights three times a week."},
+                {"actor": "user", "text": "I keep seed 1 in the Blue folder."},
             ],
             "expected": [
                 {
@@ -345,7 +357,11 @@ def test_corpus_requires_a_seeded_multi_event_positive_case() -> None:
 
     unseeded = _corpus_payload(seed_pools={})
     unseeded["cases"] = [
-        {key: value for key, value in case.items() if key != "prior_beliefs_pool"}
+        {
+            key: value
+            for key, value in case.items()
+            if key not in {"prior_beliefs_pool", "represented_text"}
+        }
         for case in _corpus_payload()["cases"]
     ]
     with pytest.raises(ValidationError, match="populated store"):
@@ -527,3 +543,155 @@ def test_live_evaluation_refuses_a_dirty_or_mismatched_tree(
                 output=tmp_path / "evidence.json",
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("statement", "clause"),
+    [
+        ("User can take meetings on Fridays.", "I cannot take meetings on Fridays"),
+        ("User runs two times a week.", "I run three times a week now"),
+        ("User prefers tea to coffee.", "I prefer coffee to tea these days"),
+        ("User pays 1500 per month in rent.", "my rent is 2500 per month"),
+        ("User runs with music.", "I run without music"),
+        ("User runs.", "When not lifting, user does not run."),
+    ],
+)
+def test_clause_support_rejects_polarity_count_and_direction_changes(
+    statement: str, clause: str
+) -> None:
+    """A memory never represents a clause that corrects it.
+
+    Anticipation may label a correction as already represented; the only
+    thing standing between that label and a silently lost correction is this
+    check, so it must say no to a negation, a different count, or a reversed
+    direction, not merely count shared words.
+    """
+
+    from agent_core.memory.equivalence import statement_supports_clause
+
+    assert not statement_supports_clause(statement, clause)
+
+
+@pytest.mark.parametrize(
+    ("statement", "clause"),
+    [
+        ("User cannot take meetings on Fridays.", "I can't take meetings on Fridays"),
+        ("User lives in Portland.", "I still live in Portland"),
+        ("User prefers tea to coffee.", "as I said, tea over coffee for me"),
+    ],
+)
+def test_clause_support_accepts_a_restated_claim(statement: str, clause: str) -> None:
+    from agent_core.memory.equivalence import statement_supports_clause
+
+    assert statement_supports_clause(statement, clause)
+
+
+def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
+    from agent_core.memory.equivalence import negated
+
+    assert negated("When not lifting, user does not run.")
+    assert not negated("User bikes on days when not lifting.")
+
+
+def test_scorer_version_advanced_with_its_semantics() -> None:
+    """A changed scorer cannot keep the version an old artifact was published under."""
+
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@3"
+
+
+def test_represented_text_requires_a_pool_and_exact_user_text() -> None:
+    with pytest.raises(ValidationError, match="requires a seed pool"):
+        _case(represented_text=["My goal is to finish the marathon"])
+    with pytest.raises(ValidationError, match="exact user substring"):
+        _case(prior_beliefs_pool="populated", represented_text=["I live in Portland"])
+    case = _case(prior_beliefs_pool="populated", represented_text=["finish the marathon"])
+    assert case.represented_text == ["finish the marathon"]
+
+
+def test_corpus_requires_a_seeded_case_that_restates_a_seed() -> None:
+    """A populated store proves nothing unless the provider is made to use it."""
+
+    payload = _corpus_payload()
+    for case in payload["cases"]:
+        case.pop("represented_text", None)
+    with pytest.raises(ValidationError, match="one of its seeds represents"):
+        MemoryDistillationCorpus.model_validate(payload)
+
+    unsupported = _corpus_payload()
+    for case in unsupported["cases"]:
+        if "represented_text" in case:
+            case["events"].append({"actor": "user", "text": "I moved to Lisbon."})
+            case["represented_text"] = ["I moved to Lisbon"]
+    with pytest.raises(ValidationError, match="one of its seeds represents"):
+        MemoryDistillationCorpus.model_validate(unsupported)
+
+
+def _results(
+    corpus: MemoryDistillationCorpus, *, represented_verified: bool
+) -> list[memory_eval.DistillationCaseResult]:
+    from datetime import UTC, datetime
+
+    from agent_core.evals.memory_distillation import (
+        DistillationArmResult,
+        DistillationCaseResult,
+        PolicyVersion,
+    )
+
+    now = datetime(2026, 9, 4, tzinfo=UTC)
+    results: list[DistillationCaseResult] = []
+    for case in corpus.cases:
+        formed = [
+            _belief(
+                claim_kind=expected.claim_kind,
+                derivation=expected.derivation,
+                longevity=expected.longevity,
+                subject=expected.subjects[0],
+                statement=expected.statements[0],
+            )
+            for expected in case.expected
+        ]
+        represented_units = len(case.represented_text)
+        arms: dict[PolicyVersion, DistillationArmResult] = {}
+        for policy in memory_eval._POLICIES:
+            current = policy == "formation@9"
+            beliefs = formed if current else []
+            arms[policy] = DistillationArmResult(
+                policy_version=policy,
+                beliefs=beliefs,
+                score=score_distillation_case(case, beliefs, closed_fields=current),
+                provider_calls=3 if current else 0,
+                expected_provider_calls=3 if current else 0,
+                seeded_beliefs=len(corpus.seeds_for(case)),
+                represented_units=represented_units if current else 0,
+                represented_units_verified=(
+                    represented_units if current and represented_verified else 0
+                ),
+                evaluated_at=now,
+            )
+        results.append(
+            DistillationCaseResult(
+                case_id=case.id, label=case.label, scenario=case.scenario, arms=arms
+            )
+        )
+    return results
+
+
+def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
+    """Zero predictions and zero attributed redundancies can no longer publish."""
+
+    corpus = MemoryDistillationCorpus.model_validate(_corpus_payload())
+
+    def gate_failures(represented_verified: bool) -> list[str]:
+        results = _results(corpus, represented_verified=represented_verified)
+        summaries = {
+            policy: memory_eval._policy_metrics(policy, results) for policy in memory_eval._POLICIES
+        }
+        return memory_eval.evaluate_publication_gates(corpus, results, summaries)
+
+    assert gate_failures(True) == []
+    failures = gate_failures(False)
+    assert "rich-conversation-900 restates a seeded belief that was not verifiably represented" in (
+        failures
+    )
+    assert "no seeded case demonstrated attributed representation" in failures
+    assert memory_eval.represented_case_count(_results(corpus, represented_verified=True)) == 1

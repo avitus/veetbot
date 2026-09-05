@@ -27,6 +27,7 @@ from agent_core.domain.events import (
     EventEnvelope,
     NewEvent,
     ProcessEvent,
+    is_schedule_instruction_event,
 )
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
@@ -524,7 +525,9 @@ class InMemoryEventRepository:
             return [
                 event.model_copy(deep=True)
                 for event in self._events[session_id]
-                if event.sequence > sequence and event.event_type in CONVERSATION_MESSAGE_EVENTS
+                if event.sequence > sequence
+                and event.event_type in CONVERSATION_MESSAGE_EVENTS
+                and not is_schedule_instruction_event(event)
             ][:limit]
 
     async def existing_sequences(
