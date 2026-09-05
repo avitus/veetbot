@@ -162,8 +162,9 @@ overlapping or omitted provenance, or a narrative span not supported by its
 citations. Validation failure falls back to one deterministic episode whose
 narrative is the ordered source text joined under the same bounds.
 
-`IntegratedEpisodeStore` has `put`, `get`, `for_session`, and
-`delete_for_session`. `put` is idempotent on `derivation_key`, and a pass that
+`IntegratedEpisodeStore` has `put`, `get`, principal-scoped
+`get_by_derivation`, `for_session`, and `delete_for_session`.
+`put` is idempotent on `derivation_key`, and a pass that
 re-derives a key an earlier pass already stored under different content, as a
 provider re-pass does after the fallback, keeps the stored episode and records
 `derivation_conflict` rather than rewriting it or failing; both in-memory
@@ -472,11 +473,12 @@ beliefs.
 Scoring is `distillation-scorer@3`. A belief matches a gold claim when its
 closed fields agree, its subject names the gold conflict key, and its statement
 is equivalent: equal after normalization, or sharing three quarters of the
-combined content terms with the same polarity, the same counts, the same large
-numbers when both carry one, the same object after every directional marker
-both share, and at most one term the gold lacks. Elaborations, negations,
-different counts or distances, reversed comparisons or origins, and sibling
-activities never match; a negation inside a subordinate circumstance
+combined content terms with the same polarity, the same absence conditions,
+the same counts, the same large numbers when both carry one, the same object
+after every directional marker both share, and at most one term the gold lacks.
+Elaborations, negations, added or removed absence conditions, different counts
+or distances, reversed comparisons or origins, and sibling activities never
+match; a negation inside a subordinate circumstance
 qualifies a claim rather than denying it. The same compatibility floor decides
 whether a live memory represents a clause and whether two candidates in one
 batch are one memory. The frozen `formation@7` and `formation@8` controls

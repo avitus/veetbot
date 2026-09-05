@@ -10,7 +10,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -45,6 +45,7 @@ from agent_core.evals.cases import load_cases
 from agent_core.evals.runner import run_case
 from agent_core.mcp.configuration import build_stdio_environment, validate_mcp_config
 from agent_core.mcp.mapping import map_discovered_tools
+from agent_core.ports.mcp import MCPClientFactory
 from agent_core.tools.executor import PIPELINE_STEP_SEQUENCE
 from agent_core.tools.registry import StaticToolRegistry
 from scripts.architecture_checks import architecture_errors
@@ -373,6 +374,56 @@ async def test_prepare_closes_all_clients_after_unexpected_discovery_failure() -
             await composition.sessions.create()
     assert len(factory.clients) == 2
     assert all(client.closed and not client.entered for client in factory.clients)
+
+
+async def test_cancelled_prepare_finishes_in_flight_client_cleanup() -> None:
+    """Cancelling the parent gather twice must not abandon an entered client."""
+
+    discovery_started = asyncio.Event()
+    close_started = asyncio.Event()
+    allow_close = asyncio.Event()
+    closed = asyncio.Event()
+
+    class CancellationClient(_TrackedClient):
+        async def discover(self) -> MCPDiscovery:
+            discovery_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def __aexit__(self, *_args: object) -> None:
+            close_started.set()
+            await allow_close.wait()
+            self.entered = False
+            self.closed = True
+            closed.set()
+
+    client = CancellationClient(fail_discovery=False)
+
+    def factory(
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> CancellationClient:
+        del config, credential, environment
+        return client
+
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("cancelled"),),
+        mcp_client_factory=cast(MCPClientFactory, factory),
+    ) as composition:
+        startup = asyncio.create_task(composition.sessions.create())
+        await asyncio.wait_for(discovery_started.wait(), timeout=1)
+        startup.cancel()
+        await asyncio.wait_for(close_started.wait(), timeout=1)
+        startup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await startup
+        allow_close.set()
+        await asyncio.wait_for(closed.wait(), timeout=1)
+
+    assert client.closed and not client.entered
 
 
 async def test_prepare_discovers_independent_servers_concurrently() -> None:

@@ -59,7 +59,7 @@ on `Run`. Section 6.3 puts `agent_id` and `agent_version` on `Session`. The
 first four lines of the runtime do not compile against the domain model in
 Section 6.
 
-**The loop cannot suspend.** `engineering-plan.md:1566` handles a paused
+**The loop cannot suspend.** `engineering-plan.md:1570` handles a paused
 disposition with `return`. Section 27.2 requires that entering either
 `WAITING_*` state release the worker lease, checkpoint the run, and emit an
 event. A bare `return` performs none of the three, and there is no

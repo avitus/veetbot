@@ -145,7 +145,8 @@ _NUMBER_WORDS = {
 _GENERIC_SUBJECTS = frozenset({"user", "the user", "users", "me", "i", "myself", "user's"})
 # "without" states an absence inside a claim rather than negating the claim:
 # "runs without music" is a superset of "runs", not its denial.
-_ABSENCE = frozenset({"without"})
+_ABSENCE = frozenset({"non", "without"})
+_ABSENCE_FILLERS = frozenset({"all", "any"})
 # A negation after one of these qualifies a circumstance ("bikes on days when
 # not lifting") rather than denying the claim itself.
 _SUBORDINATORS = frozenset(
@@ -249,7 +250,7 @@ def _stem(term: str) -> str:
 def _is_content(term: str) -> bool:
     return (
         term not in _STOPWORDS
-        and term not in _NEGATIONS
+        and (term not in _NEGATIONS or term in _ABSENCE)
         and term not in _NUMBER_WORDS
         and not _is_count(term)
     )
@@ -263,7 +264,11 @@ def content_terms(value: str) -> set[str]:
     that two claims differing only in it never compare equal.
     """
 
-    return {_stem(term) for term in _tokens(value) if _is_content(term)}
+    return {
+        "without" if term in _ABSENCE else _stem(term)
+        for term in _tokens(value)
+        if _is_content(term)
+    }
 
 
 def _is_count(term: str) -> bool:
@@ -286,12 +291,39 @@ def negated(value: str) -> bool:
     qualifies the claim rather than denying it.
     """
 
-    for term in _tokens(value):
-        if term in _SUBORDINATORS:
-            return False
-        if term in _NEGATIONS and term not in _ABSENCE:
-            return True
+    for clause in re.split(r"[,;]", value):
+        terms = _tokens(clause)
+        if terms and terms[0] in _SUBORDINATORS:
+            continue
+        for term in terms:
+            if term in _SUBORDINATORS:
+                break
+            if term in _NEGATIONS and term not in _ABSENCE:
+                return True
     return False
+
+
+def absence_terms(value: str) -> frozenset[str]:
+    """Normalized objects of absence conditions inside a positive claim."""
+
+    tokens = _tokens(value)
+    conditions: set[str] = set()
+    for index, term in enumerate(tokens):
+        if term not in _ABSENCE:
+            continue
+        following = next(
+            (
+                _stem(later)
+                for later in tokens[index + 1 :]
+                if later not in _ABSENCE_FILLERS
+                and later not in _ABSENCE
+                and not any(character.isdigit() for character in later)
+                and _is_content(later)
+            ),
+            "without",
+        )
+        conditions.add(following)
+    return frozenset(conditions)
 
 
 def large_numbers(value: str) -> frozenset[str]:
@@ -450,8 +482,8 @@ def subject_matches(
 def statements_compatible(left: str, right: str) -> bool:
     """Whether two statements could assert one claim: no contradiction in kind.
 
-    Polarity, counts and numbers, and shared directions must agree. This is the
-    floor under every equivalence, duplicate, and representation check: a
+    Polarity, absence conditions, counts and numbers, and shared directions
+    must agree. This is the floor under every equivalence, duplicate, and representation check: a
     comparison that passes it may still be about different things, but one
     that fails it is a correction, a recount, or a reversal and must never be
     merged away.
@@ -459,6 +491,7 @@ def statements_compatible(left: str, right: str) -> bool:
 
     return (
         negated(left) == negated(right)
+        and absence_terms(left) == absence_terms(right)
         and numbers_agree(left, right)
         and directions_agree(left, right)
     )

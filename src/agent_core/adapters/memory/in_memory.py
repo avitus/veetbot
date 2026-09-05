@@ -84,6 +84,17 @@ class InMemoryIntegratedEpisodeStore:
                 raise NotFoundError("integrated episode not found")
             return episode.model_copy(deep=True)
 
+    async def get_by_derivation(
+        self, derivation_key: str, principal: Principal
+    ) -> IntegratedEpisode | None:
+        async with self._lock:
+            episode_id = self._by_derivation.get(
+                (principal.tenant_id, principal.principal_id, derivation_key)
+            )
+            if episode_id is None:
+                return None
+            return self._records[episode_id].model_copy(deep=True)
+
     async def for_session(
         self,
         session_id: UUID,

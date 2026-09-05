@@ -465,10 +465,10 @@ async def _stored_episode(
 ) -> IntegratedEpisode:
     """The episode already stored under a derivation key this pass re-derived."""
 
-    for candidate in await uow.episodes.for_session(episode.session_id, principal, limit=1000):
-        if candidate.derivation_key == episode.derivation_key:
-            return candidate
-    raise ConflictError("episode derivation conflict names no stored episode")
+    stored = await uow.episodes.get_by_derivation(episode.derivation_key, principal)
+    if stored is None:
+        raise ConflictError("episode derivation conflict names no stored episode")
+    return stored
 
 
 def validate_integrated_episode(

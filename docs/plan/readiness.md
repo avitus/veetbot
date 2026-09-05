@@ -62,7 +62,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:2011` states that device tools are *"a reserved
+    `tool-system.md:2013` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -234,7 +234,7 @@ specification, and recorded as
     and a repository constructed with a live session that never
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
-    `engineering-plan.md:1732` says *"Create Alembic migrations for at
+    `engineering-plan.md:1736` says *"Create Alembic migrations for at
     least these tables"* and `development-toolchain.md:183` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
@@ -258,7 +258,7 @@ ORM.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2617`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2621`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -278,7 +278,7 @@ Three items fell short, one of them completely.
 
 1.  **Provider response metadata is designed nowhere.**
     `provider_metadata` appears exactly once in the entire corpus, as
-    a `dict[str, Any]` field at `engineering-plan.md:1318`. No document
+    a `dict[str, Any]` field at `engineering-plan.md:1322`. No document
     states which keys go in it, whether the set is open or closed,
     whether it is persisted, or where. It is absent from the
     `model_calls` schema. A field of that shape with no key discipline
@@ -575,7 +575,7 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:729`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1386`.
+bridge Section 8.5 requires is specified from `tool-system.md:1388`.
 
 Two further items deserved naming.
 
@@ -734,7 +734,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1317-1364` draws the line between
+had to be written. `tool-system.md:1319-1366` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -1477,10 +1477,11 @@ no-backfill resume, state-idempotent lifecycle methods, and schedule/run
 cancellation separation remain authoritative. Conversational “delete” means
 terminal cancellation and preserves the retained audit history.
 
-The readiness verdict is **Authorized**: ADR-0080, ADR-0088, twelve new
-`gate.schedule.*` entries, the Milestone 23 census row, a three-step build
-extension, closed schemas, and explicit failure and retry behavior specify the
-workstream before production-code changes begin. Occurrence and run history
+The readiness verdict is **Authorized**: ADR-0080, ADR-0088, twelve total
+`gate.schedule.*` entries (five added by schedule update), the Milestone 23
+census row, a three-step build extension, closed schemas, and explicit failure
+and retry behavior specify the workstream before production-code changes begin.
+Occurrence and run history
 tools, hard deletion, delegated scopes, new cadence kinds, native lifecycle
 controls, and model control of execution authority or limits remain excluded.
 
@@ -1564,8 +1565,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1469` does open a *"Device-scoped tools"* section, and
-`tool-system.md:2011` states that device tools are *"a reserved seam,
+`tool-system.md:1471` does open a *"Device-scoped tools"* section, and
+`tool-system.md:2013` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1605,7 +1606,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1483` reserved by name —
+one of them the question `tool-system.md:1485` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1759,7 +1760,7 @@ under the conflict it settles.
     Milestone 5 was an off-by-one against a list in which 5 is the
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2617` against
+    Milestone 3.** `engineering-plan.md:2621` against
     `model-gateway.md:1795` and `milestone-map.md:1659`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.

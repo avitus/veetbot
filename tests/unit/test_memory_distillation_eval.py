@@ -552,6 +552,8 @@ def test_live_evaluation_refuses_a_dirty_or_mismatched_tree(
         ("User runs two times a week.", "I run three times a week now"),
         ("User prefers tea to coffee.", "I prefer coffee to tea these days"),
         ("User pays 1500 per month in rent.", "my rent is 2500 per month"),
+        ("User runs with music.", "I run without music"),
+        ("User runs.", "When not lifting, user does not run."),
     ],
 )
 def test_clause_support_rejects_polarity_count_and_direction_changes(
@@ -582,6 +584,13 @@ def test_clause_support_accepts_a_restated_claim(statement: str, clause: str) ->
     from agent_core.memory.equivalence import statement_supports_clause
 
     assert statement_supports_clause(statement, clause)
+
+
+def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
+    from agent_core.memory.equivalence import negated
+
+    assert negated("When not lifting, user does not run.")
+    assert not negated("User bikes on days when not lifting.")
 
 
 def test_scorer_version_advanced_with_its_semantics() -> None:

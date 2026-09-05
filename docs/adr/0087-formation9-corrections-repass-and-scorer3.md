@@ -65,10 +65,11 @@ and plan text still saying twenty-four gates and three calls per consolidation.
    the fallback formed as the same source, keeps an already-stored episode
    when it re-derives its key, and audits exhaustion after the last attempt.
 3. **`distillation-scorer@3`.** Polarity is compared as parity, with a
-   negation inside a subordinate circumstance treated as a qualifier; counts
-   must match; large numbers must match when both statements carry one; and
-   the object after every directional marker both statements share must match,
-   with a preference's "to" read as "than". Represented-clause verification
+   negation inside a subordinate circumstance treated as a qualifier; absence
+   conditions such as `without` must match; counts must match; large numbers
+   must match when both statements carry one; and the object after every
+   directional marker both statements share must match, with a preference's
+   "to" read as "than". Represented-clause verification
    applies the same compatibility floor and then requires half the memory's
    content in the clause. The runtime combiner applies the floor before any
    subject- or overlap-based merge, so contradictions reach consolidation.

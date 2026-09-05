@@ -2629,6 +2629,14 @@ def test_semantic_duplicate_detection_compares_assertions_not_only_subjects() ->
     coffee = tea.model_copy(
         update={"subject": "beverage preference", "statement": "User prefers coffee to tea."}
     )
+    with_music = _candidate(
+        subject="running music",
+        statement="User runs with music.",
+        claim_kind="habit",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "run with music"}],
+    )
+    without_music = with_music.model_copy(update={"statement": "User runs without music."})
 
     # One subject and claim kind is one conflict key, so wording alone merges...
     assert _candidates_semantically_duplicate(red, tires)
@@ -2636,6 +2644,7 @@ def test_semantic_duplicate_detection_compares_assertions_not_only_subjects() ->
     assert not _candidates_semantically_duplicate(can_meet, cannot_meet)
     assert not _candidates_semantically_duplicate(hundred, two_hundred)
     assert not _candidates_semantically_duplicate(tea, coffee)
+    assert not _candidates_semantically_duplicate(with_music, without_music)
     assert _candidates_semantically_duplicate(
         red, red.model_copy(update={"statement": "The user's BMW is red."})
     )

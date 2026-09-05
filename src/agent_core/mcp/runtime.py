@@ -225,7 +225,12 @@ class MCPRuntime:
                 target = entered or client
                 if target is not None:
                     with suppress(BaseException):
-                        await target.__aexit__(None, None, None)
+                        await asyncio.shield(
+                            asyncio.wait_for(
+                                target.__aexit__(None, None, None),
+                                timeout=self._connect_timeout_seconds,
+                            )
+                        )
                 raise
             try:
                 report = map_discovered_tools(config, discovery.tools)
