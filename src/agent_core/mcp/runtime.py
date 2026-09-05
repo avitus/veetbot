@@ -190,6 +190,14 @@ class MCPRuntime:
             return build_stdio_environment(config, credential)
         return {}
 
+    async def _close_preparation_client(self, client: MCPClient) -> None:
+        await asyncio.shield(
+            asyncio.wait_for(
+                client.__aexit__(None, None, None),
+                timeout=self._connect_timeout_seconds,
+            )
+        )
+
     async def _prepare_server(
         self,
         session_id: UUID,
@@ -213,30 +221,25 @@ class MCPRuntime:
                 target = entered or client
                 if target is not None:
                     with suppress(Exception):
-                        await target.__aexit__(None, None, None)
+                        await self._close_preparation_client(target)
                 return _DisconnectedServer(config, "tool.auth_failed")
             except (MCPTransportError, TimeoutError):
                 target = entered or client
                 if target is not None:
                     with suppress(Exception):
-                        await target.__aexit__(None, None, None)
+                        await self._close_preparation_client(target)
                 return _DisconnectedServer(config, "tool.server_unreachable")
             except BaseException:
                 target = entered or client
                 if target is not None:
                     with suppress(BaseException):
-                        await asyncio.shield(
-                            asyncio.wait_for(
-                                target.__aexit__(None, None, None),
-                                timeout=self._connect_timeout_seconds,
-                            )
-                        )
+                        await self._close_preparation_client(target)
                 raise
             try:
                 report = map_discovered_tools(config, discovery.tools)
             except BaseException:
                 with suppress(BaseException):
-                    await entered.__aexit__(None, None, None)
+                    await self._close_preparation_client(entered)
                 raise
             if discovery.resources:
                 resource_name = f"mcp.{config.server_id}.read_resource"
@@ -268,15 +271,15 @@ class MCPRuntime:
                 report=report,
             )
 
-    @staticmethod
     async def _close_prepared_connections(
+        self,
         prepared: list[_Connection | _DisconnectedServer],
     ) -> None:
         for result in prepared:
             if not isinstance(result, _Connection):
                 continue
             with suppress(BaseException):
-                await result.client.__aexit__(None, None, None)
+                await self._close_preparation_client(result.client)
 
     async def prepare(self, session_id: UUID, principal: Principal) -> None:
         if session_id in self._prepared:

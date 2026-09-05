@@ -1213,8 +1213,10 @@ process-local bounded fan-out of eight. Catalog persistence, registry mutation,
 and connection or rejection events still commit in configured-server order, so
 startup latency follows the slowest batch member without making the pinned
 catalog or event sequence scheduling-dependent.
-Cancellation shields an entered client's cleanup under the configured connect
-timeout before propagating, so a second cancellation cannot abandon the client.
+Every preparation failure path shields an entered client's cleanup under the
+configured connect timeout. Expected disconnections then return their stable
+reason code; unexpected failures propagate only after bounded cleanup, so a
+second cancellation cannot abandon the client or retain a fan-out permit.
 
 Mapping a remote tool declaration into a `ToolSpec` is where the untrusted
 input meets our type system, and every field is either derived or forced:

@@ -930,7 +930,7 @@ tool acts on the run. `skill_manage` acts on durable tenant state
 that outlives the run.** It is a capability tool, and it was never in
 `tool-system.md`'s control-tool table — that table has four entries
 and `skill_manage` is not one of them. The table was right and the
-sentence was wrong, and `tool-system.md:1361` carries the corrected
+sentence was wrong, and `tool-system.md:1363` carries the corrected
 sentence now.
 
 ```text
@@ -1013,7 +1013,7 @@ It retries by reading the new current revision and deciding again.
 ### The scope is `skill.write`
 
 An earlier draft used the `skills:write` scope. The current contract at
-`tool-system.md:1365` requires `skill.write`. The earlier string was wrong in
+`tool-system.md:1367` requires `skill.write`. The earlier string was wrong in
 two ways against
 [http-api-and-streaming.md](http-api-and-streaming.md), which
 enumerates the scope vocabulary as dotted `resource.action` strings
@@ -1247,7 +1247,7 @@ something.
 1  skill_manage called a control tool a capability tool
 2  skill_manage NON_IDEMPOTENT        CONDITIONALLY_IDEMPOTENT
 3  the scope spelled skills:write     skill.write, enumerated
-4  "skills have no design at all"     tool-system.md:1319-1366
+4  "skills have no design at all"     tool-system.md:1321-1368
 5  Milestone 8 had zero gates         ten, a new `skill` area
 6  Milestone 10 had zero gates        six, in the same area
 7  no harness case names a skill      case 27, Milestone 8
@@ -1266,7 +1266,7 @@ above, under the heading that calls `skill_manage`
 Row 4 is a correction to a verdict rather than to a design.
 `readiness.md` says skills have no specification at all and that no
 document outside the plan and ADR-0013 mentions `SKILL.md`. The
-second half is true. The first is not: `tool-system.md:1319-1366` is
+second half is true. The first is not: `tool-system.md:1321-1368` is
 forty-eight lines of real design that settles four questions, and
 this document had to be written to fit inside it rather than on top
 of it. The verdict is corrected where it is stated.

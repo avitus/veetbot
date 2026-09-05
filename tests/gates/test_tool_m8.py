@@ -20,7 +20,7 @@ from agent_core.adapters.mcp.sdk import SDKMCPClient, SDKMCPClientFactory, _unau
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.credentials import CredentialRef, SecretValue
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import MCPTransportError, MCPUnauthorizedError, NotFoundError
 from agent_core.domain.mcp import (
     MCPAuthScheme,
     MCPCallResult,
@@ -424,6 +424,64 @@ async def test_cancelled_prepare_finishes_in_flight_client_cleanup() -> None:
         await asyncio.wait_for(closed.wait(), timeout=1)
 
     assert client.closed and not client.entered
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_reason"),
+    [
+        (MCPUnauthorizedError(), "tool.auth_failed"),
+        (MCPTransportError(), "tool.server_unreachable"),
+        (None, "tool.server_unreachable"),
+    ],
+    ids=("unauthorized", "transport", "timeout"),
+)
+async def test_expected_disconnect_cleanup_is_bounded(
+    failure: Exception | None,
+    expected_reason: str,
+) -> None:
+    """Expected discovery failures cannot hang while closing their client."""
+
+    close_started = asyncio.Event()
+
+    class NonSettlingCloseClient(_TrackedClient):
+        async def discover(self) -> MCPDiscovery:
+            if failure is None:
+                await asyncio.Event().wait()
+                raise AssertionError("unreachable")
+            raise failure
+
+        async def __aexit__(self, *_args: object) -> None:
+            close_started.set()
+            await asyncio.Event().wait()
+
+    client = NonSettlingCloseClient(fail_discovery=False)
+
+    def factory(
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> NonSettlingCloseClient:
+        del config, credential, environment
+        return client
+
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("expected_disconnect"),),
+        mcp_client_factory=cast(MCPClientFactory, factory),
+    ) as composition:
+        composition.mcp._connect_timeout_seconds = 0.01
+        session = await asyncio.wait_for(composition.sessions.create(), timeout=0.2)
+        assert await composition.mcp.prompt_entries(session, composition.principal) == []
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(session, 0, composition.principal)
+
+    assert close_started.is_set()
+    assert expected_reason in {
+        event.payload["reason_code"]
+        for event in events
+        if event.event_type == "mcp.server.disconnected"
+    }
 
 
 async def test_prepare_discovers_independent_servers_concurrently() -> None:
