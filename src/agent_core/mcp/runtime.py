@@ -147,6 +147,7 @@ class MCPRuntime:
         self._registration_owners: dict[_RegistrationKey, set[UUID]] = {}
         self._deferred_events: set[UUID] = set()
         self._pending_events: dict[UUID, list[tuple[str, dict[str, Any]]]] = {}
+        self._preparation_cleanup_tasks: set[asyncio.Task[bool | None]] = set()
 
     def _lock(self, session_id: UUID) -> asyncio.Lock:
         return self._locks.setdefault(session_id, asyncio.Lock())
@@ -190,13 +191,20 @@ class MCPRuntime:
             return build_stdio_environment(config, credential)
         return {}
 
+    def _preparation_cleanup_finished(self, task: asyncio.Task[bool | None]) -> None:
+        self._preparation_cleanup_tasks.discard(task)
+        with suppress(BaseException):
+            task.result()
+
     async def _close_preparation_client(self, client: MCPClient) -> None:
-        await asyncio.shield(
-            asyncio.wait_for(
-                client.__aexit__(None, None, None),
-                timeout=self._connect_timeout_seconds,
-            )
-        )
+        cleanup = asyncio.create_task(client.__aexit__(None, None, None))
+        try:
+            async with asyncio.timeout(self._connect_timeout_seconds):
+                await asyncio.shield(cleanup)
+        except BaseException:
+            self._preparation_cleanup_tasks.add(cleanup)
+            cleanup.add_done_callback(self._preparation_cleanup_finished)
+            raise
 
     async def _prepare_server(
         self,

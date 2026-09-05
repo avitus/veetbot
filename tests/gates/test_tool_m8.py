@@ -442,6 +442,9 @@ async def test_expected_disconnect_cleanup_is_bounded(
     """Expected discovery failures cannot hang while closing their client."""
 
     close_started = asyncio.Event()
+    allow_close = asyncio.Event()
+    close_finished = asyncio.Event()
+    close_cancelled = asyncio.Event()
 
     class NonSettlingCloseClient(_TrackedClient):
         async def discover(self) -> MCPDiscovery:
@@ -452,7 +455,13 @@ async def test_expected_disconnect_cleanup_is_bounded(
 
         async def __aexit__(self, *_args: object) -> None:
             close_started.set()
-            await asyncio.Event().wait()
+            try:
+                await allow_close.wait()
+            except asyncio.CancelledError:
+                close_cancelled.set()
+                await allow_close.wait()
+            finally:
+                close_finished.set()
 
     client = NonSettlingCloseClient(fail_discovery=False)
 
@@ -471,7 +480,12 @@ async def test_expected_disconnect_cleanup_is_bounded(
         mcp_client_factory=cast(MCPClientFactory, factory),
     ) as composition:
         composition.mcp._connect_timeout_seconds = 0.01
-        session = await asyncio.wait_for(composition.sessions.create(), timeout=0.2)
+        try:
+            session = await asyncio.wait_for(composition.sessions.create(), timeout=0.2)
+        finally:
+            allow_close.set()
+            await asyncio.wait_for(close_finished.wait(), timeout=0.2)
+        assert not close_cancelled.is_set()
         assert await composition.mcp.prompt_entries(session, composition.principal) == []
         async with composition.uow_factory() as uow:
             events = await uow.events.list_after(session, 0, composition.principal)
