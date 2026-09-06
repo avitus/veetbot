@@ -60,6 +60,7 @@ from agent_core.evals.memory_distillation import (
     load_distillation_corpus,
     score_distillation_case,
 )
+from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
 from agent_core.memory import SHIPPED_MEMORY_CANDIDATE_EXTRACTORS, formation
 from agent_core.memory.distillation import (
     DISTILLATION_MAXIMUM_OUTPUT_TOKENS,
@@ -96,6 +97,12 @@ from tests.contract.memory_fixtures import (
 )
 from tests.contract.support import AGENT_ID, NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
 from tests.integration.m2_support import memory_settings
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+# Activation binds an artifact to the corpus the running tree ships, so a
+# fabricated artifact must carry the real digest to activate anything here.
+_FORMATION_CORPUS_SHA256 = load_formation_corpus(_REPOSITORY_ROOT)[1]
+_DISTILLATION_CORPUS_SHA256 = load_distillation_corpus(_REPOSITORY_ROOT)[1]
 
 
 def _candidate(**overrides: object) -> MemoryCandidate:
@@ -309,19 +316,25 @@ async def test_explicit_experience_is_repaired_as_a_skill_without_an_article() -
 
 
 @pytest.mark.parametrize(
-    ("message", "retraction"),
+    ("message", "retraction", "subject"),
     [
-        ("I do not use Redis anymore.", "User no longer uses a Redis."),
-        ("I don't drive my BMW anymore.", "User no longer drives a BMW."),
-        ("I no longer take meetings on Fridays.", "User no longer takes meetings on Fridays."),
-        ("I stopped attending yoga.", "User no longer attends yoga."),
-        ("I gave up swimming.", "User no longer swims."),
-        ("I quit smoking.", "User no longer smokes."),
-        ("That old memory saying I live in Rome is wrong.", None),
+        ("I do not use Redis anymore.", "User no longer uses a Redis.", "Redis"),
+        ("I don't drive my BMW anymore.", "User no longer drives a BMW.", "BMW"),
+        (
+            "I no longer take meetings on Fridays.",
+            "User no longer takes meetings on Fridays.",
+            "meetings on Fridays",
+        ),
+        ("I stopped attending yoga.", "User no longer attends yoga.", "yoga"),
+        ("I gave up swimming.", "User no longer swims.", "swimming"),
+        ("I gave up swimming laps.", "User no longer swims laps.", "swimming laps"),
+        ("I no longer run outdoors.", "User no longer runs outdoors.", "running outdoors"),
+        ("I quit smoking.", "User no longer smokes.", "smoking"),
+        ("That old memory saying I live in Rome is wrong.", None, None),
     ],
 )
 async def test_high_recall_fallback_forms_corrections_only_as_retractions(
-    message: str, retraction: str | None
+    message: str, retraction: str | None, subject: str | None
 ) -> None:
     """A correction may update an existing belief but never create one.
 
@@ -345,7 +358,55 @@ async def test_high_recall_fallback_forms_corrections_only_as_retractions(
     assert [(candidate.statement, candidate.polarity) for candidate in candidates] == [
         (retraction, Polarity.RETRACT)
     ]
+    # The subject follows the same convention the matching assertion uses
+    # ("running outdoors", not "outdoors"), so the exact conflict key matches
+    # when it can; commit-time matching covers the rest.
+    assert candidates[0].subject == subject
     assert all(span.text in message for span in candidates[0].evidence_spans)
+
+
+@pytest.mark.parametrize(
+    ("assertion", "correction", "retracted"),
+    [
+        ("I run outdoors every day.", "I no longer run outdoors.", "User runs outdoors every day."),
+        (
+            "I swim laps every morning.",
+            "I gave up swimming laps.",
+            "User swims laps every morning.",
+        ),
+        ("I swim laps every morning.", "I gave up swimming.", "User swims laps every morning."),
+    ],
+)
+async def test_retraction_reaches_a_belief_whose_key_was_composed_differently(
+    assertion: str, correction: str, retracted: str
+) -> None:
+    """A correction retracts the belief it negates, however its key was composed.
+
+    Assertions compose conflict keys from a gerund and an object; a
+    retraction rendered from the object alone used to miss them and be
+    counted as unmatched while the habit stayed live.
+    """
+
+    clock, factory, baseline, _retriever = await formation_stack()
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        baseline._ids,
+        principal(),
+        extractor=formation.HighRecallCandidateExtractor(),
+        policy_version="formation@9",
+    )
+    await user_event(factory, assertion)
+    first = await service.run(trigger="session_closed", scope="general", session_id=SESSION_ID)
+    assert retracted in {belief.statement for belief in first.beliefs}
+    clock.advance(timedelta(days=1))
+    await user_event(factory, correction)
+
+    second = await service.run(trigger="session_closed", scope="general", session_id=SESSION_ID)
+
+    assert second.run.decision_counts.get("skipped_unmatched_retraction", 0) == 0
+    assert second.run.superseded == 1
+    assert retracted not in {belief.statement for belief in await service.list_memories()}
 
 
 async def test_fallback_retraction_supersedes_the_belief_it_corrects() -> None:
@@ -406,6 +467,16 @@ def test_provider_candidates_carry_polarity_and_corrections_pass_only_as_retract
     )
     assert retraction.polarity is Polarity.RETRACT
     assert retraction.statement == "User no longer drives their BMW."
+    # A retraction that still states the affirmative claim would supersede
+    # the old belief with a live record saying the opposite of the correction.
+    with pytest.raises(ValueError, match="local validation"):
+        _normalize_distilled_candidate(
+            _DistilledCandidate.model_validate(
+                {**proposal, "polarity": "retract", "statement": "User drives their BMW."}
+            ),
+            by_sequence={7: event},
+            scope="general",
+        )
     with pytest.raises(ValueError, match="local validation"):
         _normalize_distilled_candidate(
             _DistilledCandidate.model_validate(proposal),
@@ -2326,7 +2397,7 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         policy_version="policy@1",
         scorer_version="distillation-scorer@3",
         build_ref="0123456789abcdef0123456789abcdef01234567",
-        corpus_sha256="a" * 64,
+        corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=60,
         positive_case_count=48,
         seeded_case_count=12,
@@ -2638,10 +2709,23 @@ def test_semantic_duplicate_detection_compares_assertions_not_only_subjects() ->
     )
     without_music = with_music.model_copy(update={"statement": "User runs without music."})
 
-    # One subject and claim kind is one conflict key, so wording alone merges...
-    assert _candidates_semantically_duplicate(red, tires)
-    # ...but a contradiction never does; consolidation resolves it instead.
+    # Two claims about one subject are two memories; only one claim in two
+    # wordings is a duplicate, and a contradiction never is.
+    assert not _candidates_semantically_duplicate(red, tires)
     assert not _candidates_semantically_duplicate(can_meet, cannot_meet)
+    marathons = _candidate(
+        subject="running",
+        statement="User runs marathons.",
+        claim_kind="habit",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "run"}],
+    )
+    outdoors = marathons.model_copy(update={"statement": "User runs outdoors."})
+    weekend_marathons = marathons.model_copy(
+        update={"statement": "User runs marathons on weekends."}
+    )
+    assert not _candidates_semantically_duplicate(marathons, outdoors)
+    assert _candidates_semantically_duplicate(marathons, weekend_marathons)
     assert not _candidates_semantically_duplicate(hundred, two_hundred)
     assert not _candidates_semantically_duplicate(tea, coffee)
     assert not _candidates_semantically_duplicate(with_music, without_music)
@@ -2900,6 +2984,93 @@ def test_anticipation_prefix_is_bounded_to_the_most_recent_text() -> None:
     assert sizes[1] + sizes[2] <= MAX_ANTICIPATION_PREFIX_BYTES < sum(sizes)
     assert [event["source_event_id"] for event in prompt["prefix_events"]] == [2, 3]
     assert prompt["episode_cues"] == [{"episode_index": 0, "before_event_sequence": 4}]
+
+
+async def test_combiner_keeps_distinct_claims_under_one_subject_apart() -> None:
+    """Two provider claims filed under one subject both survive, with distinct keys."""
+
+    extractor, provider, factory = await _distillation_extractor([])
+    source_id = await user_event(factory, "I run marathons and I run outdoors.")
+    provider._script.turns = [
+        ScriptedTurn(text=_scripted_episode([source_id], ["I run marathons and I run outdoors."])),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(
+            text=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "subject": "running",
+                            "statement": "User runs marathons.",
+                            "source_event_ids": [source_id],
+                            "sensitivity_guess": "internal",
+                            "claim_kind": "habit",
+                            "derivation": "direct",
+                            "evidence_spans": [
+                                {"source_event_id": source_id, "text": "I run marathons"}
+                            ],
+                        },
+                        {
+                            "subject": "running",
+                            "statement": "User runs outdoors.",
+                            "source_event_ids": [source_id],
+                            "sensitivity_guess": "internal",
+                            "claim_kind": "habit",
+                            "derivation": "direct",
+                            "evidence_spans": [
+                                {"source_event_id": source_id, "text": "I run outdoors"}
+                            ],
+                        },
+                    ],
+                    "coverage": [
+                        {
+                            "coverage_unit_id": f"{source_id}:1",
+                            "decision": "formed",
+                            "candidate_indexes": [0],
+                            "prediction_indexes": [],
+                        },
+                        {
+                            "coverage_unit_id": f"{source_id}:2",
+                            "decision": "formed",
+                            "candidate_indexes": [1],
+                            "prediction_indexes": [],
+                        },
+                    ],
+                }
+            )
+        ),
+    ]
+
+    candidates = await extractor.extract(
+        await session_events(factory), principal=principal(), scope="general"
+    )
+
+    statements = {candidate.statement for candidate in candidates}
+    assert {"User runs marathons.", "User runs outdoors."} <= statements
+    subjects = [candidate.subject for candidate in candidates if candidate.statement in statements]
+    assert len(set(subjects)) == len(subjects), subjects
+
+
+def test_anticipation_prefix_bound_holds_for_an_oversized_newest_event() -> None:
+    """The bound is a bound: an oversized newest event is sent as its tail, not whole."""
+
+    from agent_core.memory.distillation import MAX_ANTICIPATION_PREFIX_BYTES
+
+    oversized = _personal_agent_event().model_copy(
+        update={"id": 1, "sequence": 1, "payload": {"content": "y" * 204_345}}
+    )
+    current = _personal_agent_event().model_copy(update={"id": 2, "sequence": 2})
+    episode = deterministic_integrated_episode(
+        [current], principal=principal(), episode_id=UUID(int=9), created_at=NOW
+    )
+
+    prompt = json.loads(
+        NemoriAssistedCandidateExtractor._anticipation_prompt([oversized, current], [episode], [])
+    )
+
+    [prefix] = prompt["prefix_events"]
+    assert prefix["source_event_id"] == 1
+    assert prefix["truncated"] is True
+    assert len(prefix["text"].encode("utf-8")) == MAX_ANTICIPATION_PREFIX_BYTES
 
 
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
@@ -3269,7 +3440,7 @@ def _provider_evidence(
         policy_profile="default",
         policy_version=policy_version,
         build_ref=build_ref,
-        corpus_sha256="a" * 64,
+        corpus_sha256=_FORMATION_CORPUS_SHA256,
         sample_count=25,
         positive_case_count=21,
         minimum_supported_case_count=17,
@@ -3452,7 +3623,7 @@ async def _select_with(
                 policy_version=_runtime_policy_version(),
                 scorer_version="distillation-scorer@3",
                 build_ref="9" * 40,
-                corpus_sha256="b" * 64,
+                corpus_sha256=_DISTILLATION_CORPUS_SHA256,
                 sample_count=61,
                 positive_case_count=49,
                 seeded_case_count=5,

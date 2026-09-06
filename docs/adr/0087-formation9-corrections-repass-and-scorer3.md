@@ -95,6 +95,33 @@ and plan text still saying twenty-four gates and three calls per consolidation.
    consolidation makes three calls per planned segment, as ADR-0077 already
    decided.
 
+## Second review
+
+A second review of the first fix commit (`3d1c123`) found six residual
+defects, each fixed with a regression test in the same change set:
+
+1. Fallback retractions keyed on the object alone missed assertions keyed on
+   gerund and object. The fallback now keys retractions the way the matching
+   assertion does, and consolidation retracts every live affirmative belief
+   about the user whose statement contains what the retraction negates,
+   under whatever key it was filed.
+2. A provider retraction could carry an affirmative statement and supersede
+   the old belief with a record saying the opposite of the correction. A
+   retraction must now state the negated claim.
+3. The scorer equated argument swaps and lost a negation behind a fronted
+   subordinate clause. Shared content terms must now keep their order, and
+   negation is scoped to the clause, with the same rules in clause
+   verification.
+4. Two claims under one subject and kind were merged on the key alone. The
+   combiner now merges only one claim in two wordings and files a second
+   claim under a key extended with its distinguishing words.
+5. The anticipation prefix bound exempted an oversized newest event; that
+   event is now sent as its tail.
+6. An operator-supplied artifact was matched on the policy tuple alone.
+   Startup now computes the digest of the corpus the running tree ships and
+   activates no artifact whose digest differs. The build reference remains
+   unverifiable at runtime and is checked by ancestry in the bundle test.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

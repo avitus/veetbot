@@ -48,6 +48,9 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.equivalence import (
     content_terms,
+    distinguishing_words,
+    names_in_order,
+    negated,
     statement_supports_clause,
     statements_compatible,
     statements_equivalent,
@@ -286,9 +289,20 @@ def distillation_evidence_matches(
     resolved_model: ResolvedModel,
     policy_profile: str,
     policy_version: str,
+    *,
+    corpus_sha256: str | None = None,
 ) -> bool:
-    """Require the exact evaluated model and policy tuple for activation."""
+    """Require the exact evaluated model and policy tuple for activation.
 
+    When the digest of the corpus the running tree ships is supplied, the
+    artifact must have been evaluated against that corpus: the bundle test
+    checks bundled artifacts, but an operator-supplied file reaches startup
+    without it, and a schema-valid artifact with an invented digest describes
+    an evaluation nobody can rerun here.
+    """
+
+    if corpus_sha256 is not None and evidence.corpus_sha256 != corpus_sha256:
+        return False
     expected = {
         "extractor_version": NEMORI_EXTRACTOR_VERSION,
         "formation_policy_version": NEMORI_FORMATION_POLICY_VERSION,
@@ -309,13 +323,20 @@ def select_distillation_policy(
     *,
     mode: Literal["auto", "off", "required"],
     evidenced_older_policy: str = "formation@8",
+    corpus_sha256: str | None = None,
 ) -> str:
     """Select formation@9 only on its exact evidence tuple."""
 
     if (
         mode != "off"
         and evidence is not None
-        and distillation_evidence_matches(evidence, resolved_model, policy_profile, policy_version)
+        and distillation_evidence_matches(
+            evidence,
+            resolved_model,
+            policy_profile,
+            policy_version,
+            corpus_sha256=corpus_sha256,
+        )
     ):
         return NEMORI_FORMATION_POLICY_VERSION
     if mode == "required":
@@ -572,11 +593,14 @@ def _normalize_provider_candidate(
             )
             is not (candidate.polarity is Polarity.RETRACT)
         )
+        or (candidate.polarity is Polarity.RETRACT and not negated(candidate.statement))
         or contains_automatic_memory_hazard(candidate.statement)
     ):
         # A correction clause may only yield a retraction, and a retraction
-        # must cite a correction: neither a fresh assertion from "I don't
-        # drive my BMW anymore" nor a retraction of something never corrected.
+        # must cite a correction and state the negated claim: neither a fresh
+        # assertion from "I don't drive my BMW anymore", nor a retraction of
+        # something never corrected, nor a "retraction" whose live statement
+        # would still say "User drives their BMW".
         raise ValueError("distilled candidate failed local validation")
 
     statement = _canonical_provider_statement(candidate.statement, candidate.derivation)
@@ -801,6 +825,13 @@ def _statements_agree_across_kinds(left: str, right: str) -> bool:
 
     if not statements_compatible(left, right):
         return False
+    # Runtime merging tolerates reordered paraphrases ("though the exact
+    # duration is uncertain" beside "but is uncertain of the exact duration")
+    # and insists only that shared names keep their order; the scorer and
+    # clause verification, where a false match is the danger, hold every
+    # shared term to its order.
+    if not names_in_order(left, right):
+        return False
     left_terms = {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(left)}
     right_terms = {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(right)}
     union = left_terms | right_terms
@@ -811,6 +842,65 @@ def _statements_agree_across_kinds(left: str, right: str) -> bool:
     return len(left_terms & right_terms) / len(union) >= 0.75
 
 
+def _mapped_terms(statement: str) -> set[str]:
+    return {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(statement)}
+
+
+def _same_claim_under_one_key(left: str, right: str) -> bool:
+    """Whether two statements filed under one conflict key are one claim."""
+
+    left_terms = _mapped_terms(left)
+    right_terms = _mapped_terms(right)
+    if not left_terms or not right_terms or not names_in_order(left, right):
+        return False
+    if left_terms <= right_terms or right_terms <= left_terms:
+        return True
+    return len(left_terms & right_terms) / min(len(left_terms), len(right_terms)) >= 0.6
+
+
+def _outranks(candidate: MemoryCandidate, existing: MemoryCandidate) -> bool:
+    """Whether a duplicate should replace the candidate already combined.
+
+    A direct statement outranks a guess; between equals, the richer statement
+    wins so "has a son named Robert who lives in Berlin" is not flattened to
+    "has a son" by arriving second.
+    """
+
+    if existing.derivation is MemoryDerivation.HYPOTHESIS:
+        return candidate.derivation is MemoryDerivation.DIRECT or _mapped_terms(
+            candidate.statement
+        ) > _mapped_terms(existing.statement)
+    if candidate.derivation is MemoryDerivation.HYPOTHESIS:
+        return False
+    return _mapped_terms(candidate.statement) > _mapped_terms(existing.statement)
+
+
+def _with_distinct_key(
+    candidate: MemoryCandidate, combined: list[MemoryCandidate]
+) -> MemoryCandidate:
+    """File a second claim under a key that will not collide in the store.
+
+    Local code owns subject composition. When another combined candidate
+    already holds this subject and claim kind, the words that distinguish this
+    statement are appended ("running" becomes "running outdoors"), so both
+    claims commit instead of the second resolving as the first's source.
+    """
+
+    same_key = [
+        existing
+        for existing in combined
+        if existing.claim_kind is candidate.claim_kind
+        and existing.subject.casefold() == candidate.subject.casefold()
+    ]
+    if not same_key:
+        return candidate
+    words = distinguishing_words(candidate.statement, [existing.statement for existing in same_key])
+    if not words:
+        return candidate
+    subject = f"{candidate.subject} {' '.join(words)}"[:MEMORY_SUBJECT_MAX_LENGTH].strip()
+    return candidate.model_copy(update={"subject": subject})
+
+
 def _candidates_semantically_duplicate(
     left: MemoryCandidate,
     right: MemoryCandidate,
@@ -819,11 +909,12 @@ def _candidates_semantically_duplicate(
 
     Derivation is deliberately not compared: a direct claim and a hypothesis
     about the same thing are one memory, and the combiner keeps the direct one.
-    A shared subject and claim kind is the conflict key the store resolves on,
-    so two such candidates merge on wording alone, but never when their
-    assertions contradict: a negation, a different count or number, or a
-    reversed direction is a correction the combiner must hand to consolidation
-    rather than swallow.
+    A shared subject and claim kind merges only one claim in two wordings:
+    the statements must be compatible, name shared people in one order, and
+    either nest (one elaborates the other) or share most of the smaller
+    statement's content. Two claims that merely share a key ("runs marathons",
+    "runs outdoors") are two memories, and the combiner files the second
+    under a distinguished key rather than losing it.
     """
 
     if not set(left.source_event_ids) & set(right.source_event_ids):
@@ -845,7 +936,7 @@ def _candidates_semantically_duplicate(
         " ".join(right.subject.casefold().split()),
     )
     if left.claim_kind is right.claim_kind and normalized_left_subject == normalized_right_subject:
-        return True
+        return _same_claim_under_one_key(left.statement, right.statement)
     generic_subjects = {"user", "the user"}
     if (
         left.claim_kind is right.claim_kind
@@ -1213,14 +1304,11 @@ class NemoriAssistedCandidateExtractor:
                 for index, existing in enumerate(combined):
                     if not _candidates_semantically_duplicate(existing, candidate):
                         continue
-                    if (
-                        existing.derivation is MemoryDerivation.HYPOTHESIS
-                        and candidate.derivation is MemoryDerivation.DIRECT
-                    ):
-                        # A direct statement of the same claim outranks the guess.
+                    if _outranks(candidate, existing):
                         combined[index] = candidate
                         seen.add(key)
                     return
+                candidate = _with_distinct_key(candidate, combined)
             seen.add(key)
             combined.append(candidate)
 
@@ -1434,21 +1522,26 @@ class NemoriAssistedCandidateExtractor:
         # The prefix grows with every earlier segment of a long consolidation,
         # so it keeps the most recent text under a byte bound; blinding is
         # unaffected because nothing at or after the earliest episode is sent.
-        kept: list[EventEnvelope] = []
+        kept: list[dict[str, object]] = []
         prefix_bytes = 0
         for event in reversed(prefix):
-            event_bytes = len(_event_text(event).encode("utf-8"))
-            if kept and prefix_bytes + event_bytes > MAX_ANTICIPATION_PREFIX_BYTES:
+            encoded = _event_text(event).encode("utf-8")
+            remaining = MAX_ANTICIPATION_PREFIX_BYTES - prefix_bytes
+            if len(encoded) > remaining:
+                # The newest event alone can exceed the bound; its tail is
+                # still the most recent cue, so that is what is sent.
+                if not kept and remaining > 0:
+                    tail = encoded[-remaining:].decode("utf-8", errors="ignore")
+                    kept.append(
+                        {"source_event_id": event.sequence, "text": tail, "truncated": True}
+                    )
                 break
-            kept.append(event)
-            prefix_bytes += event_bytes
+            kept.append({"source_event_id": event.sequence, "text": _event_text(event)})
+            prefix_bytes += len(encoded)
         kept.reverse()
         return json.dumps(
             {
-                "prefix_events": [
-                    {"source_event_id": event.sequence, "text": _event_text(event)}
-                    for event in kept
-                ],
+                "prefix_events": kept,
                 "episode_cues": [
                     {
                         "episode_index": index,

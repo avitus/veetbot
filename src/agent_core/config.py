@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -159,6 +160,22 @@ class Settings:
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT = PACKAGE_ROOT / "memory" / "release_evidence"
+# A release is a checkout, so the evaluation corpora ship beside the package
+# and activation can bind an artifact to the corpus this tree actually holds.
+REPOSITORY_ROOT = PACKAGE_ROOT.parents[1]
+MEMORY_FORMATION_CORPUS_PATH = Path("evals/capability/memory-formation.v2.json")
+MEMORY_DISTILLATION_CORPUS_PATH = Path("evals/capability/memory-formation.v3.json")
+
+
+def shipped_corpus_sha256(relative_path: Path) -> str | None:
+    """The digest of an evaluation corpus shipped with this tree, or nothing."""
+
+    try:
+        return hashlib.sha256((REPOSITORY_ROOT / relative_path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 SHIPPED_CONFIGS = (
     "policy/hardline.yaml",
     "policy/default.yaml",

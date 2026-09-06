@@ -276,6 +276,8 @@ from agent_core.application.trajectory_service import (
     TrajectoryRedactor,
 )
 from agent_core.config import (
+    MEMORY_DISTILLATION_CORPUS_PATH,
+    MEMORY_FORMATION_CORPUS_PATH,
     PACKAGE_ROOT,
     AuthMode,
     BrowserProviderKind,
@@ -294,6 +296,7 @@ from agent_core.config import (
     load_schedule_worker_settings,
     load_settings,
     provider_extraction_evidence_paths,
+    shipped_corpus_sha256,
     validate_runtime_identity,
     validate_settings,
 )
@@ -1636,6 +1639,16 @@ async def _compose(
                 selected_distillation_evidence = None
                 evidence_paths = provider_extraction_evidence_paths(settings)
                 policy_pin = settings.memory_formation_policy_pin
+                # An artifact activates only for the corpus this tree ships;
+                # a tree without its corpora activates no provider policy.
+                distillation_corpus_sha256 = (
+                    shipped_corpus_sha256(MEMORY_DISTILLATION_CORPUS_PATH) or "unavailable"
+                )
+                formation_corpus_sha256 = (
+                    shipped_corpus_sha256(MEMORY_FORMATION_CORPUS_PATH) or "unavailable"
+                )
+                if "unavailable" in (distillation_corpus_sha256, formation_corpus_sha256):
+                    logger.warning("memory_evaluation_corpus_unavailable")
                 provider_pins = (
                     MemoryFormationPolicyPin.PROVIDER_ASSISTED,
                     MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
@@ -1656,6 +1669,7 @@ async def _compose(
                             extraction_model,
                             agent.policy_profile,
                             ruleset.policy_version,
+                            corpus_sha256=distillation_corpus_sha256,
                         ):
                             selected_distillation_evidence = candidate_distillation_evidence
                             evidence_source = (
@@ -1692,6 +1706,7 @@ async def _compose(
                                 agent.policy_profile,
                                 ruleset.policy_version,
                                 formation_policy_version=provider_policy,
+                                corpus_sha256=formation_corpus_sha256,
                             ):
                                 selected_evidence = candidate_evidence
                                 selected_provider_policy = provider_policy

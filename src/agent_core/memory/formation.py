@@ -56,7 +56,7 @@ from agent_core.domain.persona import (
     PersonaNominationState,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.equivalence import content_terms
+from agent_core.memory.equivalence import content_terms, negated
 from agent_core.memory.profiles import (
     DEFAULT_FORMATION_PROFILE,
     DEFAULT_RETRIEVAL_PROFILE,
@@ -82,6 +82,8 @@ SESSION_IDLE_SECONDS = 30
 TRACE_EXPIRY_SWEEP_LIMIT = 500
 PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
 PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
+# One correction can end several beliefs about the same activity; never more than this.
+MAX_RETRACTION_TARGETS = 4
 
 
 def _provider_repass_floor(requests: list[EventEnvelope], watermark: int) -> int | None:
@@ -1027,6 +1029,7 @@ _NON_RETRACTABLE_VERBS = frozenset(
     }
 )
 _DETERMINERS = frozenset({"a", "an", "the", "my", "our", "this", "that", "these", "those", "it"})
+_ROUTINE_VERBS = frozenset({"attend", "do", "follow", "perform", "practice", "take"})
 _RETRACTABLE_VERB_BASES = frozenset(
     {
         *_ACTIVITY_VERBS,
@@ -1356,14 +1359,23 @@ def _render_retraction(
         if verb not in _RETRACTABLE_VERB_BASES:
             return None
         base = verb
-    if raw_object and raw_object.split()[0].casefold() in _DETERMINERS - {"it"}:
-        subject = " ".join(raw_object.split()[1:])
-    else:
-        subject = raw_object
     if raw_object and raw_object.casefold() in {"it", "that", "this"}:
         return None
-    if not subject:
+    if raw_object and raw_object.split()[0].casefold() in _DETERMINERS - {"it"}:
+        thing = " ".join(raw_object.split()[1:])
+    else:
+        thing = raw_object
+    # The key follows the convention the matching assertion used: a routine
+    # verb keys on the routine ("meetings on Fridays"), an activity verb on
+    # the gerund and its object ("running outdoors", "swimming laps"), and a
+    # bare activity on the gerund alone. Commit-time matching covers keys
+    # composed any other way.
+    if not thing:
         subject = _gerund(base)
+    elif base in _ROUTINE_VERBS:
+        subject = _third_person(thing)
+    else:
+        subject = f"{_gerund(base)} {_third_person(thing)}"
     rendered_object = f" {_third_person(raw_object)}" if raw_object else ""
     statement = f"User no longer {_third_person_verb(base)}{rendered_object}."
     body = statement.removeprefix("User ")
@@ -2732,6 +2744,49 @@ class GovernedMemoryService:
         async with self._uow_factory() as uow:
             return await apply(uow)
 
+    async def _retraction_targets(
+        self, uow: RepositoryUnitOfWork, candidate: MemoryCandidate
+    ) -> list[MemoryRecord]:
+        """The live beliefs an automatic retraction ends.
+
+        Conflict keys are composed by whoever formed the belief, so the exact
+        key is tried first and then any live affirmative belief about the user
+        whose statement contains everything the retraction negates: "User no
+        longer runs outdoors" ends "User runs outdoors every day" whether its
+        key was "running outdoors", "outdoor running", or "running". Beliefs
+        about someone else ("User's daughter swims") and beliefs that already
+        deny the claim are never targets.
+        """
+
+        live = await uow.memories.list_memories(self._principal, limit=500)
+        subject_key = " ".join(candidate.subject.split()).casefold()
+        negated_terms = content_terms(candidate.statement)
+        exact: list[MemoryRecord] = []
+        by_content: list[MemoryRecord] = []
+        for belief in live:
+            if belief.polarity is not Polarity.ASSERT:
+                continue
+            if (
+                belief.subject.casefold() == subject_key
+                and belief.belief_type is candidate.belief_type
+            ):
+                exact.append(belief)
+            elif (
+                negated_terms
+                and belief.statement.startswith("User ")
+                and not negated(belief.statement)
+                and negated_terms <= content_terms(belief.statement)
+            ):
+                by_content.append(belief)
+        targets: list[MemoryRecord] = []
+        seen: set[tuple[str, BeliefType]] = set()
+        for belief in [*exact, *by_content]:
+            key = (belief.subject.casefold(), belief.belief_type)
+            if key not in seen:
+                seen.add(key)
+                targets.append(belief)
+        return targets[:MAX_RETRACTION_TARGETS]
+
     async def run(
         self,
         *,
@@ -2915,97 +2970,111 @@ class GovernedMemoryService:
                             else "rejected_injection"
                         ] += 1
                         continue
+                    # A candidate commits under its own key, except an
+                    # automatic retraction, which commits under the key of
+                    # every live belief it negates: a correction may update
+                    # the beliefs it names and never create one, so with
+                    # nothing live to retract it is counted and dropped.
+                    commit_keys = [(candidate.subject, candidate.belief_type)]
                     if (
                         self._policy_version == NEMORI_FORMATION_POLICY_VERSION
                         and candidate.polarity is Polarity.RETRACT
                         and authority is not MemoryAuthority.USER
                     ):
-                        # A correction may update the belief it names and
-                        # never create one: with nothing live to retract,
-                        # the candidate is counted and dropped.
-                        related = await uow.memories.related(
-                            self._principal.tenant_id,
-                            self._principal.principal_id,
-                            " ".join(candidate.subject.split()),
-                            candidate.belief_type,
-                        )
-                        if not any(current.polarity is Polarity.ASSERT for current in related):
+                        targets = await self._retraction_targets(uow, candidate)
+                        if not targets:
                             rejected += 1
                             decisions["skipped_unmatched_retraction"] += 1
                             continue
+                        commit_keys = [(target.subject, target.belief_type) for target in targets]
                     source_events = [
                         event
                         for sequence in candidate.source_event_ids
                         if (event := by_sequence.get(sequence)) is not None
                     ]
                     source_event = by_sequence[candidate.source_event_ids[0]]
-                    try:
-                        belief, action = await self._remember(
-                            session_id=session_id,
-                            run_id=source_event.run_id,
-                            statement=candidate.statement,
-                            subject=candidate.subject,
-                            scope=candidate.proposed_scope,
-                            belief_type=candidate.belief_type,
-                            portability=candidate.proposed_portability,
-                            sensitivity=candidate.sensitivity_guess,
-                            source_event_ids=candidate.source_event_ids,
-                            origin_trust=TrustLevel.USER,
-                            explicit=False,
-                            authority=authority,
-                            polarity=candidate.polarity,
-                            confidence=candidate.model_confidence,
-                            valid_from=candidate.valid_from,
-                            expires_at=candidate.expires_hint,
-                            trigger=effective_trigger,
-                            record_audit=False,
-                            claim_kind=candidate.claim_kind,
-                            derivation=candidate.derivation,
-                            longevity=candidate.longevity,
-                            # A consolidation may run at any distance from the
-                            # evidence it reads - a replay re-reads a session
-                            # from watermark zero long afterwards - so recency
-                            # is judged on when the statement was made, never on
-                            # when it is being read.
-                            evidence_at=max(
-                                (event.created_at for event in source_events),
-                                default=None,
-                            ),
-                            existing_uow=uow,
-                            audit_id=consolidation_id,
-                        )
-                    except ConflictError:
-                        rejected += 1
-                        decisions["rejected_correction"] += 1
-                    except ToolValidationError:
-                        rejected += 1
-                        decisions["rejected_provenance"] += 1
-                    else:
-                        if action == "unchanged":
-                            rejected += 1
-                            decisions["redundant_attributed"] += 1
-                            continue
-                        beliefs.append(belief)
-                        if action == "promoted":
-                            reinforced += 1
-                            decisions["promoted"] += 1
-                        elif action == "reinforced":
-                            reinforced += 1
-                            decisions["reinforced"] += 1
+                    for key_index, (key_subject, key_belief_type) in enumerate(commit_keys):
+                        # One proposal, one decision: a retraction that ends
+                        # several beliefs is counted once and supersedes each.
+                        counted = key_index == 0
+                        try:
+                            belief, action = await self._remember(
+                                session_id=session_id,
+                                run_id=source_event.run_id,
+                                statement=candidate.statement,
+                                subject=key_subject,
+                                scope=candidate.proposed_scope,
+                                belief_type=key_belief_type,
+                                portability=(
+                                    candidate.proposed_portability
+                                    if key_belief_type is candidate.belief_type
+                                    else None
+                                ),
+                                sensitivity=candidate.sensitivity_guess,
+                                source_event_ids=candidate.source_event_ids,
+                                origin_trust=TrustLevel.USER,
+                                explicit=False,
+                                authority=authority,
+                                polarity=candidate.polarity,
+                                confidence=candidate.model_confidence,
+                                valid_from=candidate.valid_from,
+                                expires_at=candidate.expires_hint,
+                                trigger=effective_trigger,
+                                record_audit=False,
+                                claim_kind=candidate.claim_kind,
+                                derivation=candidate.derivation,
+                                longevity=candidate.longevity,
+                                # A consolidation may run at any distance from
+                                # the evidence it reads - a replay re-reads a
+                                # session from watermark zero long afterwards -
+                                # so recency is judged on when the statement
+                                # was made, never on when it is being read.
+                                evidence_at=max(
+                                    (event.created_at for event in source_events),
+                                    default=None,
+                                ),
+                                existing_uow=uow,
+                                audit_id=consolidation_id,
+                            )
+                        except ConflictError:
+                            if counted:
+                                rejected += 1
+                                decisions["rejected_correction"] += 1
+                        except ToolValidationError:
+                            if counted:
+                                rejected += 1
+                                decisions["rejected_provenance"] += 1
                         else:
-                            committed += 1
-                            if action == "superseded":
-                                superseded += 1
-                                decisions["superseded"] += 1
-                            elif action == "conflicted":
-                                conflicted += 1
-                                decisions["conflicted"] += 1
+                            if action == "unchanged":
+                                if counted:
+                                    rejected += 1
+                                    decisions["redundant_attributed"] += 1
+                                continue
+                            beliefs.append(belief)
+                            if action == "promoted":
+                                reinforced += 1
+                                if counted:
+                                    decisions["promoted"] += 1
+                            elif action == "reinforced":
+                                reinforced += 1
+                                if counted:
+                                    decisions["reinforced"] += 1
                             else:
-                                decisions[
-                                    "committed_hypothesis"
-                                    if candidate.derivation is MemoryDerivation.HYPOTHESIS
-                                    else "committed_direct"
-                                ] += 1
+                                committed += 1
+                                if action == "superseded":
+                                    superseded += 1
+                                    if counted:
+                                        decisions["superseded"] += 1
+                                elif action == "conflicted":
+                                    conflicted += 1
+                                    if counted:
+                                        decisions["conflicted"] += 1
+                                elif counted:
+                                    decisions[
+                                        "committed_hypothesis"
+                                        if candidate.derivation is MemoryDerivation.HYPOTHESIS
+                                        else "committed_direct"
+                                    ] += 1
                 if not should_retry:
                     await self._nominate_persona_candidates(uow, beliefs, consolidation_id)
                 watermark_after = watermark if should_retry else after

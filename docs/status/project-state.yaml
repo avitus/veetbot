@@ -654,7 +654,14 @@ milestones:
           artifact schema refuses an implausible cost. The 2026-09-03
           formation@9 artifact was published under the superseded scorer and
           is withdrawn; formation@10 serves the production tuple until the
-          re-evaluation above passes.
+          re-evaluation above passes. A second review of the fix found six
+          residual defects, each now fixed with a regression test: retractions
+          reach beliefs whose keys were composed differently, a provider
+          retraction must state the negated claim, the scorer holds shared
+          terms to their order and scopes negation to the clause, the combiner
+          keeps distinct claims under one subject apart, the anticipation prefix
+          bound holds for an oversized event, and activation binds every
+          artifact, operator-supplied included, to the shipped corpus digest.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-

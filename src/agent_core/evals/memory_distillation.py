@@ -18,6 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.config import (
+    MEMORY_DISTILLATION_CORPUS_PATH,
     AuthMode,
     DeploymentMode,
     MemoryProviderExtractionMode,
@@ -45,7 +46,7 @@ from agent_core.memory.equivalence import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
-CORPUS_PATH = Path("evals/capability/memory-formation.v3.json")
+CORPUS_PATH = MEMORY_DISTILLATION_CORPUS_PATH
 EVALUATION_SCOPE = "memory-distillation-evaluation"
 MINIMUM_SEED_POOL_SIZE = 25
 MINIMUM_EVIDENCE_DISPOSITION_PRECISION = 0.75

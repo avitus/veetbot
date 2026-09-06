@@ -288,7 +288,9 @@ def negated(value: str) -> bool:
     "does not drive" and "doesn't drive" agree while either disagrees with
     "drives". An absence such as "without" is content, not polarity, and a
     negation inside a subordinate circumstance ("on days when not lifting")
-    qualifies the claim rather than denying it.
+    qualifies the claim rather than denying it. Scope is the clause: a fronted
+    circumstance ("When travelling, I cannot ...") ends at its comma and does
+    not hide the main clause's negation.
     """
 
     for clause in re.split(r"[,;]", value):
@@ -324,6 +326,70 @@ def absence_terms(value: str) -> frozenset[str]:
         )
         conditions.add(following)
     return frozenset(conditions)
+
+
+def ordered_terms(value: str) -> list[str]:
+    """The stemmed content terms in order of first appearance."""
+
+    ordered: list[str] = []
+    for term in _tokens(value):
+        if _is_content(term):
+            stem = "without" if term in _ABSENCE else _stem(term)
+            if stem not in ordered:
+                ordered.append(stem)
+    return ordered
+
+
+def shared_terms_in_order(left: str, right: str) -> bool:
+    """Whether the content terms both statements share appear in the same order.
+
+    A bag of words cannot tell "hired Alice and fired Bob" from "hired Bob and
+    fired Alice"; the order of the terms they share can. Terms only one side
+    carries are ignored, so an elaboration is judged by the overlap rules.
+    """
+
+    left_ordered = ordered_terms(left)
+    right_ordered = ordered_terms(right)
+    shared = set(left_ordered) & set(right_ordered)
+    return [term for term in left_ordered if term in shared] == [
+        term for term in right_ordered if term in shared
+    ]
+
+
+_NAME = re.compile(r"\b[A-Z][a-z]+\b")
+
+
+def names_in_order(left: str, right: str) -> bool:
+    """Whether the proper names both statements share appear in the same order."""
+
+    def names(value: str) -> list[str]:
+        found: list[str] = []
+        for match in _NAME.finditer(value):
+            if match.start() == 0 or match.group(0) in {"User", "The"}:
+                continue
+            if match.group(0) not in found:
+                found.append(match.group(0))
+        return found
+
+    left_names = names(left)
+    right_names = names(right)
+    shared = set(left_names) & set(right_names)
+    return [name for name in left_names if name in shared] == [
+        name for name in right_names if name in shared
+    ]
+
+
+def distinguishing_words(statement: str, others: Iterable[str]) -> list[str]:
+    """The words of a statement whose content no other statement carries, in order."""
+
+    covered: set[str] = set()
+    for other in others:
+        covered |= content_terms(other)
+    words: list[str] = []
+    for term in _tokens(statement):
+        if _is_content(term) and _stem(term) not in covered and term not in words:
+            words.append(term)
+    return words
 
 
 def large_numbers(value: str) -> frozenset[str]:
@@ -423,11 +489,11 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
 
     Equal normalized text always matches. Otherwise both statements must carry
     the same polarity, the same counts and numbers, and the same direction on
-    every marker they share, share at least three quarters of their combined
-    content terms, and the candidate may introduce at most one content term the
-    reference lacks, so a paraphrased verb passes while an elaboration, a
-    negation, a different count or distance, a reversed comparison, or a
-    sibling activity does not.
+    every marker they share, keep the content terms they share in the same
+    order, share at least three quarters of their combined content terms, and
+    the candidate may introduce at most one content term the reference lacks,
+    so a paraphrased verb passes while an elaboration, a negation, a different
+    count or distance, a reversed comparison, or a sibling activity does not.
     """
 
     if normalized_statement(candidate) == normalized_statement(reference):
@@ -437,6 +503,8 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     if not candidate_terms or not reference_terms:
         return False
     if not statements_compatible(candidate, reference):
+        return False
+    if not shared_terms_in_order(candidate, reference):
         return False
     union = candidate_terms | reference_terms
     shared = candidate_terms & reference_terms
@@ -513,6 +581,8 @@ def statement_supports_clause(statement: str, clause: str) -> bool:
     if not statement_terms:
         return False
     if not statements_compatible(statement, clause):
+        return False
+    if not shared_terms_in_order(statement, clause):
         return False
     clause_terms = content_terms(clause)
     return len(statement_terms & clause_terms) / len(statement_terms) >= 0.5

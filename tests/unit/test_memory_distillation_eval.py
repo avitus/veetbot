@@ -169,6 +169,11 @@ def test_distillation_scorer_rejects_a_generic_user_subject() -> None:
             "User ran 100 miles in training for the marathon last month.",
             "User ran 200 miles in training for the marathon last month.",
         ),
+        ("User hired Alice and fired Bob.", "User hired Bob and fired Alice."),
+        (
+            "User takes important client meetings remotely on Fridays.",
+            "Although busy, User does not take important client meetings remotely on Fridays.",
+        ),
     ],
 )
 def test_scorer_never_equates_supersets_negations_counts_or_siblings(
@@ -554,6 +559,11 @@ def test_live_evaluation_refuses_a_dirty_or_mismatched_tree(
         ("User pays 1500 per month in rent.", "my rent is 2500 per month"),
         ("User runs with music.", "I run without music"),
         ("User runs.", "When not lifting, user does not run."),
+        (
+            "User can take meetings on Fridays.",
+            "When travelling, I cannot take meetings on Fridays",
+        ),
+        ("User hired Alice and fired Bob.", "I fired Alice and hired Bob"),
     ],
 )
 def test_clause_support_rejects_polarity_count_and_direction_changes(
@@ -695,3 +705,22 @@ def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
     )
     assert "no seeded case demonstrated attributed representation" in failures
     assert memory_eval.represented_case_count(_results(corpus, represented_verified=True)) == 1
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        ("When travelling, I cannot take meetings on Fridays", True),
+        ("Although busy, I do not take client meetings on Fridays", True),
+        ("User does not eat meat because of allergies.", True),
+        ("User bikes on some days when not doing the 5x5 strength routine.", False),
+        ("User swims when it is not raining.", False),
+        ("User runs without music.", False),
+    ],
+)
+def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -> None:
+    """A fronted subordinate clause does not hide the main clause's negation."""
+
+    from agent_core.memory.equivalence import negated
+
+    assert negated(statement) is expected

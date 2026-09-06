@@ -115,9 +115,13 @@ build reference bind the artifact at bundle time instead: the bundle test
 refuses an artifact whose digest is not the checked-in corpus or whose scorer
 is not the current one, and the build reference names the commit the
 evaluated tree was committed as and must be an ancestor of the tree that
-bundles it. A running process cannot compare that reference against itself,
-because the artifact is necessarily bundled in a later commit than the one it
-evaluated. A change to the scorer withdraws every artifact published under
+bundles it. A release is a checkout, so startup also computes the digest of
+the corpus the running tree ships and activates no artifact, bundled or
+operator-supplied, whose digest differs; a tree without its corpora activates
+no provider policy and logs why. A running process cannot compare the build
+reference against itself, because the artifact is necessarily bundled in a
+later commit than the one it evaluated. A change to the scorer withdraws
+every artifact published under
 the previous scorer; the `formation@9` artifact of 2026-09-03 was withdrawn on
 2026-09-04 for that reason (ADR-0087), and `auto` selects `formation@10` for
 the production tuple until a re-evaluation under the current scorer passes.
@@ -246,9 +250,10 @@ candidate-level call. One anticipation request covers every episode of a
 segment, so its prefix is the user text before the segment's earliest episode
 and contains no episode's own evidence; each cue names the sequence before
 which its evidence begins. The prefix keeps the most recent text under a bound
-of twice the segment byte limit, so a long consolidation's later segments do
-not resend the whole session; blinding is unaffected because nothing at or
-after the earliest episode is ever sent. There is no cost
+of twice the segment byte limit, sending an oversized newest event as its
+tail, so a long consolidation's later segments do not resend the whole
+session; blinding is unaffected because nothing at or after the earliest
+episode is ever sent. There is no cost
 ceiling on the distiller; cost is recorded per stage and reported in evidence.
 
 A directly stated claim is not suppressed merely because a general model could
@@ -300,12 +305,15 @@ choosing its own sentence.
 A candidate also carries `polarity`, `assert` or `retract`. A correction ("I
 don't drive my BMW anymore", "I gave up swimming", "I no longer take meetings
 on Fridays") may yield only a retraction: the provider names the subject of the
-belief it ends with polarity `retract`, the deterministic fallback recognizes
-the same forms itself, and local validation rejects an assertion that cites a
-correction clause as well as a retraction that cites none. At commit, a
-retraction supersedes the live belief under its conflict key and, when nothing
-live matches, is counted as `skipped_unmatched_retraction` and forms nothing.
-A correction can therefore update memory but never create it.
+belief it ends with polarity `retract` and states the negated claim, the
+deterministic fallback recognizes the same forms itself and keys them the way
+the matching assertion would, and local validation rejects an assertion that
+cites a correction clause, a retraction that cites none, and a retraction
+whose statement is still affirmative. At commit, a retraction supersedes
+every live affirmative belief about the user whose statement contains what it
+negates, under whatever key that belief was filed, bounded to four; when
+nothing live matches, it is counted as `skipped_unmatched_retraction` and
+forms nothing. A correction can therefore update memory but never create it.
 
 ## Capacity and ranking
 
@@ -475,13 +483,19 @@ closed fields agree, its subject names the gold conflict key, and its statement
 is equivalent: equal after normalization, or sharing three quarters of the
 combined content terms with the same polarity, the same absence conditions,
 the same counts, the same large numbers when both carry one, the same object
-after every directional marker both share, and at most one term the gold lacks.
-Elaborations, negations, added or removed absence conditions, different counts
-or distances, reversed comparisons or origins, and sibling activities never
-match; a negation inside a subordinate circumstance
-qualifies a claim rather than denying it. The same compatibility floor decides
-whether a live memory represents a clause and whether two candidates in one
-batch are one memory. The frozen `formation@7` and `formation@8` controls
+after every directional marker both share, the terms they share in the same
+order, and at most one term the gold lacks. Elaborations, negations, added or
+removed absence conditions, different counts or distances, reversed
+comparisons or origins, swapped arguments, and sibling activities never
+match. Negation is scoped to the clause: a negation inside a subordinate
+circumstance qualifies a claim rather than denying it, and a fronted
+circumstance ends at its comma so it cannot hide the main clause's negation.
+The same compatibility floor and term order decide whether a live memory
+represents a clause. Two candidates in one batch merge only when they are one
+claim: compatible, with shared names in one order, and either nesting or
+sharing most of the smaller statement's content; a second claim under the
+same subject and kind is filed under a key extended with its distinguishing
+words rather than dropped. The frozen `formation@7` and `formation@8` controls
 cannot express the closed fields, so they are scored on statement equivalence
 alone and the lift threshold compares `formation@9` strict recall against that
 lenient control recall. The scorer version is recorded in every result and
