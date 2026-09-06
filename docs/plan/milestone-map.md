@@ -46,7 +46,7 @@ declares seven more in a fifteenth area, all at Milestone 10.
 [browser-automation.md](browser-automation.md) adds ten more in a
 sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) first
 declared twenty-three Milestone 11 gates in a seventeenth area, then five at
-Milestone 19, six at Milestone 20, and seven at Milestone 23.
+Milestone 19, six at Milestone 20, and twelve at Milestone 23.
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) adds
 thirty-one Milestone 21 gates in the existing memory area.
 [persona-surface.md](persona-surface.md) adds fourteen Milestone 22 gates in
@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 28 subject specifications declare 433 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 442
-declarations, 439 registry entries once the 3 aliases are subtracted.
+The 28 subject specifications declare 438 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 447
+declarations, 444 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1303,12 +1303,13 @@ resolution range over generated selectors, dates, and zones. The remaining
 four are boundary cases over materialization, HTTP, and the ordinary tool
 pipeline.
 
-### Conversational schedule lifecycle, seven gates
+### Conversational schedule lifecycle, twelve gates
 
-Seven gates extend the existing `schedule` area at Milestone 23. They cover
+Twelve gates extend the existing `schedule` area at Milestone 23. They cover
 the feature-gated tool contracts, bounded summary discovery, approved
 pause/resume and cancellation, exact scopes, fail-closed identity and revision
-validation, and state-idempotent retry.
+validation, state-idempotent retry, and approved content/cadence patching that
+preserves hidden execution authority and replays at most once.
 
 ```text
 #   id                                                   kind         M
@@ -1320,11 +1321,17 @@ validation, and state-idempotent retry.
 39  gate.schedule.model_lifecycle_authorization          case         23
 40  gate.schedule.model_lifecycle_validation             case         23
 41  gate.schedule.model_lifecycle_retry                  case         23
+42  gate.schedule.model_update_contract                  structural   23
+43  gate.schedule.model_update_happy_path                case         23
+44  gate.schedule.model_update_preserves_authority       case         23
+45  gate.schedule.model_update_validation                case         23
+46  gate.schedule.model_update_retry                     case         23
 ```
 
-Gate 35 is structural because it inspects the registered and advertised tool
-contracts. The remaining six are boundary cases over the ordinary tool
-pipeline and existing schedule application service.
+Gates 35 and 42 are structural because they inspect the registered and
+advertised tool contracts and the closed update schema. The remaining ten are
+boundary cases over the ordinary tool pipeline and existing schedule
+application service.
 
 ### Adaptive memory distillation, thirty-one gates
 
@@ -1583,14 +1590,15 @@ milestone  new gates  cumulative  the earliest of them
 22                14         408  the persona row, its cap and pinning,
                                   human-only promotion, durable decline,
                                   snapshot de-duplication, exact scopes
-23                 7         415  summary-only schedule discovery,
-                                  approved lifecycle mutation, exact scopes,
-                                  conflict handling, idempotent retry
-24                12         427  capability registration, the
+23                12         420  summary-only schedule discovery,
+                                  approved lifecycle and definition mutation,
+                                  exact scopes, conflict handling,
+                                  idempotent retry
+24                12         432  capability registration, the
                                   invocation lifecycle, the owner-tap
                                   send boundary, ingest idempotency,
                                   untrusted triage routing
-25                12         439  the signed webhook ingress, the
+25                12         444  the signed webhook ingress, the
                                   handshake, string-id idempotency,
                                   the template window, the loopback
                                   bind, inherited surface guarantees
@@ -1614,14 +1622,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of four hundred and thirty-nine gates are green before
+2.  **Forty-one of four hundred and forty-four gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches four hundred and thirty-nine, which is every
+The cumulative column reaches four hundred and forty-four, which is every
 registry entry, at Milestone 25. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
@@ -1633,7 +1641,7 @@ those specs already shared, Milestone 18's seventeen are `gate.email.*` in
 an area of their own, Milestone 19's five return to the existing
 `gate.schedule.*` area, Milestone 20 adds six more there, Milestone 21
 adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
-`gate.persona.*` in an area of their own; Milestone 23 adds seven more to
+`gate.persona.*` in an area of their own; Milestone 23 adds twelve more to
 `gate.schedule.*`, Milestone 24's twelve return to the existing
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
 area of their own. Every authorized milestone now has a specification

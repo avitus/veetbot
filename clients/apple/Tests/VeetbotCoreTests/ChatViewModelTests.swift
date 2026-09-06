@@ -507,6 +507,94 @@ import Testing
     }
 
     @Test
+    func testFirstMessageAppearsBeforeSessionStartupCompletesAndReconcilesOnce() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let lock = NSLock()
+        let releaseSessionStartup = DispatchSemaphore(value: 0)
+        var sessionStartupBegan = false
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/sessions"):
+                lock.withLock { sessionStartupBegan = true }
+                releaseSessionStartup.wait()
+                return try response(
+                    for: request,
+                    statusCode: 201,
+                    body: """
+                        {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:00:00Z","active_run_id":null,"last_run_id":null}
+                        """
+                )
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request,
+                    statusCode: 202,
+                    body: "{\"run_id\":\"\(runID.uuidString)\",\"status\":\"QUEUED\"}"
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        id: 2
+                        event: user.message.created
+                        data: {"content":[{"type":"text","text":"Hello now"}]}
+
+                        id: 3
+                        event: run.completed
+                        data: {"run_id":"\(runID.uuidString)"}
+
+                        """,
+                    headers: ["Content-Type": "text/event-stream"]
+                )
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        let submission = Task { await model.send("Hello now") }
+        for _ in 0 ..< 1_000 where !lock.withLock({ sessionStartupBegan }) {
+            await Task.yield()
+        }
+
+        #expect(lock.withLock { sessionStartupBegan })
+        #expect(model.runState.timeline.count == 1)
+        #expect(model.runState.activityTimeline.count == 1)
+        #expect(model.runState.timeline.first?.text == "Hello now")
+        #expect(model.runState.timeline.first?.id.hasPrefix("pending-user-") == true)
+
+        releaseSessionStartup.signal()
+        #expect(await submission.value)
+        for _ in 0 ..< 1_000 where model.runState.timeline.first?.id != "event-2" {
+            await Task.yield()
+        }
+
+        #expect(model.runState.timeline.count == 1)
+        #expect(model.runState.activityTimeline.count == 1)
+        #expect(model.runState.timeline.first?.id == "event-2")
+        #expect(model.runState.timeline.first?.text == "Hello now")
+    }
+
+    @Test
     func testRetryingTheSameMessageReusesOneKeyAndDoesNotCreateAnotherSession() async throws {
         let lock = NSLock()
         var requests: [URLRequest] = []
@@ -567,6 +655,8 @@ import Testing
         )
 
         #expect(await model.send("  retry me  ") == false)
+        #expect(model.runState.timeline.isEmpty)
+        #expect(model.runState.activityTimeline.isEmpty)
         model.clearError()
         #expect(await model.send("retry me") == true)
         model.newSession()

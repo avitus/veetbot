@@ -28,6 +28,8 @@ public enum ToolActivityStatus: String, Sendable {
     case completed
     case needsCorrection = "needs correction"
     case correctedAndRetried = "corrected and retried"
+    case rejected
+    case unavailable
     case failed
     case denied
     case uncertain
@@ -152,6 +154,7 @@ public final class RunStateReducer: ObservableObject {
     @Published public private(set) var failure: RunFailureView?
 
     private var persistedSequences: Set<Int> = []
+    private var pendingUserMessageID: String?
     private var streamingMessageID: String?
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
@@ -187,6 +190,7 @@ public final class RunStateReducer: ObservableObject {
         reasoningActive = false
         failure = nil
         persistedSequences = []
+        pendingUserMessageID = nil
         streamingMessageID = nil
         toolIndex = [:]
         pendingApprovalIDs = []
@@ -217,6 +221,27 @@ public final class RunStateReducer: ObservableObject {
         activeRunID = runID
         runStatus = status
         failure = nil
+    }
+
+    func beginPendingUserMessage(content: [ContentBlock], submissionID: String) {
+        guard pendingUserMessageID == nil else { return }
+        let id = "pending-user-\(submissionID)"
+        pendingUserMessageID = id
+        activityOrder.append(.message(id))
+        timeline.append(TimelineItem(id: id, role: .user, content: content))
+    }
+
+    func discardPendingUserMessage(submissionID: String) {
+        let id = "pending-user-\(submissionID)"
+        guard pendingUserMessageID == id else { return }
+        timeline.removeAll { $0.id == id }
+        activityOrder.removeAll { reference in
+            if case .message(let messageID) = reference {
+                return messageID == id
+            }
+            return false
+        }
+        pendingUserMessageID = nil
     }
 
     public func reduce(_ frame: SSEFrame) {
@@ -325,6 +350,21 @@ public final class RunStateReducer: ObservableObject {
         guard let content = frame.data["content"].flatMap({ decode([ContentBlock].self, from: $0) })
         else { return }
         let id = frameID(frame)
+        if let pendingUserMessageID,
+            let timelineIndex = timeline.firstIndex(where: { $0.id == pendingUserMessageID })
+        {
+            timeline[timelineIndex] = TimelineItem(id: id, role: .user, content: content)
+            if let activityIndex = activityOrder.firstIndex(where: { reference in
+                if case .message(let messageID) = reference {
+                    return messageID == pendingUserMessageID
+                }
+                return false
+            }) {
+                activityOrder[activityIndex] = .message(id)
+            }
+            self.pendingUserMessageID = nil
+            return
+        }
         activityOrder.append(.message(id))
         timeline.append(
             TimelineItem(id: id, role: .user, content: content)
@@ -407,8 +447,8 @@ public final class RunStateReducer: ObservableObject {
             decode(ToolResultPayload.self, from: $0)
         })
         let presentedStatus =
-            status == .failed && result?.needsArgumentCorrection == true
-            ? ToolActivityStatus.needsCorrection
+            status == .failed
+            ? result?.failurePresentationStatus ?? status
             : status
         ensureTool(
             callID: callID,
@@ -599,18 +639,34 @@ private struct ToolResultPayload: Decodable {
     let isError: Bool
     let trust: TrustLabel?
 
-    var needsArgumentCorrection: Bool {
+    private var outcome: ToolOutcomePayload? {
         guard
             isError,
             let text = content.compactMap(\.text).first,
-            let data = text.data(using: .utf8),
-            let outcome = try? JSONDecoder.server.decode(ToolOutcomePayload.self, from: data)
-        else { return false }
-        return outcome.status == "failed"
+            let data = text.data(using: .utf8)
+        else { return nil }
+        return try? JSONDecoder.server.decode(ToolOutcomePayload.self, from: data)
+    }
+
+    var failurePresentationStatus: ToolActivityStatus? {
+        guard let outcome else { return nil }
+        if outcome.status == "failed"
             && outcome.retryable
             && outcome.remediation == "modify_arguments"
             && (outcome.reasonCode == "tool.arguments_invalid"
                 || outcome.reasonCode.hasPrefix("tool.invalid_arguments."))
+        {
+            return .needsCorrection
+        }
+        if outcome.reasonCode == "tool.web.provider_rejected" {
+            return .rejected
+        }
+        switch outcome.status {
+        case "unavailable": return .unavailable
+        case "uncertain": return .uncertain
+        case "denied": return .denied
+        default: return nil
+        }
     }
 
     enum CodingKeys: String, CodingKey {

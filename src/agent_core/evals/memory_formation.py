@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.config import (
+    MEMORY_FORMATION_CORPUS_PATH,
     AuthMode,
     DeploymentMode,
     MemoryProviderExtractionMode,
@@ -40,7 +41,7 @@ from agent_core.memory.provider_extraction import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
-CORPUS_PATH = Path("evals/capability/memory-formation.v2.json")
+CORPUS_PATH = MEMORY_FORMATION_CORPUS_PATH
 _BUILD_REF = re.compile(r"^[0-9a-f]{40}$")
 EVALUATION_SCOPE = "memory-formation-evaluation"
 

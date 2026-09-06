@@ -35,16 +35,17 @@ title: Current Milestone
   creation for all four recurring calendar kinds. Milestone 21 — adaptive
   memory distillation — is specified by
   [adaptive-memory-distillation.md](adaptive-memory-distillation.md) with
-  twenty-nine gates and is a sixth parallel workstream, adding integrated
+  thirty-one gates and is a sixth parallel workstream, adding integrated
   episodes, high-recall direct and hypothesis formation, and evidence-based
   forgetting. Milestone 22 — the persona surface and curated belief
   promotion — is specified by [persona-surface.md](persona-surface.md) with
   fourteen gates and is a seventh parallel workstream, adding an owner-edited
   trusted prefix row that a formed belief reaches only through explicit
   owner affirmation. Milestone 23 — conversational schedule lifecycle — is
-  specified by [scheduling.md](scheduling.md) with seven gates and is an eighth
-  parallel workstream, adding summary-only discovery and approval-gated pause,
-  resume, and terminal cancellation through the existing schedule service.
+  specified by [scheduling.md](scheduling.md) with twelve gates and is an eighth
+  parallel workstream, adding summary-only discovery and approval-gated update,
+  pause, resume, and terminal cancellation through the existing schedule
+  service.
   Milestone 24 — SMS through the owner's iPhone — is specified by
   [device-channel-and-sms.md](device-channel-and-sms.md) with twelve gates
   and is a ninth parallel workstream on the same terms and is in progress,
@@ -73,7 +74,8 @@ title: Current Milestone
   Milestone 22, the persona surface and curated belief promotion, was
   authorized on 2026-09-01 as a seventh (ADR-0079), again without advancing
   the verified ceiling. Milestone 23, conversational schedule lifecycle, was
-  authorized on 2026-09-02 as an eighth (ADR-0080) on the same terms.
+  authorized on 2026-09-02 as an eighth (ADR-0080) on the same terms and
+  expanded to conversational definition update on 2026-09-04 (ADR-0088).
   Milestone 24, SMS through the owner's iPhone, was authorized on
   2026-08-26 as a ninth (ADR-0081), and Milestone 25, the WhatsApp
   business surface, on 2026-08-26 as a tenth (ADR-0082), on the same
@@ -170,8 +172,8 @@ title: Current Milestone
   prefix row, curated promotion, the routes, the CLI, and the native editor
   are implemented, with only hosted CI and the final CodeRabbit review
   outstanding. Milestone 23, the eighth parallel workstream, is in progress
-  with seven registered gates for summary-only discovery and approved pause,
-  resume, and terminal cancellation. Each in-progress
+  with all twelve registered gates passing locally for summary-only discovery
+  and approved update, pause, resume, and terminal cancellation. Each in-progress
   milestone's remaining work is itemized on the
   [milestones page](../status/milestones.md), which `make docs-check`
   reconciles against the project state.
@@ -231,7 +233,7 @@ Milestone 20 reuses the same design and gate area under ADR-0073, adding six
 gates for calendar recurrence and recurring conversational creation.
 Milestone 21's
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and ADR-0077
-add twenty-nine `gate.memory.*` entries for integrated episodes, high-recall
+add thirty-one `gate.memory.*` entries for integrated episodes, high-recall
 formation, evidence-based forgetting, comparative evidence, and activation.
 Milestone 22's [persona-surface.md](persona-surface.md) and ADR-0079 landed
 with that milestone's authorization on 2026-09-01, adding fourteen
@@ -329,7 +331,7 @@ its five new `gate.schedule.*` entries plus the plan's acceptance criteria and
 the [scheduling design](scheduling.md#model-callable-creation). Milestone 20's
 contract is its six new `gate.schedule.*` entries plus the plan's acceptance
 criteria and the same scheduling design.
-Milestone 21's contract is its twenty-nine new `gate.memory.*` entries plus the
+Milestone 21's contract is its thirty-one new `gate.memory.*` entries plus the
 plan's acceptance criteria and the
 [adaptive-memory-distillation design](adaptive-memory-distillation.md).
 Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
@@ -396,7 +398,7 @@ head, and the final CodeRabbit review is clean. Because it is a parallel
 workstream, completion does not advance the verified gate ceiling past the
 sequential milestones.
 
-Milestone 21 completes when its twenty-nine gates and the cumulative registry
+Milestone 21 completes when its thirty-one gates and the cumulative registry
 pass, comparative `formation@7`/`formation@8`/`formation@9` evidence for the
 intended production tuple is published, all relevant local, PostgreSQL, and
 hosted lanes pass on the final head, and the final CodeRabbit review is clean.

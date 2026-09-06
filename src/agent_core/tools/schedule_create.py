@@ -35,91 +35,93 @@ DEFAULT_MISFIRE_GRACE_SECONDS = 3600
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 1
 DEFAULT_MAX_COST = Decimal("1")
 
+RECURRING_CADENCE_INPUT_SCHEMA: dict[str, Any] = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "DAILY"},
+                "local_time": {"type": "string", "format": "time"},
+                "timezone": {"type": "string", "minLength": 1},
+            },
+            "required": ["kind", "local_time", "timezone"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "WEEKLY"},
+                "local_time": {"type": "string", "format": "time"},
+                "weekdays": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1, "maximum": 7},
+                    "minItems": 1,
+                    "maxItems": 7,
+                    "uniqueItems": True,
+                },
+                "timezone": {"type": "string", "minLength": 1},
+            },
+            "required": ["kind", "local_time", "weekdays", "timezone"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "MONTHLY"},
+                "local_time": {"type": "string", "format": "time"},
+                "days_of_month": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "maxItems": 31,
+                    "uniqueItems": True,
+                },
+                "last_day": {"type": "boolean"},
+                "timezone": {"type": "string", "minLength": 1},
+            },
+            "required": [
+                "kind",
+                "local_time",
+                "days_of_month",
+                "last_day",
+                "timezone",
+            ],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "YEARLY"},
+                "local_time": {"type": "string", "format": "time"},
+                "dates": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "month": {"type": "integer", "minimum": 1, "maximum": 12},
+                            "day": {"type": "integer", "minimum": 1, "maximum": 31},
+                        },
+                        "required": ["month", "day"],
+                        "additionalProperties": False,
+                    },
+                    "minItems": 1,
+                    "maxItems": 366,
+                    "uniqueItems": True,
+                },
+                "timezone": {"type": "string", "minLength": 1},
+            },
+            "required": ["kind", "local_time", "dates", "timezone"],
+            "additionalProperties": False,
+        },
+    ]
+}
+
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "title": {"type": "string", "minLength": 1, "maxLength": 1024},
         "instruction": {"type": "string", "minLength": 1, "maxLength": 65_536},
         "at": {"type": "string", "format": "date-time"},
-        "cadence": {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "kind": {"const": "DAILY"},
-                        "local_time": {"type": "string", "format": "time"},
-                        "timezone": {"type": "string", "minLength": 1},
-                    },
-                    "required": ["kind", "local_time", "timezone"],
-                    "additionalProperties": False,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "kind": {"const": "WEEKLY"},
-                        "local_time": {"type": "string", "format": "time"},
-                        "weekdays": {
-                            "type": "array",
-                            "items": {"type": "integer", "minimum": 1, "maximum": 7},
-                            "minItems": 1,
-                            "maxItems": 7,
-                            "uniqueItems": True,
-                        },
-                        "timezone": {"type": "string", "minLength": 1},
-                    },
-                    "required": ["kind", "local_time", "weekdays", "timezone"],
-                    "additionalProperties": False,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "kind": {"const": "MONTHLY"},
-                        "local_time": {"type": "string", "format": "time"},
-                        "days_of_month": {
-                            "type": "array",
-                            "items": {"type": "integer", "minimum": 1, "maximum": 31},
-                            "maxItems": 31,
-                            "uniqueItems": True,
-                        },
-                        "last_day": {"type": "boolean"},
-                        "timezone": {"type": "string", "minLength": 1},
-                    },
-                    "required": [
-                        "kind",
-                        "local_time",
-                        "days_of_month",
-                        "last_day",
-                        "timezone",
-                    ],
-                    "additionalProperties": False,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "kind": {"const": "YEARLY"},
-                        "local_time": {"type": "string", "format": "time"},
-                        "dates": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "month": {"type": "integer", "minimum": 1, "maximum": 12},
-                                    "day": {"type": "integer", "minimum": 1, "maximum": 31},
-                                },
-                                "required": ["month", "day"],
-                                "additionalProperties": False,
-                            },
-                            "minItems": 1,
-                            "maxItems": 366,
-                            "uniqueItems": True,
-                        },
-                        "timezone": {"type": "string", "minLength": 1},
-                    },
-                    "required": ["kind", "local_time", "dates", "timezone"],
-                    "additionalProperties": False,
-                },
-            ]
-        },
+        "cadence": RECURRING_CADENCE_INPUT_SCHEMA,
     },
     "required": ["title", "instruction"],
     "oneOf": [
@@ -131,7 +133,7 @@ INPUT_SCHEMA: dict[str, Any] = {
 CADENCE_ADAPTER: TypeAdapter[Cadence] = TypeAdapter(Cadence)
 
 
-class _CadenceInputError(ValueError):
+class CadenceInputError(ValueError):
     def __init__(self, reason_code: str, detail: str) -> None:
         super().__init__(detail)
         self.reason_code = reason_code
@@ -221,8 +223,8 @@ class ScheduleCreateTool:
             "requested_scopes": [],
         }
         try:
-            cadence = _parse_cadence(arguments)
-        except _CadenceInputError:
+            cadence = parse_cadence(arguments)
+        except CadenceInputError:
             proposal.update({key: arguments[key] for key in ("at", "cadence") if key in arguments})
             return f"Create schedule {title!r}", proposal
         if isinstance(cadence, OnceCadence):
@@ -242,8 +244,8 @@ class ScheduleCreateTool:
         context: ToolExecutionContext,
     ) -> ToolResult:
         try:
-            cadence = _parse_cadence(arguments)
-        except _CadenceInputError as exc:
+            cadence = parse_cadence(arguments)
+        except CadenceInputError as exc:
             return _failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
                 exc.reason_code,
@@ -340,11 +342,11 @@ class ScheduleCreateTool:
         )
 
 
-def _parse_cadence(arguments: dict[str, Any]) -> Cadence:
+def parse_cadence(arguments: dict[str, Any]) -> Cadence:
     has_at = "at" in arguments
     has_cadence = "cadence" in arguments
     if has_at == has_cadence:
-        raise _CadenceInputError(
+        raise CadenceInputError(
             "schedule.cadence_invalid",
             "provide exactly one of at or cadence",
         )
@@ -353,13 +355,13 @@ def _parse_cadence(arguments: dict[str, Any]) -> Cadence:
             at = datetime.fromisoformat(str(arguments["at"]).replace("Z", "+00:00"))
             return OnceCadence(at=at)
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
-            raise _CadenceInputError("schedule.instant_invalid", str(exc)) from exc
+            raise CadenceInputError("schedule.instant_invalid", str(exc)) from exc
     try:
         cadence = CADENCE_ADAPTER.validate_python(arguments["cadence"])
     except (KeyError, TypeError, ValueError, ValidationError) as exc:
-        raise _CadenceInputError("schedule.cadence_invalid", str(exc)) from exc
+        raise CadenceInputError("schedule.cadence_invalid", str(exc)) from exc
     if isinstance(cadence, OnceCadence):
-        raise _CadenceInputError(
+        raise CadenceInputError(
             "schedule.cadence_invalid",
             "cadence must be DAILY, WEEKLY, MONTHLY, or YEARLY",
         )

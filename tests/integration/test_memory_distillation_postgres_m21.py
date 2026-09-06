@@ -122,6 +122,12 @@ async def _verify_backfill_and_erasure(tmp_path: Path, session_id: UUID, belief_
             with pytest.raises(ConflictError, match="episode id identifies different content"):
                 await uow.episodes.put(conflicting)
             assert await uow.episodes.get(episode.id, composition.principal) == episode
+            assert (
+                await uow.episodes.get_by_derivation(episode.derivation_key, composition.principal)
+                == episode
+            )
+            foreign = composition.principal.model_copy(update={"principal_id": "other"})
+            assert await uow.episodes.get_by_derivation(episode.derivation_key, foreign) is None
         async with composition.uow_factory() as uow:
             assert await uow.session_deletions.delete(
                 session_id, composition.principal, composition.clock.now()

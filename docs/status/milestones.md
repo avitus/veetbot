@@ -109,9 +109,17 @@ support the numbers it carried; the replacement is bundled for immediate
 exact-tuple activation. On 2026-09-03 the deployed artifact was found bound
 to the pre-Milestone-24 policy version and was regenerated on the deployed
 tree; the bundle test now refuses that mismatch, and the starved
-`formation@8` artifact is withdrawn in favor of `formation@10`. Remaining:
+`formation@8` artifact is withdrawn in favor of `formation@10`. On 2026-09-04
+an independent review reproduced eight release-blocking defects; each is
+fixed with a regression test (ADR-0087), the scorer advanced to
+`distillation-scorer@3`, and the `formation@9` artifact evaluated under the
+old scorer is withdrawn, so `formation@10` serves the production tuple until
+`formation@9` is re-evaluated on the deploying tree. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
+- [ ] Re-evaluate formation@9 under distillation-scorer@3 on the deploying tree and rebundle its artifact; formation@10 serves the tuple until then
+- [ ] Author a frozen holdout corpus, never edited after observing model output, and require it before a formation@9 artifact activates (ADR-0087)
+- [ ] Decide how anticipation obtains a cue on single-segment consolidations, where the blinded prefix is empty by construction
 
 ### Milestone 22 — Persona surface and curated belief promotion
 
@@ -127,8 +135,9 @@ Remaining:
 ### Milestone 23 — Conversational schedule lifecycle
 
 An eighth parallel workstream adding bounded summary discovery and
-approval-gated pause, resume, and terminal cancellation through the existing
-schedule service. Its seven `gate.schedule.*` checks pass locally, including
+approval-gated update, pause, resume, and terminal cancellation through the
+existing schedule service. All twelve `gate.schedule.*` checks pass locally,
+covering immutable content/cadence edits with preserved execution authority,
 no-backfill resume, audit-preserving cancellation, exact-scope denial,
 fail-closed revision handling, and idempotent retry. Remaining:
 

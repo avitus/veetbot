@@ -24,6 +24,8 @@ TOOL_RESULT_EVENTS = frozenset(
     {"tool.call.completed", "tool.call.failed", "tool.call.denied", "tool.call.uncertain"}
 )
 CONVERSATION_MESSAGE_EVENTS = frozenset({"user.message.created", "assistant.message.completed"})
+SCHEDULE_INSTRUCTION_EVENT_TYPE = "user.message.created"
+SCHEDULE_INSTRUCTION_ACTOR_TYPE = "scheduler"
 
 
 class NewEvent(BaseModel):
@@ -64,6 +66,15 @@ class ProcessEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     derivation_key: str
     created_at: datetime
+
+
+def is_schedule_instruction_event(event: EventEnvelope) -> bool:
+    """Return whether an event is the context-only seed for a scheduled run."""
+
+    return (
+        event.event_type == SCHEDULE_INSTRUCTION_EVENT_TYPE
+        and event.actor_type == SCHEDULE_INSTRUCTION_ACTOR_TYPE
+    )
 
 
 def conversation_items(event: EventEnvelope) -> list[ConversationItem]:

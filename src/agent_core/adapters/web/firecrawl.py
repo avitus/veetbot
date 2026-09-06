@@ -56,6 +56,7 @@ class FirecrawlWebProvider:
             credential_name=self.name,
             url="https://api.firecrawl.dev/v2/search",
             payload=payload,
+            auth_failure_statuses=frozenset({401}),
         )
         if response.get("success") is not True:
             raise WebProviderError("tool.web.provider_rejected", retryable=False)
@@ -86,6 +87,7 @@ class FirecrawlWebProvider:
                 "onlyMainContent": True,
                 "skipTlsVerification": False,
             },
+            auth_failure_statuses=frozenset({401}),
         )
         if response.get("success") is not True:
             raise WebProviderError("tool.web.provider_rejected", retryable=False)

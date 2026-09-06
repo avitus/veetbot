@@ -39,7 +39,13 @@ from agent_core.domain.errors import (
     NotFoundError,
     PersonaContentError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent, conversation_items
+from agent_core.domain.events import (
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+    conversation_items,
+    is_schedule_instruction_event,
+)
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
@@ -893,6 +899,8 @@ class PublicRunService:
                 current, events = await self._events_after(principal, run_id, watermark)
                 for event in events:
                     watermark = max(watermark, event.sequence)
+                    if is_schedule_instruction_event(event):
+                        continue
                     yield PersistedStreamFrame(
                         sequence=event.sequence,
                         event=event.event_type,

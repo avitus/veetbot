@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -13,6 +15,7 @@ from agent_core.adapters.persistence.memory_repositories import (
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import IntegratedEpisode
+from agent_core.memory.distillation import _stored_episode
 from tests.contract.support import NOW, SESSION_ID, principal
 
 
@@ -40,7 +43,14 @@ def integrated_episode(*, episode_id: int = 710) -> IntegratedEpisode:
 async def test_integrated_episode_repository_contract_is_registered() -> None:
     """The executable contract covers idempotency, scope, paging, and erasure."""
 
-    required = {"put", "get", "for_session", "delete_for_session", "delete_for_principal"}
+    required = {
+        "put",
+        "get",
+        "get_by_derivation",
+        "for_session",
+        "delete_for_session",
+        "delete_for_principal",
+    }
     for repository_type in (InMemoryIntegratedEpisodeStore, PostgresIntegratedEpisodeStore):
         assert required <= set(dir(repository_type))
 
@@ -48,6 +58,7 @@ async def test_integrated_episode_repository_contract_is_registered() -> None:
     episode = integrated_episode()
     assert await store.put(episode) == episode
     assert await store.put(episode) == episode
+    assert await store.get_by_derivation(episode.derivation_key, principal()) == episode
     conflicting = episode.model_copy(update={"derivation_key": "f" * 64})
     with pytest.raises(ConflictError, match="episode id identifies different content"):
         await store.put(conflicting)
@@ -57,6 +68,7 @@ async def test_integrated_episode_repository_contract_is_registered() -> None:
     foreign = principal().model_copy(update={"principal_id": "other"})
     with pytest.raises(NotFoundError):
         await store.get(episode.id, foreign)
+    assert await store.get_by_derivation(episode.derivation_key, foreign) is None
     assert await store.for_session(SESSION_ID, foreign) == []
     assert await store.delete_for_session(SESSION_ID, foreign) == 0
     assert await store.delete_for_session(SESSION_ID, principal()) == 1
@@ -85,3 +97,30 @@ async def test_in_memory_episode_derivation_keys_are_owner_scoped() -> None:
     assert await store.put(second) == second
     assert await store.get(first.id, principal()) == first
     assert await store.get(second.id, other_principal) == second
+
+
+async def test_rederived_episode_lookup_is_not_limited_by_session_page_size() -> None:
+    """A late derivation conflict still resolves after more than one thousand episodes."""
+
+    store = InMemoryIntegratedEpisodeStore()
+    target = integrated_episode()
+    for index in range(1_001):
+        timestamp = NOW + timedelta(seconds=index)
+        episode = target.model_copy(
+            update={
+                "id": UUID(int=10_000 + index),
+                "derivation_key": f"{index:064x}",
+                "source_started_at": timestamp,
+                "source_ended_at": timestamp,
+            }
+        )
+        await store.put(episode)
+        target = episode
+
+    recovered = await _stored_episode(
+        SimpleNamespace(episodes=store),
+        target.model_copy(update={"id": UUID(int=20_000)}),
+        principal=principal(),
+    )
+
+    assert recovered == target

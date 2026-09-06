@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 import unicodedata
@@ -15,6 +16,33 @@ from .api import ApiError, ClientError, ConnectionFailureError, ProtocolError, S
 TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.cancelled"})
 _SAFE_PROVIDER_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _SAFE_PROVIDER_PARAMETER = re.compile(r"[A-Za-z0-9_.\[\]-]{1,128}")
+
+
+def _tool_activity_phase(event: SSEEvent) -> str:
+    phase = event.event.rsplit(".", maxsplit=1)[-1]
+    if event.event != "tool.call.failed":
+        return phase
+    result_item = event.data.get("result_item")
+    if not isinstance(result_item, dict):
+        return phase
+    content = result_item.get("content")
+    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+        return phase
+    text = content[0].get("text")
+    if not isinstance(text, str):
+        return phase
+    try:
+        outcome = json.loads(text)
+    except (TypeError, ValueError):
+        return phase
+    if not isinstance(outcome, dict):
+        return phase
+    if outcome.get("reason_code") == "tool.web.provider_rejected":
+        return "rejected"
+    status = outcome.get("status")
+    if status in {"unavailable", "uncertain", "denied"}:
+        return str(status)
+    return phase
 
 
 def _provider_failure_suffix(failure: dict[str, object]) -> str:
@@ -300,10 +328,16 @@ class ChatApplication:
             message = event.data.get("message")
             if isinstance(message, dict):
                 state.durable_message = message
-        elif event.event in {"tool.call.started", "tool.call.completed", "tool.call.failed"}:
+        elif event.event in {
+            "tool.call.started",
+            "tool.call.completed",
+            "tool.call.failed",
+            "tool.call.denied",
+            "tool.call.uncertain",
+        }:
             self._finish_delta_line(state)
             tool_name = event.data.get("name") or event.data.get("tool_name") or "tool"
-            phase = event.event.rsplit(".", maxsplit=1)[-1]
+            phase = _tool_activity_phase(event)
             self.console.print(f"[tool] {tool_name}: {phase}")
         elif event.event == "context.working_state.updated":
             working_state = event.data.get("working_state")

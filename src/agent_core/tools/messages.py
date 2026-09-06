@@ -51,7 +51,10 @@ TOOL_MESSAGES: dict[str, str] = {
         "The web provider's usage or billing limit has been reached; "
         "an operator must restore provider capacity."
     ),
-    "tool.web.provider_rejected": "The configured web provider rejected this request.",
+    "tool.web.provider_rejected": (
+        "The selected web provider rejected this request; the target or requested capability "
+        "may be unsupported or blocked."
+    ),
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
     "policy.scope.missing": "Not performed. The principal lacks a required scope.",

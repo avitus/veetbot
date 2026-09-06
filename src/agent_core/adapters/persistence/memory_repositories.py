@@ -214,6 +214,20 @@ class PostgresIntegratedEpisodeStore:
             raise NotFoundError("integrated episode not found")
         return _episode(row)
 
+    async def get_by_derivation(
+        self, derivation_key: str, principal: Principal
+    ) -> IntegratedEpisode | None:
+        row = (
+            await self._session.scalars(
+                select(IntegratedEpisodeRow).where(
+                    IntegratedEpisodeRow.derivation_key == derivation_key,
+                    IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+                    IntegratedEpisodeRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else _episode(row)
+
     async def for_session(
         self,
         session_id: UUID,

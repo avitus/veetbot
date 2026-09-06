@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -203,3 +204,45 @@ def test_bundled_provider_evidence_matches_the_corpus_and_store_it_claims() -> N
         assert evidence.corpus_sha256 == corpus_sha256, path.name
         assert evidence.seeded_case_count >= 1, path.name
         assert re.fullmatch(r"[0-9a-f]{40}", evidence.build_ref), path.name
+
+
+def _is_ancestor_of_head(repository_root: Path, build_ref: str) -> bool:
+    completed = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", build_ref, "HEAD"],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if completed.returncode not in (0, 1):
+        raise AssertionError(
+            "the bundled evidence can only be bound to a commit from a git checkout: "
+            + (completed.stderr.strip() or f"git exited {completed.returncode}")
+        )
+    return completed.returncode == 0
+
+
+def test_bundled_build_refs_are_commits_this_tree_descends_from() -> None:
+    """A well-formed forty-character sha is not enough; it must be in this history.
+
+    An artifact naming a commit this tree does not descend from describes an
+    evaluation of some other code, and nothing at runtime can tell the
+    difference, so the bundle test is where the ancestry is checked.
+    """
+
+    repository_root = Path(__file__).resolve().parents[2]
+    for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
+        evidence = load_memory_release_evidence(path)
+        assert _is_ancestor_of_head(repository_root, evidence.build_ref), (
+            f"{path.name} is bound to {evidence.build_ref}, which is not an ancestor of HEAD"
+        )
+
+
+def test_no_formation9_artifact_ships_until_the_scorer_change_is_re_evaluated() -> None:
+    """The scorer moved to distillation-scorer@3; the @2 artifact was withdrawn."""
+
+    for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
+        evidence = load_memory_release_evidence(path)
+        if isinstance(evidence, MemoryDistillationEvidence):
+            assert evidence.scorer_version == DISTILLATION_SCORER_VERSION, path.name

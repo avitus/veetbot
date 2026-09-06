@@ -264,6 +264,26 @@ async def test_web_provider_rejected_credential_is_a_stable_auth_failure(
     assert raised.value.retryable is False
 
 
+async def test_firecrawl_forbidden_fetch_is_a_provider_rejection() -> None:
+    """Firecrawl also uses 403 for target- and feature-specific refusals."""
+
+    credentials = MappingCredentialResolver({"firecrawl": "synthetic-firecrawl-credential"})
+    upstream_diagnostic = "This site is not supported"
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(403, text=upstream_diagnostic)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        provider = FirecrawlWebProvider(credentials=credentials, client=client)
+        with pytest.raises(WebProviderError) as raised:
+            await provider.fetch("https://example.org/ada")
+
+    assert raised.value.reason_code == "tool.web.provider_rejected"
+    assert raised.value.retryable is False
+    assert upstream_diagnostic not in str(raised.value)
+
+
 @pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_bounds_oversized_responses(
     provider_name: str,
@@ -459,7 +479,6 @@ async def test_web_provider_rejects_result_rows_that_fail_domain_validation(
     ("status", "reason_code", "retryable"),
     [
         (402, "tool.web.quota_exceeded", False),
-        (403, "tool.web.auth_failed", False),
         (408, "tool.web.provider_unavailable", True),
         (425, "tool.web.provider_unavailable", True),
         (500, "tool.web.provider_unavailable", True),
@@ -489,6 +508,34 @@ async def test_web_provider_status_taxonomy_is_stable(
 
     assert raised.value.reason_code == reason_code
     assert raised.value.retryable is retryable
+    assert "upstream-private-diagnostic" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "reason_code"),
+    [
+        ("tavily", "tool.web.auth_failed"),
+        ("firecrawl", "tool.web.provider_rejected"),
+        ("keenable", "tool.web.auth_failed"),
+    ],
+)
+async def test_web_provider_403_taxonomy_is_provider_specific(
+    provider_name: str,
+    reason_code: str,
+) -> None:
+    """A forbidden response has the meaning documented by its provider."""
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(403, text="upstream-private-diagnostic")
+
+    factory = dict(provider_factories())[provider_name]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(WebProviderError) as raised:
+            await factory(client).fetch("https://example.org/ada")
+
+    assert raised.value.reason_code == reason_code
+    assert raised.value.retryable is False
     assert "upstream-private-diagnostic" not in str(raised.value)
 
 

@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-04 — Schedules can be revised in conversation
+
+- Added approval-gated `schedule.update` so a conversation can revise a
+  schedule's title, instruction, or supported one-time/recurring cadence using
+  its stable identifier and current revision. Updates preserve the schedule's
+  hidden execution authority and limits, keep prior revisions immutable, and
+  recompute only a future active firing; paused schedules remain paused.
+- Added retry-safe update semantics, stale-revision and terminal-state
+  refusals, secret scanning, feature-gated registration, and five Milestone 23
+  gates under ADR-0088.
+
 ## 2026-09-04 — Memory snapshots fit their final context class
 
 - Memory retrieval now applies the context planner's model-specific token

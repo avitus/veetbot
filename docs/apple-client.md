@@ -140,6 +140,12 @@ routed to run input with the displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
 sends its contents, while Command-Return inserts a newline.
 
+Submitting a top-level message inserts its user bubble before the first network
+await. The persisted `user.message.created` event replaces that optimistic item
+in place, preserving its position without rendering a duplicate. A submission
+failure before server acceptance removes the optimistic item so the restored
+composer remains the single retry surface.
+
 The SSE reader parses the response incrementally. A bounded byte-to-line
 decoder preserves the empty lines that delimit SSE frames because
 `URLSession.AsyncBytes.lines` omits those separators on the supported Apple

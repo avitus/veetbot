@@ -138,7 +138,12 @@ def provider_extraction_evidence_matches(
     policy_version: str,
     *,
     formation_policy_version: str = PROVIDER_FORMATION_POLICY_VERSION,
+    corpus_sha256: str | None = None,
 ) -> bool:
+    # An operator-supplied artifact bypasses the bundle test, so when the
+    # running tree's corpus digest is known the artifact must carry it.
+    if corpus_sha256 is not None and evidence.corpus_sha256 != corpus_sha256:
+        return False
     expected = {
         "extractor_version": provider_extractor_version(formation_policy_version),
         "formation_policy_version": formation_policy_version,

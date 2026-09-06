@@ -316,6 +316,70 @@ def test_chat_replays_resolves_suspensions_and_reconciles_final_message() -> Non
     assert "reconnecting from 1" in stderr.getvalue()
 
 
+def test_chat_labels_non_successful_tool_outcomes_semantically() -> None:
+    class OutcomeChatApi(ScriptedChatApi):
+        def stream_events(
+            self, run_id: str, last_event_id: int | None = None
+        ) -> Iterator[SSEEvent]:
+            del run_id, last_event_id
+            outcome = (
+                '{"status":"failed","action":"web.fetch",'
+                '"reason_code":"tool.web.provider_rejected",'
+                '"message":"The selected web provider rejected this request.",'
+                '"retryable":false,"remediation":"none"}'
+            )
+            yield SSEEvent(
+                "tool.call.failed",
+                {
+                    "name": "web.fetch",
+                    "result_item": {
+                        "content": [{"type": "text", "text": outcome}],
+                        "is_error": True,
+                        "trust": "external_untrusted",
+                    },
+                },
+                1,
+            )
+            unavailable = (
+                '{"status":"unavailable","action":"web.fetch",'
+                '"reason_code":"tool.web.provider_unavailable",'
+                '"message":"The selected web provider is unavailable.",'
+                '"retryable":true,"remediation":"none"}'
+            )
+            yield SSEEvent(
+                "tool.call.failed",
+                {
+                    "name": "web.fetch",
+                    "result_item": {
+                        "content": [{"type": "text", "text": unavailable}],
+                        "is_error": True,
+                        "trust": "external_untrusted",
+                    },
+                },
+                2,
+            )
+            yield SSEEvent("tool.call.denied", {"name": "workspace.write_text"}, 3)
+            yield SSEEvent("tool.call.uncertain", {"name": "device.send_sms"}, 4)
+            yield SSEEvent(
+                "run.completed",
+                {"final_message": {"kind": "assistant", "content": []}},
+                5,
+            )
+
+    stdout = io.StringIO()
+    application = ChatApplication(
+        cast(ChatApi, OutcomeChatApi()),
+        Console(stdout, io.StringIO()),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert application.watch_run("run-1") == "COMPLETED"
+    assert "[tool] web.fetch: rejected" in stdout.getvalue()
+    assert "[tool] web.fetch: unavailable" in stdout.getvalue()
+    assert "[tool] workspace.write_text: denied" in stdout.getvalue()
+    assert "[tool] device.send_sms: uncertain" in stdout.getvalue()
+
+
 def test_chat_bounds_total_reconnects_even_when_each_stream_yields_an_event() -> None:
     class ReconnectingChatApi(ScriptedChatApi):
         def stream_events(

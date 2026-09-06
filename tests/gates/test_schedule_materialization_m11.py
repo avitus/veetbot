@@ -12,7 +12,9 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
+    AssistantMessage,
     FakeModelScript,
     ScriptedToolCall,
     ScriptedTurn,
@@ -199,6 +201,56 @@ async def test_due_schedule_materializes_one_complete_ordinary_run() -> None:
             events = await uow.events.list_after(run.session_id, 0, _principal())
         assert events[-1].event_type == "tool.call.denied"
         assert events[-1].payload["reason_code"] == "policy.scope.missing"
+
+
+async def test_scheduled_instruction_is_context_only_on_public_chat_surfaces() -> None:
+    public_principal = _principal(scopes={"memory.read", "run.read", "session.read"})
+    async with _materialize(public_principal) as (composition, occurrence):
+        assert occurrence is not None
+        assert occurrence.session_id is not None
+        assert occurrence.run_id is not None
+        answer = AssistantMessage(content=[TextPart(text="The briefing result.")])
+        async with composition.uow_factory() as uow:
+            await uow.events.append(
+                NewEvent(
+                    session_id=occurrence.session_id,
+                    run_id=occurrence.run_id,
+                    event_type="assistant.message.completed",
+                    actor_type="runtime",
+                    payload={"message": answer.model_dump(mode="json")},
+                )
+            )
+            running = await uow.runs.transition(
+                occurrence.run_id,
+                RunStatus.QUEUED,
+                RunStatus.RUNNING,
+            )
+            await uow.runs.transition(
+                running.id,
+                RunStatus.RUNNING,
+                RunStatus.COMPLETED,
+                final_message="The briefing result.",
+            )
+
+        transcript = await composition.services.sessions.messages(
+            public_principal,
+            occurrence.session_id,
+            limit=100,
+            cursor=None,
+        )
+        assert [
+            (message.role, [block.model_dump(mode="json") for block in message.content])
+            for message in transcript.items
+        ] == [("assistant", [{"type": "text", "text": "The briefing result."}])]
+
+        frames = [
+            frame
+            async for frame in composition.services.runs.stream(
+                public_principal, occurrence.run_id, None
+            )
+        ]
+        assert "user.message.created" not in [frame.event for frame in frames]
+        assert "assistant.message.completed" in [frame.event for frame in frames]
 
 
 async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve() -> None:

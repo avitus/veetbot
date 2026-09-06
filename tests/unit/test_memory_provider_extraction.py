@@ -55,6 +55,8 @@ from agent_core.domain.messages import (
     UsageEvent,
     UserMessage,
 )
+from agent_core.evals.memory_distillation import load_distillation_corpus
+from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
@@ -207,7 +209,7 @@ def _evidence() -> ProviderExtractionEvaluationEvidence:
         policy_profile="default",
         policy_version="default@test",
         build_ref="test-build",
-        corpus_sha256="a" * 64,
+        corpus_sha256=_FORMATION_CORPUS_SHA256,
         sample_count=20,
         positive_case_count=20,
         minimum_supported_case_count=16,
@@ -2228,7 +2230,7 @@ async def test_auto_mode_activates_matching_release_bundled_evidence(
     assert selections[0].payload["evidence_source"] == "release"
     assert ":matching_evidence:release:" in selections[0].derivation_key
     assert selections[0].payload["evidence_build_ref"] == "test-build"
-    assert selections[0].payload["evidence_corpus_sha256"] == "a" * 64
+    assert selections[0].payload["evidence_corpus_sha256"] == _FORMATION_CORPUS_SHA256
 
 
 async def test_auto_mode_prefers_newer_distillation_evidence_over_older_artifact(
@@ -2269,11 +2271,16 @@ async def test_auto_mode_prefers_newer_distillation_evidence_over_older_artifact
     assert len(selections) == 1
     assert selections[0].payload["outcome"] == "activated"
     assert selections[0].payload["evidence_build_ref"] == _DISTILLATION_BUILD_REF
-    assert selections[0].payload["evidence_corpus_sha256"] == "b" * 64
+    assert selections[0].payload["evidence_corpus_sha256"] == _DISTILLATION_CORPUS_SHA256
     assert selections[0].payload["policy_pin"] is None
 
 
 _DISTILLATION_BUILD_REF = "0123456789abcdef0123456789abcdef01234567"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+# Activation binds an artifact to the corpus the running tree ships, so a
+# fabricated artifact must carry the real digest to activate anything here.
+_FORMATION_CORPUS_SHA256 = load_formation_corpus(_REPOSITORY_ROOT)[1]
+_DISTILLATION_CORPUS_SHA256 = load_distillation_corpus(_REPOSITORY_ROOT)[1]
 
 
 def _distillation_evidence() -> MemoryDistillationEvidence:
@@ -2283,12 +2290,13 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version=_runtime_policy_version(),
-        scorer_version="distillation-scorer@2",
+        scorer_version="distillation-scorer@3",
         build_ref=_DISTILLATION_BUILD_REF,
-        corpus_sha256="b" * 64,
+        corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=61,
         positive_case_count=49,
         seeded_case_count=5,
+        represented_case_count=1,
         direct_must_form_recall=1,
         hypothesis_must_form_recall=1,
         benign_precision=0.96,
@@ -3268,3 +3276,43 @@ async def test_frozen_policy_view_never_sends_sensitive_beliefs() -> None:
     assert "astronomy club newsletter" in prompt
     assert "ledger password" not in prompt
     assert "red notebook" not in prompt
+
+
+async def test_operator_evidence_with_an_invented_corpus_digest_does_not_activate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An operator artifact is judged against the corpus this tree ships.
+
+    The bundle test cannot see an operator-supplied file, so the runtime match
+    must refuse a schema-valid artifact whose corpus digest names an
+    evaluation nobody can rerun on this tree.
+    """
+
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(config_module, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", release_root)
+    invented = tmp_path / "operator-formation9.json"
+    invented.write_text(
+        _distillation_evidence().model_copy(update={"corpus_sha256": "b" * 64}).model_dump_json(),
+        encoding="utf-8",
+    )
+    settings = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        memory_provider_extraction_evidence=invented,
+        artifact_root=tmp_path / "artifacts",
+    )
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+
+    assert len(selections) == 1
+    assert selections[0].payload["outcome"] != "activated"
+    assert selections[0].payload["evidence_corpus_sha256"] is None
+
+    genuine = tmp_path / "operator-formation9-genuine.json"
+    genuine.write_text(_distillation_evidence().model_dump_json(), encoding="utf-8")
+    settings = replace(settings, memory_provider_extraction_evidence=genuine)
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+    assert selections[0].payload["outcome"] == "activated"
+    assert selections[0].payload["evidence_corpus_sha256"] == _DISTILLATION_CORPUS_SHA256

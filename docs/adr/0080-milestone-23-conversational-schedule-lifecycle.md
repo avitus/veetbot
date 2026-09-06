@@ -55,10 +55,12 @@ scope in Milestones 19 and 20.
 - Resume retains the Milestone 11 rule: it chooses the first future occurrence
   strictly after the current instant and never backfills paused time.
 - Cancel retains schedule/run separation and audit history.
-- The model still cannot update schedule content or cadence, inspect occurrence
-  history, hard-delete schedule state, or delegate scopes to scheduled runs.
-- Seven `gate.schedule.*` entries cover composition, discovery, mutation,
-  authorization, validation/conflict behavior, and retry safety.
+- This decision originally left schedule content and cadence updates deferred;
+  ADR-0088 subsequently authorizes and specifies that capability. Occurrence
+  history, hard deletion, and delegated scopes remain outside this surface.
+- The original seven `gate.schedule.*` entries cover composition, discovery,
+  mutation, authorization, validation/conflict behavior, and retry safety;
+  ADR-0088 adds five update gates.
 
 ## Alternatives considered
 

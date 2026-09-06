@@ -95,6 +95,8 @@ from agent_core.domain.errors import (
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
     CONVERSATION_MESSAGE_EVENTS,
+    SCHEDULE_INSTRUCTION_ACTOR_TYPE,
+    SCHEDULE_INSTRUCTION_EVENT_TYPE,
     EventEnvelope,
     NewEvent,
     ProcessEvent,
@@ -759,6 +761,10 @@ class PostgresEventRepository:
                     EventRow.session_id == session_id,
                     EventRow.sequence > sequence,
                     EventRow.event_type.in_(CONVERSATION_MESSAGE_EVENTS),
+                    or_(
+                        EventRow.event_type != SCHEDULE_INSTRUCTION_EVENT_TYPE,
+                        EventRow.actor_type != SCHEDULE_INSTRUCTION_ACTOR_TYPE,
+                    ),
                 )
                 .order_by(EventRow.sequence, EventRow.id)
                 .limit(limit)

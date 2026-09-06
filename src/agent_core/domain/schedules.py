@@ -354,6 +354,22 @@ class ScheduleDefinition(BaseModel):
         return self.cadence.timezone
 
 
+class ScheduleDefinitionPatch(BaseModel):
+    """Model-visible definition fields allowed to change conversationally."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=1024)
+    instruction: str | None = Field(default=None, min_length=1, max_length=65_536)
+    cadence: Cadence | None = None
+
+    @model_validator(mode="after")
+    def at_least_one_field_changes(self) -> ScheduleDefinitionPatch:
+        if self.title is None and self.instruction is None and self.cadence is None:
+            raise ValueError("schedule update requires at least one changed field")
+        return self
+
+
 class ScheduleRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

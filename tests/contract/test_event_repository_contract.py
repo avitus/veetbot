@@ -123,3 +123,30 @@ async def test_event_repository_bounds_conversation_event_queries() -> None:
     ]
     with pytest.raises(ValueError, match="nonnegative"):
         await repository.list_conversation_after(SESSION_ID, 0, principal(), limit=-1)
+
+
+async def test_event_repository_omits_scheduled_seed_before_applying_the_page_limit() -> None:
+    _clock, _sessions, _runs, repository = await memory_stack()
+    for event_type, actor_type in (
+        ("user.message.created", "scheduler"),
+        ("assistant.message.completed", "runtime"),
+        ("user.message.created", "principal"),
+    ):
+        await repository.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type=event_type,
+                actor_type=actor_type,
+            )
+        )
+
+    first = await repository.list_conversation_after(SESSION_ID, 0, principal(), limit=1)
+    second = await repository.list_conversation_after(
+        SESSION_ID, first[-1].sequence, principal(), limit=1
+    )
+
+    assert [(event.sequence, event.event_type) for event in first + second] == [
+        (2, "assistant.message.completed"),
+        (3, "user.message.created"),
+    ]

@@ -209,7 +209,7 @@
   milestone: 23
   kind: structural
   spec: docs/plan/scheduling.md#hard-gates
-  statement: "**Conversational lifecycle tools are feature-gated and honestly classified.** The schedule flag pair registers and advertises exactly `schedule.list`, `schedule.pause`, `schedule.resume`, and `schedule.cancel` beside creation, with the declared effects, risks, idempotency, scopes, and parallelism."
+  statement: "**Conversational lifecycle tools are feature-gated and honestly classified.** The schedule flag pair registers and advertises exactly `schedule.list`, `schedule.update`, `schedule.pause`, `schedule.resume`, and `schedule.cancel` beside creation, with the declared effects, risks, idempotency, scopes, and parallelism."
   check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_lifecycle_tools_are_feature_gated_and_classified
 - id: gate.schedule.model_lifecycle_discovery
   milestone: 23
@@ -247,3 +247,33 @@
   spec: docs/plan/scheduling.md#hard-gates
   statement: "**Conversational lifecycle retries are state-idempotent.** Replaying an identical authorized invocation cannot duplicate a transition event or move a schedule beyond the requested legal state."
   check: tests/gates/test_schedule_lifecycle_tool_m23.py::test_schedule_lifecycle_retries_are_state_idempotent
+- id: gate.schedule.model_update_contract
+  milestone: 23
+  kind: structural
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational update is a closed, governed patch.** `schedule.update` is feature-gated, approval-gated, conditionally idempotent, non-parallel, and exactly scoped by `schedule.write`; its input accepts only identity plus content or cadence changes."
+  check: tests/gates/test_schedule_update_tool_m23.py::test_schedule_update_tool_is_feature_gated_and_classified
+- id: gate.schedule.model_update_happy_path
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**A conversational edit writes one future immutable revision.** Approval updates content and cadence in N+1, leaves revision N unchanged, and recomputes the first future firing."
+  check: tests/gates/test_schedule_update_tool_m23.py::test_schedule_update_runs_through_approval_and_writes_one_revision
+- id: gate.schedule.model_update_preserves_authority
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational update cannot widen hidden execution authority.** Omitted execution fields are preserved, and updating while paused retains paused state without a next firing."
+  check: tests/gates/test_schedule_update_tool_m23.py::test_schedule_update_preserves_hidden_fields_and_paused_state
+- id: gate.schedule.model_update_validation
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational update authorization and validation fail closed.** Missing scope, invalid content, stale identity, and terminal state write no revision or event."
+  check: tests/gates/test_schedule_update_tool_m23.py::test_schedule_update_authorization_and_validation_fail_closed
+- id: gate.schedule.model_update_retry
+  milestone: 23
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational update recovery applies at most once.** Identical replay returns without another revision or event, and changed content under the same key conflicts."
+  check: tests/gates/test_schedule_update_tool_m23.py::test_schedule_update_recovery_applies_at_most_once

@@ -358,9 +358,9 @@ The control annotation is on the two domains that hold nothing else.
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
 `schedule` holds `schedule.create` plus Milestone 23's summary-only
-`schedule.list` and approval-gated `schedule.pause`, `schedule.resume`, and
-`schedule.cancel` capabilities; their registration remains conditional on the
-scheduling deployment flags.
+`schedule.list` and approval-gated `schedule.update`, `schedule.pause`,
+`schedule.resume`, and `schedule.cancel` capabilities; their registration
+remains conditional on the scheduling deployment flags.
 `web` holds the read-only `web.search` and `web.fetch` capabilities designed in
 [web-access.md](web-access.md). Their `web_provider` target is valid only with
 `NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any
@@ -1207,6 +1207,18 @@ Discovery runs at session open, before the context plan is built, because the
 context engine pins the tool set and the pin must include MCP tools or they
 cannot be advertised. For each configured server: connect, `initialize`,
 `tools/list`, map, register, hash.
+
+Independent server connection, initialization, and discovery operations use a
+process-local bounded fan-out of eight. Catalog persistence, registry mutation,
+and connection or rejection events still commit in configured-server order, so
+startup latency follows the slowest batch member without making the pinned
+catalog or event sequence scheduling-dependent.
+Every preparation failure path starts and retains an entered client's cleanup,
+then awaits it through a shield for at most the configured connect timeout. A
+deadline detaches rather than cancels the cleanup task so cancellation-resistant
+clients can still settle independently. Expected disconnections then return
+their stable reason code, while unexpected failures propagate without retaining
+a fan-out permit.
 
 Mapping a remote tool declaration into a `ToolSpec` is where the untrusted
 input meets our type system, and every field is either derived or forced:

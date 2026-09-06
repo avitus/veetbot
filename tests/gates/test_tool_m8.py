@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
@@ -9,7 +10,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -19,7 +20,7 @@ from agent_core.adapters.mcp.sdk import SDKMCPClient, SDKMCPClientFactory, _unau
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.credentials import CredentialRef, SecretValue
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import MCPTransportError, MCPUnauthorizedError, NotFoundError
 from agent_core.domain.mcp import (
     MCPAuthScheme,
     MCPCallResult,
@@ -44,6 +45,7 @@ from agent_core.evals.cases import load_cases
 from agent_core.evals.runner import run_case
 from agent_core.mcp.configuration import build_stdio_environment, validate_mcp_config
 from agent_core.mcp.mapping import map_discovered_tools
+from agent_core.ports.mcp import MCPClientFactory
 from agent_core.tools.executor import PIPELINE_STEP_SEQUENCE
 from agent_core.tools.registry import StaticToolRegistry
 from scripts.architecture_checks import architecture_errors
@@ -183,6 +185,67 @@ class _TrackedFactory:
         return client
 
 
+class _DiscoveryBarrier:
+    def __init__(self, expected: int, *, hold_until_released: bool = False) -> None:
+        self.expected = expected
+        self.hold_until_released = hold_until_released
+        self.started = 0
+        self.in_flight = 0
+        self.maximum_in_flight = 0
+        self.all_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+
+class _BarrierClient(_TrackedClient):
+    def __init__(self, barrier: _DiscoveryBarrier) -> None:
+        super().__init__(fail_discovery=False)
+        self.barrier = barrier
+
+    async def __aenter__(self) -> _BarrierClient:
+        self.entered = True
+        return self
+
+    async def discover(self) -> MCPDiscovery:
+        self.barrier.started += 1
+        self.barrier.in_flight += 1
+        self.barrier.maximum_in_flight = max(
+            self.barrier.maximum_in_flight,
+            self.barrier.in_flight,
+        )
+        if self.barrier.started == self.barrier.expected:
+            self.barrier.all_started.set()
+        try:
+            if self.barrier.hold_until_released:
+                await self.barrier.release.wait()
+            else:
+                await asyncio.wait_for(self.barrier.all_started.wait(), timeout=0.2)
+        except TimeoutError:
+            pass
+        finally:
+            self.barrier.in_flight -= 1
+        return _discovery()
+
+
+class _BarrierFactory:
+    def __init__(self, expected: int, *, hold_until_released: bool = False) -> None:
+        self.barrier = _DiscoveryBarrier(
+            expected,
+            hold_until_released=hold_until_released,
+        )
+        self.clients: list[_BarrierClient] = []
+
+    def __call__(
+        self,
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> _BarrierClient:
+        del config, credential, environment
+        client = _BarrierClient(self.barrier)
+        self.clients.append(client)
+        return client
+
+
 async def test_dynamic_registry_is_tenant_scoped() -> None:
     spec = map_discovered_tools(_server("shared"), _discovery().tools).accepted[0].spec
     first = _TenantTool(spec, "first")
@@ -311,6 +374,159 @@ async def test_prepare_closes_all_clients_after_unexpected_discovery_failure() -
             await composition.sessions.create()
     assert len(factory.clients) == 2
     assert all(client.closed and not client.entered for client in factory.clients)
+
+
+async def test_cancelled_prepare_finishes_in_flight_client_cleanup() -> None:
+    """Cancelling the parent gather twice must not abandon an entered client."""
+
+    discovery_started = asyncio.Event()
+    close_started = asyncio.Event()
+    allow_close = asyncio.Event()
+    closed = asyncio.Event()
+
+    class CancellationClient(_TrackedClient):
+        async def discover(self) -> MCPDiscovery:
+            discovery_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def __aexit__(self, *_args: object) -> None:
+            close_started.set()
+            await allow_close.wait()
+            self.entered = False
+            self.closed = True
+            closed.set()
+
+    client = CancellationClient(fail_discovery=False)
+
+    def factory(
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> CancellationClient:
+        del config, credential, environment
+        return client
+
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("cancelled"),),
+        mcp_client_factory=cast(MCPClientFactory, factory),
+    ) as composition:
+        startup = asyncio.create_task(composition.sessions.create())
+        await asyncio.wait_for(discovery_started.wait(), timeout=1)
+        startup.cancel()
+        await asyncio.wait_for(close_started.wait(), timeout=1)
+        startup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await startup
+        allow_close.set()
+        await asyncio.wait_for(closed.wait(), timeout=1)
+
+    assert client.closed and not client.entered
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_reason"),
+    [
+        (MCPUnauthorizedError(), "tool.auth_failed"),
+        (MCPTransportError(), "tool.server_unreachable"),
+        (None, "tool.server_unreachable"),
+    ],
+    ids=("unauthorized", "transport", "timeout"),
+)
+async def test_expected_disconnect_cleanup_is_bounded(
+    failure: Exception | None,
+    expected_reason: str,
+) -> None:
+    """Expected discovery failures cannot hang while closing their client."""
+
+    close_started = asyncio.Event()
+    allow_close = asyncio.Event()
+    close_finished = asyncio.Event()
+    close_cancelled = asyncio.Event()
+
+    class NonSettlingCloseClient(_TrackedClient):
+        async def discover(self) -> MCPDiscovery:
+            if failure is None:
+                await asyncio.Event().wait()
+                raise AssertionError("unreachable")
+            raise failure
+
+        async def __aexit__(self, *_args: object) -> None:
+            close_started.set()
+            try:
+                await allow_close.wait()
+            except asyncio.CancelledError:
+                close_cancelled.set()
+                await allow_close.wait()
+            finally:
+                close_finished.set()
+
+    client = NonSettlingCloseClient(fail_discovery=False)
+
+    def factory(
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> NonSettlingCloseClient:
+        del config, credential, environment
+        return client
+
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("expected_disconnect"),),
+        mcp_client_factory=cast(MCPClientFactory, factory),
+    ) as composition:
+        composition.mcp._connect_timeout_seconds = 0.01
+        try:
+            session = await asyncio.wait_for(composition.sessions.create(), timeout=0.2)
+        finally:
+            allow_close.set()
+            await asyncio.wait_for(close_finished.wait(), timeout=0.2)
+        assert not close_cancelled.is_set()
+        assert await composition.mcp.prompt_entries(session, composition.principal) == []
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(session, 0, composition.principal)
+
+    assert close_started.is_set()
+    assert expected_reason in {
+        event.payload["reason_code"]
+        for event in events
+        if event.event_type == "mcp.server.disconnected"
+    }
+
+
+async def test_prepare_discovers_independent_servers_concurrently() -> None:
+    factory = _BarrierFactory(expected=3)
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("first"), _server("second"), _server("third")),
+        mcp_client_factory=factory,
+    ) as composition:
+        await composition.sessions.create()
+    assert factory.barrier.maximum_in_flight == 3
+
+
+async def test_prepare_bounds_server_discovery_fan_out() -> None:
+    factory = _BarrierFactory(expected=8, hold_until_released=True)
+    configs = tuple(_server(f"server_{index}") for index in range(9))
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=configs,
+        mcp_client_factory=factory,
+    ) as composition:
+        startup = asyncio.create_task(composition.sessions.create())
+        try:
+            await asyncio.wait_for(factory.barrier.all_started.wait(), timeout=1)
+            assert factory.barrier.started == 8
+        finally:
+            factory.barrier.release.set()
+            await startup
+    assert factory.barrier.maximum_in_flight == 8
 
 
 async def test_dynamic_registrations_are_owned_by_live_sessions() -> None:

@@ -20,6 +20,7 @@ from agent_core.domain.schedules import (
     Schedule,
     ScheduleDefinition,
     ScheduleDefinitionLimits,
+    ScheduleDefinitionPatch,
     ScheduleIdempotencyRecord,
     ScheduleOccurrence,
     ScheduleRevision,
@@ -174,6 +175,7 @@ def test_schedule_domain_and_persistence_models_have_no_credential_fields() -> N
     models = (
         Schedule,
         ScheduleDefinition,
+        ScheduleDefinitionPatch,
         ScheduleIdempotencyRecord,
         ScheduleOccurrence,
         ScheduleRevision,

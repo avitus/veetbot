@@ -124,6 +124,10 @@ class IntegratedEpisodeStore(Protocol):
 
     async def get(self, episode_id: UUID, principal: Principal) -> IntegratedEpisode: ...
 
+    async def get_by_derivation(
+        self, derivation_key: str, principal: Principal
+    ) -> IntegratedEpisode | None: ...
+
     async def for_session(
         self,
         session_id: UUID,
