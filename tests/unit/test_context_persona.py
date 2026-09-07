@@ -39,7 +39,7 @@ def test_persona_renders_at_index_two_as_trusted_unenveloped_system_text() -> No
     assert isinstance(tools_row, SystemMessage)
     tools_part = tools_row.content[0]
     assert isinstance(tools_part, TextPart)
-    assert tools_part.text.startswith("Declared tools")
+    assert tools_part.text == "Tools."
 
 
 def test_render_persona_orders_entries_and_honors_the_ceiling() -> None:

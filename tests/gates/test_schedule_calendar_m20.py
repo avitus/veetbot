@@ -24,6 +24,7 @@ from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.errors import ToolValidationError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
 from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.schedules import (
@@ -38,6 +39,7 @@ from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.tools.registry import RegisteredTool
 from agent_core.tools.schedule_create import ScheduleCreateTool
+from agent_core.tools.validation import validate_and_normalize
 from tests.contract.support import tool_context
 from tests.integration.m2_support import memory_settings
 
@@ -69,6 +71,13 @@ CALENDAR_CADENCES: tuple[dict[str, object], ...] = (
         "dates": [{"month": 12, "day": 25}, {"month": 8, "day": 28}],
         "timezone": "UTC",
     },
+)
+
+FORBIDDEN_CADENCE_SELECTORS: tuple[dict[str, object], ...] = (
+    {"weekdays": [1]},
+    {"days_of_month": [1]},
+    {"dates": [{"month": 1, "day": 1}]},
+    {"last_day": True},
 )
 
 
@@ -502,6 +511,21 @@ async def test_schedule_create_supports_every_recurring_kind_through_approval(
     assert len(page.items) == 1
     assert page.items[0].revision.cadence.kind.value == cadence["kind"]
     assert page.items[0].revision.requested_scopes == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("cadence", "forbidden"),
+    zip(CALENDAR_CADENCES, FORBIDDEN_CADENCE_SELECTORS, strict=True),
+    ids=["DAILY", "WEEKLY", "MONTHLY", "YEARLY"],
+)
+def test_schedule_create_model_schema_rejects_cross_kind_selectors(
+    cadence: dict[str, object],
+    forbidden: dict[str, object],
+) -> None:
+    arguments = _tool_arguments({**cadence, **forbidden})
+
+    with pytest.raises(ToolValidationError, match="declared schema"):
+        validate_and_normalize(arguments, ScheduleCreateTool.spec.input_schema)
 
 
 async def test_schedule_create_calendar_validation_and_replay_fail_closed() -> None:

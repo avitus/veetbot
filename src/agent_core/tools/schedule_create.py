@@ -35,84 +35,87 @@ DEFAULT_MISFIRE_GRACE_SECONDS = 3600
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 1
 DEFAULT_MAX_COST = Decimal("1")
 
+_FORBIDDEN_CADENCE_FIELD_SCHEMA: dict[str, Any] = {"not": {}}
+
+# Keep the model contract closed without repeating the common civil-time and
+# selector schemas in every variant. A property constrained by the always-false
+# schema is forbidden for that cadence kind; execution still validates the same
+# discriminated domain union before writing schedule state.
 RECURRING_CADENCE_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "kind": {},
+        "local_time": {"type": "string", "format": "time"},
+        "timezone": {"type": "string", "minLength": 1},
+        "weekdays": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 1, "maximum": 7},
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": True,
+        },
+        "days_of_month": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 1, "maximum": 31},
+            "maxItems": 31,
+            "uniqueItems": True,
+        },
+        "last_day": {"type": "boolean"},
+        "dates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "month": {"type": "integer", "minimum": 1, "maximum": 12},
+                    "day": {"type": "integer", "minimum": 1, "maximum": 31},
+                },
+                "required": ["month", "day"],
+                "additionalProperties": False,
+            },
+            "minItems": 1,
+            "maxItems": 366,
+            "uniqueItems": True,
+        },
+    },
+    "required": ["kind", "local_time", "timezone"],
     "oneOf": [
         {
-            "type": "object",
             "properties": {
                 "kind": {"const": "DAILY"},
-                "local_time": {"type": "string", "format": "time"},
-                "timezone": {"type": "string", "minLength": 1},
+                "weekdays": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "days_of_month": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "last_day": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "dates": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
             },
-            "required": ["kind", "local_time", "timezone"],
-            "additionalProperties": False,
         },
         {
-            "type": "object",
             "properties": {
                 "kind": {"const": "WEEKLY"},
-                "local_time": {"type": "string", "format": "time"},
-                "weekdays": {
-                    "type": "array",
-                    "items": {"type": "integer", "minimum": 1, "maximum": 7},
-                    "minItems": 1,
-                    "maxItems": 7,
-                    "uniqueItems": True,
-                },
-                "timezone": {"type": "string", "minLength": 1},
+                "days_of_month": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "last_day": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "dates": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
             },
-            "required": ["kind", "local_time", "weekdays", "timezone"],
-            "additionalProperties": False,
+            "required": ["weekdays"],
         },
         {
-            "type": "object",
             "properties": {
                 "kind": {"const": "MONTHLY"},
-                "local_time": {"type": "string", "format": "time"},
-                "days_of_month": {
-                    "type": "array",
-                    "items": {"type": "integer", "minimum": 1, "maximum": 31},
-                    "maxItems": 31,
-                    "uniqueItems": True,
-                },
-                "last_day": {"type": "boolean"},
-                "timezone": {"type": "string", "minLength": 1},
+                "weekdays": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "dates": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
             },
-            "required": [
-                "kind",
-                "local_time",
-                "days_of_month",
-                "last_day",
-                "timezone",
-            ],
-            "additionalProperties": False,
+            "required": ["days_of_month", "last_day"],
         },
         {
-            "type": "object",
             "properties": {
                 "kind": {"const": "YEARLY"},
-                "local_time": {"type": "string", "format": "time"},
-                "dates": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "month": {"type": "integer", "minimum": 1, "maximum": 12},
-                            "day": {"type": "integer", "minimum": 1, "maximum": 31},
-                        },
-                        "required": ["month", "day"],
-                        "additionalProperties": False,
-                    },
-                    "minItems": 1,
-                    "maxItems": 366,
-                    "uniqueItems": True,
-                },
-                "timezone": {"type": "string", "minLength": 1},
+                "weekdays": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "days_of_month": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
+                "last_day": _FORBIDDEN_CADENCE_FIELD_SCHEMA,
             },
-            "required": ["kind", "local_time", "dates", "timezone"],
-            "additionalProperties": False,
+            "required": ["dates"],
         },
-    ]
+    ],
+    "additionalProperties": False,
 }
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -181,11 +184,10 @@ class ScheduleCreateTool:
 
     spec = ToolSpec(
         name=SCHEDULE_CREATE_TOOL_NAME,
-        version="1.1.0",
+        version="1.1.1",
         description=(
-            "Create one future one-time, daily, weekly, monthly, or yearly scheduled run. "
-            "Use an exact aware instant or a complete IANA-zone civil cadence; ask the user "
-            "when the date, calendar selector, local time, or timezone is ambiguous."
+            "Create one future one-time or recurring schedule. For recurrence, supply a "
+            "complete IANA-zone cadence; ask about ambiguous dates or times."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,

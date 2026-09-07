@@ -36,7 +36,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@5"
+BUILDER_VERSION = "context-builder@6"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16

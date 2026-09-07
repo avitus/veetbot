@@ -39,7 +39,6 @@ def build_prefix(
     *,
     persona: str = "",
 ) -> list[ConversationItem]:
-    tool_names = ", ".join(spec.name for spec in tools) or "none"
     base: list[ConversationItem] = [
         SystemMessage(content=[TextPart(text=PLATFORM_FRAMING)]),
         SystemMessage(
@@ -60,7 +59,10 @@ def build_prefix(
             else []
         ),
         SystemMessage(
-            content=[TextPart(text=f"Declared tools (advertisement only): {tool_names}")],
+            # The provider tool array carries the canonical names and schemas.
+            # Repeating every name in prose spends the governed tool-definition
+            # budget without adding model-visible capability information.
+            content=[TextPart(text="Tools.")],
             trust=TrustLevel.TRUSTED_CONFIGURATION,
         ),
     ]

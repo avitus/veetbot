@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-06 — Full production tool roster fits the context guardrail
+
+- Removed the redundant prose copy of every provider tool name and compacted
+  the model-visible recurring-schedule schema without changing its closed
+  cadence validation. The normal Gmail, scheduling, and web composition now
+  advertises all 29 tools below the existing 6,000-token tool-definition cap.
+- Added a production-shaped interaction regression and advanced the context
+  builder version so existing sessions rotate cleanly to the repaired prefix.
+
 ## 2026-09-04 — Schedules can be revised in conversation
 
 - Added approval-gated `schedule.update` so a conversation can revise a

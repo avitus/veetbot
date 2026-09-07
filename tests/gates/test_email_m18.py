@@ -13,7 +13,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
@@ -37,6 +37,8 @@ from agent_core.config import (
     Settings,
     load_settings,
 )
+from agent_core.context.estimator import ConservativeTokenEstimator
+from agent_core.context.rendering import build_prefix
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.credentials import CredentialRef, SecretValue
@@ -83,6 +85,7 @@ from gmail_mcp.errors import GmailError
 from gmail_mcp.server import create_server
 from scripts.architecture_checks import architecture_errors
 from tests.contract.support import tool_context
+from tests.unit.test_web_tools import FakeWebProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -443,6 +446,23 @@ def _discovery(mode: str) -> MCPDiscovery:
                 ),
             )
             for name in ROSTERS[mode]
+        )
+    )
+
+
+async def _generated_gmail_discovery(mode: str) -> MCPDiscovery:
+    """Use the first-party server's exact model-visible schemas."""
+
+    server = create_server(mode, cast(GmailClient, object()))
+    tools = await server.list_tools()
+    return MCPDiscovery(
+        tools=tuple(
+            MCPRemoteTool(
+                name=tool.name,
+                description=tool.description or "",
+                input_schema=tool.input_schema,
+            )
+            for tool in tools
         )
     )
 
@@ -1031,6 +1051,65 @@ async def test_email_is_default_off_and_grants_nothing(tmp_path: Path) -> None:
     async with build(settings=settings, sequential_ids=True) as composition:
         assert not any(scope.startswith("mcp.gmail_") for scope in composition.principal.scopes)
         assert not email_server_configs("local", enabled=settings.email_enabled)
+
+
+async def test_production_tool_roster_stays_within_the_context_cap() -> None:
+    settings = replace(
+        _email_settings(),
+        schedule_api_enabled=True,
+        schedule_worker_enabled=True,
+    )
+    scripts = {
+        f"gmail_{mode}": ScriptedMCPServer(
+            name=f"gmail_{mode}",
+            discovery=await _generated_gmail_discovery(mode),
+        )
+        for mode in ("read", "write", "send")
+    }
+    provider = FakeWebProvider()
+    async with build(
+        settings=settings,
+        script=FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    text="Recommendation ready.",
+                    stop_reason=StopReason.END_TURN,
+                )
+            ]
+        ),
+        mcp_client_factory=ScriptedMCPClientFactory(scripts),
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        run_id = await composition.runs.submit(
+            "Recommend an advanced driving course.",
+            session_id,
+        )
+        terminal = await composition.runs.wait_terminal(run_id)
+        plan = await composition.executor._context_planner.current(session_id)
+        agent = composition.sessions._default_agent
+
+    assert terminal.status is RunStatus.COMPLETED
+    assert plan is not None
+    assert len(plan.tool_specs) == 29
+    assert {
+        "mcp.gmail_read.search_threads",
+        "mcp.gmail_write.modify_labels",
+        "mcp.gmail_send.send_message",
+        "schedule.create",
+        "schedule.update",
+        "web.search",
+        "web.fetch",
+    }.issubset(plan.tool_names)
+
+    estimator = ConservativeTokenEstimator()
+    prefix = build_prefix(agent, plan.tool_specs)
+    tool_tokens = estimator.estimate(
+        prefix[2:],
+        plan.model_id,
+    ) + estimator.estimate_tools(plan.tool_specs, plan.model_id)
+    assert tool_tokens <= 6_000
 
 
 def test_email_scope_confinement_rejects_any_nonexact_scope() -> None:

@@ -311,11 +311,10 @@ class ScheduleListTool:
 
     spec = ToolSpec(
         name=SCHEDULE_LIST_TOOL_NAME,
-        version="1.0.0",
+        version="1.0.1",
         description=(
-            "List the user's schedules as bounded summaries. Use this before update, pause, "
-            "resume, or cancel to resolve a description to one stable schedule ID and "
-            "revision; ask the user if zero or multiple summaries match."
+            "List bounded schedule summaries with stable IDs and revisions. Use before "
+            "changes; ask if zero or multiple schedules match."
         ),
         input_schema=LIST_INPUT_SCHEMA,
         output_schema=LIST_OUTPUT_SCHEMA,
@@ -390,11 +389,10 @@ class ScheduleUpdateTool:
 
     spec = ToolSpec(
         name=SCHEDULE_UPDATE_TOOL_NAME,
-        version="1.0.0",
+        version="1.0.1",
         description=(
-            "Update a schedule title, instruction, cadence, or any combination after using "
-            "schedule.list to resolve one stable ID and revision. Omitted fields stay "
-            "unchanged; ask the user when the intended schedule or time is ambiguous."
+            "Update a schedule's title, instruction, or cadence by stable ID and expected "
+            "revision. Omitted fields stay unchanged; ask about ambiguity."
         ),
         input_schema=UPDATE_INPUT_SCHEMA,
         output_schema=UPDATE_OUTPUT_SCHEMA,
@@ -577,15 +575,14 @@ def _mutation_spec(
 ) -> ToolSpec:
     verb = "Cancel" if action == "cancel" else action.capitalize()
     detail = (
-        "Cancellation is terminal, preserves history, and does not cancel an already "
-        "materialized run."
+        " This is terminal; history and already-materialized runs remain."
         if action == "cancel"
-        else "Use schedule.list first and never select a schedule by title alone."
+        else ""
     )
     return ToolSpec(
         name=name,
-        version="1.0.0",
-        description=(f"{verb} exactly one schedule by stable ID and expected revision. {detail}"),
+        version="1.0.1",
+        description=f"{verb} one schedule by stable ID and expected revision.{detail}",
         input_schema=MUTATION_INPUT_SCHEMA,
         output_schema=MUTATION_OUTPUT_SCHEMA,
         side_effect=side_effect,
