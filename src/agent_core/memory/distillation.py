@@ -211,8 +211,11 @@ class _DistilledCandidate(BaseModel):
     claim_kind: MemoryClaimKind
     derivation: MemoryDerivation
     # A retraction names the belief a correction ends; consolidation updates
-    # that belief and never creates one from it.
-    polarity: Literal["assert", "retract"] = "assert"
+    # that belief and never creates one from it. Required, not defaulted: the
+    # provider's strict structured output rejects a schema with an optional
+    # property, and an optional field here once failed every distillation
+    # call in a live evaluation.
+    polarity: Literal["assert", "retract"]
     evidence_spans: list[EvidenceSpan] = Field(min_length=1, max_length=256)
 
 

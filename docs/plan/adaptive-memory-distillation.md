@@ -246,7 +246,10 @@ evidence.
 ### Segments and limits
 
 The output ceiling is 16,384 tokens, sized so a full ledger and its candidates
-fit. A batch is planned into segments before any call: a segment closes before
+fit. Every stage's response schema is submitted as strict structured output,
+so no object property may be optional: a defaulted field is rejected by the
+provider on every call and surfaces only as a fallback, which is how a
+defaulted `polarity` once zeroed a live evaluation. A batch is planned into segments before any call: a segment closes before
 the event that would carry it past ninety coverage units, two hundred and
 fifty-six events, or ninety-six kilobytes of source text, and an oversized
 single event forms its own segment. Each segment makes the three calls in

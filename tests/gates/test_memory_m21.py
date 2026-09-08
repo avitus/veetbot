@@ -457,8 +457,11 @@ def test_provider_candidates_carry_polarity_and_corrections_pass_only_as_retract
         "sensitivity_guess": "internal",
         "claim_kind": "resource",
         "derivation": "direct",
+        "polarity": "assert",
         "evidence_spans": [{"source_event_id": 7, "text": "don't drive my BMW anymore"}],
     }
+    with pytest.raises(ValidationError):
+        _DistilledCandidate.model_validate({k: v for k, v in proposal.items() if k != "polarity"})
 
     retraction = _normalize_distilled_candidate(
         _DistilledCandidate.model_validate({**proposal, "polarity": "retract"}),
@@ -1400,6 +1403,7 @@ async def test_distillation_normalizes_provider_policy_fields_locally() -> None:
                             "sensitivity_guess": "public",
                             "claim_kind": "skill",
                             "derivation": "hypothesis",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -1508,6 +1512,7 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
                             "sensitivity_guess": "internal",
                             "claim_kind": "preference",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -1524,6 +1529,7 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
                             "sensitivity_guess": "internal",
                             "claim_kind": "habit",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -2037,6 +2043,7 @@ async def test_provider_fallback_completes_and_schedules_a_provider_repass() -> 
                             "sensitivity_guess": "internal",
                             "claim_kind": "interest",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {"source_event_id": source_id, "text": "personal AI agent"}
                             ],
@@ -2855,6 +2862,7 @@ async def test_distillation_grounds_evidence_that_contains_a_period() -> None:
                             "sensitivity_guess": "internal",
                             "claim_kind": "resource",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -3005,6 +3013,7 @@ async def test_combiner_keeps_distinct_claims_under_one_subject_apart() -> None:
                             "sensitivity_guess": "internal",
                             "claim_kind": "habit",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {"source_event_id": source_id, "text": "I run marathons"}
                             ],
@@ -3016,6 +3025,7 @@ async def test_combiner_keeps_distinct_claims_under_one_subject_apart() -> None:
                             "sensitivity_guess": "internal",
                             "claim_kind": "habit",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {"source_event_id": source_id, "text": "I run outdoors"}
                             ],
@@ -3141,6 +3151,37 @@ async def test_retraction_targets_follow_the_verb_across_morphology_and_keys() -
         "User is running outdoors every day.",
         "User goes running outdoors most mornings.",
     }
+
+
+def test_provider_response_schemas_have_no_optional_property() -> None:
+    """Every stage schema must satisfy strict structured output.
+
+    The provider rejects a strict schema in which any object property is not
+    required, and the rejection surfaces only as a provider failure on every
+    call. A defaulted `polarity` did exactly that in a live evaluation: the
+    distillation stage fell back on all 67 cases and evidence-disposition
+    precision measured 0.000. This test fails on the schema, not on the bill.
+    """
+
+    from agent_core.memory.distillation import (
+        _AnticipationResponse,
+        _DistillationResponse,
+        _EpisodeResponse,
+    )
+
+    for response in (_EpisodeResponse, _AnticipationResponse, _DistillationResponse):
+        schema = response.model_json_schema()
+        objects = [schema, *schema.get("$defs", {}).values()]
+        for definition in objects:
+            if definition.get("type") != "object":
+                continue
+            properties = set(definition.get("properties", {}))
+            assert set(definition.get("required", [])) == properties, (
+                response.__name__,
+                definition.get("title"),
+                properties - set(definition.get("required", [])),
+            )
+            assert definition.get("additionalProperties") is False, definition.get("title")
 
 
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
