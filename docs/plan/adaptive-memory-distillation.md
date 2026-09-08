@@ -476,7 +476,32 @@ cases. At least seventy percent are positive. Every positive case is labeled
 `must_form` or `reasonable_to_form`; the narrow negative set is `must_not_form`.
 Each expected candidate declares claim kind, derivation, longevity, canonical
 subject and statement alternatives, and exact evidence text; a subject is a
-specific conflict key, never the user. Coverage includes every claim kind,
+specific conflict key, never the user. A direct expectation may also declare
+up to three compatible kinds, the kinds a correct belief could reasonably
+carry instead: a stated training history is a skill to the label author and a
+project fact to the model, and both are the same memory. Compatible kinds are
+assigned by the shape of the claim, never by what a model happened to
+produce, from this table; a hypothesis declares none.
+
+| Claim shape | Primary kind | Compatible kinds |
+| --- | --- | --- |
+| stated experience or training history | skill | project_fact |
+| stated occupation | skill | role, project_fact |
+| activity program with a schedule | habit | project_fact, ongoing_project |
+| routine or chore | habit | project_fact, recurring_state |
+| recurring condition | recurring_state | project_fact (habit when it is also a routine) |
+| something being built or planned | ongoing_project | project_fact, goal |
+| a wish or aim | goal | ongoing_project (project_fact for a team's aim) |
+| a wish about how the agent should answer | preference | goal, constraint |
+| a position held | role | project_fact |
+| an interest | interest | preference |
+| a preference | preference | constraint |
+| a constraint | constraint | preference, project_fact |
+| a family member | relationship | none |
+| a fact about a family member's situation | project_fact or relationship | the other |
+| a recurring activity of a family member | relationship | recurring_state, project_fact |
+| a resource or its location | resource | project_fact |
+| a technical fact about the user's project | project_fact | resource | Coverage includes every claim kind,
 direct and hypothesis formation, compound utterances, corroboration and
 promotion, correction, retirement, and self-citation.
 
@@ -488,9 +513,10 @@ populated production store. At least one positive multi-event case and the
 rich production conversation run against a pool of at least twenty-five
 beliefs.
 
-Scoring is `distillation-scorer@4`. A belief matches a gold claim when its
-closed fields agree, its subject names the gold conflict key, and its statement
-is equivalent: equal after normalization, or sharing three quarters of the
+Scoring is `distillation-scorer@5`. A belief matches a gold claim when its
+derivation agrees, its claim kind is the gold kind with the gold longevity or a
+compatible kind with the longevity local policy assigns that kind, its subject
+names the gold conflict key, and its statement is equivalent: equal after normalization, or sharing three quarters of the
 combined content terms with the same polarity, the same absence conditions,
 the same counts, the same large numbers when both carry one, the same object
 after every directional marker both share, the terms they share in the same
@@ -560,7 +586,9 @@ Publication requires:
 - precision against exhaustive, semantic-paraphrase-aware gold claims over
   benign positive and negative cases is at least 90 percent;
 - useful recall is at least fifteen percentage points above `formation@8`;
-- every claim kind has a positive case and the personal-agent core passes;
+- every claim kind has a positive case, counted by the kind the provider
+  formed rather than the kind the label names, and the personal-agent core
+  passes;
 - measurable user correction or rejection is below ten per one hundred
   automatically formed memories;
 - at least three quarters of the clauses the gold labels as evidence are formed

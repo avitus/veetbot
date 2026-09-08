@@ -156,6 +156,17 @@ exoplanets" into a duplicate keyed "exoplanets loves learning", so a claim
 whose kind is its subject (interest, preference, relationship, role,
 constraint) merges under its key unless the statements contradict.
 
+That run also showed three misses that were category disagreements rather
+than wrong memories: "restarted 5x5 a year ago" filed as a project fact where
+the gold says skill, "started sailing on weekends" as a project fact where the
+gold says habit, and the daughter's college start folded into the relationship
+belief. The owner decided on 2026-09-08 that an expectation may declare up to
+three compatible kinds, assigned by claim shape from a table in the design
+document rather than from observed output, with a compatible belief held to
+the longevity local policy assigns its kind, and that claim-kind coverage
+counts the kind the provider formed. That is `distillation-scorer@5`. The gold
+statements themselves were not edited.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

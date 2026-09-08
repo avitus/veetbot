@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@4"]] = "distillation-scorer@4"
+DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@5"]] = "distillation-scorer@5"
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)*")
 _STOPWORDS = frozenset(

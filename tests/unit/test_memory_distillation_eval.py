@@ -264,6 +264,7 @@ def _corpus_payload(**overrides: object) -> dict[str, Any]:
                         "claim_kind": kind.value,
                         "derivation": "direct",
                         "longevity": "durable",
+                        "compatible_kinds": ["project_fact"] if kind.value == "skill" else [],
                         "subjects": [f"item {index}"],
                         "statements": [f"User keeps item {index} in the Blue folder."],
                         "evidence_text": [f"item {index}"],
@@ -621,7 +622,7 @@ def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
 def test_scorer_version_advanced_with_its_semantics() -> None:
     """A changed scorer cannot keep the version an old artifact was published under."""
 
-    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@4"
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@5"
 
 
 def test_represented_text_requires_a_pool_and_exact_user_text() -> None:
@@ -746,3 +747,108 @@ def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -
     from agent_core.memory.equivalence import negated
 
     assert negated(statement) is expected
+
+
+def test_compatible_kinds_match_with_the_longevity_local_policy_assigns() -> None:
+    """A gold claim may name kinds a correct belief could reasonably carry.
+
+    "Restarted 5x5 a year ago" is a skill to the label author and a project
+    fact to the model; both are the same memory. A belief filed under a
+    compatible kind matches only with the longevity local policy assigns that
+    kind, so the loosening is bounded to taxonomy and never reaches the
+    lifecycle a memory will get.
+    """
+
+    case = _case(
+        expected=[
+            {
+                "claim_kind": "skill",
+                "derivation": "direct",
+                "longevity": "durable",
+                "compatible_kinds": ["project_fact"],
+                "subjects": ["5x5 history"],
+                "statements": ["User restarted 5x5 a year ago."],
+                "evidence_text": ["marathon"],
+            }
+        ]
+    )
+    as_project_fact = _belief(
+        claim_kind="project_fact",
+        derivation="direct",
+        longevity="ongoing",
+        subject="5x5 history",
+        statement="User restarted 5x5 a year ago.",
+    )
+    wrong_longevity = as_project_fact.model_copy(update={"longevity": MemoryLongevity.DURABLE})
+    as_habit = as_project_fact.model_copy(
+        update={"claim_kind": MemoryClaimKind.HABIT, "longevity": MemoryLongevity.ONGOING}
+    )
+    primary = as_project_fact.model_copy(
+        update={"claim_kind": MemoryClaimKind.SKILL, "longevity": MemoryLongevity.DURABLE}
+    )
+
+    assert score_distillation_case(case, [as_project_fact]).matched == 1
+    assert score_distillation_case(case, [wrong_longevity]).matched == 0
+    assert score_distillation_case(case, [as_habit]).matched == 0
+    assert score_distillation_case(case, [primary]).matched == 1
+
+
+def test_compatible_kinds_are_bounded_and_exclude_the_primary_kind() -> None:
+    base = {
+        "claim_kind": "skill",
+        "derivation": "direct",
+        "longevity": "durable",
+        "subjects": ["5x5 history"],
+        "statements": ["User restarted 5x5 a year ago."],
+        "evidence_text": ["marathon"],
+    }
+    with pytest.raises(ValidationError, match="primary"):
+        _case(expected=[{**base, "compatible_kinds": ["skill"]}])
+    with pytest.raises(ValidationError):
+        _case(expected=[{**base, "compatible_kinds": ["project_fact", "habit", "role", "goal"]}])
+    with pytest.raises(ValidationError, match="unique"):
+        _case(expected=[{**base, "compatible_kinds": ["project_fact", "project_fact"]}])
+
+
+def test_claim_kind_coverage_counts_the_kind_the_provider_formed() -> None:
+    """Matching through a compatible kind must not certify the kind it avoided."""
+
+    corpus = MemoryDistillationCorpus.model_validate(_corpus_payload())
+    results = _results(corpus, represented_verified=True)
+    rewritten = []
+    for result in results:
+        arm = result.arms["formation@9"]
+        beliefs = [
+            belief.model_copy(
+                update={
+                    "claim_kind": MemoryClaimKind.PROJECT_FACT,
+                    "longevity": (
+                        MemoryLongevity.TENTATIVE
+                        if belief.derivation is MemoryDerivation.HYPOTHESIS
+                        else MemoryLongevity.ONGOING
+                    ),
+                }
+            )
+            if belief.claim_kind is MemoryClaimKind.SKILL
+            else belief
+            for belief in arm.beliefs
+        ]
+        rewritten.append(
+            result.model_copy(
+                update={
+                    "arms": {
+                        **result.arms,
+                        "formation@9": arm.model_copy(update={"beliefs": beliefs}),
+                    }
+                }
+            )
+        )
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, rewritten) for policy in memory_eval._POLICIES
+    }
+
+    failures = memory_eval.evaluate_publication_gates(corpus, rewritten, summaries)
+
+    assert any(
+        failure.startswith("claim-kind coverage is incomplete: skill") for failure in failures
+    )

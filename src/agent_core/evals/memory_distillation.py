@@ -35,7 +35,7 @@ from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     MemoryLongevity,
 )
-from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT
+from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT, assigned_longevity
 from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
     is_generic_subject,
@@ -74,6 +74,12 @@ class ExpectedDistilledCandidate(BaseModel):
     claim_kind: MemoryClaimKind
     derivation: MemoryDerivation
     longevity: MemoryLongevity
+    # Kinds a correct belief could reasonably carry instead of the primary
+    # kind: a stated training history is a skill to the label author and a
+    # project fact to the model. A belief under a compatible kind matches
+    # only with the longevity local policy assigns that kind, so the
+    # loosening is taxonomy alone and never reaches the memory's lifecycle.
+    compatible_kinds: list[MemoryClaimKind] = Field(default_factory=list, max_length=3)
     subjects: list[str] = Field(min_length=1)
     statements: list[str] = Field(min_length=1)
     evidence_text: list[str] = Field(min_length=1)
@@ -82,7 +88,20 @@ class ExpectedDistilledCandidate(BaseModel):
     def subjects_are_specific(self) -> ExpectedDistilledCandidate:
         if any(is_generic_subject(subject) for subject in self.subjects):
             raise ValueError("expected subjects must name a specific conflict key, not the user")
+        if self.claim_kind in self.compatible_kinds:
+            raise ValueError("compatible kinds must not repeat the primary kind")
+        if len(set(self.compatible_kinds)) != len(self.compatible_kinds):
+            raise ValueError("compatible kinds must be unique")
         return self
+
+    def accepts(self, claim_kind: MemoryClaimKind, longevity: MemoryLongevity) -> bool:
+        """Whether a belief's kind and longevity satisfy this expectation."""
+
+        if claim_kind is self.claim_kind:
+            return longevity is self.longevity
+        return claim_kind in self.compatible_kinds and longevity is assigned_longevity(
+            claim_kind, self.derivation
+        )
 
 
 class SeedBelief(BaseModel):
@@ -252,7 +271,7 @@ class DistillationEvaluationBelief(BaseModel):
 class DistillationCaseScore(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    scorer_version: Literal["distillation-scorer@4"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@5"] = DISTILLATION_SCORER_VERSION
     scoring: Literal["strict", "lenient"] = "strict"
     expected: int = Field(ge=0)
     matched: int = Field(ge=0)
@@ -320,7 +339,7 @@ class MemoryDistillationEvaluationResult(BaseModel):
 
     passed: bool
     failure_summary: str | None
-    scorer_version: Literal["distillation-scorer@4"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@5"] = DISTILLATION_SCORER_VERSION
     cases: list[DistillationCaseResult]
     policies: dict[PolicyVersion, DistillationPolicyMetrics]
     evidence: MemoryDistillationEvidence | None = None
@@ -344,16 +363,16 @@ def _belief_matches(
 ) -> bool:
     """One expected claim matches one belief.
 
-    Strict scoring requires the closed claim kind, derivation, and longevity plus
-    a specific subject and an equivalent statement. Lenient scoring compares the
-    statement only, so a control policy that cannot express the closed fields is
-    still credited for the memory it actually formed.
+    Strict scoring requires the derivation, the closed claim kind or one the
+    gold declares compatible with the longevity local policy assigns it, plus
+    a specific subject and an equivalent statement. Lenient scoring compares
+    the statement only, so a control policy that cannot express the closed
+    fields is still credited for the memory it actually formed.
     """
 
     if closed_fields and (
-        belief.claim_kind is not expected.claim_kind
-        or belief.derivation is not expected.derivation
-        or belief.longevity is not expected.longevity
+        belief.derivation is not expected.derivation
+        or not expected.accepts(belief.claim_kind, belief.longevity)
     ):
         return False
     statement_matches = any(
@@ -1019,14 +1038,15 @@ def evaluate_publication_gates(
         for result in rich_core
     ):
         failures.append("rich multi-turn conversation core did not pass completely")
+    # Coverage counts the kind the provider formed, not the kind the label
+    # names: matching a skill through a compatible project fact must not
+    # certify that the policy ever forms a skill.
     matched_kinds = {
-        expected.claim_kind
+        belief.claim_kind
         for case, result in zip(corpus.cases, results, strict=True)
         for expected in case.expected
-        if any(
-            _belief_matches(belief, expected, closed_fields=True)
-            for belief in result.arms["formation@9"].beliefs
-        )
+        for belief in result.arms["formation@9"].beliefs
+        if _belief_matches(belief, expected, closed_fields=True)
     }
     if matched_kinds != set(MemoryClaimKind):
         missing = ",".join(sorted(kind.value for kind in set(MemoryClaimKind) - matched_kinds))

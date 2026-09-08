@@ -50,7 +50,7 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@4`, the evidence schema is version 3 with a required
+`distillation-scorer@5`, the evidence schema is version 3 with a required
 `represented_case_count`, and the 67-case corpus carries a seeded case whose
 restated clause must be verifiably represented. Automatic selection therefore
 activates `formation@10` for the production tuple until `agent eval
@@ -69,7 +69,7 @@ scorer equated negations, counts, supersets, and sibling activities, its corpus
 had been edited toward the implementation, every case ran against an empty
 store, and its build reference was an operator-typed label. A `formation@9`
 artifact may be bundled only when it carries `scorer_version`
-`distillation-scorer@4`, a forty-character commit `build_ref` that is an
+`distillation-scorer@5`, a forty-character commit `build_ref` that is an
 ancestor of the bundling tree, the digest of the checked-in corpus, at least
 one seeded case, at least one verifiably represented seeded case, the
 evidence-disposition precision, and the measured provider cost under the

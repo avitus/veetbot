@@ -426,7 +426,7 @@ class MemoryDistillationEvidence(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     schema_version: Literal[3] = 3
-    scorer_version: Literal["distillation-scorer@4"]
+    scorer_version: Literal["distillation-scorer@5"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
     model_policy: str = Field(min_length=1)

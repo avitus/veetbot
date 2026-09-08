@@ -288,6 +288,16 @@ def belief_type_for_claim_kind(claim_kind: MemoryClaimKind) -> BeliefType:
     return _BELIEF_TYPE_BY_CLAIM_KIND[claim_kind]
 
 
+def assigned_longevity(
+    claim_kind: MemoryClaimKind, derivation: MemoryDerivation
+) -> MemoryLongevity:
+    """The longevity local policy gives a provider candidate of this kind and derivation."""
+
+    if derivation is MemoryDerivation.HYPOTHESIS:
+        return MemoryLongevity.TENTATIVE
+    return _DIRECT_LONGEVITY_BY_CLAIM_KIND[claim_kind]
+
+
 def distillation_evidence_matches(
     evidence: MemoryDistillationEvidence,
     resolved_model: ResolvedModel,
