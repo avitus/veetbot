@@ -10,8 +10,10 @@ import stat
 import sys
 import time
 import webbrowser
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import TextIO
 from urllib.parse import parse_qs, urlsplit
 
 from gmail_mcp.bootstrap import BootstrapError, bootstrap_credentials
@@ -19,6 +21,13 @@ from gmail_mcp.client import GmailClient, GmailCredential
 from gmail_mcp.constants import GOOGLE_SCOPES, LOOPBACK_REDIRECT_HOST
 from gmail_mcp.errors import GmailError
 from gmail_mcp.server import create_server
+
+_PRIVACY_POLICY_URL = "https://www.veetbot.com/privacy"
+_DATA_BY_MODE = {
+    "read": "message metadata, headers, labels, snippets, and plain-text bodies",
+    "write": "draft recipients and content, plus thread and label identifiers",
+    "send": "the recipient, subject, and plain-text body of the message you approve",
+}
 
 
 def _oauth_client(path: Path) -> tuple[str, str]:
@@ -89,6 +98,49 @@ def _authorize_via_loopback(_mode: str, authorization_url: str) -> str:
     return code
 
 
+def _authorize_with_disclosure(
+    mode: str,
+    authorization_url: str,
+    *,
+    read_input: Callable[[str], str] | None = None,
+    output: TextIO | None = None,
+    authorize: Callable[[str, str], str] | None = None,
+) -> str:
+    reader = input if read_input is None else read_input
+    stream = sys.stdout if output is None else output
+    open_authorization = _authorize_via_loopback if authorize is None else authorize
+    print(
+        "\n".join(
+            (
+                "Veetbot Gmail data-use disclosure",
+                f"Scope: {GOOGLE_SCOPES[mode]}",
+                f"Data accessed: {_DATA_BY_MODE[mode]}.",
+                "Use and sharing: Veetbot uses Gmail data only for the email features "
+                "you request. In the hosted deployment, relevant content may be sent "
+                "to the OpenAI or Anthropic API solely to produce that user-facing "
+                "result; a self-hosted local model keeps that processing on the host.",
+                "Prohibited uses: Google data is not sold. It is not used for "
+                "advertising, credit decisions, or general-purpose AI/ML training, "
+                "and Veetbot does not permit an AI provider to use it for such training.",
+                "Provider retention: Standard hosted API controls may retain request "
+                "and response content for abuse monitoring for up to 30 days, subject "
+                "to limited safety or legal exceptions.",
+                "Storage and deletion: Selected Gmail data and derived output may be "
+                "retained in Veetbot session history until you delete the session. "
+                "Deleted data may remain in encrypted backups for no more than 35 days.",
+                "Control: You may decline now, revoke Veetbot in your Google Account, "
+                "disable the Gmail integration, and delete associated Veetbot sessions.",
+                f"Privacy policy: {_PRIVACY_POLICY_URL}",
+            )
+        ),
+        file=stream,
+        flush=True,
+    )
+    if reader("Type CONTINUE to open Google's consent screen for this scope: ") != "CONTINUE":
+        raise BootstrapError("Gmail authorization cancelled before consent")
+    return open_authorization(mode, authorization_url)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m gmail_mcp")
     parser.add_argument("--mode", choices=tuple(GOOGLE_SCOPES))
@@ -130,7 +182,7 @@ def main(argv: list[str] | None = None) -> None:
                     client_secret=client_secret,
                     account_id=arguments.bootstrap_account_id,
                     output_directory=arguments.output_directory.expanduser().resolve(),
-                    authorize=_authorize_via_loopback,
+                    authorize=_authorize_with_disclosure,
                 )
             )
         except BootstrapError as exc:

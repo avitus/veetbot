@@ -151,6 +151,34 @@ correctness path. Occurrence links provide offline result recovery, while
 session erasure clears content links and retains an explicit non-content audit
 marker.
 
+## Milestone 18 Gmail controls
+
+The owner-operated Gmail bootstrap presents a scope-specific data-use
+disclosure immediately before each Google authorization URL and requires the
+operator to type `CONTINUE` before the browser can open. The disclosure names
+the exact data, user-requested feature, hosted AI processors, provider-retention
+boundary, prohibited uses, Veetbot retention, deletion controls, and public
+privacy policy. The three refresh tokens remain separated into owner-only
+credential files, and read, write, and send authority remain independent.
+Every Gmail result enters the context as `EXTERNAL_UNTRUSTED`: mail content
+cannot authorize an action or bypass policy, and a write or send proposed after
+reading mail cannot receive a plain allow. The public policy applies the same
+controls to raw Gmail data and derived output and states that Veetbot creates no
+cross-user aggregate or anonymized Gmail dataset.
+
+The hosted OpenAI Responses adapter sends `store: false`. OpenAI and Anthropic
+state that commercial API inputs and outputs are not used for general-purpose
+model training by default unless the customer explicitly opts in. Their
+standard abuse-monitoring retention may be up to thirty days; Veetbot neither
+submits Gmail-derived conversations as provider feedback nor opts them into
+training. The public privacy policy names both processors and this boundary.
+
+The production database, artifact directory, and Gmail credential directory
+are Google-data-bearing storage and must reside on encrypted-at-rest block
+storage before the public policy's encryption statement is deployed. This
+requirement is separate from Milestone 15's still-unimplemented encrypted
+off-host backup and restore tranche.
+
 ## Production delivery controls
 
 Milestone 15 ([operational-hardening.md](plan/operational-hardening.md))

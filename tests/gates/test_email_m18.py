@@ -73,7 +73,7 @@ from agent_core.mcp.mapping import map_discovered_tools
 from agent_core.policy.engine import evaluate_deterministic
 from agent_core.policy.loader import DEFAULT_RULESET
 from agent_core.scheduling.worker import ScheduleWorker
-from gmail_mcp.bootstrap import bootstrap_credentials
+from gmail_mcp.bootstrap import BootstrapError, bootstrap_credentials
 from gmail_mcp.client import GmailClient, GmailCredential
 from gmail_mcp.constants import (
     GOOGLE_SCOPES,
@@ -417,6 +417,63 @@ def test_loopback_authorization_ignores_stray_requests_until_matching_code(
     assert gmail_main._authorize_via_loopback("read", authorization_url) == "accepted-code"
     assert len(servers) == 1
     assert servers[0].requests == 2
+
+
+def test_bootstrap_disclosure_requires_affirmative_consent_before_each_google_grant() -> None:
+    opened: list[tuple[str, str]] = []
+
+    def authorize(mode: str, url: str) -> str:
+        opened.append((mode, url))
+        return "accepted-code"
+
+    declined = io.StringIO()
+    with pytest.raises(BootstrapError, match="cancelled before consent"):
+        gmail_main._authorize_with_disclosure(
+            "read",
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            read_input=lambda _prompt: "no",
+            output=declined,
+            authorize=authorize,
+        )
+    assert opened == []
+
+    expected_data = {
+        "read": "message metadata, headers, labels, snippets, and plain-text bodies",
+        "write": "draft recipients and content, plus thread and label identifiers",
+        "send": "the recipient, subject, and plain-text body of the message you approve",
+    }
+    for mode in ("read", "write", "send"):
+        accepted = io.StringIO()
+        authorization_url = f"https://accounts.google.com/o/oauth2/v2/auth?mode={mode}"
+        assert (
+            gmail_main._authorize_with_disclosure(
+                mode,
+                authorization_url,
+                read_input=lambda prompt: "CONTINUE" if "Type CONTINUE" in prompt else "",
+                output=accepted,
+                authorize=authorize,
+            )
+            == "accepted-code"
+        )
+        disclosure = accepted.getvalue()
+        assert "Veetbot Gmail data-use disclosure" in disclosure
+        assert GOOGLE_SCOPES[mode] in disclosure
+        assert expected_data[mode] in disclosure
+        assert "OpenAI or Anthropic API" in disclosure
+        assert (
+            "not used for advertising, credit decisions, or general-purpose AI/ML training"
+            in disclosure
+        )
+        assert "does not permit an AI provider to use it for such training" in disclosure
+        assert "abuse monitoring for up to 30 days" in disclosure
+        assert "retained in Veetbot session history until you delete the session" in disclosure
+        assert "encrypted backups for no more than 35 days" in disclosure
+        assert "https://www.veetbot.com/privacy" in disclosure
+    assert opened == [
+        ("read", "https://accounts.google.com/o/oauth2/v2/auth?mode=read"),
+        ("write", "https://accounts.google.com/o/oauth2/v2/auth?mode=write"),
+        ("send", "https://accounts.google.com/o/oauth2/v2/auth?mode=send"),
+    ]
 
 
 def _discovery(mode: str) -> MCPDiscovery:
