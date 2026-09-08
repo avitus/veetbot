@@ -51,6 +51,7 @@ from agent_core.memory.equivalence import (
     distinguishing_words,
     names_in_order,
     negated,
+    proper_names,
     statement_supports_clause,
     statements_compatible,
     statements_equivalent,
@@ -896,9 +897,22 @@ def _with_distinct_key(
         return candidate
     words = distinguishing_words(candidate.statement, [existing.statement for existing in same_key])
     if not words:
-        return candidate
-    subject = f"{candidate.subject} {' '.join(words)}"[:MEMORY_SUBJECT_MAX_LENGTH].strip()
-    return candidate.model_copy(update={"subject": subject})
+        # The same words in a different relationship ("lent Alice Bob's
+        # book" beside "lent Bob Alice's book"): the names in this
+        # statement's order tell the two apart.
+        words = proper_names(candidate.statement)
+    taken = {
+        existing.subject.casefold()
+        for existing in combined
+        if existing.claim_kind is candidate.claim_kind
+    }
+    subject = f"{candidate.subject} {' '.join(words)}".strip()
+    if not words or subject.casefold() in taken:
+        ordinal = 2
+        while f"{subject} #{ordinal}".casefold() in taken:
+            ordinal += 1
+        subject = f"{subject} #{ordinal}"
+    return candidate.model_copy(update={"subject": subject[:MEMORY_SUBJECT_MAX_LENGTH].strip()})
 
 
 def _candidates_semantically_duplicate(

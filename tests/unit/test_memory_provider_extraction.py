@@ -3316,3 +3316,45 @@ async def test_operator_evidence_with_an_invented_corpus_digest_does_not_activat
         selections = await uow.process_events.list("memory.provider_extraction.selection")
     assert selections[0].payload["outcome"] == "activated"
     assert selections[0].payload["evidence_corpus_sha256"] == _DISTILLATION_CORPUS_SHA256
+
+
+async def test_operator_evidence_must_be_built_from_the_running_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An operator-supplied artifact activates only when built from the deployed commit.
+
+    The bundle test checks bundled artifacts by ancestry, but an operator file
+    never passes through it, so the runtime holds it to the one commit it can
+    name: the running release. A forged forty-character sha therefore
+    activates nothing.
+    """
+
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(config_module, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", release_root)
+    deployed = "9edd2630000000000000000000000000000abcde"
+    forged = tmp_path / "operator-forged.json"
+    forged.write_text(_distillation_evidence().model_dump_json(), encoding="utf-8")
+    genuine = tmp_path / "operator-genuine.json"
+    genuine.write_text(
+        _distillation_evidence().model_copy(update={"build_ref": deployed}).model_dump_json(),
+        encoding="utf-8",
+    )
+    base = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        release_id="20260906-182456-9edd263",
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    async def outcome(path: Path) -> dict[str, object]:
+        settings = replace(base, memory_provider_extraction_evidence=path)
+        async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+            selections = await uow.process_events.list("memory.provider_extraction.selection")
+        assert len(selections) == 1
+        return dict(selections[0].payload)
+
+    assert (await outcome(forged))["outcome"] != "activated"
+    activated = await outcome(genuine)
+    assert activated["outcome"] == "activated"
+    assert activated["evidence_build_ref"] == deployed

@@ -118,9 +118,14 @@ evaluated tree was committed as and must be an ancestor of the tree that
 bundles it. A release is a checkout, so startup also computes the digest of
 the corpus the running tree ships and activates no artifact, bundled or
 operator-supplied, whose digest differs; a tree without its corpora activates
-no provider policy and logs why. A running process cannot compare the build
-reference against itself, because the artifact is necessarily bundled in a
-later commit than the one it evaluated. A change to the scorer withdraws
+no provider policy and logs why. A bundled artifact's build reference is
+verified by ancestry at bundle time, because a running process cannot compare
+that reference against itself: the artifact is necessarily bundled in a later
+commit than the one it evaluated. An operator-supplied artifact never passes
+the bundle test, so the runtime holds it to the one commit it can name and
+activates it only when its build reference is the running release's commit;
+outside production, where no release identity exists, the file is accepted
+and the gap is logged. A change to the scorer withdraws
 every artifact published under
 the previous scorer; the `formation@9` artifact of 2026-09-03 was withdrawn on
 2026-09-04 for that reason (ADR-0087), and `auto` selects `formation@10` for
@@ -310,10 +315,12 @@ deterministic fallback recognizes the same forms itself and keys them the way
 the matching assertion would, and local validation rejects an assertion that
 cites a correction clause, a retraction that cites none, and a retraction
 whose statement is still affirmative. At commit, a retraction supersedes
-every live affirmative belief about the user whose statement contains what it
-negates, under whatever key that belief was filed, bounded to four; when
-nothing live matches, it is counted as `skipped_unmatched_retraction` and
-forms nothing. A correction can therefore update memory but never create it.
+every live affirmative belief about the user that has the same main verb and
+whose lemmatized content contains what it negates, under whatever key that
+belief was filed, bounded to four: "no longer runs outdoors" ends "is running
+outdoors every day" and "goes running outdoors most mornings" but not "tracks
+runs outdoors in a journal". When nothing live matches, it is counted as
+`skipped_unmatched_retraction` and forms nothing. A correction can therefore update memory but never create it.
 
 ## Capacity and ranking
 
@@ -489,13 +496,15 @@ removed absence conditions, different counts or distances, reversed
 comparisons or origins, swapped arguments, and sibling activities never
 match. Negation is scoped to the clause: a negation inside a subordinate
 circumstance qualifies a claim rather than denying it, and a fronted
-circumstance ends at its comma so it cannot hide the main clause's negation.
+circumstance ends at its comma, or without one where the main clause's
+subject begins, so it cannot hide the main clause's negation.
 The same compatibility floor and term order decide whether a live memory
 represents a clause. Two candidates in one batch merge only when they are one
 claim: compatible, with shared names in one order, and either nesting or
 sharing most of the smaller statement's content; a second claim under the
 same subject and kind is filed under a key extended with its distinguishing
-words rather than dropped. The frozen `formation@7` and `formation@8` controls
+words, or with its names in order when the two claims share every word, or
+with an ordinal when nothing else separates them, rather than dropped. The frozen `formation@7` and `formation@8` controls
 cannot express the closed fields, so they are scored on statement equivalence
 alone and the lift threshold compares `formation@9` strict recall against that
 lenient control recall. The scorer version is recorded in every result and

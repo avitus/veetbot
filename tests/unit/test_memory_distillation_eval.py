@@ -174,6 +174,10 @@ def test_distillation_scorer_rejects_a_generic_user_subject() -> None:
             "User takes important client meetings remotely on Fridays.",
             "Although busy, User does not take important client meetings remotely on Fridays.",
         ),
+        (
+            "User takes important client meetings remotely on Fridays.",
+            "Although busy User does not take important client meetings remotely on Fridays.",
+        ),
     ],
 )
 def test_scorer_never_equates_supersets_negations_counts_or_siblings(
@@ -564,6 +568,10 @@ def test_live_evaluation_refuses_a_dirty_or_mismatched_tree(
             "When travelling, I cannot take meetings on Fridays",
         ),
         ("User hired Alice and fired Bob.", "I fired Alice and hired Bob"),
+        (
+            "User takes important client meetings remotely on Fridays.",
+            "Although busy I do not take important client meetings remotely on Fridays",
+        ),
     ],
 )
 def test_clause_support_rejects_polarity_count_and_direction_changes(
@@ -716,6 +724,13 @@ def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
         ("User bikes on some days when not doing the 5x5 strength routine.", False),
         ("User swims when it is not raining.", False),
         ("User runs without music.", False),
+        # A fronted subordinate clause with no comma still ends where the main
+        # clause's subject begins.
+        ("Although busy I do not take important client meetings remotely on Fridays.", True),
+        ("When travelling I cannot take meetings on Fridays", True),
+        ("When I am not lifting I run", False),
+        ("If it is not raining user runs outdoors", False),
+        ("User bikes on days when I am not lifting", False),
     ],
 )
 def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -> None:
