@@ -426,7 +426,7 @@ result.
 | Identity and purpose | `https://www.veetbot.com/`, the `Veetbot` name, and the Gmail capability description | “Veetbot is an AI agent that reads Gmail at the user's request and requires explicit approval before it changes a mailbox or sends mail.” |
 | Start the grant | A terminal running `python -m gmail_mcp bootstrap`, followed by Veetbot's data-use disclosure and the operator typing `CONTINUE`; keep the client file and output location obscured | “Before Google opens, Veetbot names the exact scope, data accessed, AI-provider transfer, retention and deletion behavior, and requires a separate affirmative action.” |
 | Read consent | The complete Google consent flow for `gmail.readonly`, including `Veetbot`, account selection, every permission panel expanded, and the English language selector | “This separate least-privilege grant lets Veetbot search messages, retrieve message bodies, and list labels.” |
-| Modify consent | The complete Google consent flow for `gmail.modify`, with the same identity and all permission text expanded | “This separate grant lets Veetbot create drafts and make reversible mailbox changes, each only after approval.” |
+| Modify consent | The complete Google consent flow for `gmail.modify`, with the same identity and all permission text expanded | “Google's `gmail.modify` grant permits reading, composing, and sending messages. Veetbot restricts this separate write integration to drafts and reversible mailbox changes after approval; sending uses the separate `gmail.send` integration and approval path.” |
 | Send consent | The complete Google consent flow for `gmail.send`, with the same identity and all permission text expanded | “This separate grant lets Veetbot send the exact message the user approves.” |
 | Grant result | The terminal's three success lines naming `gmail.readonly`, `gmail.modify`, and `gmail.send`; do not show credential contents | “Bootstrap stored three separate owner-only credentials. Each credential contains exactly one of the requested scopes.” |
 | Read functionality | A new Veetbot conversation asks to find and summarize `VEETBOT-OAUTH-DEMO-<date>`; tool activity identifies `mcp.gmail_read.*`, the matching message is returned, and no approval appears | “Veetbot is now using `gmail.readonly`; this network read does not change the mailbox.” |
@@ -438,11 +438,12 @@ Do not cover the `Veetbot` identity, Google permission text, tool name, approval
 arguments, or resulting Gmail state with a crop or blur. Blur only unrelated
 personal data. The demo mailbox and recipient should contain no private mail so
 their test addresses and the complete harmless message can remain visible.
-The real Google address bar must remain visible long enough to show the submitted
-OAuth client id during the grant. An OAuth client id is public application
-identity, not a credential. Never reveal the OAuth **client secret**, an
-authorization code, refresh token, access token, credential JSON, browser
-developer tools, or shell history.
+Show the submitted OAuth client id only while the Google-hosted consent page is
+visible. An OAuth client id is public application identity, not a credential.
+Before the browser redirects to the local loopback callback, mask the browser
+frame and keep it masked until the callback URL is gone. Never reveal the OAuth
+**client secret**, authorization code, refresh token, access token, credential
+JSON, browser developer tools, or shell history.
 
 Add voice narration or large on-screen captions with the exact scope URI at the
 start of each consent and functionality pair. Do not accelerate the consent

@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/privacy" },
 };
 
+/** Render the public policy governing Veetbot's website and Gmail integration. */
 export default function PrivacyPolicy() {
   return (
     <main>
@@ -78,8 +79,12 @@ export default function PrivacyPolicy() {
                 <div>
                   <dt><code>gmail.modify</code></dt>
                   <dd>
-                    Create drafts; add or remove labels; archive or mark threads
-                    read; and move threads to or from Gmail trash.
+                    Google&apos;s grant permits Veetbot to read, compose, and send
+                    all Gmail messages. Veetbot restricts the separate write
+                    integration to creating drafts; adding or removing labels;
+                    archiving or marking threads read; and moving threads to or
+                    from Gmail trash. Sending uses the separate{" "}
+                    <code>gmail.send</code> integration and approval path.
                   </dd>
                 </div>
                 <div>
@@ -147,7 +152,7 @@ export default function PrivacyPolicy() {
                 " "
                 }and the{
                 " "
-                }<a href="https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">
+                }<a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">
                   Anthropic API retention policy
                 </a>.
               </p>

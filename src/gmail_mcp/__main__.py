@@ -25,7 +25,10 @@ from gmail_mcp.server import create_server
 _PRIVACY_POLICY_URL = "https://www.veetbot.com/privacy"
 _DATA_BY_MODE = {
     "read": "message metadata, headers, labels, snippets, and plain-text bodies",
-    "write": "draft recipients and content, plus thread and label identifiers",
+    "write": (
+        "Gmail messages for reading, composing, and sending, including message bodies, "
+        "draft recipients and content, and thread and label identifiers"
+    ),
     "send": "the recipient, subject, and plain-text body of the message you approve",
 }
 
@@ -106,6 +109,8 @@ def _authorize_with_disclosure(
     output: TextIO | None = None,
     authorize: Callable[[str, str], str] | None = None,
 ) -> str:
+    """Present the scope-specific data-use notice before opening Google OAuth."""
+
     reader = input if read_input is None else read_input
     stream = sys.stdout if output is None else output
     open_authorization = _authorize_via_loopback if authorize is None else authorize
@@ -168,6 +173,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run a Gmail MCP server or the interactive credential bootstrap."""
+
     arguments = _parser().parse_args(argv)
     if arguments.command == "bootstrap":
         if arguments.mode is not None:

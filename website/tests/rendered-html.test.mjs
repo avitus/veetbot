@@ -25,12 +25,14 @@ test("homepage identifies Veetbot and links its public policies", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
+/** Verify the built policy contains every reviewer-facing Gmail disclosure. */
 test("privacy page discloses Gmail access, processing, retention, and control", async () => {
   const html = await htmlFor("/privacy");
 
   assert.match(html, /<title>Privacy Policy \| Veetbot<\/title>/i);
   assert.match(html, /gmail\.readonly/i);
   assert.match(html, /gmail\.modify/i);
+  assert.match(html, /read, compose, and send all Gmail messages/i);
   assert.match(html, /gmail\.send/i);
   assert.match(html, /AI model provider/i);
   assert.match(html, /OpenAI and Anthropic/i);

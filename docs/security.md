@@ -169,9 +169,14 @@ cross-user aggregate or anonymized Gmail dataset.
 The hosted OpenAI Responses adapter sends `store: false`. OpenAI and Anthropic
 state that commercial API inputs and outputs are not used for general-purpose
 model training by default unless the customer explicitly opts in. Their
-standard abuse-monitoring retention may be up to thirty days; Veetbot neither
-submits Gmail-derived conversations as provider feedback nor opts them into
-training. The public privacy policy names both processors and this boundary.
+standard abuse-monitoring retention may be up to thirty days, subject to
+limited safety or legal exceptions; see the [OpenAI API data
+controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint)
+and [Anthropic API retention
+policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
+Veetbot neither submits Gmail-derived conversations as provider feedback nor
+opts them into training. The public privacy policy names both processors and
+this boundary.
 
 The production database, artifact directory, and Gmail credential directory
 are Google-data-bearing storage and must reside on encrypted-at-rest block
