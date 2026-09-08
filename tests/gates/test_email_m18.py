@@ -64,6 +64,7 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.runs import Run, RunKind, RunLimits, RunStatus
 from agent_core.domain.schedules import OnceCadence, ScheduleDefinition
+from agent_core.domain.tools import ToolInvocationStatus
 from agent_core.mcp.configuration import (
     build_stdio_environment,
     email_server_configs,
@@ -73,7 +74,7 @@ from agent_core.mcp.mapping import map_discovered_tools
 from agent_core.policy.engine import evaluate_deterministic
 from agent_core.policy.loader import DEFAULT_RULESET
 from agent_core.scheduling.worker import ScheduleWorker
-from gmail_mcp.bootstrap import bootstrap_credentials
+from gmail_mcp.bootstrap import BootstrapError, bootstrap_credentials
 from gmail_mcp.client import GmailClient, GmailCredential
 from gmail_mcp.constants import (
     GOOGLE_SCOPES,
@@ -417,6 +418,68 @@ def test_loopback_authorization_ignores_stray_requests_until_matching_code(
     assert gmail_main._authorize_via_loopback("read", authorization_url) == "accepted-code"
     assert len(servers) == 1
     assert servers[0].requests == 2
+
+
+def test_bootstrap_disclosure_requires_affirmative_consent_before_each_google_grant() -> None:
+    """Each Gmail grant requires its complete disclosure and an exact CONTINUE."""
+
+    opened: list[tuple[str, str]] = []
+
+    def authorize(mode: str, url: str) -> str:
+        opened.append((mode, url))
+        return "accepted-code"
+
+    declined = io.StringIO()
+    with pytest.raises(BootstrapError, match="cancelled before consent"):
+        gmail_main._authorize_with_disclosure(
+            "read",
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            read_input=lambda _prompt: "no",
+            output=declined,
+            authorize=authorize,
+        )
+    assert opened == []
+
+    expected_data = {
+        "read": "message metadata, headers, labels, snippets, and plain-text bodies",
+        "write": (
+            "Gmail messages for reading, composing, and sending, including message bodies, "
+            "draft recipients and content, and thread and label identifiers"
+        ),
+        "send": "the recipient, subject, and plain-text body of the message you approve",
+    }
+    for mode in ("read", "write", "send"):
+        accepted = io.StringIO()
+        authorization_url = f"https://accounts.google.com/o/oauth2/v2/auth?mode={mode}"
+        assert (
+            gmail_main._authorize_with_disclosure(
+                mode,
+                authorization_url,
+                read_input=lambda prompt: "CONTINUE" if "Type CONTINUE" in prompt else "",
+                output=accepted,
+                authorize=authorize,
+            )
+            == "accepted-code"
+        )
+        disclosure = accepted.getvalue()
+        assert "Veetbot Gmail data-use disclosure" in disclosure
+        assert GOOGLE_SCOPES[mode] in disclosure
+        assert expected_data[mode] in disclosure
+        assert "OpenAI or Anthropic API" in disclosure
+        assert (
+            "not used for advertising, credit decisions, or general-purpose AI/ML training"
+            in disclosure
+        )
+        assert "does not permit an AI provider to use it for such training" in disclosure
+        assert "abuse monitoring for up to 30 days" in disclosure
+        assert "retained in Veetbot session history until you delete the session" in disclosure
+        assert "encrypted backups for no more than 35 days" in disclosure
+        assert "https://www.veetbot.com/privacy" in disclosure
+    assert opened == [
+        ("read", "https://accounts.google.com/o/oauth2/v2/auth?mode=read"),
+        ("write", "https://accounts.google.com/o/oauth2/v2/auth?mode=write"),
+        ("send", "https://accounts.google.com/o/oauth2/v2/auth?mode=send"),
+    ]
 
 
 def _discovery(mode: str) -> MCPDiscovery:
@@ -976,6 +1039,79 @@ def test_untrusted_mail_can_never_plain_allow_a_send() -> None:
         permissive,
     )
     assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+
+async def test_gmail_result_stays_untrusted_and_cannot_authorize_a_mutation() -> None:
+    """A persisted Gmail result taints later mailbox writes and sends."""
+
+    scripts = {
+        "gmail_read": ScriptedMCPServer(
+            name="gmail_read",
+            discovery=_discovery("read"),
+            responses=(
+                ScriptedMCPResponse(
+                    name="list_labels",
+                    result=MCPCallResult(content=('{"labels":[]}',), structured={"labels": []}),
+                ),
+            ),
+        ),
+        "gmail_write": ScriptedMCPServer(name="gmail_write", discovery=_discovery("write")),
+        "gmail_send": ScriptedMCPServer(name="gmail_send", discovery=_discovery("send")),
+    }
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[ScriptedToolCall(name="mcp.gmail_read.list_labels", arguments={})],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="The labels were read.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+
+    async with build(
+        settings=_email_settings(),
+        script=script,
+        sequential_ids=True,
+        mcp_client_factory=ScriptedMCPClientFactory(scripts),
+    ) as composition:
+        run_id = await composition.runs.submit("List my Gmail labels.")
+        terminal = await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            [invocation] = await uow.invocations.list_for_run(run_id, composition.principal)
+
+    assert terminal.status is RunStatus.COMPLETED
+    assert invocation.status is ToolInvocationStatus.SUCCEEDED
+    assert invocation.result_item is not None
+    assert invocation.result_item.trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+    ruleset = _ruleset()
+    permissive = ruleset.model_copy(
+        update={
+            "rules": tuple(
+                rule.model_copy(update={"decision": PolicyDecisionType.ALLOW})
+                if rule.side_effect
+                in {SideEffectClass.EXTERNAL_WRITE, SideEffectClass.EXTERNAL_MESSAGE}
+                else rule
+                for rule in ruleset.rules
+            )
+        }
+    )
+    for server_id, side_effect in (
+        ("gmail_write", SideEffectClass.EXTERNAL_WRITE),
+        ("gmail_send", SideEffectClass.EXTERNAL_MESSAGE),
+    ):
+        decision = evaluate_deterministic(
+            _action(
+                server_id=server_id,
+                side_effect=side_effect,
+                idempotency=IdempotencyClass.NON_IDEMPOTENT,
+                origin=invocation.result_item.trust,
+            ),
+            _principal(),
+            _run(),
+            permissive,
+        )
+        assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
 def test_named_account_policy_profile_cannot_autoapprove_mutations() -> None:

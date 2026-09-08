@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/privacy" },
 };
 
+/** Render the public policy governing Veetbot's website and Gmail integration. */
 export default function PrivacyPolicy() {
   return (
     <main>
@@ -21,7 +22,7 @@ export default function PrivacyPolicy() {
             This policy explains how Veetbot handles information on its public
             website and in its optional Gmail integration.
           </p>
-          <p className="effective-date">Effective September 2, 2026</p>
+          <p className="effective-date">Effective September 7, 2026</p>
         </header>
 
         <div className="legal-layout">
@@ -78,8 +79,12 @@ export default function PrivacyPolicy() {
                 <div>
                   <dt><code>gmail.modify</code></dt>
                   <dd>
-                    Create drafts; add or remove labels; archive or mark threads
-                    read; and move threads to or from Gmail trash.
+                    Google&apos;s grant permits Veetbot to read, compose, and send
+                    all Gmail messages. Veetbot restricts the separate write
+                    integration to creating drafts; adding or removing labels;
+                    archiving or marking threads read; and moving threads to or
+                    from Gmail trash. Sending uses the separate{" "}
+                    <code>gmail.send</code> integration and approval path.
                   </dd>
                 </div>
                 <div>
@@ -94,6 +99,12 @@ export default function PrivacyPolicy() {
                 Veetbot does not use these permissions to permanently delete
                 Gmail messages, download attachments, access calendars, or
                 connect additional mailboxes without a new authorization.
+              </p>
+              <p>
+                Generated summaries, classifications, drafts, approval records,
+                and other derived output are treated as Google user data under
+                this policy. Veetbot does not create cross-user aggregate or
+                anonymized Gmail datasets.
               </p>
             </section>
 
@@ -110,7 +121,8 @@ export default function PrivacyPolicy() {
               <p>
                 Veetbot does not sell Google user data, use it for advertising,
                 use it to determine creditworthiness, or use it to train a
-                general-purpose AI model.
+                general-purpose AI model. It is not an email-warming, cold email,
+                unsolicited bulk-send, or recipient-profiling service.
               </p>
             </section>
 
@@ -121,16 +133,37 @@ export default function PrivacyPolicy() {
                 may be sent to the AI model provider configured by the Veetbot
                 operator. This processing is limited to producing the requested
                 user-facing result, such as a summary, classification, draft,
-                or proposed action. The selected provider processes that data
-                under its own terms and privacy policy. Connect Gmail only if
-                you accept that processing arrangement.
+                or proposed action. The hosted deployment uses the OpenAI and
+                Anthropic APIs, depending on the selected model. Veetbot does
+                not permit either provider, or any replacement provider, to use
+                transferred Google user data to train or improve a
+                general-purpose AI or machine-learning model. A self-hosted
+                local model keeps that processing on the operator&apos;s host.
+              </p>
+              <p>
+                Under their standard API data controls, each hosted provider
+                may retain request and response content for abuse monitoring
+                for up to 30 days, subject to limited safety or legal
+                exceptions. See the{
+                " "
+                }<a href="https://platform.openai.com/docs/models/default-usage-policies-by-endpoint">
+                  OpenAI API data controls
+                </a>{
+                " "
+                }and the{
+                " "
+                }<a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">
+                  Anthropic API retention policy
+                </a>.
               </p>
               <p>
                 Veetbot may otherwise disclose data only to service providers
                 needed to operate the requested feature, to investigate a
                 security incident, when you explicitly direct or consent to the
                 disclosure, or when required by law. Human access is limited to
-                those purposes and to support you explicitly request.
+                those purposes and to support you explicitly request. Veetbot
+                does not transfer Google user data to advertisers, data brokers,
+                information resellers, or lending and eligibility services.
               </p>
             </section>
 
@@ -138,19 +171,22 @@ export default function PrivacyPolicy() {
               <h2>6. Storage and retention</h2>
               <p>
                 OAuth client secrets and refresh tokens are stored in private
-                operator-controlled credential files. Tokens and raw Google
-                error responses are excluded from Veetbot tool results, events,
-                and logs.
+                operator-controlled credential files. Production storage that
+                contains Google user data is encrypted at rest. Tokens and raw
+                Google error responses are excluded from Veetbot tool results,
+                events, and logs.
               </p>
               <p>
                 Gmail content selected for a task, tool inputs and outputs,
                 generated summaries and drafts, approval records, and related
                 artifacts may be retained in Veetbot&apos;s session and run
-                history. This supports inspection, continuation, recovery, and
-                auditing. Retention is controlled by the deployment operator;
-                protected backups may persist until their normal rotation.
-                Deleting mail in Gmail does not automatically delete a copy
-                already retained in a Veetbot record.
+                history until you delete the session or ask the deployment
+                operator to delete it. This supports inspection, continuation,
+                recovery, and auditing. Deletion removes the corresponding live
+                records and artifacts; encrypted backup copies may remain for
+                no more than 35 days before automatic expiration. Deleting mail
+                in Gmail does not automatically delete a copy already retained
+                in a Veetbot record.
               </p>
             </section>
 
@@ -185,6 +221,12 @@ export default function PrivacyPolicy() {
                 bounded outputs, and secret-redaction controls. No system is
                 perfectly secure, and operators remain responsible for securing
                 their hosts, provider accounts, and backups.
+              </p>
+              <p>
+                Gmail content is treated as untrusted external input. It cannot
+                authorize an action, grant itself additional access, or bypass
+                policy. Mailbox changes and sends require a separate explicit
+                human approval after Veetbot displays the proposed action.
               </p>
             </section>
 

@@ -136,8 +136,16 @@ python -m gmail_mcp bootstrap
 ```
 
 runs the installed-app loopback consent flow once per server — three consents,
-each requesting exactly that server's Google scope — and writes three
-owner-only (0600) credential files. The files enter the broker through
+each requesting exactly that server's Google scope. Immediately before opening
+each Google authorization URL, the command presents a prominent data-use
+disclosure naming the scope and data accessed, the requested Gmail feature,
+the hosted OpenAI/Anthropic transfer and provider-retention boundary, the
+no-sale, no-advertising, no-credit, and no-training restrictions, the session
+and backup retention periods, and the revocation, disablement, and deletion
+controls. It links the public privacy policy and opens Google only after the
+operator types the exact affirmative action `CONTINUE`; any other input cancels
+before the browser opens. After consent, the command writes three owner-only
+(0600) credential files. The files enter the broker through
 file-backed settings references, the shape the browser-automation profile
 credential already uses. The ceremony prints file paths and granted scopes,
 never token material. The owner's Google OAuth client runs in production
@@ -470,9 +478,12 @@ the mailbox. The platform does not guess, and it does not send again.
 10. **Scope confinement.** Each server requires exactly its own
     `mcp.{server_id}.use` scope, and a configuration declaring a platform
     scope for a `gmail_*` server is rejected. **M18.**
-11. **Bootstrap consent.** The ceremony writes owner-only credential files
-    that round-trip through the settings loader, requests exactly the
-    per-server Google scopes, and never prints token material. **M18.**
+11. **Bootstrap consent.** Immediately before each Google grant the ceremony
+    presents the scope-specific data-use disclosure and requires the exact
+    affirmative action `CONTINUE`; declining opens no authorization URL. It
+    then writes owner-only credential files that round-trip through the
+    settings loader, requests exactly the per-server Google scopes, and never
+    prints token material. **M18.**
 12. **Failure taxonomy.** Connect-time auth failure is terminal, the
     mid-session ladder is bounded, rate limits and server errors are stable
     and retryable for the read server, but every post-dispatch failure for a

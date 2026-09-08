@@ -25,14 +25,27 @@ test("homepage identifies Veetbot and links its public policies", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
+/** Verify the built policy contains every reviewer-facing Gmail disclosure. */
 test("privacy page discloses Gmail access, processing, retention, and control", async () => {
   const html = await htmlFor("/privacy");
 
   assert.match(html, /<title>Privacy Policy \| Veetbot<\/title>/i);
   assert.match(html, /gmail\.readonly/i);
   assert.match(html, /gmail\.modify/i);
+  assert.match(html, /read, compose, and send all Gmail messages/i);
   assert.match(html, /gmail\.send/i);
   assert.match(html, /AI model provider/i);
+  assert.match(html, /OpenAI and Anthropic/i);
+  assert.match(html, /does not permit.*train.*general-purpose AI/i);
+  assert.match(html, /provider.*up to 30 days/i);
+  assert.match(html, /does not create cross-user aggregate or anonymized Gmail datasets/i);
+  assert.match(html, /data brokers/i);
+  assert.match(html, /cold email/i);
+  assert.match(html, /Gmail content.*untrusted/i);
+  assert.match(html, /cannot authorize an action/i);
+  assert.match(html, /encrypted at rest/i);
+  assert.match(html, /until you delete the session/i);
+  assert.match(html, /no more than 35 days/i);
   assert.match(html, /Google API Services User Data Policy/i);
   assert.match(html, /Limited Use requirements/i);
   assert.match(html, /revoke/i);

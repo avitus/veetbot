@@ -400,6 +400,93 @@ Checkpoint:
 - [ ] Phone notification contained no mail content
 - [ ] Exactly one approved message was received
 
+## Google OAuth verification replacement video
+
+Google's [demo-video guidance](https://support.google.com/cloud/answer/13804565)
+requires a reviewer-facing end-to-end proof, not only a product tour. Record a
+replacement whenever Google reports that the consent flow or Gmail
+functionality is missing. The recording must use the same `Veetbot` OAuth
+application submitted for verification, show Google in English, and make every
+requested scope and its corresponding Veetbot action legible.
+
+Use a dedicated non-production demo mailbox and harmless demo recipient whose
+addresses can remain visible. Do not revoke the production mailbox's grant just
+to make the consent screen reappear: that invalidates its installed refresh
+tokens. Instead, run the bootstrap ceremony with the submitted OAuth client and
+a demo Google account that has not granted Veetbot access. If no such account is
+available, stop and plan a controlled credential replacement before revoking an
+installed grant.
+
+Record the following scenes in order. Prefer one continuous recording; if waits
+are removed, use visible cut markers and never cut between an action and its
+result.
+
+| Scene | Evidence that must remain visible | Suggested narration |
+| --- | --- | --- |
+| Identity and purpose | `https://www.veetbot.com/`, the `Veetbot` name, and the Gmail capability description | “Veetbot is an AI agent that reads Gmail at the user's request and requires explicit approval before it changes a mailbox or sends mail.” |
+| Start the grant | A terminal running `python -m gmail_mcp bootstrap`, followed by Veetbot's data-use disclosure and the operator typing `CONTINUE`; keep the client file and output location obscured | “Before Google opens, Veetbot names the exact scope, data accessed, AI-provider transfer, retention and deletion behavior, and requires a separate affirmative action.” |
+| Read consent | The complete Google consent flow for `gmail.readonly`, including `Veetbot`, account selection, every permission panel expanded, and the English language selector | “This separate least-privilege grant lets Veetbot search messages, retrieve message bodies, and list labels.” |
+| Modify consent | The complete Google consent flow for `gmail.modify`, with the same identity and all permission text expanded | “Google's `gmail.modify` grant permits reading, composing, and sending messages. Veetbot restricts this separate write integration to drafts and reversible mailbox changes after approval; sending uses the separate `gmail.send` integration and approval path.” |
+| Send consent | The complete Google consent flow for `gmail.send`, with the same identity and all permission text expanded | “This separate grant lets Veetbot send the exact message the user approves.” |
+| Grant result | The terminal's three success lines naming `gmail.readonly`, `gmail.modify`, and `gmail.send`; do not show credential contents | “Bootstrap stored three separate owner-only credentials. Each credential contains exactly one of the requested scopes.” |
+| Read functionality | A new Veetbot conversation asks to find and summarize `VEETBOT-OAUTH-DEMO-<date>`; tool activity identifies `mcp.gmail_read.*`, the matching message is returned, and no approval appears | “Veetbot is now using `gmail.readonly`; this network read does not change the mailbox.” |
+| Modify functionality | Veetbot is asked to create a draft reply; the `mcp.gmail_write.create_draft` approval shows the full demo recipient, subject, and body; one approval is given; Gmail then shows the draft and shows that it was not sent | “Veetbot is now using `gmail.modify`. The operation cannot run until I approve the complete proposed draft.” |
+| Send functionality | Veetbot is asked to send one message; the `mcp.gmail_send.send_message` approval shows the full demo recipient, subject, and body; one approval is given; Gmail Sent and the recipient inbox show exactly one message | “Veetbot is now using `gmail.send`. It sends only the exact content I approve.” |
+| Scope recap | A final card lists the three exact scope URIs beside the demonstrated read, draft, and send actions | “These are the only Google scopes requested, and the recording has shown the consent and app functionality for each one.” |
+
+Do not cover the `Veetbot` identity, Google permission text, tool name, approval
+arguments, or resulting Gmail state with a crop or blur. Blur only unrelated
+personal data. The demo mailbox and recipient should contain no private mail so
+their test addresses and the complete harmless message can remain visible.
+Show the submitted OAuth client id only while the Google-hosted consent page is
+visible. An OAuth client id is public application identity, not a credential.
+Before the browser redirects to the local loopback callback, mask the browser
+frame and keep it masked until the callback URL is gone. Never reveal the OAuth
+**client secret**, authorization code, refresh token, access token, credential
+JSON, browser developer tools, or shell history.
+
+Add voice narration or large on-screen captions with the exact scope URI at the
+start of each consent and functionality pair. Do not accelerate the consent
+screens so much that a reviewer cannot read them. Before submitting, watch the
+uploaded video from beginning to end in a signed-out private browser window and
+confirm that it is available without an access request, is set to **Unlisted**,
+preferably uses at least 1080p, and has legible consent and approval text.
+
+Reply directly to the open Google OAuth Verification email with the replacement
+link and real timestamps; do not open a second verification request:
+
+```text
+Hello Google OAuth Verification Team,
+
+We replaced the Veetbot demo video in response to your functionality findings:
+<unlisted YouTube URL>
+
+The video now shows the complete OAuth consent flow and the app functionality
+for every requested scope:
+- <timestamp>: complete gmail.readonly consent
+- <timestamp>: gmail.readonly search and message summary
+- <timestamp>: complete gmail.modify consent
+- <timestamp>: approval-gated draft creation using gmail.modify
+- <timestamp>: complete gmail.send consent
+- <timestamp>: approval-gated send using gmail.send and one-message receipt
+
+The consent UI is in English, uses the same Veetbot OAuth application submitted
+for verification, and all requested permissions are expanded and readable.
+
+Thank you.
+```
+
+Checkpoint:
+
+- [ ] Same submitted `Veetbot` OAuth application shown
+- [ ] Complete English consent flow shown for all three separate grants
+- [ ] Every requested permission is expanded and readable
+- [ ] Read, approved draft, and approved send are each tied to their scope
+- [ ] Gmail confirms the draft state and exactly one delivered message
+- [ ] No credential or private mailbox data appears
+- [ ] Unlisted upload plays while signed out and timestamps are accurate
+- [ ] Replacement link sent by replying to Google's open verification email
+
 ## Phase 5 — Scheduled triage smoke
 
 Do not create this schedule through the conversational `schedule.create` tool.
