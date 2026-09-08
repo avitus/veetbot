@@ -485,7 +485,7 @@ produce, from this table; a hypothesis declares none.
 
 | Claim shape | Primary kind | Compatible kinds |
 | --- | --- | --- |
-| stated experience or training history | skill | project_fact |
+| stated experience or training history | skill (habit when labelled as a routine) | project_fact (plus skill) |
 | stated occupation | skill | role, project_fact |
 | activity program with a schedule | habit | project_fact, ongoing_project |
 | routine or chore | habit | project_fact, recurring_state |
@@ -530,10 +530,13 @@ subject begins, so it cannot hide the main clause's negation.
 The same compatibility floor and term order decide whether a live memory
 represents a clause. Two candidates in one batch merge only when they are one
 claim: compatible, with shared names in one order, and either nesting or
-sharing most of the smaller statement's content; a second claim under the
-same subject and kind is filed under a key extended with its distinguishing
-words, or with its names in order when the two claims share every word, or
-with an ordinal when nothing else separates them, rather than dropped. The frozen `formation@7` and `formation@8` controls
+sharing most of the smaller statement's content; of two wordings of one
+claim the richer survives and a tie goes to the provider's over the
+fallback's, whose kind is a default and whose key is composed from source
+words; a second claim under the same subject and kind is filed under a key
+extended with its distinguishing words, or with its names in order when the
+two claims share every word, or with an ordinal when nothing else separates
+them, rather than dropped. The frozen `formation@7` and `formation@8` controls
 cannot express the closed fields, so they are scored on statement equivalence
 alone and the lift threshold compares `formation@9` strict recall against that
 lenient control recall. The scorer version is recorded in every result and

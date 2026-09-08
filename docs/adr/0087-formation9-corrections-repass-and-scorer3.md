@@ -165,7 +165,11 @@ three compatible kinds, assigned by claim shape from a table in the design
 document rather than from observed output, with a compatible belief held to
 the longevity local policy assigns its kind, and that claim-kind coverage
 counts the kind the provider formed. That is `distillation-scorer@5`. The gold
-statements themselves were not edited.
+statements themselves were not edited. The run under it showed one more
+defect: the provider's habit "has started sailing on weekends" tied on
+content with the fallback's copy, a default-kind project fact keyed "on
+weekends", and the combiner kept the fallback's; a tie now goes to the
+newcomer, which is always the provider's.
 
 ## Consequences
 

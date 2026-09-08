@@ -3259,6 +3259,62 @@ def test_state_claims_under_one_key_merge_while_activities_stay_apart() -> None:
     assert not _candidates_semantically_duplicate(interested, hates)
 
 
+async def test_provider_claim_outranks_a_fallback_copy_of_the_same_claim() -> None:
+    """When the provider and the fallback state one claim, the provider's wins.
+
+    The fallback passes a frozen-extractor candidate through with a default
+    kind and a key composed from the source words ("on weekends"); the
+    provider names the kind and composes the key. A live run kept the
+    fallback's copy because the two tied on content, and the memory was then
+    scored under the wrong kind.
+    """
+
+    extractor, provider, factory = await _distillation_extractor([])
+    source_id = await user_event(factory, "I have started sailing on weekends.")
+    provider._script.turns = [
+        ScriptedTurn(text=_scripted_episode([source_id], ["I have started sailing on weekends."])),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(
+            text=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "subject": "weekend sailing",
+                            "statement": "User has started sailing on weekends.",
+                            "source_event_ids": [source_id],
+                            "sensitivity_guess": "internal",
+                            "claim_kind": "habit",
+                            "derivation": "direct",
+                            "polarity": "assert",
+                            "evidence_spans": [
+                                {
+                                    "source_event_id": source_id,
+                                    "text": "started sailing on weekends",
+                                }
+                            ],
+                        }
+                    ],
+                    "coverage": [
+                        {
+                            "coverage_unit_id": f"{source_id}:1",
+                            "decision": "formed",
+                            "candidate_indexes": [0],
+                            "prediction_indexes": [],
+                        }
+                    ],
+                }
+            )
+        ),
+    ]
+
+    candidates = await extractor.extract(
+        await session_events(factory), principal=principal(), scope="general"
+    )
+
+    sailing = [candidate for candidate in candidates if "sailing" in candidate.statement]
+    assert [(c.claim_kind.value, c.subject) for c in sailing] == [("habit", "weekend sailing")]
+
+
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
     """A batch beyond one ledger's worth of clauses runs three calls per segment."""
 

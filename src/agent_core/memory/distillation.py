@@ -916,16 +916,20 @@ def _outranks(candidate: MemoryCandidate, existing: MemoryCandidate) -> bool:
 
     A direct statement outranks a guess; between equals, the richer statement
     wins so "has a son named Robert who lives in Berlin" is not flattened to
-    "has a son" by arriving second.
+    "has a son" by arriving second. A tie goes to the newcomer: the fallback's
+    candidates are combined first with a default kind and a key composed from
+    the source words, and the provider's copy of the same claim names its
+    kind and composes its key, so a tie must not leave the poorer copy in
+    place.
     """
 
     if existing.derivation is MemoryDerivation.HYPOTHESIS:
         return candidate.derivation is MemoryDerivation.DIRECT or _mapped_terms(
             candidate.statement
-        ) > _mapped_terms(existing.statement)
+        ) >= _mapped_terms(existing.statement)
     if candidate.derivation is MemoryDerivation.HYPOTHESIS:
         return False
-    return _mapped_terms(candidate.statement) > _mapped_terms(existing.statement)
+    return _mapped_terms(candidate.statement) >= _mapped_terms(existing.statement)
 
 
 def _with_distinct_key(
