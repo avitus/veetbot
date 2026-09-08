@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@3"]] = "distillation-scorer@3"
+DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@4"]] = "distillation-scorer@4"
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)*")
 _STOPWORDS = frozenset(
@@ -507,20 +507,38 @@ def ordered_terms(value: str) -> list[str]:
     return ordered
 
 
+def _longest_common_subsequence(left: list[str], right: list[str]) -> int:
+    lengths = [[0] * (len(right) + 1) for _ in range(len(left) + 1)]
+    for i, left_term in enumerate(left, start=1):
+        for j, right_term in enumerate(right, start=1):
+            lengths[i][j] = (
+                lengths[i - 1][j - 1] + 1
+                if left_term == right_term
+                else max(lengths[i - 1][j], lengths[i][j - 1])
+            )
+    return lengths[len(left)][len(right)]
+
+
 def shared_terms_in_order(left: str, right: str) -> bool:
-    """Whether the content terms both statements share appear in the same order.
+    """Whether the content terms both statements share keep their order.
 
     A bag of words cannot tell "hired Alice and fired Bob" from "hired Bob and
-    fired Alice"; the order of the terms they share can. Terms only one side
-    carries are ignored, so an elaboration is judged by the overlap rules.
+    fired Alice"; the order of the terms they share can. Shared proper names
+    must keep their exact order. Among the other shared terms one may move,
+    because "modify the routine to improve it" and "improve the routine" are
+    one claim, while a swap of two arguments ("the cat chased the dog") moves
+    two and never passes. Terms only one side carries are ignored, so an
+    elaboration is judged by the overlap rules.
     """
 
+    if not names_in_order(left, right):
+        return False
     left_ordered = ordered_terms(left)
     right_ordered = ordered_terms(right)
     shared = set(left_ordered) & set(right_ordered)
-    return [term for term in left_ordered if term in shared] == [
-        term for term in right_ordered if term in shared
-    ]
+    left_shared = [term for term in left_ordered if term in shared]
+    right_shared = [term for term in right_ordered if term in shared]
+    return _longest_common_subsequence(left_shared, right_shared) >= len(shared) - 1
 
 
 def names_in_order(left: str, right: str) -> bool:

@@ -140,7 +140,21 @@ with a regression test:
 4. An operator-supplied artifact was bound to the corpus but not to a build.
    Startup now activates an operator file only when its build reference is
    the running release's commit; outside production the gap is logged. The
-   frozen holdout corpus and the scorer@3 re-evaluation remain open items.
+   frozen holdout corpus and the re-evaluation remain open items.
+
+The first live re-evaluation on the fixed tree (2026-09-08) surfaced four
+more defects, each fixed with a regression test. A defaulted `polarity` made
+the candidate schema non-strict and the provider rejected every distillation
+call, so every stage schema is now checked for optional properties. The
+scorer's term-order rule rejected "modify the routine to improve it" against
+"improve the routine", so `distillation-scorer@4` holds proper names to their
+exact order and tolerates one displaced shared term, still rejecting a
+two-argument swap. The provider stored an "unspecified activity" and an hour
+of dishwashing, so a statement with no object or a completed one-off event is
+now rejected locally. And the combiner had turned "loves learning about
+exoplanets" into a duplicate keyed "exoplanets loves learning", so a claim
+whose kind is its subject (interest, preference, relationship, role,
+constraint) merges under its key unless the statements contradict.
 
 ## Consequences
 

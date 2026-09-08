@@ -170,6 +170,8 @@ def test_distillation_scorer_rejects_a_generic_user_subject() -> None:
             "User ran 200 miles in training for the marathon last month.",
         ),
         ("User hired Alice and fired Bob.", "User hired Bob and fired Alice."),
+        ("User lent Alice Bob's book.", "User lent Bob Alice's book."),
+        ("The cat chased the dog in the garden.", "The dog chased the cat in the garden."),
         (
             "User takes important client meetings remotely on Fridays.",
             "Although busy, User does not take important client meetings remotely on Fridays.",
@@ -205,6 +207,11 @@ def test_scorer_never_equates_supersets_negations_counts_or_siblings(
         ),
         ("User prefers tea over coffee.", "User prefers tea to coffee."),
         ("User does not drive to work.", "User doesn't drive to work."),
+        # One displaced shared term is a paraphrase, not a swapped argument.
+        (
+            "User wants to modify the standard 5x5 strength-training routine to improve it.",
+            "User wants to improve their standard 5x5 strength training routine.",
+        ),
     ],
 )
 def test_scorer_accepts_equivalent_wording(candidate: str, reference: str) -> None:
@@ -614,7 +621,7 @@ def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
 def test_scorer_version_advanced_with_its_semantics() -> None:
     """A changed scorer cannot keep the version an old artifact was published under."""
 
-    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@3"
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@4"
 
 
 def test_represented_text_requires_a_pool_and_exact_user_text() -> None:

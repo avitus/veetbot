@@ -624,7 +624,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Re-evaluate formation@9 under distillation-scorer@3 on the deploying tree and rebundle its artifact; formation@10 serves the tuple until then
+        Re-evaluate formation@9 under distillation-scorer@4 on the deploying tree and rebundle its artifact; formation@10 serves the tuple until then
       - >-
         Author a frozen holdout corpus, never edited after observing model output, and require it before a formation@9 artifact activates (ADR-0087)
       - >-
@@ -640,7 +640,7 @@ milestones:
           provider's new polarity field and the fallback's own recognition; a
           forty-kilobyte turn no longer crashes consolidation because the
           episode narrative bound covers any single API message; the scorer,
-          now distillation-scorer@3, compares polarity, counts, large numbers,
+          now distillation-scorer@4, compares polarity, counts, large numbers,
           and shared directional markers, so tea-over-coffee never equals
           coffee-over-tea and one hundred miles never equals two hundred;
           represented-clause verification applies the same floor, so a

@@ -488,7 +488,7 @@ populated production store. At least one positive multi-event case and the
 rich production conversation run against a pool of at least twenty-five
 beliefs.
 
-Scoring is `distillation-scorer@3`. A belief matches a gold claim when its
+Scoring is `distillation-scorer@4`. A belief matches a gold claim when its
 closed fields agree, its subject names the gold conflict key, and its statement
 is equivalent: equal after normalization, or sharing three quarters of the
 combined content terms with the same polarity, the same absence conditions,

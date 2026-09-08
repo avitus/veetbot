@@ -252,7 +252,7 @@ class DistillationEvaluationBelief(BaseModel):
 class DistillationCaseScore(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    scorer_version: Literal["distillation-scorer@3"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@4"] = DISTILLATION_SCORER_VERSION
     scoring: Literal["strict", "lenient"] = "strict"
     expected: int = Field(ge=0)
     matched: int = Field(ge=0)
@@ -320,7 +320,7 @@ class MemoryDistillationEvaluationResult(BaseModel):
 
     passed: bool
     failure_summary: str | None
-    scorer_version: Literal["distillation-scorer@3"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@4"] = DISTILLATION_SCORER_VERSION
     cases: list[DistillationCaseResult]
     policies: dict[PolicyVersion, DistillationPolicyMetrics]
     evidence: MemoryDistillationEvidence | None = None

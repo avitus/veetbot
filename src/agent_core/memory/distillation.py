@@ -541,6 +541,21 @@ def _higher_sensitivity(left: Sensitivity, right: Sensitivity) -> Sensitivity:
     return left if SENSITIVITY_ORDER[left] >= SENSITIVITY_ORDER[right] else right
 
 
+_VACUOUS_STATEMENT = re.compile(
+    r"\b(?:an?\s+)?(?:unspecified|unnamed|unknown|unstated|certain|various|some)\s+"
+    r"(?:activity|activities|thing|things|hobby|hobbies|task|tasks|pursuit|pursuits)\b"
+    r"|\bsomething\b|\ban activity\b",
+    re.IGNORECASE,
+)
+_TRANSIENT_EVENT = re.compile(
+    r"^User\s+(?:did|had|went|made|spent|took|ate|drank|watched|attended|visited|called"
+    r"|met|cleaned|washed|cooked|fixed|finished|bought)\b.*\b(?:for\s+(?:an?|\d+|one|two"
+    r"|three|four|five|several|a\s+few)\s+(?:hours?|minutes?|days?)|yesterday|today|tonight"
+    r"|this\s+(?:morning|afternoon|evening)|last\s+(?:night|week|weekend|month))\b",
+    re.IGNORECASE,
+)
+
+
 def _canonical_provider_statement(
     statement: str,
     derivation: MemoryDerivation,
@@ -560,6 +575,13 @@ def _canonical_provider_statement(
     compact = re.sub(r"^user(?=['\s])", "User", compact, flags=re.IGNORECASE)
     if _CANONICAL_USER_STATEMENT.match(compact) is None:
         raise ValueError("provider statement has no canonical user subject")
+    # A statement with no object ("an unspecified activity") or a completed
+    # one-off event ("did the dishes for an hour") says nothing recallable
+    # about the user; both are counted as rejections, never stored.
+    if _VACUOUS_STATEMENT.search(compact) is not None:
+        raise ValueError("provider statement has no recallable content")
+    if derivation is MemoryDerivation.DIRECT and _TRANSIENT_EVENT.match(compact) is not None:
+        raise ValueError("provider statement records a transient event")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None
     if derivation is MemoryDerivation.DIRECT and hedged:
         raise ValueError("direct statement uses hypothesis language")
@@ -850,13 +872,30 @@ def _mapped_terms(statement: str) -> set[str]:
     return {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(statement)}
 
 
-def _same_claim_under_one_key(left: str, right: str) -> bool:
-    """Whether two statements filed under one conflict key are one claim."""
+# A claim of these kinds is its subject: "interested in exoplanets" and "loves
+# learning about exoplanets" under the key "exoplanets" are one memory, and
+# only a contradiction separates them. An activity or fact under one key can
+# still be two claims ("runs marathons", "runs outdoors").
+_SUBJECT_IS_THE_CLAIM = frozenset(
+    {
+        MemoryClaimKind.CONSTRAINT,
+        MemoryClaimKind.INTEREST,
+        MemoryClaimKind.PREFERENCE,
+        MemoryClaimKind.RELATIONSHIP,
+        MemoryClaimKind.ROLE,
+    }
+)
+
+
+def _same_claim_under_one_key(left: str, right: str, claim_kind: MemoryClaimKind) -> bool:
+    """Whether two compatible statements filed under one conflict key are one claim."""
 
     left_terms = _mapped_terms(left)
     right_terms = _mapped_terms(right)
     if not left_terms or not right_terms or not names_in_order(left, right):
         return False
+    if claim_kind in _SUBJECT_IS_THE_CLAIM:
+        return True
     if left_terms <= right_terms or right_terms <= left_terms:
         return True
     return len(left_terms & right_terms) / min(len(left_terms), len(right_terms)) >= 0.6
@@ -953,7 +992,7 @@ def _candidates_semantically_duplicate(
         " ".join(right.subject.casefold().split()),
     )
     if left.claim_kind is right.claim_kind and normalized_left_subject == normalized_right_subject:
-        return _same_claim_under_one_key(left.statement, right.statement)
+        return _same_claim_under_one_key(left.statement, right.statement, left.claim_kind)
     generic_subjects = {"user", "the user"}
     if (
         left.claim_kind is right.claim_kind
@@ -1499,7 +1538,12 @@ class NemoriAssistedCandidateExtractor:
             "source_event_id must name a supplied user event and every candidate must include "
             "exact evidence_spans copied from those events. Use direct for stated evidence and "
             "hypothesis only for inference. Write short third-person canonical statements "
-            "beginning with User, User's, or The user's. Set proposed_scope to the supplied "
+            "beginning with User, User's, or The user's, stating the claim itself as what the "
+            "user does, has, wants, or prefers (User swims most days; User prefers metric "
+            "units; User has a daughter), never as a description of a routine, goal, "
+            "preference, or resource (not: the user's routine includes swimming; the user's "
+            "goal is to; the user's preference is to). Name every activity: a claim with no "
+            "object is not memory. Set proposed_scope to the supplied "
             "scope. When the user states that something previously true no longer holds "
             "(no longer, stopped, gave up, don't anymore), emit it with polarity retract, "
             "named by the subject of the belief it ends and worded as the negated claim; "

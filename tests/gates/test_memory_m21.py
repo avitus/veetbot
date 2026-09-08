@@ -2402,7 +2402,7 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version="policy@1",
-        scorer_version="distillation-scorer@3",
+        scorer_version="distillation-scorer@4",
         build_ref="0123456789abcdef0123456789abcdef01234567",
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=60,
@@ -3184,6 +3184,81 @@ def test_provider_response_schemas_have_no_optional_property() -> None:
             assert definition.get("additionalProperties") is False, definition.get("title")
 
 
+@pytest.mark.parametrize(
+    ("statement", "claim_kind", "reason"),
+    [
+        ("User has started doing an unspecified activity on weekends.", "habit", "vacuous"),
+        ("User does something on weekends.", "habit", "vacuous"),
+        ("User did the dishes for an hour.", "project_fact", "transient"),
+        ("User went to the dentist yesterday.", "project_fact", "transient"),
+    ],
+)
+def test_provider_candidates_with_no_durable_content_are_rejected(
+    statement: str, claim_kind: str, reason: str
+) -> None:
+    """A live run stored an "unspecified activity" and an hour of dishwashing.
+
+    Neither says anything recallable about the user: the first has no object,
+    the second is a completed one-off event. Local validation rejects both
+    and counts them, exactly as it rejects an ungrounded claim.
+    """
+
+    from agent_core.memory.distillation import _DistilledCandidate, _normalize_distilled_candidate
+
+    text = {
+        "vacuous": "Let me tell you what I have started doing on weekends.",
+        "transient": "I did the dishes for an hour and went to the dentist yesterday.",
+    }[reason]
+    event = _personal_agent_event().model_copy(update={"payload": {"content": text}})
+    span = text.split(".")[0]
+    candidate = _DistilledCandidate.model_validate(
+        {
+            "subject": "weekends" if reason == "vacuous" else "chores",
+            "statement": statement,
+            "source_event_ids": [7],
+            "sensitivity_guess": "internal",
+            "claim_kind": claim_kind,
+            "derivation": "direct",
+            "polarity": "assert",
+            "evidence_spans": [{"source_event_id": 7, "text": span}],
+        }
+    )
+    with pytest.raises(ValueError, match="recallable content|transient event"):
+        _normalize_distilled_candidate(candidate, by_sequence={7: event}, scope="general")
+
+
+def test_state_claims_under_one_key_merge_while_activities_stay_apart() -> None:
+    """An interest, preference, or relationship is its subject; a habit is not.
+
+    "Is interested in exoplanets" and "loves learning about exoplanets" are
+    one memory under the key "exoplanets", and a live run turned the second
+    into a duplicate with the key "exoplanets loves learning". "Runs
+    marathons" and "runs outdoors" under "running" remain two memories.
+    """
+
+    interested = _candidate(
+        subject="exoplanets",
+        statement="User is interested in exoplanets.",
+        claim_kind="interest",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "love learning about exoplanets"}],
+    )
+    loves = interested.model_copy(update={"statement": "User loves learning about exoplanets."})
+    marathons = _candidate(
+        subject="running",
+        statement="User runs marathons.",
+        claim_kind="habit",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "run"}],
+    )
+    outdoors = marathons.model_copy(update={"statement": "User runs outdoors."})
+    hates = interested.model_copy(update={"statement": "User is not interested in exoplanets."})
+
+    assert _candidates_semantically_duplicate(interested, loves)
+    assert not _candidates_semantically_duplicate(marathons, outdoors)
+    assert not _candidates_semantically_duplicate(interested, hates)
+
+
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
     """A batch beyond one ledger's worth of clauses runs three calls per segment."""
 
@@ -3732,7 +3807,7 @@ async def _select_with(
                 model="scripted",
                 policy_profile="default",
                 policy_version=_runtime_policy_version(),
-                scorer_version="distillation-scorer@3",
+                scorer_version="distillation-scorer@4",
                 build_ref="9" * 40,
                 corpus_sha256=_DISTILLATION_CORPUS_SHA256,
                 sample_count=61,
