@@ -60,7 +60,7 @@ from agent_core.evals.memory_distillation import (
     load_distillation_holdout,
 )
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
-from agent_core.memory.formation import DeterministicCandidateExtractor
+from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
     REPAIRED_PROVIDER_EXTRACTOR_VERSION,
@@ -694,6 +694,89 @@ async def test_provider_semantic_claims_render_canonical_memories(
         (candidate.belief_type.value, candidate.subject, candidate.statement)
         for candidate in candidates
     ] == [expected]
+
+
+async def test_repaired_provider_clamps_uncle_relationship_before_commit() -> None:
+    """An over-portable relationship proposal is narrowed, not discarded.
+
+    This is the exact candidate shape returned in production for the transfer
+    conversation. The provider owns neither the final prose nor the maximum
+    portability, so local rendering must correct both before consolidation.
+    """
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(
+        factory,
+        "My uncle wants to send me AUS$1000 from Perth. What is the best option?",
+    )
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "relationship",
+                    "subject": "uncle",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "My uncle wants to send me AUS$1000 from Perth.",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.99,
+                    "proposed_portability": "portable",
+                    "sensitivity_guess": "public",
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        },
+        separators=(",", ":"),
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(7_200, 7_300)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_repaired_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+        formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(7_300, 7_400)),
+        principal(),
+        extractor=extractor,
+        policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+
+    result = await service.run(
+        trigger="session_closed",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert result.run.candidates_proposed == 1
+    assert result.run.committed == 1
+    assert result.run.rejected == 0
+    assert result.run.decision_counts == {"committed_direct": 1}
+    assert len(result.beliefs) == 1
+    belief = result.beliefs[0]
+    assert belief.subject == "uncle"
+    assert belief.statement == "User has an uncle."
+    assert belief.portability is Portability.CONTEXTUAL
+    assert belief.sensitivity is Sensitivity.SENSITIVE
+    assert belief.source_event_ids == [source]
 
 
 async def test_provider_keeps_valid_grounded_claims_when_one_claim_cannot_render() -> None:
@@ -2561,6 +2644,48 @@ def test_provider_claim_sensitivity_is_clamped_to_the_claim_kind_floor(
     )
     candidate = _render_claim(claim, "project-a")
     assert candidate.sensitivity_guess.value == expected
+
+
+@pytest.mark.parametrize(
+    ("proposed", "expected"),
+    [
+        (Portability.PORTABLE, Portability.CONTEXTUAL),
+        (Portability.CONTEXTUAL, Portability.CONTEXTUAL),
+        (Portability.LOCAL, Portability.LOCAL),
+    ],
+)
+def test_provider_relationship_portability_is_clamped_without_widening(
+    proposed: Portability,
+    expected: Portability,
+) -> None:
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind.RELATIONSHIP,
+        subject="uncle",
+        value=None,
+        context=None,
+        quantity=1,
+        evidence_quote="My uncle",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[1],
+        model_confidence=0.99,
+        proposed_portability=proposed,
+        sensitivity_guess=Sensitivity.PUBLIC,
+        valid_from=None,
+        expires_hint=None,
+    )
+
+    from agent_core.memory.provider_extraction import _render_claim
+
+    candidate = _render_claim(claim, "general")
+
+    assert candidate.proposed_portability is expected
+
+
+def test_provider_instructions_explain_the_portability_ceiling() -> None:
+    instructions = ProviderAssistedCandidateExtractor._instructions()
+
+    assert "Relationships and project facts cannot be portable" in instructions
+    assert "You may choose a more restrictive portability" in instructions
 
 
 @pytest.mark.parametrize(

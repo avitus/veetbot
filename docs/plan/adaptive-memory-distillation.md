@@ -458,8 +458,9 @@ Every proposed claim ends in exactly one content-free reason category:
 committed_direct        committed_hypothesis      reinforced
 promoted                redundant_attributed     superseded
 conflicted              rejected_provenance      rejected_credential
-rejected_injection      rejected_correction      displaced_per_source
-displaced_global        provider_invalid
+rejected_injection      rejected_correction      rejected_portability
+rejected_validation     displaced_per_source     displaced_global
+provider_invalid
 ```
 
 `ConsolidationRun` stores the category counts plus episode count, provider call

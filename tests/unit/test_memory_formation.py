@@ -17,6 +17,7 @@ import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.domain.agents import Principal
 from agent_core.domain.context import Fact, WorkingState
 from agent_core.domain.errors import ConflictError, ToolValidationError
 from agent_core.domain.events import EventEnvelope, NewEvent
@@ -24,12 +25,15 @@ from agent_core.domain.memory import (
     BeliefType,
     DecayResult,
     MemoryAuthority,
+    MemoryCandidate,
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
+    Polarity,
     Portability,
     RecallResult,
     RejectionKind,
+    Sensitivity,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
@@ -48,6 +52,23 @@ from tests.contract.memory_fixtures import (
     user_event,
 )
 from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal, session
+
+
+class _SingleCandidateExtractor:
+    name = "single-candidate-extractor"
+
+    def __init__(self, candidate: MemoryCandidate) -> None:
+        self._candidate = candidate
+
+    async def extract(
+        self,
+        events: list[EventEnvelope],
+        *,
+        principal: Principal,
+        scope: str,
+    ) -> list[MemoryCandidate]:
+        del events, principal, scope
+        return [self._candidate]
 
 
 def _envelope(event_type: str, payload: dict[str, object], sequence: int = 1) -> EventEnvelope:
@@ -109,6 +130,72 @@ def test_portability_ceiling_travels_with_belief_type() -> None:
     assert portability_ceiling(BeliefType.PROCEDURE_POINTER) is Portability.PORTABLE
     assert portability_ceiling(BeliefType.FACT) is Portability.CONTEXTUAL
     assert portability_ceiling(BeliefType.RELATIONSHIP) is Portability.CONTEXTUAL
+
+
+async def test_automatic_over_portable_candidate_has_an_accurate_audit_reason() -> None:
+    clock, factory, baseline, _retriever = await formation_stack()
+    source = await user_event(factory, "My uncle lives in Perth.")
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP,
+        subject="uncle",
+        statement="User has an uncle.",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[source],
+        model_confidence=0.9,
+        proposed_scope="general",
+        proposed_portability=Portability.PORTABLE,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        baseline._ids,
+        principal(),
+        extractor=_SingleCandidateExtractor(candidate),
+    )
+
+    result = await service.run(
+        trigger="session_closed",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert result.beliefs == []
+    assert result.run.rejected == 1
+    assert result.run.decision_counts == {"rejected_portability": 1}
+
+
+async def test_automatic_candidate_validation_is_not_reported_as_provenance() -> None:
+    clock, factory, baseline, _retriever = await formation_stack()
+    source = await user_event(factory, "My uncle lives in Perth.")
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP,
+        subject="uncle",
+        statement="Brief.",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[source],
+        model_confidence=0.9,
+        proposed_scope="general",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        baseline._ids,
+        principal(),
+        extractor=_SingleCandidateExtractor(candidate),
+    )
+
+    result = await service.run(
+        trigger="session_closed",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert result.beliefs == []
+    assert result.run.rejected == 1
+    assert result.run.decision_counts == {"rejected_validation": 1}
 
 
 async def test_candidate_extracts_explicit_remember_requests() -> None:

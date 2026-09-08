@@ -2292,6 +2292,13 @@ def _portability_allowed(proposed: Portability, ceiling: Portability) -> bool:
     return order[proposed] <= order[ceiling]
 
 
+def clamp_portability(proposed: Portability, belief_type: BeliefType) -> Portability:
+    """Keep an extractor's stricter proposal, but never let it exceed policy."""
+
+    ceiling = portability_ceiling(belief_type)
+    return proposed if _portability_allowed(proposed, ceiling) else ceiling
+
+
 class GovernedMemoryService:
     """Formation service and management surface over the structured store."""
 
@@ -2979,6 +2986,13 @@ class GovernedMemoryService:
                         rejected += 1
                         decisions["rejected_provenance"] += 1
                         continue
+                    if not _portability_allowed(
+                        candidate.proposed_portability,
+                        portability_ceiling(candidate.belief_type),
+                    ):
+                        rejected += 1
+                        decisions["rejected_portability"] += 1
+                        continue
                     source_text = "\n".join(
                         _event_text(by_sequence[sequence])
                         for sequence in candidate.source_event_ids
@@ -3064,7 +3078,7 @@ class GovernedMemoryService:
                         except ToolValidationError:
                             if counted:
                                 rejected += 1
-                                decisions["rejected_provenance"] += 1
+                                decisions["rejected_validation"] += 1
                         else:
                             if action == "unchanged":
                                 if counted:
