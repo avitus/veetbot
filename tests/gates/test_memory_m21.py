@@ -3223,7 +3223,7 @@ def test_provider_candidates_with_no_durable_content_are_rejected(
             "evidence_spans": [{"source_event_id": 7, "text": span}],
         }
     )
-    with pytest.raises(ValueError, match="recallable content|transient event"):
+    with pytest.raises(ValueError, match=r"recallable content|transient event"):
         _normalize_distilled_candidate(candidate, by_sequence={7: event}, scope="general")
 
 
