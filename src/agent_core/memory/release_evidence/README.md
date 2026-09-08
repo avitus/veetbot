@@ -6,7 +6,9 @@ The runtime loads only `*.json` files and requires an exact extractor,
 formation-policy, model-policy, provider, model, policy-profile, and compiled-
 policy-version match, and a `corpus_sha256` equal to the digest of the corpus
 the running checkout ships; an operator-supplied artifact is held to the same
-digest, so a schema-valid file with an invented digest activates nothing. One artifact per formation policy per tuple: startup
+digest and, in production, to a `build_ref` that is the running release's
+commit, so a schema-valid file with an invented digest or build activates
+nothing. One artifact per formation policy per tuple: startup
 prefers matching `formation@9` evidence, then `formation@10`, then
 `formation@8`, and records a content-free deterministic-fallback audit when
 none matches; `required` mode refuses startup instead. The operator pin

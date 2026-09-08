@@ -56,7 +56,7 @@ from agent_core.domain.persona import (
     PersonaNominationState,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.equivalence import content_terms, negated
+from agent_core.memory.equivalence import content_terms, lemmatized_terms, main_verb, negated
 from agent_core.memory.profiles import (
     DEFAULT_FORMATION_PROFILE,
     DEFAULT_RETRIEVAL_PROFILE,
@@ -2760,7 +2760,12 @@ class GovernedMemoryService:
 
         live = await uow.memories.list_memories(self._principal, limit=500)
         subject_key = " ".join(candidate.subject.split()).casefold()
-        negated_terms = content_terms(candidate.statement)
+        # Matched on lemmas and on the verb: "no longer runs outdoors" ends
+        # "is running outdoors every day" and "goes running outdoors most
+        # mornings", but not "tracks runs outdoors in a journal", whose verb
+        # is tracking, nor anything said about someone else.
+        negated_terms = lemmatized_terms(candidate.statement)
+        negated_verb = main_verb(candidate.statement)
         exact: list[MemoryRecord] = []
         by_content: list[MemoryRecord] = []
         for belief in live:
@@ -2773,9 +2778,11 @@ class GovernedMemoryService:
                 exact.append(belief)
             elif (
                 negated_terms
+                and negated_verb is not None
                 and belief.statement.startswith("User ")
                 and not negated(belief.statement)
-                and negated_terms <= content_terms(belief.statement)
+                and main_verb(belief.statement) == negated_verb
+                and negated_terms <= lemmatized_terms(belief.statement)
             ):
                 by_content.append(belief)
         targets: list[MemoryRecord] = []

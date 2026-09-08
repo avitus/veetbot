@@ -662,6 +662,12 @@ milestones:
           keeps distinct claims under one subject apart, the anticipation prefix
           bound holds for an oversized event, and activation binds every
           artifact, operator-supplied included, to the shipped corpus digest.
+          A third review after the merge found four more, each fixed with a
+          regression test: negation scope survives a fronted clause without a
+          comma, same-word claims in a different relationship get distinct
+          keys, retractions target by main verb and lemmatized content, and an
+          operator artifact activates in production only when built from the
+          running release's commit.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-

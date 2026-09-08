@@ -296,13 +296,180 @@ def negated(value: str) -> bool:
     for clause in re.split(r"[,;]", value):
         terms = _tokens(clause)
         if terms and terms[0] in _SUBORDINATORS:
-            continue
+            # A fronted circumstance with no comma ends where the main
+            # clause's subject begins: "Although busy I do not take ..." is
+            # negated, "When I am not lifting I run" is not.
+            starts = [index for index, term in enumerate(terms) if term in _SUBJECT_TOKENS]
+            if not starts:
+                continue
+            terms = terms[starts[-1] :]
         for term in terms:
             if term in _SUBORDINATORS:
                 break
             if term in _NEGATIONS and term not in _ABSENCE:
                 return True
     return False
+
+
+_NAME = re.compile(r"\b[A-Z][a-z]+\b")
+_IRREGULAR_LEMMAS = {
+    "ate": "eat",
+    "attending": "attend",
+    "baking": "bake",
+    "biking": "bike",
+    "boxing": "box",
+    "coding": "code",
+    "commuting": "commute",
+    "cycling": "cycle",
+    "dancing": "dance",
+    "did": "do",
+    "does": "do",
+    "doing": "do",
+    "driven": "drive",
+    "driving": "drive",
+    "drove": "drive",
+    "eating": "eat",
+    "flew": "fly",
+    "flying": "fly",
+    "gave": "give",
+    "given": "give",
+    "goes": "go",
+    "going": "go",
+    "gone": "go",
+    "had": "have",
+    "has": "have",
+    "having": "have",
+    "hiking": "hike",
+    "jogging": "jog",
+    "lifting": "lift",
+    "made": "make",
+    "making": "make",
+    "meditating": "meditate",
+    "practicing": "practice",
+    "ran": "run",
+    "riding": "ride",
+    "rode": "ride",
+    "rowing": "row",
+    "running": "run",
+    "sailing": "sail",
+    "sat": "sit",
+    "sitting": "sit",
+    "skating": "skate",
+    "skiing": "ski",
+    "smoking": "smoke",
+    "studies": "study",
+    "studying": "study",
+    "surfing": "surf",
+    "swam": "swim",
+    "swimming": "swim",
+    "taken": "take",
+    "taking": "take",
+    "took": "take",
+    "tries": "try",
+    "volunteering": "volunteer",
+    "wearing": "wear",
+    "went": "go",
+    "wore": "wear",
+    "worn": "wear",
+    "writing": "write",
+    "written": "write",
+    "wrote": "write",
+}
+_SUBJECT_TOKENS = frozenset(
+    {"i", "i'd", "i'll", "i'm", "i've", "user", "users", "we", "we're", "we've"}
+)
+# Verbs and adverbs that carry an activity rather than being one: "goes
+# running", "keeps swimming", "usually runs".
+_LIGHT_LEADS = frozenset(
+    {
+        "always",
+        "enjoy",
+        "enjoys",
+        "go",
+        "goes",
+        "going",
+        "keep",
+        "keeps",
+        "kept",
+        "like",
+        "likes",
+        "love",
+        "loves",
+        "mostly",
+        "normally",
+        "often",
+        "prefer",
+        "prefers",
+        "regularly",
+        "sometimes",
+        "start",
+        "started",
+        "starting",
+        "tend",
+        "tends",
+        "try",
+        "tries",
+        "usually",
+        "went",
+    }
+)
+
+
+def lemma(term: str) -> str:
+    """A light lemma: inflection stripped so "running", "ran", and "runs" agree."""
+
+    if term in _IRREGULAR_LEMMAS:
+        return _IRREGULAR_LEMMAS[term]
+    if term.endswith("ing") and len(term) > 5:
+        base = term[:-3]
+        if base[-1] == base[-2] and base[-1] not in "aeiou":
+            base = base[:-1]
+        return base
+    if term.endswith("ies") and len(term) > 4:
+        return term[:-3] + "y"
+    if term.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return term[:-2]
+    if term.endswith("ed") and len(term) > 4:
+        base = term[:-2]
+        if base[-1] == base[-2] and base[-1] not in "aeiou":
+            base = base[:-1]
+        return base
+    if term.endswith("s") and not term.endswith("ss") and len(term) > 3:
+        return term[:-1]
+    return term
+
+
+def lemmatized_terms(value: str) -> set[str]:
+    """Content terms reduced to lemmas, for matching an activity across wordings."""
+
+    return {lemma(term) for term in _tokens(value) if _is_content(term)}
+
+
+def main_verb(value: str) -> str | None:
+    """The lemma of the first content word after any negation and light lead.
+
+    "User no longer runs outdoors" and "User goes running outdoors most
+    mornings" both give "run"; "User tracks runs outdoors in a journal" gives
+    "track", which is why a retraction of running does not end it.
+    """
+
+    for term in _tokens(value):
+        if not _is_content(term) or term in _LIGHT_LEADS:
+            continue
+        return lemma(term)
+    return None
+
+
+def proper_names(value: str) -> list[str]:
+    """Capitalized names in order of first appearance, excluding the subject word."""
+
+    found: list[str] = []
+    for match in _NAME.finditer(value):
+        if match.start() == 0 or match.group(0) in {"User", "The"}:
+            continue
+        if match.group(0) not in found:
+            found.append(match.group(0))
+    return found
 
 
 def absence_terms(value: str) -> frozenset[str]:
@@ -356,23 +523,11 @@ def shared_terms_in_order(left: str, right: str) -> bool:
     ]
 
 
-_NAME = re.compile(r"\b[A-Z][a-z]+\b")
-
-
 def names_in_order(left: str, right: str) -> bool:
     """Whether the proper names both statements share appear in the same order."""
 
-    def names(value: str) -> list[str]:
-        found: list[str] = []
-        for match in _NAME.finditer(value):
-            if match.start() == 0 or match.group(0) in {"User", "The"}:
-                continue
-            if match.group(0) not in found:
-                found.append(match.group(0))
-        return found
-
-    left_names = names(left)
-    right_names = names(right)
+    left_names = proper_names(left)
+    right_names = proper_names(right)
     shared = set(left_names) & set(right_names)
     return [name for name in left_names if name in shared] == [
         name for name in right_names if name in shared

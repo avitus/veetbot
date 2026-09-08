@@ -122,6 +122,26 @@ defects, each fixed with a regression test in the same change set:
    activates no artifact whose digest differs. The build reference remains
    unverifiable at runtime and is checked by ancestry in the bundle test.
 
+## Third review
+
+A third review, after PR #98 merged, found four residual defects, each fixed
+with a regression test:
+
+1. A fronted subordinate clause without a comma still hid the main clause's
+   negation. The scope now ends where the main clause's subject begins, so
+   "Although busy I do not take ..." is negated and "When I am not lifting I
+   run" is not.
+2. Two claims built from the same words in a different relationship kept one
+   key and the store dropped the second. The combiner now keys such a claim by
+   its names in order, or by an ordinal when nothing else separates it.
+3. Retraction targeting matched raw term subsets, missing "is running
+   outdoors" and catching "tracks runs outdoors in a journal". Targets now
+   share the retraction's main verb and contain its lemmatized content.
+4. An operator-supplied artifact was bound to the corpus but not to a build.
+   Startup now activates an operator file only when its build reference is
+   the running release's commit; outside production the gap is logged. The
+   frozen holdout corpus and the scorer@3 re-evaluation remain open items.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

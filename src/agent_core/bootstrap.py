@@ -1649,6 +1649,31 @@ async def _compose(
                 )
                 if "unavailable" in (distillation_corpus_sha256, formation_corpus_sha256):
                     logger.warning("memory_evaluation_corpus_unavailable")
+
+                def operator_artifact_is_bound(evidence_path: Path, build_ref: str) -> bool:
+                    """An operator file must be built from the running release.
+
+                    A bundled artifact is checked by ancestry in the bundle
+                    test; an operator-supplied file never passes through it,
+                    so the runtime holds it to the one commit it can name.
+                    Outside production, where no release identity exists, the
+                    file is accepted and the gap is logged.
+                    """
+
+                    if evidence_path != settings.memory_provider_extraction_evidence:
+                        return True
+                    if settings.release_id is None:
+                        if settings.deployment_mode is DeploymentMode.PRODUCTION:
+                            logger.warning("memory_operator_evidence_unbound_in_production")
+                            return False
+                        logger.warning("memory_operator_evidence_unbound")
+                        return True
+                    deployed_sha = settings.release_id.rsplit("-", 1)[-1]
+                    if build_ref.startswith(deployed_sha):
+                        return True
+                    logger.warning("memory_operator_evidence_build_mismatch")
+                    return False
+
                 provider_pins = (
                     MemoryFormationPolicyPin.PROVIDER_ASSISTED,
                     MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
@@ -1670,6 +1695,8 @@ async def _compose(
                             agent.policy_profile,
                             ruleset.policy_version,
                             corpus_sha256=distillation_corpus_sha256,
+                        ) and operator_artifact_is_bound(
+                            evidence_path, candidate_distillation_evidence.build_ref
                         ):
                             selected_distillation_evidence = candidate_distillation_evidence
                             evidence_source = (
@@ -1707,6 +1734,8 @@ async def _compose(
                                 ruleset.policy_version,
                                 formation_policy_version=provider_policy,
                                 corpus_sha256=formation_corpus_sha256,
+                            ) and operator_artifact_is_bound(
+                                evidence_path, candidate_evidence.build_ref
                             ):
                                 selected_evidence = candidate_evidence
                                 selected_provider_policy = provider_policy

@@ -3073,6 +3073,76 @@ def test_anticipation_prefix_bound_holds_for_an_oversized_newest_event() -> None
     assert len(prefix["text"].encode("utf-8")) == MAX_ANTICIPATION_PREFIX_BYTES
 
 
+def test_same_words_in_a_different_relationship_get_distinct_keys() -> None:
+    """Two claims built from the same words still commit under two keys."""
+
+    from agent_core.memory.distillation import _with_distinct_key
+
+    lent_to_alice = _candidate(
+        subject="book lending",
+        statement="User lent Alice Bob's book.",
+        claim_kind="project_fact",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "lent"}],
+    )
+    lent_to_bob = lent_to_alice.model_copy(update={"statement": "User lent Bob Alice's book."})
+
+    assert not _candidates_semantically_duplicate(lent_to_alice, lent_to_bob)
+    second = _with_distinct_key(lent_to_bob, [lent_to_alice])
+    assert second.subject.casefold() != lent_to_alice.subject.casefold()
+    assert second.subject.startswith("book lending")
+    third = _with_distinct_key(
+        lent_to_alice.model_copy(update={"statement": "User lent a book."}),
+        [lent_to_alice, second],
+    )
+    assert len({lent_to_alice.subject, second.subject, third.subject}) == 3
+
+
+async def test_retraction_targets_follow_the_verb_across_morphology_and_keys() -> None:
+    """A retraction ends the activity it names, however the belief was worded or keyed.
+
+    "User no longer runs outdoors" must reach "User is running outdoors every
+    day" filed under "outdoor running", and must not reach a belief that merely
+    mentions those words about something else, such as journaling runs, or a
+    belief about someone else.
+    """
+
+    _clock, factory, baseline, _retriever = await formation_stack()
+    await user_event(factory, "I run outdoors.")
+    seeds = [
+        ("outdoor running", "User is running outdoors every day."),
+        ("run journal", "User tracks runs outdoors in a journal."),
+        ("daughter's running", "User's daughter runs outdoors."),
+        ("morning routine", "User goes running outdoors most mornings."),
+        ("outdoor cycling", "User bikes outdoors on weekends."),
+    ]
+    for subject, statement in seeds:
+        await baseline.remember(
+            session_id=SESSION_ID,
+            run_id=None,
+            statement=statement,
+            subject=subject,
+            scope="general",
+            belief_type=BeliefType.USER_MODEL_ATTR,
+        )
+    retraction = _candidate(
+        subject="running outdoors",
+        statement="User no longer runs outdoors.",
+        claim_kind="habit",
+        polarity=Polarity.RETRACT,
+        source_event_ids=[1],
+        evidence_spans=[{"source_event_id": 1, "text": "no longer run outdoors"}],
+    )
+
+    async with factory() as uow:
+        targets = await baseline._retraction_targets(uow, retraction)
+
+    assert {target.statement for target in targets} == {
+        "User is running outdoors every day.",
+        "User goes running outdoors most mornings.",
+    }
+
+
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
     """A batch beyond one ledger's worth of clauses runs three calls per segment."""
 
