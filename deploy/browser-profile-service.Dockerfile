@@ -5,14 +5,25 @@ RUN groupadd --gid 65532 browser-profile \
     && mkdir -p /opt/veetbot /var/lib/veetbot/browser-profiles \
     && chown -R 65532:65532 /opt/veetbot /var/lib/veetbot \
     && chmod 0700 /var/lib/veetbot/browser-profiles
-COPY pyproject.toml uv.lock README.md /opt/veetbot/
-COPY src /opt/veetbot/src
 WORKDIR /opt/veetbot
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Layer order bounds disk usage on the release host. The dependency set,
+# Chromium, and its system libraries change only when the lock file changes,
+# so they stay above the application source and every release image shares
+# them instead of snapshotting them again.
+COPY pyproject.toml uv.lock /opt/veetbot/
 RUN python -m pip install --no-cache-dir uv==0.8.6 \
-    && uv sync --frozen --no-dev --no-editable \
-    && uv run playwright install --with-deps chromium \
+    && uv sync --frozen --no-dev --no-editable --no-install-project \
+    && rm -rf /root/.cache
+RUN /opt/veetbot/.venv/bin/playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright \
+    && rm -rf /root/.cache /var/lib/apt/lists/*
+
+# Only the layers below are rebuilt when the application source changes.
+COPY README.md /opt/veetbot/
+COPY src /opt/veetbot/src
+RUN uv sync --frozen --no-dev --no-editable \
     && rm -rf /root/.cache
 ENV PATH="/opt/veetbot/.venv/bin:$PATH"
 

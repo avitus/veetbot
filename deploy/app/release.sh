@@ -11,6 +11,7 @@ BROWSER_CONTROL_CREDENTIAL_FILE="${VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
 KEEP_RELEASES="${VEETBOT_KEEP_RELEASES:-5}"
+KEEP_IMAGES="${VEETBOT_KEEP_IMAGES:-2}"
 LOCK_WAIT_SECS="${VEETBOT_DEPLOY_LOCK_WAIT_SECS:-900}"
 HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
@@ -36,12 +37,57 @@ environment_flag() {
   ' "$file"
 }
 
+# Remove a repository's timestamped tags beyond the newest KEEP_IMAGES. The
+# tag just released, any tag a running container uses, and every
+# non-timestamp tag such as production survive. Failures are reported and
+# never propagate, so the step is safe to repeat and cannot fail a release.
+prune_release_images() {
+  local repository="$1"
+  local running="$2"
+  local kept=0
+  local tag
+  while IFS= read -r tag; do
+    [[ "$tag" =~ $RELEASE_PATTERN ]] || continue
+    kept=$((kept + 1))
+    (( kept > KEEP_IMAGES )) || continue
+    [[ "$tag" != "$RELEASE_ID" ]] || continue
+    if grep -Fxq -- "$repository:$tag" <<<"$running"; then
+      printf 'Keeping %s:%s because a container is running it.\n' "$repository" "$tag"
+      continue
+    fi
+    if docker image rm "$repository:$tag" >/dev/null; then
+      printf 'Removed stale image %s:%s.\n' "$repository" "$tag"
+    else
+      printf 'warning: could not remove stale image %s:%s; continuing.\n' \
+        "$repository" "$tag" >&2
+    fi
+  done < <(docker image ls --format '{{.Tag}}' "$repository" 2>/dev/null | sort -r || true)
+}
+
+reclaim_image_storage() {
+  local running
+  printf 'Docker storage before image retention:\n'
+  docker system df || true
+  if ! running="$(docker ps --format '{{.Image}}')"; then
+    printf 'warning: could not list running containers; skipping image retention.\n' >&2
+    return 0
+  fi
+  prune_release_images "$SANDBOX_REPOSITORY" "$running"
+  prune_release_images "$PROFILE_REPOSITORY" "$running"
+  docker builder prune --all --force --filter until=48h >/dev/null || \
+    printf 'warning: could not prune the build cache; continuing.\n' >&2
+  printf 'Docker storage after image retention:\n'
+  docker system df || true
+}
+
 [[ "$RELEASE_ID" =~ $RELEASE_PATTERN ]] || fail \
   "release id must be YYYYMMDD-HHMMSS plus a 7-40 character lowercase hex revision"
 [[ "$DEPLOY_ROOT" = /* && "$DEPLOY_ROOT" != / ]] || fail \
   "VEETBOT_ROOT must be a non-root absolute path"
 [[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]] || fail \
   "VEETBOT_KEEP_RELEASES must be a positive integer"
+[[ "$KEEP_IMAGES" =~ ^[1-9][0-9]*$ ]] || fail \
+  "VEETBOT_KEEP_IMAGES must be a positive integer"
 [[ "$LOCK_WAIT_SECS" =~ ^[1-9][0-9]*$ ]] || fail \
   "VEETBOT_DEPLOY_LOCK_WAIT_SECS must be a positive integer"
 [[ "$HEALTH_TIMEOUT_SECS" =~ ^[1-9][0-9]*$ ]] || fail \
@@ -56,9 +102,11 @@ RELEASES_DIR="$DEPLOY_ROOT/releases"
 SHARED_DIR="$DEPLOY_ROOT/shared"
 STAGE="$RELEASES_DIR/$RELEASE_ID"
 CURRENT="$DEPLOY_ROOT/current"
-RELEASE_IMAGE="agent-core-sandbox:$RELEASE_ID"
-PRODUCTION_IMAGE="agent-core-sandbox:production"
-PROFILE_RELEASE_IMAGE="veetbot-browser-profile-service:$RELEASE_ID"
+SANDBOX_REPOSITORY="agent-core-sandbox"
+PROFILE_REPOSITORY="veetbot-browser-profile-service"
+RELEASE_IMAGE="$SANDBOX_REPOSITORY:$RELEASE_ID"
+PRODUCTION_IMAGE="$SANDBOX_REPOSITORY:production"
+PROFILE_RELEASE_IMAGE="$PROFILE_REPOSITORY:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
 HEALTH_HEADERS=""
@@ -359,11 +407,13 @@ while IFS= read -r candidate; do
       [[ ! -e "$candidate_path" && ! -L "$candidate_path" ]] || fail \
         "the trusted deployment container could not prune $candidate_path"
     fi
-    docker image rm "agent-core-sandbox:$candidate" >/dev/null 2>&1 || true
   fi
 done < <(
   find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -r
 )
+
+reclaim_image_storage || \
+  printf 'warning: image retention did not complete; the release is unaffected.\n' >&2
 
 trap - EXIT
 printf 'Released %s successfully.\n' "$RELEASE_ID"

@@ -15,6 +15,7 @@ PROFILE_AUTH_FILE="$TEST_ROOT/browser-profile-auth"
 PROFILE_SESSION_FILE="$TEST_ROOT/browser-profile-session-secret"
 PROFILE_KEY_DIR="$TEST_ROOT/browser-profile-keys"
 LOG_FILE="$TEST_ROOT/commands.log"
+DOCKER_IMAGES="$TEST_ROOT/docker-images"
 mkdir -p "$BIN_DIR" "$DEPLOY_ROOT/releases" "$SYSTEMD_DIR" "$PROCESS_ROOT/4242"
 mkdir -m 0700 "$PROFILE_KEY_DIR"
 printf '%s\n' 'synthetic-browser-profile-auth-value' >"$PROFILE_AUTH_FILE"
@@ -78,10 +79,45 @@ write_stub readlink '
 '
 write_stub docker '
   printf "docker %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  image_state() { printf "%s/%s" "$VEETBOT_TEST_DOCKER_IMAGES" "$1"; }
+  add_tag() {
+    local reference="$1" state
+    mkdir -p "$VEETBOT_TEST_DOCKER_IMAGES"
+    state="$(image_state "${reference%%:*}")"
+    grep -Fxq -- "${reference#*:}" "$state" 2>/dev/null \
+      || printf "%s\n" "${reference#*:}" >>"$state"
+  }
   if [[ "${1:-}" == run && " $* " == *" --entrypoint /bin/rm "* ]]; then
     target="${!#}"
     [[ "$target" == /releases/* ]]
     /bin/rm -rf -- "$VEETBOT_ROOT/releases/${target##*/}"
+  elif [[ "${1:-}" == build ]]; then
+    while (($#)); do
+      if [[ "$1" == -t ]]; then add_tag "$2"; shift 2; else shift; fi
+    done
+  elif [[ "${1:-}" == tag ]]; then
+    add_tag "$3"
+  elif [[ "${1:-}" == image && "${2:-}" == ls ]]; then
+    state="$(image_state "${!#}")"
+    [[ -f "$state" ]] && cat "$state"
+    exit 0
+  elif [[ "${1:-}" == image && "${2:-}" == rm ]]; then
+    reference="$3"
+    state="$(image_state "${reference%%:*}")"
+    if [[ "$reference" == "${VEETBOT_TEST_UNREMOVABLE_IMAGE:-}" ]]; then
+      printf "Error response from daemon: conflict: unable to remove %s\n" "$reference" >&2
+      exit 1
+    fi
+    if ! grep -Fxq -- "${reference#*:}" "$state" 2>/dev/null; then
+      printf "Error response from daemon: No such image: %s\n" "$reference" >&2
+      exit 1
+    fi
+    grep -Fxv -- "${reference#*:}" "$state" >"$state.next" || true
+    /bin/mv "$state.next" "$state"
+  elif [[ "${1:-}" == ps ]]; then
+    printf "%s\n" "${VEETBOT_TEST_RUNNING_IMAGES:-}"
+  elif [[ "${1:-}" == system && "${2:-}" == df ]]; then
+    printf "TYPE   TOTAL  ACTIVE  SIZE  RECLAIMABLE\n"
   fi
 '
 write_stub rm '
@@ -200,6 +236,9 @@ run_release() {
   VEETBOT_TEST_RELEASE="$release_id" \
   VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$release_id}" \
   VEETBOT_TEST_UNPRUNABLE_RELEASE="${VEETBOT_TEST_UNPRUNABLE_RELEASE:-}" \
+  VEETBOT_TEST_DOCKER_IMAGES="$DOCKER_IMAGES" \
+  VEETBOT_TEST_RUNNING_IMAGES="${VEETBOT_TEST_RUNNING_IMAGES:-}" \
+  VEETBOT_TEST_UNREMOVABLE_IMAGE="${VEETBOT_TEST_UNREMOVABLE_IMAGE:-}" \
   VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION="${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" \
   VEETBOT_API_BASE_URL="${VEETBOT_TEST_API_BASE_URL:-http://127.0.0.1:8000/}" \
     "$RELEASE_SCRIPT" "$release_id"
@@ -227,7 +266,28 @@ release_id="20260810-152233-abcdef0"
 make_stage "$release_id"
 ln -s "$DEPLOY_ROOT/releases/$release_id" "$PROCESS_ROOT/4242/cwd"
 legacy_unprunable_id="20260809-120001-0000001"
-VEETBOT_TEST_UNPRUNABLE_RELEASE="$legacy_unprunable_id" run_release "$release_id"
+mkdir -p "$DOCKER_IMAGES"
+# The oldest sandbox tag has no release directory left, so only tag-based
+# retention can remove it.
+printf '%s\n' \
+  production \
+  20260808-000000-0000000 \
+  20260809-120001-0000001 \
+  20260809-120002-0000002 \
+  20260809-120003-0000003 >"$DOCKER_IMAGES/agent-core-sandbox"
+printf '%s\n' \
+  local \
+  20260809-120001-0000001 \
+  20260809-120002-0000002 \
+  20260809-120003-0000003 >"$DOCKER_IMAGES/veetbot-browser-profile-service"
+running_images="$(printf '%s\n' \
+  'veetbot-browser-profile-service:20260809-120001-0000001' \
+  'agent-core-sandbox:production')"
+VEETBOT_TEST_UNPRUNABLE_RELEASE="$legacy_unprunable_id" \
+  VEETBOT_TEST_RUNNING_IMAGES="$running_images" \
+  VEETBOT_TEST_UNREMOVABLE_IMAGE="agent-core-sandbox:20260809-120002-0000002" \
+  run_release "$release_id" >"$TEST_ROOT/first.out" 2>&1
+cat "$TEST_ROOT/first.out"
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
@@ -253,6 +313,35 @@ grep -Fxq "Authorization: $auth_scheme synthetic-test-token" \
 grep -Fq \
   "docker run --rm --pull=never --network none --read-only --user 0:0 --volume $DEPLOY_ROOT/releases:/releases --entrypoint /bin/rm agent-core-sandbox:$release_id -rf -- /releases/$legacy_unprunable_id" \
   "$LOG_FILE"
+
+# Image retention keeps the newest two timestamped tags per repository, the
+# tag any running container uses, and every non-timestamp tag; a removal that
+# fails is reported without failing the release.
+expected_sandbox_tags="$(printf '%s\n' \
+  production 20260809-120002-0000002 20260809-120003-0000003 "$release_id")"
+[[ "$(cat "$DOCKER_IMAGES/agent-core-sandbox")" == "$expected_sandbox_tags" ]] || {
+  printf 'unexpected sandbox tags after retention:\n' >&2
+  cat "$DOCKER_IMAGES/agent-core-sandbox" >&2
+  exit 1
+}
+expected_profile_tags="$(printf '%s\n' \
+  local 20260809-120001-0000001 20260809-120003-0000003 "$release_id")"
+[[ "$(cat "$DOCKER_IMAGES/veetbot-browser-profile-service")" == "$expected_profile_tags" ]] || {
+  printf 'unexpected browser-profile tags after retention:\n' >&2
+  cat "$DOCKER_IMAGES/veetbot-browser-profile-service" >&2
+  exit 1
+}
+grep -Fq 'docker image rm agent-core-sandbox:20260808-000000-0000000' "$LOG_FILE"
+grep -Fq 'docker image rm agent-core-sandbox:20260809-120001-0000001' "$LOG_FILE"
+grep -Fq 'docker image rm veetbot-browser-profile-service:20260809-120002-0000002' "$LOG_FILE"
+! grep -Fq 'docker image rm agent-core-sandbox:production' "$LOG_FILE"
+! grep -Fq 'docker image rm veetbot-browser-profile-service:local' "$LOG_FILE"
+! grep -Fq 'docker image rm veetbot-browser-profile-service:20260809-120001-0000001' "$LOG_FILE"
+grep -Fq 'could not remove stale image agent-core-sandbox:20260809-120002-0000002' \
+  "$TEST_ROOT/first.out"
+grep -Fq 'Released 20260810-152233-abcdef0 successfully.' "$TEST_ROOT/first.out"
+grep -Fxq 'docker builder prune --all --force --filter until=48h' "$LOG_FILE"
+[[ "$(grep -Fxc 'docker system df' "$LOG_FILE")" == 2 ]]
 
 if run_release "$release_id" >"$TEST_ROOT/active.out" 2>&1; then
   printf 'active release mutation unexpectedly succeeded\n' >&2
@@ -340,9 +429,17 @@ equal_timestamp_id="20260810-152255-0000000"
 make_stage "$equal_timestamp_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
 ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
+printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/agent-core-sandbox"
+printf '%s\n' "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-browser-profile-service"
+: >"$LOG_FILE"
 run_release "$equal_timestamp_id"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
+# The store already satisfied the retention rule, so the step removes nothing.
+! grep -Fq 'docker image rm' "$LOG_FILE"
+grep -Fxq 'docker builder prune --all --force --filter until=48h' "$LOG_FILE"
+[[ "$(cat "$DOCKER_IMAGES/agent-core-sandbox")" == \
+  "$(printf '%s\n' production "$unhealthy_id" "$equal_timestamp_id")" ]]
 
 schedule_env="$TEST_ROOT/schedule.env"
 schedule_worker_env="$TEST_ROOT/veetbot-schedule.env"
