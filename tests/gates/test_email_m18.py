@@ -22,6 +22,7 @@ import pytest
 from hypothesis import given
 from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
+from jsonschema import Draft202012Validator
 from mcp.types import CallToolResult
 from pydantic import SecretStr
 
@@ -266,6 +267,29 @@ async def test_gmail_modes_pass_the_shared_contract(mode: str) -> None:
         for request in fake.requests
     )
     await client.close()
+
+
+async def test_search_threads_advertises_result_bounds_and_pagination() -> None:
+    """Keep the production 100/50-result failure outside the model contract."""
+
+    server = create_server("read", cast(GmailClient, object()))
+    search = next(tool for tool in await server.list_tools() if tool.name == "search_threads")
+    schema = search.input_schema
+    max_results = schema["properties"]["max_results"]
+
+    assert max_results["minimum"] == 1
+    assert max_results["maximum"] == 25
+    description = search.description or ""
+    assert "1 to 25" in description
+    assert "next_page_token" in description
+    assert "page_token" in description
+
+    validator = Draft202012Validator(schema)
+    assert not list(validator.iter_errors({"query": "newer_than:1d", "max_results": 25}))
+    for production_value in (100, 50):
+        assert list(
+            validator.iter_errors({"query": "newer_than:1d", "max_results": production_value})
+        )
 
 
 @pytest.mark.parametrize("mode", ["read", "write", "send"])

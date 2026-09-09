@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent
+from pydantic import Field
 
 from gmail_mcp.client import GmailClient
 from gmail_mcp.constants import ROSTERS
@@ -64,10 +65,17 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
         @server.tool()
         async def search_threads(
             query: str,
-            max_results: int,
+            max_results: Annotated[
+                int,
+                Field(
+                    ge=1,
+                    le=25,
+                    description="Number of threads to return, from 1 to 25.",
+                ),
+            ],
             page_token: str | None = None,
         ) -> CallToolResult:
-            """Search Gmail threads using Gmail query syntax."""
+            """Search Gmail using 1 to 25 results; continue next_page_token as page_token."""
 
             return await _call(client.search_threads, query, max_results, page_token)
 
