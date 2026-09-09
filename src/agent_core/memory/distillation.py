@@ -967,13 +967,30 @@ def _with_distinct_key(
         for existing in combined
         if existing.claim_kind is candidate.claim_kind
     }
-    subject = f"{candidate.subject} {' '.join(words)}".strip()
+    subject = _bounded_key(candidate.subject, " ".join(words))
     if not words or subject.casefold() in taken:
         ordinal = 2
-        while f"{subject} #{ordinal}".casefold() in taken:
+        while _bounded_key(subject, f"#{ordinal}").casefold() in taken:
             ordinal += 1
-        subject = f"{subject} #{ordinal}"
-    return candidate.model_copy(update={"subject": subject[:MEMORY_SUBJECT_MAX_LENGTH].strip()})
+        subject = _bounded_key(subject, f"#{ordinal}")
+    return candidate.model_copy(update={"subject": subject})
+
+
+def _bounded_key(base: str, suffix: str) -> str:
+    """Append ``suffix`` to ``base`` within the subject bound, suffix intact.
+
+    The suffix is what tells the key apart from the one it collided with, so
+    the base gives way to it: bounding the composed key from its end would
+    hand a subject that already fills the bound straight back its collision,
+    and formation would then reach the existing record instead of a new one.
+    """
+
+    if not suffix:
+        return base[:MEMORY_SUBJECT_MAX_LENGTH].strip()
+    room = MEMORY_SUBJECT_MAX_LENGTH - len(suffix) - 1
+    if room <= 0:
+        return suffix[:MEMORY_SUBJECT_MAX_LENGTH].strip()
+    return f"{base[:room].rstrip()} {suffix}".strip()
 
 
 def _candidates_semantically_duplicate(

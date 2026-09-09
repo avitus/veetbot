@@ -43,6 +43,15 @@ printf '%s\n' \
   'BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.test' \
   "BROWSER_PROFILE_KEY_DIR=$PROFILE_KEY_DIR" >"$ENV_FILE"
 
+# A negated pipeline never trips errexit, so a forbidden log line must fail
+# through an explicit exit.
+assert_log_lacks() {
+  if grep -Fq -- "$1" "$LOG_FILE"; then
+    printf 'forbidden command was run: %s\n' "$1" >&2
+    exit 1
+  fi
+}
+
 write_stub() {
   local name="$1"
   shift
@@ -334,9 +343,9 @@ expected_profile_tags="$(printf '%s\n' \
 grep -Fq 'docker image rm agent-core-sandbox:20260808-000000-0000000' "$LOG_FILE"
 grep -Fq 'docker image rm agent-core-sandbox:20260809-120001-0000001' "$LOG_FILE"
 grep -Fq 'docker image rm veetbot-browser-profile-service:20260809-120002-0000002' "$LOG_FILE"
-! grep -Fq 'docker image rm agent-core-sandbox:production' "$LOG_FILE"
-! grep -Fq 'docker image rm veetbot-browser-profile-service:local' "$LOG_FILE"
-! grep -Fq 'docker image rm veetbot-browser-profile-service:20260809-120001-0000001' "$LOG_FILE"
+assert_log_lacks 'docker image rm agent-core-sandbox:production'
+assert_log_lacks 'docker image rm veetbot-browser-profile-service:local'
+assert_log_lacks 'docker image rm veetbot-browser-profile-service:20260809-120001-0000001'
 grep -Fq 'could not remove stale image agent-core-sandbox:20260809-120002-0000002' \
   "$TEST_ROOT/first.out"
 grep -Fq 'Released 20260810-152233-abcdef0 successfully.' "$TEST_ROOT/first.out"
@@ -436,7 +445,7 @@ run_release "$equal_timestamp_id"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
 # The store already satisfied the retention rule, so the step removes nothing.
-! grep -Fq 'docker image rm' "$LOG_FILE"
+assert_log_lacks 'docker image rm'
 grep -Fxq 'docker builder prune --all --force --filter until=48h' "$LOG_FILE"
 [[ "$(cat "$DOCKER_IMAGES/agent-core-sandbox")" == \
   "$(printf '%s\n' production "$unhealthy_id" "$equal_timestamp_id")" ]]

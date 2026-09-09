@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -796,6 +797,90 @@ async def test_midstream_chat_transport_failure_keeps_a_gapless_terminal_sequenc
     assert [event.sequence for event in events] == [0, 1]
     assert isinstance(events[-1], ModelFailedEvent)
     assert events[-1].error.kind == "transient"
+
+
+class _StreamedBody(httpx.AsyncByteStream):
+    """A response body httpx has not read, as a real streamed HTTP response arrives."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._payload
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _chat_sse(text: str) -> bytes:
+    event = json.dumps(chat_text_events(text)[0])
+    return f"data: {event}\n\ndata: [DONE]\n\n".encode()
+
+
+async def test_chat_http_status_error_reads_the_unread_body_before_classifying() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request_value: httpx.Request) -> httpx.Response:
+        requests.append(request_value)
+        return httpx.Response(
+            429,
+            headers={"Content-Type": "application/json"},
+            stream=_StreamedBody(
+                b'{"error": {"type": "insufficient_quota", "code": "insufficient_quota", '
+                b'"message": "provider body must not be retained"}}'
+            ),
+        )
+
+    provider = ChatCompletionsProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("chat_completions"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+
+    assert len(events) == 1
+    assert isinstance(events[0], ModelFailedEvent)
+    assert events[0].error.kind == "permanent"
+    assert events[0].error.provider_code == "insufficient_quota"
+    assert events[0].error.http_status == 429
+    assert "provider body must not be retained" not in events[0].model_dump_json()
+    assert len(requests) == 1
+
+
+async def test_chat_transient_http_status_error_retries_before_output() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request_value: httpx.Request) -> httpx.Response:
+        requests.append(request_value)
+        if len(requests) == 1:
+            return httpx.Response(
+                503,
+                headers={"Content-Type": "application/json"},
+                stream=_StreamedBody(b'{"error": {"type": "server_error"}}'),
+            )
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            stream=_StreamedBody(_chat_sse("recovered")),
+        )
+
+    provider = ChatCompletionsProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    try:
+        turn = await collect_turn(provider.stream(request(), resolved("chat_completions"), ATTEMPT))
+    finally:
+        await provider.close()
+
+    assert turn.assistant_messages[0].content == [TextPart(text="recovered")]
+    assert len(requests) == 2
 
 
 async def test_anthropic_usage_and_indexes_default_defensively() -> None:

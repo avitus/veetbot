@@ -289,17 +289,24 @@ def negated(value: str) -> bool:
     "drives". An absence such as "without" is content, not polarity, and a
     negation inside a subordinate circumstance ("on days when not lifting")
     qualifies the claim rather than denying it. Scope is the clause: a fronted
-    circumstance ("When travelling, I cannot ...") ends at its comma and does
-    not hide the main clause's negation.
+    circumstance ("When travelling, I cannot ...") ends at its comma, or
+    without one where the main clause's subject begins, and does not hide the
+    main clause's negation.
     """
 
-    for clause in re.split(r"[,;]", value):
+    clauses = re.split(r"[,;]", value)
+    for index, clause in enumerate(clauses):
         terms = _tokens(clause)
         if terms and terms[0] in _SUBORDINATORS:
-            # A fronted circumstance with no comma ends where the main
-            # clause's subject begins: "Although busy I do not take ..." is
-            # negated, "When I am not lifting I run" is not.
-            starts = [index for index, term in enumerate(terms) if term in _SUBJECT_TOKENS]
+            if index < len(clauses) - 1:
+                # A fronted circumstance ends at its comma or semicolon, even
+                # when it carries its own subject: "Although I do not run,
+                # User bikes" is not negated.
+                continue
+            # With no separator it ends where the main clause's subject
+            # begins: "Although busy I do not take ..." is negated, "When I
+            # am not lifting I run" is not.
+            starts = [start for start, term in enumerate(terms) if term in _SUBJECT_TOKENS]
             if not starts:
                 continue
             terms = terms[starts[-1] :]

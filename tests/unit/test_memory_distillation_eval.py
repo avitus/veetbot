@@ -738,6 +738,12 @@ def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
         ("When I am not lifting I run", False),
         ("If it is not raining user runs outdoors", False),
         ("User bikes on days when I am not lifting", False),
+        # A fronted subordinate clause that ends at a comma or semicolon is
+        # a circumstance in full, even when it carries its own subject and
+        # negation; the subject search applies only without a separator.
+        ("Although I do not run, User bikes.", False),
+        ("Although I do not run; User bikes.", False),
+        ("Although I run User does not bike", True),
     ],
 )
 def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -> None:
@@ -746,6 +752,19 @@ def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -
     from agent_core.memory.equivalence import negated
 
     assert negated(statement) is expected
+
+
+def test_affirmative_main_clause_stays_compatible_after_a_negated_fronted_clause() -> None:
+    """A negation confined to a comma-terminated fronted clause is not a denial.
+
+    "Although I do not run, User bikes." asserts that the user bikes; the
+    compatibility floor must not read the circumstance's "not" as the claim's
+    polarity and reject the affirmative belief.
+    """
+
+    from agent_core.memory.equivalence import statements_compatible
+
+    assert statements_compatible("Although I do not run, User bikes.", "User bikes.")
 
 
 def test_compatible_kinds_match_with_the_longevity_local_policy_assigns() -> None:

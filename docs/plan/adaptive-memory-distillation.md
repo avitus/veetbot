@@ -505,9 +505,11 @@ produce, from this table; a hypothesis declares none.
 | a fact about a family member's situation | project_fact or relationship | the other |
 | a recurring activity of a family member | relationship | recurring_state, project_fact |
 | a resource or its location | resource | project_fact |
-| a technical fact about the user's project | project_fact | resource | Coverage includes every claim kind,
-direct and hypothesis formation, compound utterances, corroboration and
-promotion, correction, retirement, and self-citation.
+| a technical fact about the user's project | project_fact | resource |
+
+Coverage includes every claim kind, direct and hypothesis formation, compound
+utterances, corroboration and promotion, correction, retirement, and
+self-citation.
 
 The corpus also declares seed pools of realistic prior beliefs. A positive
 case may name a pool, and the evaluator writes those beliefs through the

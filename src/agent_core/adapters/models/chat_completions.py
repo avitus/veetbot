@@ -168,6 +168,10 @@ class ChatCompletionsProvider:
             json=payload,
             timeout=timeout,
         ) as response:
+            if response.is_error:
+                # A streamed body is unread when raise_for_status fires; read it
+                # here so the status handler can classify the provider error.
+                await response.aread()
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):

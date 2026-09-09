@@ -27,6 +27,7 @@ from agent_core.config import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
+    MEMORY_SUBJECT_MAX_LENGTH,
     BeliefType,
     MemoryAuthority,
     MemoryCandidate,
@@ -3150,6 +3151,36 @@ def test_same_words_in_a_different_relationship_get_distinct_keys() -> None:
         [lent_to_alice, second],
     )
     assert len({lent_to_alice.subject, second.subject, third.subject}) == 3
+
+
+def test_distinct_keys_survive_the_subject_length_bound() -> None:
+    """A claim whose subject already fills the bound still leaves under its own key.
+
+    Formation looks the store up by subject and belief type, so a suffix the
+    bound cuts back off would hand the second claim to the first's record to
+    reinforce or supersede instead of committing beside it.
+    """
+
+    from agent_core.memory.distillation import _with_distinct_key
+
+    lent_to_alice = _candidate(
+        subject="b" * MEMORY_SUBJECT_MAX_LENGTH,
+        statement="User lent Alice Bob's book.",
+        claim_kind="project_fact",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "lent"}],
+    )
+    lent_to_bob = lent_to_alice.model_copy(update={"statement": "User lent Bob Alice's book."})
+
+    second = _with_distinct_key(lent_to_bob, [lent_to_alice])
+    third = _with_distinct_key(
+        lent_to_alice.model_copy(update={"statement": "User lent a book."}),
+        [lent_to_alice, second],
+    )
+
+    subjects = [lent_to_alice.subject, second.subject, third.subject]
+    assert len({subject.casefold() for subject in subjects}) == 3
+    assert all(len(subject) <= MEMORY_SUBJECT_MAX_LENGTH for subject in subjects)
 
 
 async def test_retraction_targets_follow_the_verb_across_morphology_and_keys() -> None:
