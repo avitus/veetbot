@@ -305,6 +305,7 @@ def distillation_evidence_matches(
     policy_version: str,
     *,
     corpus_sha256: str | None = None,
+    holdout_sha256: str | None = None,
 ) -> bool:
     """Require the exact evaluated model and policy tuple for activation.
 
@@ -316,6 +317,8 @@ def distillation_evidence_matches(
     """
 
     if corpus_sha256 is not None and evidence.corpus_sha256 != corpus_sha256:
+        return False
+    if holdout_sha256 is not None and evidence.holdout_sha256 != holdout_sha256:
         return False
     expected = {
         "extractor_version": NEMORI_EXTRACTOR_VERSION,
@@ -338,6 +341,7 @@ def select_distillation_policy(
     mode: Literal["auto", "off", "required"],
     evidenced_older_policy: str = "formation@8",
     corpus_sha256: str | None = None,
+    holdout_sha256: str | None = None,
 ) -> str:
     """Select formation@9 only on its exact evidence tuple."""
 
@@ -350,6 +354,7 @@ def select_distillation_policy(
             policy_profile,
             policy_version,
             corpus_sha256=corpus_sha256,
+            holdout_sha256=holdout_sha256,
         )
     ):
         return NEMORI_FORMATION_POLICY_VERSION
@@ -1116,6 +1121,13 @@ class NemoriAssistedCandidateExtractor:
 
         async with self._uow_factory() as uow:
             live_memories = await uow.memories.list_memories(principal, limit=50)
+            # The anticipation cue is the user's text before a segment's
+            # earliest episode. A session's already-consolidated text is still
+            # before it, so the cue reaches back past the watermark; without
+            # that, every single-segment consolidation, which is nearly all of
+            # them, ran anticipation with nothing to predict from.
+            history = await uow.events.list_after(selected[0].session_id, 0, principal)
+        prefix_pool = owned_user_events(history, principal)
         # Anticipation is provider egress: a sensitive or restricted belief
         # stays out of the request, so it can neither be predicted from nor
         # attributed as redundancy.
@@ -1248,7 +1260,7 @@ class NemoriAssistedCandidateExtractor:
 
             anticipation_raw, failure, stage_metric = await self._call(
                 stage="anticipation",
-                prompt=self._anticipation_prompt(selected, episodes, prior_memories),
+                prompt=self._anticipation_prompt(prefix_pool, episodes, prior_memories),
                 response_schema=_AnticipationResponse.model_json_schema(),
                 principal=principal,
                 run_id=segment[-1].run_id,

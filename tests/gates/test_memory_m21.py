@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -58,6 +59,7 @@ from agent_core.evals.memory_distillation import (
     DistillationEvaluationBelief,
     MemoryDistillationCase,
     load_distillation_corpus,
+    load_distillation_holdout,
     score_distillation_case,
 )
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
@@ -103,6 +105,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # fabricated artifact must carry the real digest to activate anything here.
 _FORMATION_CORPUS_SHA256 = load_formation_corpus(_REPOSITORY_ROOT)[1]
 _DISTILLATION_CORPUS_SHA256 = load_distillation_corpus(_REPOSITORY_ROOT)[1]
+_DISTILLATION_HOLDOUT_SHA256 = load_distillation_holdout(_REPOSITORY_ROOT)[1]
 
 
 def _candidate(**overrides: object) -> MemoryCandidate:
@@ -330,6 +333,7 @@ async def test_explicit_experience_is_repaired_as_a_skill_without_an_article() -
         ("I gave up swimming laps.", "User no longer swims laps.", "swimming laps"),
         ("I no longer run outdoors.", "User no longer runs outdoors.", "running outdoors"),
         ("I quit smoking.", "User no longer smokes.", "smoking"),
+        ("I don't take calls anymore.", "User no longer takes calls.", "calls"),
         ("That old memory saying I live in Rome is wrong.", None, None),
     ],
 )
@@ -407,6 +411,31 @@ async def test_retraction_reaches_a_belief_whose_key_was_composed_differently(
     assert second.run.decision_counts.get("skipped_unmatched_retraction", 0) == 0
     assert second.run.superseded == 1
     assert retracted not in {belief.statement for belief in await service.list_memories()}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I don't take calls before nine in the morning.",
+        "I do not eat gluten.",
+        "I never drink coffee after lunch.",
+    ],
+)
+async def test_a_standing_negative_claim_is_not_a_correction(message: str) -> None:
+    """ "I don't take calls before nine" states a constraint, not a change.
+
+    A correction says something has changed; "don't" and "do not" only say so
+    with a change marker such as "anymore". Treating every negative present
+    tense as a retraction vetoed standing constraints and, worse, rendered
+    them as retractions of beliefs that never existed.
+    """
+
+    assert not formation.contains_automatic_memory_correction(message)
+    event = _personal_agent_event().model_copy(update={"payload": {"content": message}})
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        [event], principal=principal(), scope="general"
+    )
+    assert all(candidate.polarity is Polarity.ASSERT for candidate in candidates)
 
 
 async def test_fallback_retraction_supersedes_the_belief_it_corrects() -> None:
@@ -2409,6 +2438,15 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         positive_case_count=48,
         seeded_case_count=12,
         represented_case_count=3,
+        holdout_sha256=_DISTILLATION_HOLDOUT_SHA256,
+        holdout_sample_count=40,
+        holdout_positive_case_count=32,
+        holdout_direct_must_form_recall=0.96,
+        holdout_hypothesis_must_form_recall=0.8,
+        holdout_benign_precision=0.91,
+        holdout_useful_recall_lift_percentage_points=40,
+        holdout_evidence_disposition_precision=0.9,
+        holdout_represented_case_count=2,
         direct_must_form_recall=0.96,
         hypothesis_must_form_recall=0.82,
         benign_precision=0.92,
@@ -2512,6 +2550,12 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "seeded_case_count": 0,
         "represented_case_count": 0,
         "provider_cost_usd": "999999999",
+        "holdout_sample_count": 29,
+        "holdout_direct_must_form_recall": 0.94,
+        "holdout_benign_precision": 0.89,
+        "holdout_useful_recall_lift_percentage_points": 14,
+        "holdout_represented_case_count": 0,
+        "holdout_sha256": "not-a-digest",
         "build_ref": "content-6973e8ddc75c6e40947e1f368abf2a96",
         "scorer_version": "distillation-scorer@1",
     }
@@ -3315,6 +3359,63 @@ async def test_provider_claim_outranks_a_fallback_copy_of_the_same_claim() -> No
     assert [(c.claim_kind.value, c.subject) for c in sailing] == [("habit", "weekend sailing")]
 
 
+async def test_anticipation_prefix_reaches_back_past_the_watermark() -> None:
+    """A continuing session's earlier text is the cue for its next consolidation.
+
+    The prefix was the current batch's text before the segment's earliest
+    episode, which is empty on every single-segment consolidation, so
+    anticipation could never attribute a redundancy in the common case. The
+    session's already-consolidated user text is still text before the
+    episode, and it becomes the cue, bounded by the same byte cap.
+    """
+
+    extractor, provider, factory = await _distillation_extractor([])
+    first = await user_event(factory, "I live in Portland and I work at Acme Labs.")
+    provider._script.turns = [
+        ScriptedTurn(
+            text=_scripted_episode([first], ["I live in Portland and I work at Acme Labs."])
+        ),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(text=_empty_distillation(first)),
+    ]
+    first_batch = [event for event in await session_events(factory) if event.sequence == first]
+    await extractor.extract(first_batch, principal=principal(), scope="general")
+
+    second = await user_event(factory, "I still live in Portland, and I have started sailing.")
+    provider._script.turns = [
+        *provider._script.turns,
+        ScriptedTurn(
+            text=_scripted_episode(
+                [second], ["I still live in Portland, and I have started sailing."]
+            )
+        ),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(text=_empty_distillation(second)),
+    ]
+    second_batch = [event for event in await session_events(factory) if event.sequence == second]
+    await extractor.extract(second_batch, principal=principal(), scope="general")
+
+    anticipation = json.loads(_prompt_text(provider.requests[4]))
+    assert [event["source_event_id"] for event in anticipation["prefix_events"]] == [first]
+    assert anticipation["prefix_events"][0]["text"] == (
+        "I live in Portland and I work at Acme Labs."
+    )
+    assert anticipation["episode_cues"] == [{"episode_index": 0, "before_event_sequence": second}]
+    # The first consolidation had nothing before it and sent no prefix.
+    first_anticipation = json.loads(_prompt_text(provider.requests[1]))
+    assert first_anticipation["prefix_events"] == []
+
+
+def _prompt_text(request: Any) -> str:
+    """The user-turn prompt of one scripted-provider request."""
+
+    message = request.conversation[1]
+    assert isinstance(message, UserMessage)
+    part = message.content[0]
+    assert isinstance(part, TextPart)
+    return part.text
+
+
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
     """A batch beyond one ledger's worth of clauses runs three calls per segment."""
 
@@ -3870,6 +3971,15 @@ async def _select_with(
                 positive_case_count=49,
                 seeded_case_count=5,
                 represented_case_count=1,
+                holdout_sha256=_DISTILLATION_HOLDOUT_SHA256,
+                holdout_sample_count=40,
+                holdout_positive_case_count=32,
+                holdout_direct_must_form_recall=0.96,
+                holdout_hypothesis_must_form_recall=0.8,
+                holdout_benign_precision=0.91,
+                holdout_useful_recall_lift_percentage_points=40,
+                holdout_evidence_disposition_precision=0.9,
+                holdout_represented_case_count=2,
                 direct_must_form_recall=1,
                 hypothesis_must_form_recall=1,
                 benign_precision=0.96,

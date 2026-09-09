@@ -171,6 +171,21 @@ content with the fallback's copy, a default-kind project fact keyed "on
 weekends", and the combiner kept the fallback's; a tie now goes to the
 newcomer, which is always the provider's.
 
+## The holdout and the cue
+
+After the scorer@5 run the owner decided, on 2026-09-08, the two remaining
+questions. The anticipation cue now reaches back past the consolidation
+watermark: a session's already-consolidated user text is still text before
+the segment's earliest episode, so a continuing session is cued by what the
+user said earlier in it, bounded by the existing byte cap and with blinding
+unchanged. And activation evidence now comes from a frozen holdout as well as
+the development corpus: fifty-one cases authored on 2026-09-09 before any run,
+with their digest recorded in the tree, both digests bound into the artifact,
+the holdout's own thresholds gated, and the represented gate made the
+aggregate on both sets. The development corpus may be tuned; the holdout may
+only be re-frozen deliberately. The frozen holdout item and the cue item are
+therefore closed; the re-evaluation remains open until a run passes.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

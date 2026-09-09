@@ -277,6 +277,7 @@ from agent_core.application.trajectory_service import (
 )
 from agent_core.config import (
     MEMORY_DISTILLATION_CORPUS_PATH,
+    MEMORY_DISTILLATION_HOLDOUT_PATH,
     MEMORY_FORMATION_CORPUS_PATH,
     PACKAGE_ROOT,
     AuthMode,
@@ -1647,7 +1648,14 @@ async def _compose(
                 formation_corpus_sha256 = (
                     shipped_corpus_sha256(MEMORY_FORMATION_CORPUS_PATH) or "unavailable"
                 )
-                if "unavailable" in (distillation_corpus_sha256, formation_corpus_sha256):
+                distillation_holdout_sha256 = (
+                    shipped_corpus_sha256(MEMORY_DISTILLATION_HOLDOUT_PATH) or "unavailable"
+                )
+                if "unavailable" in (
+                    distillation_corpus_sha256,
+                    formation_corpus_sha256,
+                    distillation_holdout_sha256,
+                ):
                     logger.warning("memory_evaluation_corpus_unavailable")
 
                 def operator_artifact_is_bound(evidence_path: Path, build_ref: str) -> bool:
@@ -1695,6 +1703,7 @@ async def _compose(
                             agent.policy_profile,
                             ruleset.policy_version,
                             corpus_sha256=distillation_corpus_sha256,
+                            holdout_sha256=distillation_holdout_sha256,
                         ) and operator_artifact_is_bound(
                             evidence_path, candidate_distillation_evidence.build_ref
                         ):

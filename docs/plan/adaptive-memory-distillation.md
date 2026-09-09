@@ -257,11 +257,14 @@ order, so a consolidation makes exactly three calls per segment and never a
 candidate-level call. One anticipation request covers every episode of a
 segment, so its prefix is the user text before the segment's earliest episode
 and contains no episode's own evidence; each cue names the sequence before
-which its evidence begins. The prefix keeps the most recent text under a bound
-of twice the segment byte limit, sending an oversized newest event as its
-tail, so a long consolidation's later segments do not resend the whole
-session; blinding is unaffected because nothing at or after the earliest
-episode is ever sent. There is no cost
+which its evidence begins. That text includes the session's already
+consolidated user events, not only the current batch: a continuing session's
+next consolidation is cued by what the user said earlier in it, which is what
+makes a restated fact predictable and therefore attributable. The prefix
+keeps the most recent text under a bound of twice the segment byte limit,
+sending an oversized newest event as its tail, so neither a long session nor
+a long consolidation's later segments resend everything; blinding is
+unaffected because nothing at or after the earliest episode is ever sent. There is no cost
 ceiling on the distiller; cost is recorded per stage and reported in evidence.
 
 A directly stated claim is not suppressed merely because a general model could
@@ -513,6 +516,20 @@ populated production store. At least one positive multi-event case and the
 rich production conversation run against a pool of at least twenty-five
 beliefs.
 
+That corpus is the development set: it may be tuned, and its alternatives
+have been edited after observing model output. Independent evidence comes
+from the frozen holdout, `evals/capability/memory-formation.v3-holdout.json`:
+at least thirty cases authored before their first run, every claim kind, both
+derivations, must-not-form cases, and at least three seeded cases that
+restate a seed across a segment boundary. Its digest is recorded beside it in
+`memory-formation.v3-holdout.sha256`; the loader refuses a holdout whose
+content no longer matches the record, so any edit is a deliberate re-freeze
+that shows in review and invalidates every artifact bound to the old digest.
+The evaluator scores every run on both sets, the artifact carries both
+digests and the holdout's own recall, precision, lift, disposition, and
+represented counts, and activation binds the holdout digest exactly as it
+binds the corpus digest.
+
 Scoring is `distillation-scorer@5`. A belief matches a gold claim when its
 derivation agrees, its claim kind is the gold kind with the gold longevity or a
 compatible kind with the longevity local policy assigns that kind, its subject
@@ -599,7 +616,11 @@ Publication requires:
   memory;
 - at least one positive case ran against a populated store, and at least one
   seeded case that restates a seeded belief across a segment boundary had that
-  clause verifiably represented by an anticipation attributed to the seed;
+  clause verifiably represented by an anticipation attributed to the seed; the
+  gate is the aggregate, because one case is one anticipation call's chance;
+- the frozen holdout passes the same recall, precision, lift, disposition,
+  boundary, call-count, and represented thresholds, with none of the corpus's
+  named-scenario rules;
 - every eligible consolidation made exactly three calls per planned segment,
   and the artifact records the measured call and consolidation totals;
 - all lifecycle timing, promotion, and self-citation checks pass, and the

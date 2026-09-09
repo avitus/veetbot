@@ -55,7 +55,10 @@ from agent_core.domain.messages import (
     UsageEvent,
     UserMessage,
 )
-from agent_core.evals.memory_distillation import load_distillation_corpus
+from agent_core.evals.memory_distillation import (
+    load_distillation_corpus,
+    load_distillation_holdout,
+)
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
@@ -2281,6 +2284,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # fabricated artifact must carry the real digest to activate anything here.
 _FORMATION_CORPUS_SHA256 = load_formation_corpus(_REPOSITORY_ROOT)[1]
 _DISTILLATION_CORPUS_SHA256 = load_distillation_corpus(_REPOSITORY_ROOT)[1]
+_DISTILLATION_HOLDOUT_SHA256 = load_distillation_holdout(_REPOSITORY_ROOT)[1]
 
 
 def _distillation_evidence() -> MemoryDistillationEvidence:
@@ -2297,6 +2301,15 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         positive_case_count=49,
         seeded_case_count=5,
         represented_case_count=1,
+        holdout_sha256=_DISTILLATION_HOLDOUT_SHA256,
+        holdout_sample_count=40,
+        holdout_positive_case_count=32,
+        holdout_direct_must_form_recall=0.96,
+        holdout_hypothesis_must_form_recall=0.8,
+        holdout_benign_precision=0.91,
+        holdout_useful_recall_lift_percentage_points=40,
+        holdout_evidence_disposition_precision=0.9,
+        holdout_represented_case_count=2,
         direct_must_form_recall=1,
         hypothesis_must_form_recall=1,
         benign_precision=0.96,

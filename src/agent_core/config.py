@@ -165,6 +165,12 @@ PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT = PACKAGE_ROOT / "memory" / "release_e
 REPOSITORY_ROOT = PACKAGE_ROOT.parents[1]
 MEMORY_FORMATION_CORPUS_PATH = Path("evals/capability/memory-formation.v2.json")
 MEMORY_DISTILLATION_CORPUS_PATH = Path("evals/capability/memory-formation.v3.json")
+# The frozen holdout: authored before its first run and never edited after,
+# with its digest recorded beside it and bound into every artifact.
+MEMORY_DISTILLATION_HOLDOUT_PATH = Path("evals/capability/memory-formation.v3-holdout.json")
+MEMORY_DISTILLATION_HOLDOUT_DIGEST_PATH = Path(
+    "evals/capability/memory-formation.v3-holdout.sha256"
+)
 
 
 def shipped_corpus_sha256(relative_path: Path) -> str | None:

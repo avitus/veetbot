@@ -50,9 +50,10 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@5`, the evidence schema is version 3 with a required
-`represented_case_count`, and the 67-case corpus carries a seeded case whose
-restated clause must be verifiably represented. Automatic selection therefore
+`distillation-scorer@5`, the evidence schema is version 4 with a required
+`represented_case_count` and the frozen holdout's digest and thresholds, the
+67-case development corpus carries a seeded case whose restated clause must be
+verifiably represented, and the 51-case holdout carries three. Automatic selection therefore
 activates `formation@10` for the production tuple until `agent eval
 memory-distillation` is re-run on the tree that deploys and its artifact is
 bundled here.

@@ -716,10 +716,9 @@ def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
 
     assert gate_failures(True) == []
     failures = gate_failures(False)
-    assert "rich-conversation-900 restates a seeded belief that was not verifiably represented" in (
-        failures
-    )
+    # The gate is the aggregate: one case is one anticipation call's chance.
     assert "no seeded case demonstrated attributed representation" in failures
+    assert not any("restates a seeded belief" in failure for failure in failures)
     assert memory_eval.represented_case_count(_results(corpus, represented_verified=True)) == 1
 
 
@@ -851,4 +850,71 @@ def test_claim_kind_coverage_counts_the_kind_the_provider_formed() -> None:
 
     assert any(
         failure.startswith("claim-kind coverage is incomplete: skill") for failure in failures
+    )
+
+
+def test_holdout_requires_three_seeded_restatements_and_every_kind(tmp_path: Path) -> None:
+    from agent_core.evals.memory_distillation import MemoryDistillationHoldout
+
+    root = Path(__file__).resolve().parents[2]
+    holdout, digest = memory_eval.load_distillation_holdout(root)
+    assert len(digest) == 64
+    represented = [case for case in holdout.cases if case.represented_text]
+    assert len(represented) >= 3
+    payload = holdout.model_dump(mode="json")
+    payload["cases"] = [case for case in payload["cases"] if not case.get("represented_text")]
+    with pytest.raises(ValidationError, match="three seeded cases"):
+        MemoryDistillationHoldout.model_validate(payload)
+    thin = holdout.model_dump(mode="json")
+    thin["cases"] = [
+        case
+        for case in thin["cases"]
+        if not any(expected["claim_kind"] == "resource" for expected in case["expected"])
+    ]
+    with pytest.raises(ValidationError, match="every claim kind"):
+        MemoryDistillationHoldout.model_validate(thin)
+
+
+def test_holdout_loader_refuses_an_edit_after_the_freeze(tmp_path: Path) -> None:
+    import shutil
+
+    root = Path(__file__).resolve().parents[2]
+    for relative in ("evals/capability", "src"):
+        (tmp_path / relative).mkdir(parents=True, exist_ok=True)
+    shutil.copy(root / "evals/capability/memory-formation.v3.json", tmp_path / "evals/capability/")
+    shutil.copy(
+        root / "evals/capability/memory-formation.v3-holdout.sha256", tmp_path / "evals/capability/"
+    )
+    edited = (
+        (root / "evals/capability/memory-formation.v3-holdout.json")
+        .read_text()
+        .replace("medieval cartography", "renaissance cartography", 1)
+    )
+    (tmp_path / "evals/capability/memory-formation.v3-holdout.json").write_text(edited)
+    with pytest.raises(ValueError, match="edited since its digest was frozen"):
+        memory_eval.load_distillation_holdout(tmp_path)
+
+
+def test_holdout_gates_mirror_the_thresholds_without_scenario_rules() -> None:
+    from agent_core.evals.memory_distillation import evaluate_holdout_gates
+
+    root = Path(__file__).resolve().parents[2]
+    holdout, _digest = memory_eval.load_distillation_holdout(root)
+    corpus_like = MemoryDistillationCorpus.model_construct(
+        cases=holdout.cases, seed_pools=holdout.seed_pools
+    )
+    results = _results(corpus_like, represented_verified=True)
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, results) for policy in memory_eval._POLICIES
+    }
+
+    assert evaluate_holdout_gates(results, summaries) == []
+    unrepresented = _results(corpus_like, represented_verified=False)
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, unrepresented)
+        for policy in memory_eval._POLICIES
+    }
+    assert (
+        "no holdout seeded case demonstrated attributed representation"
+        in evaluate_holdout_gates(unrepresented, summaries)
     )
