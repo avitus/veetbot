@@ -370,7 +370,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/milestone-map.md:1659"
     excerpt: "```text"
     digest: "b4a313791c1fbca2"
-  - cite: "docs/plan/readiness.md#docs/plan/model-gateway.md:1795"
+  - cite: "docs/plan/readiness.md#docs/plan/model-gateway.md:1810"
     excerpt: "10. `model_calls`, `model_prices`, `UsageRepository`, cost c"
     digest: "c2be30fe851cd120"
   - cite: "docs/plan/readiness.md#docs/plan/policy-and-approvals.md:1094-1095"

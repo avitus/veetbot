@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from typing import Any, cast
 
-from anthropic import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncAnthropic
+from anthropic import (
+    APIConnectionError,
+    APIError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncAnthropic,
+)
 
 from agent_core.adapters.models.common import (
     RawEventSource,
     as_mapping,
+    classify_provider_failure,
     failed_event,
-    nested,
+    should_retry_failure_event,
     text_content,
     tool_definition,
 )
@@ -41,7 +50,6 @@ from agent_core.domain.messages import (
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
 
-TRANSIENT_ERROR_TYPES = frozenset({"overloaded_error", "rate_limit_error", "api_error"})
 _ANTHROPIC_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 
@@ -122,17 +130,30 @@ class AnthropicMessagesProvider:
             return
         for internal_attempt in range(1, self._max_internal_attempts + 1):
             emitted_count = 0
+            retry_stream = False
             try:
-                async for event in self._translate(
-                    self._source(payload),
-                    request,
-                    resolved,
-                    attempt,
-                    sent=sent,
-                    dropped=dropped,
-                ):
-                    emitted_count = event.sequence + 1
-                    yield event
+                async with aclosing(
+                    self._translate(
+                        self._source(payload),
+                        request,
+                        resolved,
+                        attempt,
+                        sent=sent,
+                        dropped=dropped,
+                    )
+                ) as events:
+                    async for event in events:
+                        if should_retry_failure_event(
+                            event,
+                            internal_attempt=internal_attempt,
+                            max_internal_attempts=self._max_internal_attempts,
+                        ):
+                            retry_stream = True
+                            break
+                        emitted_count = event.sequence + 1
+                        yield event
+                if retry_stream:
+                    continue
                 return
             except (APIConnectionError, APITimeoutError):
                 if emitted_count == 0 and internal_attempt < self._max_internal_attempts:
@@ -148,14 +169,13 @@ class AnthropicMessagesProvider:
                 )
                 return
             except APIStatusError as exc:
-                error_type = _status_error_type(exc)
-                transient = (
-                    exc.status_code == 429
-                    or exc.status_code >= 500
-                    or error_type in TRANSIENT_ERROR_TYPES
+                failure = classify_provider_failure(
+                    exc.body,
+                    http_status=exc.status_code,
+                    fallback_code=f"http_{exc.status_code}",
                 )
                 if (
-                    transient
+                    failure.category == "transient"
                     and emitted_count == 0
                     and internal_attempt < self._max_internal_attempts
                 ):
@@ -165,20 +185,45 @@ class AnthropicMessagesProvider:
                     provider=self.name,
                     model=resolved.model,
                     sequence=emitted_count,
-                    category="transient" if transient else "permanent",
-                    provider_code=f"http_{exc.status_code}",
+                    category=failure.category,
+                    provider_code=failure.provider_code,
                     http_status=exc.status_code,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=emitted_count > 0,
                 )
                 return
-            except APIError:
+            except APIResponseValidationError:
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
                     sequence=emitted_count,
-                    category="permanent",
-                    provider_code="sdk_error",
+                    category="protocol",
+                    provider_code="sdk_response_invalid",
+                    stream_had_output=emitted_count > 0,
+                    detail="provider response failed SDK validation",
+                )
+                return
+            except APIError as exc:
+                failure = classify_provider_failure(
+                    exc.body,
+                    fallback_code="sdk_error",
+                    default_transient=True,
+                )
+                if (
+                    failure.category == "transient"
+                    and emitted_count == 0
+                    and internal_attempt < self._max_internal_attempts
+                ):
+                    continue
+                yield failed_event(
+                    attempt=attempt,
+                    provider=self.name,
+                    model=resolved.model,
+                    sequence=emitted_count,
+                    category=failure.category,
+                    provider_code=failure.provider_code,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=emitted_count > 0,
                 )
                 return
@@ -192,7 +237,7 @@ class AnthropicMessagesProvider:
         *,
         sent: int,
         dropped: int,
-    ) -> AsyncIterator[ModelEvent]:
+    ) -> AsyncGenerator[ModelEvent, None]:
         try:
             _, wire_to_canonical = _tool_name_maps(request)
         except ValueError:
@@ -428,15 +473,18 @@ class AnthropicMessagesProvider:
                 )
                 return
             elif event_type == "error":
-                code = nested(raw, "error", "type")
-                transient = code in TRANSIENT_ERROR_TYPES
+                failure = classify_provider_failure(
+                    raw,
+                    fallback_code="provider_error",
+                )
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
                     sequence=sequence,
-                    category="transient" if transient else "permanent",
-                    provider_code=None if code is None else str(code),
+                    category=failure.category,
+                    provider_code=failure.provider_code,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=sequence > 0,
                 )
                 return
@@ -586,11 +634,3 @@ def _optional_string(value: object) -> str | None:
 
 def _integer(value: object, *, default: int = 0) -> int:
     return value if type(value) is int and value >= 0 else default
-
-
-def _status_error_type(exc: APIStatusError) -> str | None:
-    body = exc.body
-    if not isinstance(body, dict):
-        return None
-    value = nested(body, "error", "type")
-    return None if value is None else str(value)

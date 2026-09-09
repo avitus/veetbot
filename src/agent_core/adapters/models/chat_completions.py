@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 import httpx
 
-from agent_core.adapters.models.common import RawEventSource, failed_event, text_content
+from agent_core.adapters.models.common import (
+    RawEventSource,
+    classify_provider_failure,
+    failed_event,
+    should_retry_failure_event,
+    text_content,
+)
 from agent_core.adapters.models.registry import CHAT_COMPLETIONS_CAPABILITY_CEILING
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -204,12 +211,23 @@ class ChatCompletionsProvider:
             return
         for internal_attempt in range(1, self._max_internal_attempts + 1):
             emitted_count = 0
+            retry_stream = False
             try:
-                async for event in self._translate(
-                    self._source(dict(payload), timeout), resolved, attempt
-                ):
-                    emitted_count = event.sequence + 1
-                    yield event
+                async with aclosing(
+                    self._translate(self._source(dict(payload), timeout), resolved, attempt)
+                ) as events:
+                    async for event in events:
+                        if should_retry_failure_event(
+                            event,
+                            internal_attempt=internal_attempt,
+                            max_internal_attempts=self._max_internal_attempts,
+                        ):
+                            retry_stream = True
+                            break
+                        emitted_count = event.sequence + 1
+                        yield event
+                if retry_stream:
+                    continue
                 return
             except httpx.TransportError:
                 if emitted_count == 0 and internal_attempt < self._max_internal_attempts:
@@ -226,9 +244,13 @@ class ChatCompletionsProvider:
                 return
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
-                transient = status == 429 or status >= 500
+                failure = classify_provider_failure(
+                    _response_body(exc.response),
+                    http_status=status,
+                    fallback_code=f"http_{status}",
+                )
                 if (
-                    transient
+                    failure.category == "transient"
                     and emitted_count == 0
                     and internal_attempt < self._max_internal_attempts
                 ):
@@ -238,9 +260,10 @@ class ChatCompletionsProvider:
                     provider=self.name,
                     model=resolved.model,
                     sequence=emitted_count,
-                    category="transient" if transient else "permanent",
-                    provider_code=f"http_{status}",
+                    category=failure.category,
+                    provider_code=failure.provider_code,
                     http_status=status,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=emitted_count > 0,
                 )
                 return
@@ -250,7 +273,7 @@ class ChatCompletionsProvider:
         source: AsyncIterator[dict[str, Any]],
         resolved: ResolvedModel,
         attempt: ModelAttempt,
-    ) -> AsyncIterator[ModelEvent]:
+    ) -> AsyncGenerator[ModelEvent, None]:
         sequence = 0
         accumulator = ModelStreamAccumulator()
         think = ThinkScrubber(self._think_open, self._think_close)
@@ -276,6 +299,22 @@ class ChatCompletionsProvider:
             return active_item_index
 
         async for raw in source:
+            if isinstance(raw.get("error"), dict):
+                failure = classify_provider_failure(
+                    raw,
+                    fallback_code="provider_error",
+                )
+                yield failed_event(
+                    attempt=attempt,
+                    provider=self.name,
+                    model=resolved.model,
+                    sequence=sequence,
+                    category=failure.category,
+                    provider_code=failure.provider_code,
+                    provider_parameter=failure.provider_parameter,
+                    stream_had_output=sequence > 0,
+                )
+                return
             if raw.get("type") == "malformed_sse":
                 yield failed_event(
                     attempt=attempt,
@@ -649,3 +688,11 @@ def _stop_reason(value: object, has_tools: bool) -> StopReason:
 
 def _optional_string(value: object) -> str | None:
     return None if value is None else str(value)
+
+
+def _response_body(response: httpx.Response) -> object:
+    try:
+        value = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}

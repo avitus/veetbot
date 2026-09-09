@@ -364,6 +364,14 @@ clients can diagnose a rejected field without receiving the provider's raw
 response body. The public `RunView` continues to omit `details` as required by
 the HTTP boundary.
 
+All adapters use one failure classifier for HTTP errors, SDK stream errors,
+and provider-native in-band error events. The classifier reads only the
+provider's closed-grammar code, type, and parameter fields; provider-controlled
+message text is neither logged nor copied into the neutral event. A response
+that fails the official SDK's structural validation is a
+`ModelProtocolError`, because the provider response violated the adapter's
+expected wire contract rather than rejecting the request.
+
 `stream_had_output` is what resolves the retry-ownership question below.
 
 `ModelProtocolError` is the gateway accusing the provider, not the model. It is
@@ -1346,12 +1354,19 @@ class ModelTransientError(ModelError):
 ```
 
 Before the first event reaches the caller, the adapter may retry internally:
-connection resets, TLS handshake failures, HTTP 429 and 5xx received before
-the stream opened, and provider overload responses. These are invisible to the
-caller by construction, since nothing was emitted, so retrying them in the
-adapter costs the caller nothing and keeps a large class of noise out of the
-runtime. The adapter honours `Retry-After` when present, uses exponential
-backoff with jitter otherwise, and caps at three internal attempts.
+connection resets, TLS handshake failures, HTTP 408, 409, 429, and 5xx received
+before the stream opened, and provider-coded timeout, rate-limit, overload,
+server, or temporary-unavailability failures. The same rule applies whether
+the failure arrived as an HTTP response, a bare SDK stream exception, or an
+in-band provider error event. A bare SDK stream exception with no safe
+diagnostic fields is transient before output; this prevents an isolated stream
+decoder failure from being misreported as a permanent request rejection.
+Known authentication, permission, invalid-request, and quota-exhaustion codes
+remain permanent even if the HTTP status would otherwise be retryable. These
+retries are invisible to the caller by construction, since nothing was
+emitted, so they keep a large class of provider noise out of the runtime. The
+adapter honours `Retry-After` when present, uses exponential backoff with
+jitter otherwise, and caps at three internal attempts.
 
 Once any event has been emitted, the adapter never retries. It emits
 `ModelFailedEvent` with `stream_had_output=True` and stops. The caller decides,
