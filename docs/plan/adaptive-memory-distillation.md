@@ -118,9 +118,14 @@ evaluated tree was committed as and must be an ancestor of the tree that
 bundles it. A release is a checkout, so startup also computes the digest of
 the corpus the running tree ships and activates no artifact, bundled or
 operator-supplied, whose digest differs; a tree without its corpora activates
-no provider policy and logs why. A running process cannot compare the build
-reference against itself, because the artifact is necessarily bundled in a
-later commit than the one it evaluated. A change to the scorer withdraws
+no provider policy and logs why. A bundled artifact's build reference is
+verified by ancestry at bundle time, because a running process cannot compare
+that reference against itself: the artifact is necessarily bundled in a later
+commit than the one it evaluated. An operator-supplied artifact never passes
+the bundle test, so the runtime holds it to the one commit it can name and
+activates it only when its build reference is the running release's commit;
+outside production, where no release identity exists, the file is accepted
+and the gap is logged. A change to the scorer withdraws
 every artifact published under
 the previous scorer; the `formation@9` artifact of 2026-09-03 was withdrawn on
 2026-09-04 for that reason (ADR-0087), and `auto` selects `formation@10` for
@@ -241,7 +246,10 @@ evidence.
 ### Segments and limits
 
 The output ceiling is 16,384 tokens, sized so a full ledger and its candidates
-fit. A batch is planned into segments before any call: a segment closes before
+fit. Every stage's response schema is submitted as strict structured output,
+so no object property may be optional: a defaulted field is rejected by the
+provider on every call and surfaces only as a fallback, which is how a
+defaulted `polarity` once zeroed a live evaluation. A batch is planned into segments before any call: a segment closes before
 the event that would carry it past ninety coverage units, two hundred and
 fifty-six events, or ninety-six kilobytes of source text, and an oversized
 single event forms its own segment. Each segment makes the three calls in
@@ -249,11 +257,14 @@ order, so a consolidation makes exactly three calls per segment and never a
 candidate-level call. One anticipation request covers every episode of a
 segment, so its prefix is the user text before the segment's earliest episode
 and contains no episode's own evidence; each cue names the sequence before
-which its evidence begins. The prefix keeps the most recent text under a bound
-of twice the segment byte limit, sending an oversized newest event as its
-tail, so a long consolidation's later segments do not resend the whole
-session; blinding is unaffected because nothing at or after the earliest
-episode is ever sent. There is no cost
+which its evidence begins. That text includes the session's already
+consolidated user events, not only the current batch: a continuing session's
+next consolidation is cued by what the user said earlier in it, which is what
+makes a restated fact predictable and therefore attributable. The prefix
+keeps the most recent text under a bound of twice the segment byte limit,
+sending an oversized newest event as its tail, so neither a long session nor
+a long consolidation's later segments resend everything; blinding is
+unaffected because nothing at or after the earliest episode is ever sent. There is no cost
 ceiling on the distiller; cost is recorded per stage and reported in evidence.
 
 A directly stated claim is not suppressed merely because a general model could
@@ -310,10 +321,12 @@ deterministic fallback recognizes the same forms itself and keys them the way
 the matching assertion would, and local validation rejects an assertion that
 cites a correction clause, a retraction that cites none, and a retraction
 whose statement is still affirmative. At commit, a retraction supersedes
-every live affirmative belief about the user whose statement contains what it
-negates, under whatever key that belief was filed, bounded to four; when
-nothing live matches, it is counted as `skipped_unmatched_retraction` and
-forms nothing. A correction can therefore update memory but never create it.
+every live affirmative belief about the user that has the same main verb and
+whose lemmatized content contains what it negates, under whatever key that
+belief was filed, bounded to four: "no longer runs outdoors" ends "is running
+outdoors every day" and "goes running outdoors most mornings" but not "tracks
+runs outdoors in a journal". When nothing live matches, it is counted as
+`skipped_unmatched_retraction` and forms nothing. A correction can therefore update memory but never create it.
 
 ## Capacity and ranking
 
@@ -445,8 +458,9 @@ Every proposed claim ends in exactly one content-free reason category:
 committed_direct        committed_hypothesis      reinforced
 promoted                redundant_attributed     superseded
 conflicted              rejected_provenance      rejected_credential
-rejected_injection      rejected_correction      displaced_per_source
-displaced_global        provider_invalid
+rejected_injection      rejected_correction      rejected_portability
+rejected_validation     displaced_per_source     displaced_global
+provider_invalid
 ```
 
 `ConsolidationRun` stores the category counts plus episode count, provider call
@@ -466,9 +480,36 @@ cases. At least seventy percent are positive. Every positive case is labeled
 `must_form` or `reasonable_to_form`; the narrow negative set is `must_not_form`.
 Each expected candidate declares claim kind, derivation, longevity, canonical
 subject and statement alternatives, and exact evidence text; a subject is a
-specific conflict key, never the user. Coverage includes every claim kind,
-direct and hypothesis formation, compound utterances, corroboration and
-promotion, correction, retirement, and self-citation.
+specific conflict key, never the user. A direct expectation may also declare
+up to three compatible kinds, the kinds a correct belief could reasonably
+carry instead: a stated training history is a skill to the label author and a
+project fact to the model, and both are the same memory. Compatible kinds are
+assigned by the shape of the claim, never by what a model happened to
+produce, from this table; a hypothesis declares none.
+
+| Claim shape | Primary kind | Compatible kinds |
+| --- | --- | --- |
+| stated experience or training history | skill (habit when labelled as a routine) | project_fact (plus skill) |
+| stated occupation | skill | role, project_fact |
+| activity program with a schedule | habit | project_fact, ongoing_project |
+| routine or chore | habit | project_fact, recurring_state |
+| recurring condition | recurring_state | project_fact (habit when it is also a routine) |
+| something being built or planned | ongoing_project | project_fact, goal |
+| a wish or aim | goal | ongoing_project (project_fact for a team's aim) |
+| a wish about how the agent should answer | preference | goal, constraint |
+| a position held | role | project_fact |
+| an interest | interest | preference |
+| a preference | preference | constraint |
+| a constraint | constraint | preference, project_fact |
+| a family member | relationship | none |
+| a fact about a family member's situation | project_fact or relationship | the other |
+| a recurring activity of a family member | relationship | recurring_state, project_fact |
+| a resource or its location | resource | project_fact |
+| a technical fact about the user's project | project_fact | resource |
+
+Coverage includes every claim kind, direct and hypothesis formation, compound
+utterances, corroboration and promotion, correction, retirement, and
+self-citation.
 
 The corpus also declares seed pools of realistic prior beliefs. A positive
 case may name a pool, and the evaluator writes those beliefs through the
@@ -478,9 +519,24 @@ populated production store. At least one positive multi-event case and the
 rich production conversation run against a pool of at least twenty-five
 beliefs.
 
-Scoring is `distillation-scorer@3`. A belief matches a gold claim when its
-closed fields agree, its subject names the gold conflict key, and its statement
-is equivalent: equal after normalization, or sharing three quarters of the
+That corpus is the development set: it may be tuned, and its alternatives
+have been edited after observing model output. Independent evidence comes
+from the frozen holdout, `evals/capability/memory-formation.v3-holdout.json`:
+at least thirty cases authored before their first run, every claim kind, both
+derivations, must-not-form cases, and at least three seeded cases that
+restate a seed across a segment boundary. Its digest is recorded beside it in
+`memory-formation.v3-holdout.sha256`; the loader refuses a holdout whose
+content no longer matches the record, so any edit is a deliberate re-freeze
+that shows in review and invalidates every artifact bound to the old digest.
+The evaluator scores every run on both sets, the artifact carries both
+digests and the holdout's own recall, precision, lift, disposition, and
+represented counts, and activation binds the holdout digest exactly as it
+binds the corpus digest.
+
+Scoring is `distillation-scorer@5`. A belief matches a gold claim when its
+derivation agrees, its claim kind is the gold kind with the gold longevity or a
+compatible kind with the longevity local policy assigns that kind, its subject
+names the gold conflict key, and its statement is equivalent: equal after normalization, or sharing three quarters of the
 combined content terms with the same polarity, the same absence conditions,
 the same counts, the same large numbers when both carry one, the same object
 after every directional marker both share, the terms they share in the same
@@ -489,13 +545,18 @@ removed absence conditions, different counts or distances, reversed
 comparisons or origins, swapped arguments, and sibling activities never
 match. Negation is scoped to the clause: a negation inside a subordinate
 circumstance qualifies a claim rather than denying it, and a fronted
-circumstance ends at its comma so it cannot hide the main clause's negation.
+circumstance ends at its comma, or without one where the main clause's
+subject begins, so it cannot hide the main clause's negation.
 The same compatibility floor and term order decide whether a live memory
 represents a clause. Two candidates in one batch merge only when they are one
 claim: compatible, with shared names in one order, and either nesting or
-sharing most of the smaller statement's content; a second claim under the
-same subject and kind is filed under a key extended with its distinguishing
-words rather than dropped. The frozen `formation@7` and `formation@8` controls
+sharing most of the smaller statement's content; of two wordings of one
+claim the richer survives and a tie goes to the provider's over the
+fallback's, whose kind is a default and whose key is composed from source
+words; a second claim under the same subject and kind is filed under a key
+extended with its distinguishing words, or with its names in order when the
+two claims share every word, or with an ordinal when nothing else separates
+them, rather than dropped. The frozen `formation@7` and `formation@8` controls
 cannot express the closed fields, so they are scored on statement equivalence
 alone and the lift threshold compares `formation@9` strict recall against that
 lenient control recall. The scorer version is recorded in every result and
@@ -548,7 +609,9 @@ Publication requires:
 - precision against exhaustive, semantic-paraphrase-aware gold claims over
   benign positive and negative cases is at least 90 percent;
 - useful recall is at least fifteen percentage points above `formation@8`;
-- every claim kind has a positive case and the personal-agent core passes;
+- every claim kind has a positive case, counted by the kind the provider
+  formed rather than the kind the label names, and the personal-agent core
+  passes;
 - measurable user correction or rejection is below ten per one hundred
   automatically formed memories;
 - at least three quarters of the clauses the gold labels as evidence are formed
@@ -556,7 +619,11 @@ Publication requires:
   memory;
 - at least one positive case ran against a populated store, and at least one
   seeded case that restates a seeded belief across a segment boundary had that
-  clause verifiably represented by an anticipation attributed to the seed;
+  clause verifiably represented by an anticipation attributed to the seed; the
+  gate is the aggregate, because one case is one anticipation call's chance;
+- the frozen holdout passes the same recall, precision, lift, disposition,
+  boundary, call-count, and represented thresholds, with none of the corpus's
+  named-scenario rules;
 - every eligible consolidation made exactly three calls per planned segment,
   and the artifact records the measured call and consolidation totals;
 - all lifecycle timing, promotion, and self-citation checks pass, and the

@@ -170,9 +170,15 @@ def test_distillation_scorer_rejects_a_generic_user_subject() -> None:
             "User ran 200 miles in training for the marathon last month.",
         ),
         ("User hired Alice and fired Bob.", "User hired Bob and fired Alice."),
+        ("User lent Alice Bob's book.", "User lent Bob Alice's book."),
+        ("The cat chased the dog in the garden.", "The dog chased the cat in the garden."),
         (
             "User takes important client meetings remotely on Fridays.",
             "Although busy, User does not take important client meetings remotely on Fridays.",
+        ),
+        (
+            "User takes important client meetings remotely on Fridays.",
+            "Although busy User does not take important client meetings remotely on Fridays.",
         ),
     ],
 )
@@ -201,6 +207,11 @@ def test_scorer_never_equates_supersets_negations_counts_or_siblings(
         ),
         ("User prefers tea over coffee.", "User prefers tea to coffee."),
         ("User does not drive to work.", "User doesn't drive to work."),
+        # One displaced shared term is a paraphrase, not a swapped argument.
+        (
+            "User wants to modify the standard 5x5 strength-training routine to improve it.",
+            "User wants to improve their standard 5x5 strength training routine.",
+        ),
     ],
 )
 def test_scorer_accepts_equivalent_wording(candidate: str, reference: str) -> None:
@@ -253,6 +264,7 @@ def _corpus_payload(**overrides: object) -> dict[str, Any]:
                         "claim_kind": kind.value,
                         "derivation": "direct",
                         "longevity": "durable",
+                        "compatible_kinds": ["project_fact"] if kind.value == "skill" else [],
                         "subjects": [f"item {index}"],
                         "statements": [f"User keeps item {index} in the Blue folder."],
                         "evidence_text": [f"item {index}"],
@@ -564,6 +576,10 @@ def test_live_evaluation_refuses_a_dirty_or_mismatched_tree(
             "When travelling, I cannot take meetings on Fridays",
         ),
         ("User hired Alice and fired Bob.", "I fired Alice and hired Bob"),
+        (
+            "User takes important client meetings remotely on Fridays.",
+            "Although busy I do not take important client meetings remotely on Fridays",
+        ),
     ],
 )
 def test_clause_support_rejects_polarity_count_and_direction_changes(
@@ -606,7 +622,7 @@ def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
 def test_scorer_version_advanced_with_its_semantics() -> None:
     """A changed scorer cannot keep the version an old artifact was published under."""
 
-    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@3"
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@5"
 
 
 def test_represented_text_requires_a_pool_and_exact_user_text() -> None:
@@ -700,10 +716,9 @@ def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
 
     assert gate_failures(True) == []
     failures = gate_failures(False)
-    assert "rich-conversation-900 restates a seeded belief that was not verifiably represented" in (
-        failures
-    )
+    # The gate is the aggregate: one case is one anticipation call's chance.
     assert "no seeded case demonstrated attributed representation" in failures
+    assert not any("restates a seeded belief" in failure for failure in failures)
     assert memory_eval.represented_case_count(_results(corpus, represented_verified=True)) == 1
 
 
@@ -716,6 +731,19 @@ def test_publication_requires_a_verifiably_represented_seeded_clause() -> None:
         ("User bikes on some days when not doing the 5x5 strength routine.", False),
         ("User swims when it is not raining.", False),
         ("User runs without music.", False),
+        # A fronted subordinate clause with no comma still ends where the main
+        # clause's subject begins.
+        ("Although busy I do not take important client meetings remotely on Fridays.", True),
+        ("When travelling I cannot take meetings on Fridays", True),
+        ("When I am not lifting I run", False),
+        ("If it is not raining user runs outdoors", False),
+        ("User bikes on days when I am not lifting", False),
+        # A fronted subordinate clause that ends at a comma or semicolon is
+        # a circumstance in full, even when it carries its own subject and
+        # negation; the subject search applies only without a separator.
+        ("Although I do not run, User bikes.", False),
+        ("Although I do not run; User bikes.", False),
+        ("Although I run User does not bike", True),
     ],
 )
 def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -> None:
@@ -724,3 +752,188 @@ def test_negation_is_scoped_to_the_main_clause(statement: str, expected: bool) -
     from agent_core.memory.equivalence import negated
 
     assert negated(statement) is expected
+
+
+def test_affirmative_main_clause_stays_compatible_after_a_negated_fronted_clause() -> None:
+    """A negation confined to a comma-terminated fronted clause is not a denial.
+
+    "Although I do not run, User bikes." asserts that the user bikes; the
+    compatibility floor must not read the circumstance's "not" as the claim's
+    polarity and reject the affirmative belief.
+    """
+
+    from agent_core.memory.equivalence import statements_compatible
+
+    assert statements_compatible("Although I do not run, User bikes.", "User bikes.")
+
+
+def test_compatible_kinds_match_with_the_longevity_local_policy_assigns() -> None:
+    """A gold claim may name kinds a correct belief could reasonably carry.
+
+    "Restarted 5x5 a year ago" is a skill to the label author and a project
+    fact to the model; both are the same memory. A belief filed under a
+    compatible kind matches only with the longevity local policy assigns that
+    kind, so the loosening is bounded to taxonomy and never reaches the
+    lifecycle a memory will get.
+    """
+
+    case = _case(
+        expected=[
+            {
+                "claim_kind": "skill",
+                "derivation": "direct",
+                "longevity": "durable",
+                "compatible_kinds": ["project_fact"],
+                "subjects": ["5x5 history"],
+                "statements": ["User restarted 5x5 a year ago."],
+                "evidence_text": ["marathon"],
+            }
+        ]
+    )
+    as_project_fact = _belief(
+        claim_kind="project_fact",
+        derivation="direct",
+        longevity="ongoing",
+        subject="5x5 history",
+        statement="User restarted 5x5 a year ago.",
+    )
+    wrong_longevity = as_project_fact.model_copy(update={"longevity": MemoryLongevity.DURABLE})
+    as_habit = as_project_fact.model_copy(
+        update={"claim_kind": MemoryClaimKind.HABIT, "longevity": MemoryLongevity.ONGOING}
+    )
+    primary = as_project_fact.model_copy(
+        update={"claim_kind": MemoryClaimKind.SKILL, "longevity": MemoryLongevity.DURABLE}
+    )
+
+    assert score_distillation_case(case, [as_project_fact]).matched == 1
+    assert score_distillation_case(case, [wrong_longevity]).matched == 0
+    assert score_distillation_case(case, [as_habit]).matched == 0
+    assert score_distillation_case(case, [primary]).matched == 1
+
+
+def test_compatible_kinds_are_bounded_and_exclude_the_primary_kind() -> None:
+    base = {
+        "claim_kind": "skill",
+        "derivation": "direct",
+        "longevity": "durable",
+        "subjects": ["5x5 history"],
+        "statements": ["User restarted 5x5 a year ago."],
+        "evidence_text": ["marathon"],
+    }
+    with pytest.raises(ValidationError, match="primary"):
+        _case(expected=[{**base, "compatible_kinds": ["skill"]}])
+    with pytest.raises(ValidationError):
+        _case(expected=[{**base, "compatible_kinds": ["project_fact", "habit", "role", "goal"]}])
+    with pytest.raises(ValidationError, match="unique"):
+        _case(expected=[{**base, "compatible_kinds": ["project_fact", "project_fact"]}])
+
+
+def test_claim_kind_coverage_counts_the_kind_the_provider_formed() -> None:
+    """Matching through a compatible kind must not certify the kind it avoided."""
+
+    corpus = MemoryDistillationCorpus.model_validate(_corpus_payload())
+    results = _results(corpus, represented_verified=True)
+    rewritten = []
+    for result in results:
+        arm = result.arms["formation@9"]
+        beliefs = [
+            belief.model_copy(
+                update={
+                    "claim_kind": MemoryClaimKind.PROJECT_FACT,
+                    "longevity": (
+                        MemoryLongevity.TENTATIVE
+                        if belief.derivation is MemoryDerivation.HYPOTHESIS
+                        else MemoryLongevity.ONGOING
+                    ),
+                }
+            )
+            if belief.claim_kind is MemoryClaimKind.SKILL
+            else belief
+            for belief in arm.beliefs
+        ]
+        rewritten.append(
+            result.model_copy(
+                update={
+                    "arms": {
+                        **result.arms,
+                        "formation@9": arm.model_copy(update={"beliefs": beliefs}),
+                    }
+                }
+            )
+        )
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, rewritten) for policy in memory_eval._POLICIES
+    }
+
+    failures = memory_eval.evaluate_publication_gates(corpus, rewritten, summaries)
+
+    assert any(
+        failure.startswith("claim-kind coverage is incomplete: skill") for failure in failures
+    )
+
+
+def test_holdout_requires_three_seeded_restatements_and_every_kind(tmp_path: Path) -> None:
+    from agent_core.evals.memory_distillation import MemoryDistillationHoldout
+
+    root = Path(__file__).resolve().parents[2]
+    holdout, digest = memory_eval.load_distillation_holdout(root)
+    assert len(digest) == 64
+    represented = [case for case in holdout.cases if case.represented_text]
+    assert len(represented) >= 3
+    payload = holdout.model_dump(mode="json")
+    payload["cases"] = [case for case in payload["cases"] if not case.get("represented_text")]
+    with pytest.raises(ValidationError, match="three seeded cases"):
+        MemoryDistillationHoldout.model_validate(payload)
+    thin = holdout.model_dump(mode="json")
+    thin["cases"] = [
+        case
+        for case in thin["cases"]
+        if not any(expected["claim_kind"] == "resource" for expected in case["expected"])
+    ]
+    with pytest.raises(ValidationError, match="every claim kind"):
+        MemoryDistillationHoldout.model_validate(thin)
+
+
+def test_holdout_loader_refuses_an_edit_after_the_freeze(tmp_path: Path) -> None:
+    import shutil
+
+    root = Path(__file__).resolve().parents[2]
+    for relative in ("evals/capability", "src"):
+        (tmp_path / relative).mkdir(parents=True, exist_ok=True)
+    shutil.copy(root / "evals/capability/memory-formation.v3.json", tmp_path / "evals/capability/")
+    shutil.copy(
+        root / "evals/capability/memory-formation.v3-holdout.sha256", tmp_path / "evals/capability/"
+    )
+    edited = (
+        (root / "evals/capability/memory-formation.v3-holdout.json")
+        .read_text()
+        .replace("medieval cartography", "renaissance cartography", 1)
+    )
+    (tmp_path / "evals/capability/memory-formation.v3-holdout.json").write_text(edited)
+    with pytest.raises(ValueError, match="edited since its digest was frozen"):
+        memory_eval.load_distillation_holdout(tmp_path)
+
+
+def test_holdout_gates_mirror_the_thresholds_without_scenario_rules() -> None:
+    from agent_core.evals.memory_distillation import evaluate_holdout_gates
+
+    root = Path(__file__).resolve().parents[2]
+    holdout, _digest = memory_eval.load_distillation_holdout(root)
+    corpus_like = MemoryDistillationCorpus.model_construct(
+        cases=holdout.cases, seed_pools=holdout.seed_pools
+    )
+    results = _results(corpus_like, represented_verified=True)
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, results) for policy in memory_eval._POLICIES
+    }
+
+    assert evaluate_holdout_gates(results, summaries) == []
+    unrepresented = _results(corpus_like, represented_verified=False)
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, unrepresented)
+        for policy in memory_eval._POLICIES
+    }
+    assert (
+        "no holdout seeded case demonstrated attributed representation"
+        in evaluate_holdout_gates(unrepresented, summaries)
+    )

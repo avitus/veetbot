@@ -6,7 +6,9 @@ The runtime loads only `*.json` files and requires an exact extractor,
 formation-policy, model-policy, provider, model, policy-profile, and compiled-
 policy-version match, and a `corpus_sha256` equal to the digest of the corpus
 the running checkout ships; an operator-supplied artifact is held to the same
-digest, so a schema-valid file with an invented digest activates nothing. One artifact per formation policy per tuple: startup
+digest and, in production, to a `build_ref` that is the running release's
+commit, so a schema-valid file with an invented digest or build activates
+nothing. One artifact per formation policy per tuple: startup
 prefers matching `formation@9` evidence, then `formation@10`, then
 `formation@8`, and records a content-free deterministic-fallback audit when
 none matches; `required` mode refuses startup instead. The operator pin
@@ -48,9 +50,10 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@3`, the evidence schema is version 3 with a required
-`represented_case_count`, and the 67-case corpus carries a seeded case whose
-restated clause must be verifiably represented. Automatic selection therefore
+`distillation-scorer@5`, the evidence schema is version 4 with a required
+`represented_case_count` and the frozen holdout's digest and thresholds, the
+67-case development corpus carries a seeded case whose restated clause must be
+verifiably represented, and the 51-case holdout carries three. Automatic selection therefore
 activates `formation@10` for the production tuple until `agent eval
 memory-distillation` is re-run on the tree that deploys and its artifact is
 bundled here.
@@ -67,7 +70,7 @@ scorer equated negations, counts, supersets, and sibling activities, its corpus
 had been edited toward the implementation, every case ran against an empty
 store, and its build reference was an operator-typed label. A `formation@9`
 artifact may be bundled only when it carries `scorer_version`
-`distillation-scorer@3`, a forty-character commit `build_ref` that is an
+`distillation-scorer@5`, a forty-character commit `build_ref` that is an
 ancestor of the bundling tree, the digest of the checked-in corpus, at least
 one seeded case, at least one verifiably represented seeded case, the
 evidence-disposition precision, and the measured provider cost under the

@@ -112,14 +112,12 @@ tree; the bundle test now refuses that mismatch, and the starved
 `formation@8` artifact is withdrawn in favor of `formation@10`. On 2026-09-04
 an independent review reproduced eight release-blocking defects; each is
 fixed with a regression test (ADR-0087), the scorer advanced to
-`distillation-scorer@3`, and the `formation@9` artifact evaluated under the
+`distillation-scorer@5`, and the `formation@9` artifact evaluated under the
 old scorer is withdrawn, so `formation@10` serves the production tuple until
 `formation@9` is re-evaluated on the deploying tree. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Re-evaluate formation@9 under distillation-scorer@3 on the deploying tree and rebundle its artifact; formation@10 serves the tuple until then
-- [ ] Author a frozen holdout corpus, never edited after observing model output, and require it before a formation@9 artifact activates (ADR-0087)
-- [ ] Decide how anticipation obtains a cue on single-segment consolidations, where the blinded prefix is empty by construction
+- [ ] Owner review of the frozen holdout, then the first scorer@5 run on the deploying tree over both case sets and the formation@9 rebundle; formation@10 serves the tuple until then
 
 ### Milestone 22 — Persona surface and curated belief promotion
 

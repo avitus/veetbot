@@ -55,9 +55,12 @@ from agent_core.domain.messages import (
     UsageEvent,
     UserMessage,
 )
-from agent_core.evals.memory_distillation import load_distillation_corpus
+from agent_core.evals.memory_distillation import (
+    load_distillation_corpus,
+    load_distillation_holdout,
+)
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
-from agent_core.memory.formation import DeterministicCandidateExtractor
+from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
     REPAIRED_PROVIDER_EXTRACTOR_VERSION,
@@ -691,6 +694,89 @@ async def test_provider_semantic_claims_render_canonical_memories(
         (candidate.belief_type.value, candidate.subject, candidate.statement)
         for candidate in candidates
     ] == [expected]
+
+
+async def test_repaired_provider_clamps_uncle_relationship_before_commit() -> None:
+    """An over-portable relationship proposal is narrowed, not discarded.
+
+    This is the exact candidate shape returned in production for the transfer
+    conversation. The provider owns neither the final prose nor the maximum
+    portability, so local rendering must correct both before consolidation.
+    """
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(
+        factory,
+        "My uncle wants to send me AUS$1000 from Perth. What is the best option?",
+    )
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "relationship",
+                    "subject": "uncle",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "My uncle wants to send me AUS$1000 from Perth.",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.99,
+                    "proposed_portability": "portable",
+                    "sensitivity_guess": "public",
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        },
+        separators=(",", ":"),
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(7_200, 7_300)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_repaired_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+        formation_policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(7_300, 7_400)),
+        principal(),
+        extractor=extractor,
+        policy_version=REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
+    )
+
+    result = await service.run(
+        trigger="session_closed",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert result.run.candidates_proposed == 1
+    assert result.run.committed == 1
+    assert result.run.rejected == 0
+    assert result.run.decision_counts == {"committed_direct": 1}
+    assert len(result.beliefs) == 1
+    belief = result.beliefs[0]
+    assert belief.subject == "uncle"
+    assert belief.statement == "User has an uncle."
+    assert belief.portability is Portability.CONTEXTUAL
+    assert belief.sensitivity is Sensitivity.SENSITIVE
+    assert belief.source_event_ids == [source]
 
 
 async def test_provider_keeps_valid_grounded_claims_when_one_claim_cannot_render() -> None:
@@ -2281,6 +2367,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # fabricated artifact must carry the real digest to activate anything here.
 _FORMATION_CORPUS_SHA256 = load_formation_corpus(_REPOSITORY_ROOT)[1]
 _DISTILLATION_CORPUS_SHA256 = load_distillation_corpus(_REPOSITORY_ROOT)[1]
+_DISTILLATION_HOLDOUT_SHA256 = load_distillation_holdout(_REPOSITORY_ROOT)[1]
 
 
 def _distillation_evidence() -> MemoryDistillationEvidence:
@@ -2290,13 +2377,22 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version=_runtime_policy_version(),
-        scorer_version="distillation-scorer@3",
+        scorer_version="distillation-scorer@5",
         build_ref=_DISTILLATION_BUILD_REF,
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=61,
         positive_case_count=49,
         seeded_case_count=5,
         represented_case_count=1,
+        holdout_sha256=_DISTILLATION_HOLDOUT_SHA256,
+        holdout_sample_count=40,
+        holdout_positive_case_count=32,
+        holdout_direct_must_form_recall=0.96,
+        holdout_hypothesis_must_form_recall=0.8,
+        holdout_benign_precision=0.91,
+        holdout_useful_recall_lift_percentage_points=40,
+        holdout_evidence_disposition_precision=0.9,
+        holdout_represented_case_count=2,
         direct_must_form_recall=1,
         hypothesis_must_form_recall=1,
         benign_precision=0.96,
@@ -2548,6 +2644,48 @@ def test_provider_claim_sensitivity_is_clamped_to_the_claim_kind_floor(
     )
     candidate = _render_claim(claim, "project-a")
     assert candidate.sensitivity_guess.value == expected
+
+
+@pytest.mark.parametrize(
+    ("proposed", "expected"),
+    [
+        (Portability.PORTABLE, Portability.CONTEXTUAL),
+        (Portability.CONTEXTUAL, Portability.CONTEXTUAL),
+        (Portability.LOCAL, Portability.LOCAL),
+    ],
+)
+def test_provider_relationship_portability_is_clamped_without_widening(
+    proposed: Portability,
+    expected: Portability,
+) -> None:
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind.RELATIONSHIP,
+        subject="uncle",
+        value=None,
+        context=None,
+        quantity=1,
+        evidence_quote="My uncle",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[1],
+        model_confidence=0.99,
+        proposed_portability=proposed,
+        sensitivity_guess=Sensitivity.PUBLIC,
+        valid_from=None,
+        expires_hint=None,
+    )
+
+    from agent_core.memory.provider_extraction import _render_claim
+
+    candidate = _render_claim(claim, "general")
+
+    assert candidate.proposed_portability is expected
+
+
+def test_provider_instructions_explain_the_portability_ceiling() -> None:
+    instructions = ProviderAssistedCandidateExtractor._instructions()
+
+    assert "Relationships and project facts cannot be portable" in instructions
+    assert "You may choose a more restrictive portability" in instructions
 
 
 @pytest.mark.parametrize(
@@ -3316,3 +3454,45 @@ async def test_operator_evidence_with_an_invented_corpus_digest_does_not_activat
         selections = await uow.process_events.list("memory.provider_extraction.selection")
     assert selections[0].payload["outcome"] == "activated"
     assert selections[0].payload["evidence_corpus_sha256"] == _DISTILLATION_CORPUS_SHA256
+
+
+async def test_operator_evidence_must_be_built_from_the_running_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An operator-supplied artifact activates only when built from the deployed commit.
+
+    The bundle test checks bundled artifacts by ancestry, but an operator file
+    never passes through it, so the runtime holds it to the one commit it can
+    name: the running release. A forged forty-character sha therefore
+    activates nothing.
+    """
+
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(config_module, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", release_root)
+    deployed = "9edd2630000000000000000000000000000abcde"
+    forged = tmp_path / "operator-forged.json"
+    forged.write_text(_distillation_evidence().model_dump_json(), encoding="utf-8")
+    genuine = tmp_path / "operator-genuine.json"
+    genuine.write_text(
+        _distillation_evidence().model_copy(update={"build_ref": deployed}).model_dump_json(),
+        encoding="utf-8",
+    )
+    base = replace(
+        memory_settings(),
+        memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,
+        release_id="20260906-182456-9edd263",
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    async def outcome(path: Path) -> dict[str, object]:
+        settings = replace(base, memory_provider_extraction_evidence=path)
+        async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+            selections = await uow.process_events.list("memory.provider_extraction.selection")
+        assert len(selections) == 1
+        return dict(selections[0].payload)
+
+    assert (await outcome(forged))["outcome"] != "activated"
+    activated = await outcome(genuine)
+    assert activated["outcome"] == "activated"
+    assert activated["evidence_build_ref"] == deployed

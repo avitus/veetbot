@@ -20,7 +20,7 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:487-497). That surface is right for an
+(memory-formation-and-consolidation.md:490-500). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 

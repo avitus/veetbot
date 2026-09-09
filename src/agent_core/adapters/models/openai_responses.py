@@ -5,16 +5,26 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from typing import Any, cast
 
-from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+)
 
 from agent_core.adapters.models.common import (
     RawEventSource,
     as_mapping,
+    classify_provider_failure,
     failed_event,
     nested,
+    should_retry_failure_event,
     text_content,
     tool_definition,
 )
@@ -37,8 +47,6 @@ from agent_core.domain.messages import (
     ToolCallItem,
     ToolResultItem,
     UserMessage,
-    sanitize_provider_code,
-    sanitize_provider_parameter,
 )
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
@@ -66,17 +74,6 @@ def _tool_name_maps(request: ModelRequest) -> tuple[dict[str, str], dict[str, st
         canonical_to_wire[tool.name] = wire_name
         wire_to_canonical[wire_name] = tool.name
     return canonical_to_wire, wire_to_canonical
-
-
-def _status_error_field(error: APIStatusError, field: str) -> str | None:
-    body = error.body
-    if not isinstance(body, dict):
-        return None
-    nested_error = body.get("error", body)
-    if not isinstance(nested_error, dict):
-        return None
-    value = nested_error.get(field)
-    return value if isinstance(value, str) else None
 
 
 class OpenAIResponsesProvider:
@@ -139,12 +136,23 @@ class OpenAIResponsesProvider:
 
         for internal_attempt in range(1, self._max_internal_attempts + 1):
             emitted_count = 0
+            retry_stream = False
             try:
-                async for event in self._translate(
-                    self._source(payload), request, resolved, attempt
-                ):
-                    emitted_count = event.sequence + 1
-                    yield event
+                async with aclosing(
+                    self._translate(self._source(payload), request, resolved, attempt)
+                ) as events:
+                    async for event in events:
+                        if should_retry_failure_event(
+                            event,
+                            internal_attempt=internal_attempt,
+                            max_internal_attempts=self._max_internal_attempts,
+                        ):
+                            retry_stream = True
+                            break
+                        emitted_count = event.sequence + 1
+                        yield event
+                if retry_stream:
+                    continue
                 return
             except (APIConnectionError, APITimeoutError):
                 if emitted_count == 0 and internal_attempt < self._max_internal_attempts:
@@ -160,44 +168,67 @@ class OpenAIResponsesProvider:
                 )
                 return
             except APIStatusError as exc:
-                transient = exc.status_code == 429 or exc.status_code >= 500
+                failure = classify_provider_failure(
+                    exc.body,
+                    http_status=exc.status_code,
+                    fallback_code=f"http_{exc.status_code}",
+                )
                 if (
-                    transient
+                    failure.category == "transient"
                     and emitted_count == 0
                     and internal_attempt < self._max_internal_attempts
                 ):
                     continue
-                provider_code = (
-                    sanitize_provider_code(_status_error_field(exc, "code"))
-                    or f"http_{exc.status_code}"
-                )
-                provider_parameter = sanitize_provider_parameter(_status_error_field(exc, "param"))
                 logger.warning(
                     "openai_request_rejected status=%s code=%s parameter=%s",
                     exc.status_code,
-                    provider_code,
-                    provider_parameter or "none",
+                    failure.provider_code,
+                    failure.provider_parameter or "none",
                 )
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
                     sequence=emitted_count,
-                    category="transient" if transient else "permanent",
-                    provider_code=provider_code,
+                    category=failure.category,
+                    provider_code=failure.provider_code,
                     http_status=exc.status_code,
-                    provider_parameter=provider_parameter,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=emitted_count > 0,
                 )
                 return
-            except APIError:
+            except APIResponseValidationError:
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
                     sequence=emitted_count,
-                    category="permanent",
-                    provider_code="sdk_error",
+                    category="protocol",
+                    provider_code="sdk_response_invalid",
+                    stream_had_output=emitted_count > 0,
+                    detail="provider response failed SDK validation",
+                )
+                return
+            except APIError as exc:
+                failure = classify_provider_failure(
+                    exc.body,
+                    fallback_code="sdk_error",
+                    default_transient=True,
+                )
+                if (
+                    failure.category == "transient"
+                    and emitted_count == 0
+                    and internal_attempt < self._max_internal_attempts
+                ):
+                    continue
+                yield failed_event(
+                    attempt=attempt,
+                    provider=self.name,
+                    model=resolved.model,
+                    sequence=emitted_count,
+                    category=failure.category,
+                    provider_code=failure.provider_code,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=emitted_count > 0,
                 )
                 return
@@ -208,7 +239,7 @@ class OpenAIResponsesProvider:
         request: ModelRequest,
         resolved: ResolvedModel,
         attempt: ModelAttempt,
-    ) -> AsyncIterator[ModelEvent]:
+    ) -> AsyncGenerator[ModelEvent, None]:
         try:
             _, wire_to_canonical = _tool_name_maps(request)
         except ValueError:
@@ -369,18 +400,21 @@ class OpenAIResponsesProvider:
                 )
                 return
             elif event_type in {"response.failed", "error"}:
-                code = nested(raw, "response", "error", "code") or nested(raw, "error", "code")
-                parameter = nested(raw, "response", "error", "param") or nested(
-                    raw, "error", "param"
+                body = raw.get("response")
+                if not isinstance(body, dict):
+                    body = raw
+                failure = classify_provider_failure(
+                    body,
+                    fallback_code="provider_error",
                 )
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
                     sequence=sequence,
-                    category="permanent",
-                    provider_code=None if code is None else str(code),
-                    provider_parameter=None if parameter is None else str(parameter),
+                    category=failure.category,
+                    provider_code=failure.provider_code,
+                    provider_parameter=failure.provider_parameter,
                     stream_had_output=sequence > 0,
                 )
                 terminal = True

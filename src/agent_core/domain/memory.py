@@ -425,8 +425,8 @@ class MemoryDistillationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[3] = 3
-    scorer_version: Literal["distillation-scorer@3"]
+    schema_version: Literal[4] = 4
+    scorer_version: Literal["distillation-scorer@5"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
     model_policy: str = Field(min_length=1)
@@ -454,6 +454,18 @@ class MemoryDistillationEvidence(BaseModel):
     # The share of gold-evidence clauses the provider formed or represented
     # rather than labelled away as transient, unsafe, or not memory.
     evidence_disposition_precision: float = Field(ge=0.75, le=1)
+    # The frozen holdout the same run was scored on: cases authored before
+    # their first run and never edited after, so these numbers are the ones a
+    # reader may treat as independent of the development corpus above.
+    holdout_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    holdout_sample_count: int = Field(ge=30)
+    holdout_positive_case_count: int = Field(ge=20)
+    holdout_direct_must_form_recall: float = Field(ge=0.95, le=1)
+    holdout_hypothesis_must_form_recall: float = Field(ge=0.8, le=1)
+    holdout_benign_precision: float = Field(ge=0.9, le=1)
+    holdout_useful_recall_lift_percentage_points: float = Field(ge=15, le=100)
+    holdout_evidence_disposition_precision: float = Field(ge=0.75, le=1)
+    holdout_represented_case_count: int = Field(ge=1)
     # Three batched calls per planned segment, and the measured totals behind
     # that claim: a consolidation over several segments makes three per segment.
     provider_calls_per_segment: Literal[3] = 3
@@ -482,6 +494,8 @@ class MemoryDistillationEvidence(BaseModel):
             raise ValueError("measured provider calls fall short of one segment per consolidation")
         if self.represented_case_count > self.seeded_case_count:
             raise ValueError("represented cases exceed the seeded cases")
+        if self.holdout_positive_case_count > self.holdout_sample_count:
+            raise ValueError("positive holdout cases exceed the holdout sample")
         if Decimal(self.provider_cost_usd) > MAXIMUM_DISTILLATION_EVIDENCE_COST_USD:
             raise ValueError("distillation evidence cost exceeds the sanity ceiling")
         return self

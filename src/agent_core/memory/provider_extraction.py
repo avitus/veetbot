@@ -52,7 +52,11 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.equivalence import content_terms
-from agent_core.memory.formation import contains_memory_injection, grounding_tokens
+from agent_core.memory.formation import (
+    clamp_portability,
+    contains_memory_injection,
+    grounding_tokens,
+)
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamError, collect_turn
 from agent_core.ports.determinism import Clock, IdFactory
@@ -576,7 +580,8 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
             statement = f"User has at least one {relation}."
         else:
             subject = relation
-            statement = f"User has a {relation}."
+            article = "an" if relation[:1] in "aeiou" else "a"
+            statement = f"User has {article} {relation}."
         belief_type = BeliefType.RELATIONSHIP
     elif kind is MemoryClaimKind.OCCUPATION:
         subject = "occupation"
@@ -666,7 +671,7 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
         source_event_ids=claim.source_event_ids,
         model_confidence=claim.model_confidence,
         proposed_scope=scope,
-        proposed_portability=claim.proposed_portability,
+        proposed_portability=clamp_portability(claim.proposed_portability, belief_type),
         sensitivity_guess=sensitivity,
         valid_from=claim.valid_from,
         expires_hint=claim.expires_hint,
@@ -1273,6 +1278,9 @@ class ProviderAssistedCandidateExtractor:
             "claims separate and use null for value, context, quantity, valid_from, or "
             "expires_hint "
             "when the source does not support that field."
+            " Relationships and project facts cannot be portable; use contextual or "
+            "local for relationship, project_schedule, and project_fact claims. You may "
+            "choose a more restrictive portability for any claim."
         )
 
     @staticmethod

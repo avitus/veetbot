@@ -36,7 +36,10 @@ from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     ProviderExtractionEvaluationEvidence,
 )
-from agent_core.evals.memory_distillation import load_distillation_corpus
+from agent_core.evals.memory_distillation import (
+    load_distillation_corpus,
+    load_distillation_holdout,
+)
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
 from agent_core.memory.equivalence import DISTILLATION_SCORER_VERSION
 
@@ -134,11 +137,13 @@ def test_bundled_distillation_evidence_matches_the_corpus_and_scorer_it_claims()
 
     repository_root = Path(__file__).resolve().parents[2]
     _corpus, corpus_sha256 = load_distillation_corpus(repository_root)
+    _holdout, holdout_sha256 = load_distillation_holdout(repository_root)
     for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
         evidence = load_memory_release_evidence(path)
         if not isinstance(evidence, MemoryDistillationEvidence):
             continue
         assert evidence.corpus_sha256 == corpus_sha256, path.name
+        assert evidence.holdout_sha256 == holdout_sha256, path.name
         assert evidence.scorer_version == DISTILLATION_SCORER_VERSION, path.name
         assert re.fullmatch(r"[0-9a-f]{40}", evidence.build_ref), path.name
         assert evidence.seeded_case_count >= 1, path.name
@@ -240,9 +245,25 @@ def test_bundled_build_refs_are_commits_this_tree_descends_from() -> None:
 
 
 def test_no_formation9_artifact_ships_until_the_scorer_change_is_re_evaluated() -> None:
-    """The scorer moved to distillation-scorer@3; the @2 artifact was withdrawn."""
+    """The scorer moved to distillation-scorer@5; the @2 artifact was withdrawn."""
 
     for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
         evidence = load_memory_release_evidence(path)
         if isinstance(evidence, MemoryDistillationEvidence):
             assert evidence.scorer_version == DISTILLATION_SCORER_VERSION, path.name
+
+
+def test_the_holdout_is_frozen_by_its_recorded_digest() -> None:
+    """The holdout's digest is recorded beside it; an edit shows up here first.
+
+    The loader refuses a holdout whose content no longer matches the record,
+    so re-freezing is a deliberate, reviewable act rather than a side effect
+    of tuning cases toward a run.
+    """
+
+    repository_root = Path(__file__).resolve().parents[2]
+    holdout, digest = load_distillation_holdout(repository_root)
+    recorded = (repository_root / "evals/capability/memory-formation.v3-holdout.sha256").read_text()
+    assert recorded.strip() == digest
+    assert holdout.frozen_on.isoformat() == "2026-09-09"
+    assert len(holdout.cases) >= 30

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError
 from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APIError as OpenAIAPIError
 from openai import APIResponseValidationError as OpenAIAPIResponseValidationError
 from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ValidationError
@@ -431,7 +433,7 @@ async def test_openai_midstream_transport_failure_uses_the_next_sequence() -> No
     assert events[-1].error.kind == "transient"
 
 
-async def test_openai_midstream_sdk_error_is_normalized_without_losing_sequence() -> None:
+async def test_openai_midstream_sdk_validation_error_is_protocol_failure() -> None:
     async def invalid_response(_request: dict[str, Any]) -> Any:
         yield {
             "type": "response.output_text.delta",
@@ -453,8 +455,195 @@ async def test_openai_midstream_sdk_error_is_normalized_without_losing_sequence(
         await provider.close()
     assert [event.sequence for event in events] == [0, 1]
     assert isinstance(events[-1], ModelFailedEvent)
-    assert events[-1].error.kind == "permanent"
-    assert events[-1].error.provider_code == "sdk_error"
+    assert events[-1].error.kind == "protocol"
+    assert events[-1].error.provider_code == "sdk_response_invalid"
+
+
+async def test_openai_preoutput_sdk_error_retries_the_production_failure_shape() -> None:
+    calls = 0
+
+    async def stream_error_then_text(_request: dict[str, Any]) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OpenAIAPIError(
+                "provider stream body must not be retained",
+                request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+                body=None,
+            )
+        for event in openai_text_events("recovered"):
+            yield event
+
+    provider = OpenAIResponsesProvider(event_source=stream_error_then_text)
+    try:
+        turn = await collect_turn(provider.stream(request(), resolved("openai"), ATTEMPT))
+    finally:
+        await provider.close()
+
+    assert turn.assistant_messages[0].content == [TextPart(text="recovered")]
+    assert calls == 2
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "failure_stream"),
+    [
+        (
+            "openai",
+            [
+                {
+                    "type": "response.failed",
+                    "response": {
+                        "error": {
+                            "type": "server_error",
+                            "code": "server_error",
+                            "message": "provider stream body must not be retained",
+                        }
+                    },
+                }
+            ],
+        ),
+        (
+            "anthropic",
+            [
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "overloaded_error",
+                        "message": "provider stream body must not be retained",
+                    },
+                }
+            ],
+        ),
+        (
+            "chat_completions",
+            [
+                {
+                    "error": {
+                        "type": "server_error",
+                        "code": "server_error",
+                        "message": "provider stream body must not be retained",
+                    }
+                }
+            ],
+        ),
+    ],
+)
+async def test_preoutput_transient_stream_error_retries_across_api_modes(
+    provider_name: str,
+    failure_stream: list[dict[str, Any]],
+) -> None:
+    success_stream = (
+        openai_text_events("recovered")
+        if provider_name == "openai"
+        else anthropic_text_events("recovered")
+        if provider_name == "anthropic"
+        else chat_text_events("recovered")
+    )
+    source = ScriptedRawSource([failure_stream, success_stream])
+    if provider_name == "openai":
+        provider: ModelProvider = OpenAIResponsesProvider(event_source=source)
+    elif provider_name == "anthropic":
+        provider = AnthropicMessagesProvider(event_source=source)
+    else:
+        provider = ChatCompletionsProvider(
+            base_url="http://127.0.0.1:11434/v1",
+            event_source=source,
+        )
+
+    try:
+        turn = await collect_turn(provider.stream(request(), resolved(provider_name), ATTEMPT))
+    finally:
+        await provider.close()
+
+    assert turn.assistant_messages[0].content == [TextPart(text="recovered")]
+    assert len(source.requests) == 2
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "failure_stream", "provider_code", "provider_parameter"),
+    [
+        (
+            "openai",
+            [
+                {
+                    "type": "response.failed",
+                    "response": {
+                        "error": {
+                            "type": "invalid_request_error",
+                            "code": "invalid_json_schema",
+                            "param": "text.format.schema",
+                            "message": "provider body must not be retained",
+                        }
+                    },
+                }
+            ],
+            "invalid_json_schema",
+            "text.format.schema",
+        ),
+        (
+            "anthropic",
+            [
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "param": "messages[2]",
+                        "message": "provider body must not be retained",
+                    },
+                }
+            ],
+            "invalid_request_error",
+            "messages[2]",
+        ),
+        (
+            "chat_completions",
+            [
+                {
+                    "error": {
+                        "type": "invalid_request_error",
+                        "code": "invalid_request",
+                        "param": "messages[2]",
+                        "message": "provider body must not be retained",
+                    }
+                }
+            ],
+            "invalid_request",
+            "messages[2]",
+        ),
+    ],
+)
+async def test_permanent_stream_errors_keep_only_safe_diagnostics_across_api_modes(
+    provider_name: str,
+    failure_stream: list[dict[str, Any]],
+    provider_code: str,
+    provider_parameter: str,
+) -> None:
+    source = ScriptedRawSource([failure_stream])
+    if provider_name == "openai":
+        provider: ModelProvider = OpenAIResponsesProvider(event_source=source)
+    elif provider_name == "anthropic":
+        provider = AnthropicMessagesProvider(event_source=source)
+    else:
+        provider = ChatCompletionsProvider(
+            base_url="http://127.0.0.1:11434/v1",
+            event_source=source,
+        )
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved(provider_name), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+
+    assert len(events) == 1
+    assert isinstance(events[0], ModelFailedEvent)
+    assert events[0].error.kind == "permanent"
+    assert events[0].error.provider_code == provider_code
+    assert events[0].error.provider_parameter == provider_parameter
+    assert "provider body must not be retained" not in events[0].model_dump_json()
+    assert len(source.requests) == 1
 
 
 async def test_openai_status_error_preserves_only_safe_diagnostics() -> None:
@@ -610,6 +799,90 @@ async def test_midstream_chat_transport_failure_keeps_a_gapless_terminal_sequenc
     assert events[-1].error.kind == "transient"
 
 
+class _StreamedBody(httpx.AsyncByteStream):
+    """A response body httpx has not read, as a real streamed HTTP response arrives."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._payload
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _chat_sse(text: str) -> bytes:
+    event = json.dumps(chat_text_events(text)[0])
+    return f"data: {event}\n\ndata: [DONE]\n\n".encode()
+
+
+async def test_chat_http_status_error_reads_the_unread_body_before_classifying() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request_value: httpx.Request) -> httpx.Response:
+        requests.append(request_value)
+        return httpx.Response(
+            429,
+            headers={"Content-Type": "application/json"},
+            stream=_StreamedBody(
+                b'{"error": {"type": "insufficient_quota", "code": "insufficient_quota", '
+                b'"message": "provider body must not be retained"}}'
+            ),
+        )
+
+    provider = ChatCompletionsProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("chat_completions"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+
+    assert len(events) == 1
+    assert isinstance(events[0], ModelFailedEvent)
+    assert events[0].error.kind == "permanent"
+    assert events[0].error.provider_code == "insufficient_quota"
+    assert events[0].error.http_status == 429
+    assert "provider body must not be retained" not in events[0].model_dump_json()
+    assert len(requests) == 1
+
+
+async def test_chat_transient_http_status_error_retries_before_output() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request_value: httpx.Request) -> httpx.Response:
+        requests.append(request_value)
+        if len(requests) == 1:
+            return httpx.Response(
+                503,
+                headers={"Content-Type": "application/json"},
+                stream=_StreamedBody(b'{"error": {"type": "server_error"}}'),
+            )
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            stream=_StreamedBody(_chat_sse("recovered")),
+        )
+
+    provider = ChatCompletionsProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    try:
+        turn = await collect_turn(provider.stream(request(), resolved("chat_completions"), ATTEMPT))
+    finally:
+        await provider.close()
+
+    assert turn.assistant_messages[0].content == [TextPart(text="recovered")]
+    assert len(requests) == 2
+
+
 async def test_anthropic_usage_and_indexes_default_defensively() -> None:
     events = anthropic_text_events("safe")
     events[0]["message"]["usage"] = {
@@ -661,7 +934,7 @@ async def test_anthropic_disjoint_input_counters_normalize_to_total_input() -> N
     assert turn.usage.cost == Decimal("0.0002975")
 
 
-async def test_anthropic_error_type_drives_retry_and_sdk_errors_are_normalized() -> None:
+async def test_anthropic_error_type_drives_retry_and_sdk_validation_is_protocol() -> None:
     calls = 0
 
     async def overload_then_text(_request: dict[str, Any]) -> Any:
@@ -702,7 +975,8 @@ async def test_anthropic_error_type_drives_retry_and_sdk_errors_are_normalized()
         await invalid.close()
     assert len(normalized) == 1
     assert isinstance(normalized[0], ModelFailedEvent)
-    assert normalized[0].error.kind == "permanent"
+    assert normalized[0].error.kind == "protocol"
+    assert normalized[0].error.provider_code == "sdk_response_invalid"
 
 
 async def test_anthropic_midstream_transport_failure_keeps_sequence_gapless() -> None:

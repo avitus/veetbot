@@ -56,7 +56,7 @@ from agent_core.domain.persona import (
     PersonaNominationState,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.equivalence import content_terms, negated
+from agent_core.memory.equivalence import content_terms, lemmatized_terms, main_verb, negated
 from agent_core.memory.profiles import (
     DEFAULT_FORMATION_PROFILE,
     DEFAULT_RETRIEVAL_PROFILE,
@@ -982,13 +982,18 @@ _EXPLICIT_EXPERIENCE = re.compile(
     r"(?P<skill>[^,;]{1,60}?)\s+experience)\b",
     re.IGNORECASE,
 )
+# A correction says something has changed. "No longer", "stopped", "quit",
+# and "gave up" say so on their own; "don't" and "do not" say so only with a
+# change marker such as "anymore", because "I don't take calls before nine"
+# is a standing constraint and "I don't eat gluten" a standing fact.
 _AUTOMATIC_CORRECTION_CUE = re.compile(
-    r"\b(?:no\s+longer|do\s+not|don't|never|stopped|quit|gave\s+up|given\s+up)\s+"
+    r"\b(?:no\s+longer|stopped|quit|gave\s+up|given\s+up)\s+"
     r"(?:have|own|use|wear|drive|live|work|like|want|need|play|eat|drink|smoke|run|swim"
     r"|bike|train|go|take|attend|practice|do|follow|teach|coach|study|read|watch|visit"
     r"|cook|bake|lift|climb|ride|cycle|meditate|volunteer|commute)\b"
     r"|\b(?:stopped|quit|gave\s+up|given\s+up)\s+[a-z]+ing\b"
-    r"|\b(?:not|don't|no\s+longer)\b[^.!?;]{0,40}\banymore\b"
+    r"|\b(?:not|don't|do\s+not|never|no\s+longer)\b[^.!?;]{0,40}"
+    r"\b(?:anymore|any\s+more|these\s+days|nowadays)\b"
     r"|\b(?:old\s+memory|memory\s+saying)\b.*\b(?:wrong|incorrect)\b",
     re.IGNORECASE,
 )
@@ -996,13 +1001,20 @@ _AUTOMATIC_CORRECTION_CUE = re.compile(
 # "I no longer take meetings on Fridays". Ownership verbs are left to the
 # completed extractor, whose retraction the fallback passes through.
 _RETRACTION_LEAD = (
-    r"\bi\s+(?:no\s+longer|don't|do\s+not|have\s+stopped|stopped|have\s+quit|quit"
+    r"\bi\s+(?:no\s+longer|have\s+stopped|stopped|have\s+quit|quit"
     r"|gave\s+up|have\s+given\s+up)\s+"
 )
+_CHANGED_RETRACTION_LEAD = r"\bi\s+(?:don't|do\s+not)\s+"
 _RETRACTED_ACTIVITY = re.compile(
-    _RETRACTION_LEAD
+    r"(?:"
+    + _RETRACTION_LEAD
     + r"(?P<verb>[a-z]+)(?:\s+(?P<object>[^,;]{1,80}?))?"
-    + r"(?:\s+(?:anymore|any\s+more|now|these\s+days))?\s*$",
+    + r"(?:\s+(?:anymore|any\s+more|now|these\s+days|nowadays))?"
+    + r"|"
+    + _CHANGED_RETRACTION_LEAD
+    + r"(?P<verb2>[a-z]+)(?:\s+(?P<object2>[^,;]{1,80}?))?"
+    + r"\s+(?:anymore|any\s+more|these\s+days|nowadays)"
+    + r")\s*$",
     re.IGNORECASE,
 )
 _RETRACTION_TRAILER = re.compile(r"\s+(?:anymore|any\s+more)(?=\.?$)", re.IGNORECASE)
@@ -1348,8 +1360,10 @@ def _render_retraction(
     and renders nothing.
     """
 
-    verb = match.group("verb").casefold()
-    raw_object = " ".join((match.group("object") or "").split()).strip(_CLAUSE_STRIP)
+    verb = (match.group("verb") or match.group("verb2") or "").casefold()
+    raw_object = " ".join((match.group("object") or match.group("object2") or "").split()).strip(
+        _CLAUSE_STRIP
+    )
     if verb in _NON_RETRACTABLE_VERBS or verb in _DETERMINERS or verb in _DIRECTION_WORDS:
         return None
     base = _gerund_base(verb)
@@ -2278,6 +2292,13 @@ def _portability_allowed(proposed: Portability, ceiling: Portability) -> bool:
     return order[proposed] <= order[ceiling]
 
 
+def clamp_portability(proposed: Portability, belief_type: BeliefType) -> Portability:
+    """Keep an extractor's stricter proposal, but never let it exceed policy."""
+
+    ceiling = portability_ceiling(belief_type)
+    return proposed if _portability_allowed(proposed, ceiling) else ceiling
+
+
 class GovernedMemoryService:
     """Formation service and management surface over the structured store."""
 
@@ -2760,7 +2781,12 @@ class GovernedMemoryService:
 
         live = await uow.memories.list_memories(self._principal, limit=500)
         subject_key = " ".join(candidate.subject.split()).casefold()
-        negated_terms = content_terms(candidate.statement)
+        # Matched on lemmas and on the verb: "no longer runs outdoors" ends
+        # "is running outdoors every day" and "goes running outdoors most
+        # mornings", but not "tracks runs outdoors in a journal", whose verb
+        # is tracking, nor anything said about someone else.
+        negated_terms = lemmatized_terms(candidate.statement)
+        negated_verb = main_verb(candidate.statement)
         exact: list[MemoryRecord] = []
         by_content: list[MemoryRecord] = []
         for belief in live:
@@ -2773,9 +2799,11 @@ class GovernedMemoryService:
                 exact.append(belief)
             elif (
                 negated_terms
+                and negated_verb is not None
                 and belief.statement.startswith("User ")
                 and not negated(belief.statement)
-                and negated_terms <= content_terms(belief.statement)
+                and main_verb(belief.statement) == negated_verb
+                and negated_terms <= lemmatized_terms(belief.statement)
             ):
                 by_content.append(belief)
         targets: list[MemoryRecord] = []
@@ -2958,6 +2986,13 @@ class GovernedMemoryService:
                         rejected += 1
                         decisions["rejected_provenance"] += 1
                         continue
+                    if not _portability_allowed(
+                        candidate.proposed_portability,
+                        portability_ceiling(candidate.belief_type),
+                    ):
+                        rejected += 1
+                        decisions["rejected_portability"] += 1
+                        continue
                     source_text = "\n".join(
                         _event_text(by_sequence[sequence])
                         for sequence in candidate.source_event_ids
@@ -3043,7 +3078,7 @@ class GovernedMemoryService:
                         except ToolValidationError:
                             if counted:
                                 rejected += 1
-                                decisions["rejected_provenance"] += 1
+                                decisions["rejected_validation"] += 1
                         else:
                             if action == "unchanged":
                                 if counted:

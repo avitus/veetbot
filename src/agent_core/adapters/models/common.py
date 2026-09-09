@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from typing import Any, Protocol, cast
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol, cast
 
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -11,6 +12,7 @@ from agent_core.domain.messages import (
     FileReferencePart,
     ImageReferencePart,
     ModelAttempt,
+    ModelEvent,
     ModelFailedEvent,
     ModelPermanentError,
     ModelProtocolError,
@@ -22,6 +24,109 @@ from agent_core.domain.messages import (
 from agent_core.model.tool_definitions import tool_definition as tool_definition
 
 type RawEventSource = Callable[[dict[str, Any]], AsyncIterator[dict[str, Any]]]
+
+_TRANSIENT_HTTP_STATUSES = frozenset({408, 409, 429})
+_TRANSIENT_PROVIDER_CODES = frozenset(
+    {
+        "api_error",
+        "internal_error",
+        "overloaded_error",
+        "rate_limit_error",
+        "request_timeout",
+        "server_error",
+        "service_unavailable",
+        "temporarily_unavailable",
+        "timeout",
+    }
+)
+_PERMANENT_PROVIDER_CODES = frozenset(
+    {
+        "authentication_error",
+        "billing_hard_limit_reached",
+        "insufficient_quota",
+        "invalid_api_key",
+        "invalid_request",
+        "invalid_request_error",
+        "not_found_error",
+        "permission_error",
+        "request_too_large",
+        "unprocessable_entity",
+        "usage_limit_reached",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderFailure:
+    """Safe, provider-neutral classification of an upstream failure."""
+
+    category: Literal["transient", "permanent"]
+    provider_code: str
+    provider_parameter: str | None
+
+
+def classify_provider_failure(
+    body: object,
+    *,
+    http_status: int | None = None,
+    fallback_code: str,
+    default_transient: bool = False,
+) -> ProviderFailure:
+    """Classify a failure without retaining provider-controlled prose.
+
+    Safe permanent codes override retryable HTTP statuses so quota exhaustion
+    is never retried as an ordinary rate limit. Provider transient codes take
+    precedence over other 4xx statuses because Anthropic reports overloads as
+    an error type even when a compatible endpoint uses a generic status.
+    """
+
+    mapping = body if isinstance(body, dict) else {}
+    raw_error = mapping.get("error", mapping)
+    error = raw_error if isinstance(raw_error, dict) else {}
+    raw_code = error.get("code")
+    raw_type = error.get("type")
+    code = sanitize_provider_code(raw_code if isinstance(raw_code, str) else None)
+    error_type = sanitize_provider_code(raw_type if isinstance(raw_type, str) else None)
+    parameter_value = error.get("param", error.get("parameter"))
+    parameter = sanitize_provider_parameter(
+        parameter_value if isinstance(parameter_value, str) else None
+    )
+    candidates = {
+        value.lower()
+        for value in (code, error_type)
+        if value is not None and value != "provider_error"
+    }
+    if candidates & _PERMANENT_PROVIDER_CODES:
+        transient = False
+    elif candidates & _TRANSIENT_PROVIDER_CODES:
+        transient = True
+    elif http_status is not None:
+        transient = http_status in _TRANSIENT_HTTP_STATUSES or http_status >= 500
+    else:
+        transient = default_transient
+    provider_code = code or error_type or sanitize_provider_code(fallback_code) or "provider_error"
+    return ProviderFailure(
+        category="transient" if transient else "permanent",
+        provider_code=provider_code,
+        provider_parameter=parameter,
+    )
+
+
+def should_retry_failure_event(
+    event: ModelEvent,
+    *,
+    internal_attempt: int,
+    max_internal_attempts: int,
+) -> bool:
+    """Return whether an in-band failure can be retried before caller-visible output."""
+
+    return (
+        internal_attempt < max_internal_attempts
+        and isinstance(event, ModelFailedEvent)
+        and isinstance(event.error, ModelTransientError)
+        and not event.error.stream_had_output
+        and event.sequence == 0
+    )
 
 
 class Dumpable(Protocol):

@@ -87,8 +87,11 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>`, makes an authenticated request to the
    authoritative session index, and requires every process to run from the
-   promoted directory; and
-9. retains the five newest valid releases.
+   promoted directory;
+9. retains the five newest valid releases; and
+10. retains the two newest timestamped `agent-core-sandbox` and
+    `veetbot-browser-profile-service` image tags and prunes build cache that
+    no build has used for 48 hours.
 
 Release pruning normally runs as the deployment identity. Older releases may
 contain service-owned Python bytecode from deployments that predate the strict
@@ -99,6 +102,24 @@ the releases directory is mounted writable, and its fixed entrypoint removes
 only the validated release name selected by the retention loop. This fallback
 uses the deployment identity's existing Docker trust boundary; application
 identities still receive no Docker access.
+
+Image retention runs only after every verification above has passed. For each
+of the two repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
+first and removes every tag after the second, which keeps the active release's
+image and its predecessor, the manual rollback target. It never removes the tag
+just released, a tag that `docker ps` reports a container running, or a tag
+outside that pattern such as `production`, `local`, or `dev`. Each removal is
+independent: a failure is logged as a warning and the release still succeeds,
+so a rerun removes only what remains. The same step runs
+`docker builder prune --all --force --filter until=48h`, which discards build
+cache no build has touched in two days while keeping the dependency and
+Chromium layers that consecutive builds share warm. The step prints
+`docker system df` before and after so the CircleCI deployment log records the
+reclaimed space. `VEETBOT_KEEP_IMAGES` overrides the tag count. The
+`deploy/browser-profile-service.Dockerfile` installs dependencies and Chromium
+above the application source so that only the final layers change between
+releases; without that order each release snapshot repeats those layers and
+the retained tags share nothing.
 
 A successful server release returns control to CircleCI, which polls the public
 TLS readiness endpoint until it reports the same release ID. Exhausting that
@@ -183,7 +204,8 @@ have no Docker-socket access. Only the credential-free `veetbot-exec` execution
 service receives Docker access at application runtime and owns sandbox
 lifecycle. The separate deploy identity retains delivery-time Docker access
 because the audited release contract builds and tags both images, reconciles the
-browser-profile service, and prunes release images. That trusted operator
+browser-profile service, and prunes stale release images and build cache. That
+trusted operator
 boundary is the explicit tradeoff in ADR-0067 decision 1; it is never an
 application systemd identity. Consequently neither an application process nor
 an application-launched container can modify the documentation release. On a
@@ -899,8 +921,10 @@ any symlink changes. Image validation and tagging also precede all three pointer
 switches. If either public-surface switch, service restart, or readiness check
 fails, the exit trap restores all three previous pointers and the previous production image tag,
 then restarts the previous release; `deploy/app/rollback.test.sh` failure-injects
-the second switch to verify that recovery. If the older release image was
-pruned, rebuild it from that retained source tree before switching.
+the second switch to verify that recovery. Image retention keeps the active
+release's image and its predecessor, so the newest rollback target normally
+still has its image; if an older release image was pruned, rebuild it from that
+retained source tree before switching.
 
 Nginx backups are independent. To recover one, copy the selected file from
 `/etc/nginx/veetbot-backups` to `/etc/nginx/sites-available/veetbot`, run

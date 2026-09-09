@@ -295,6 +295,22 @@ def test_browser_profile_dockerfile_preserves_process_isolation() -> None:
     assert "playwright install --with-deps chromium" in profile_dockerfile
 
 
+def test_browser_profile_dockerfile_caches_runtime_layers_before_source() -> None:
+    """Dependency and browser layers precede the source copy so releases share them."""
+
+    deploy = ROOT / "deploy"
+    profile_dockerfile = (deploy / "browser-profile-service.Dockerfile").read_text(encoding="utf-8")
+    lock_copy = profile_dockerfile.index("COPY pyproject.toml uv.lock /opt/veetbot/")
+    dependency_layer = profile_dockerfile.index(
+        "uv sync --frozen --no-dev --no-editable --no-install-project"
+    )
+    browser_layer = profile_dockerfile.index("playwright install --with-deps chromium")
+    source_copy = profile_dockerfile.index("COPY src /opt/veetbot/src")
+    project_layer = profile_dockerfile.rindex("uv sync --frozen --no-dev --no-editable")
+    assert lock_copy < dependency_layer < browser_layer < source_copy < project_layer
+    assert "COPY pyproject.toml uv.lock README.md" not in profile_dockerfile
+
+
 def test_systemd_units_preserve_role_boundaries() -> None:
     deploy = ROOT / "deploy"
     units = deploy / "systemd"
@@ -560,6 +576,8 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert "VEETBOT_RELEASE_ID" in release
     assert "systemctl enable --now" in release
     assert "VEETBOT_KEEP_RELEASES:-5" in release
+    assert "VEETBOT_KEEP_IMAGES:-2" in release
+    assert "docker builder prune --all --force --filter until=48h" in release
     assert '--project-name "$COMPOSE_PROJECT_NAME"' in release
     assert "browser-profile-service.Dockerfile" in release
     assert 'up -d --wait --wait-timeout "$HEALTH_TIMEOUT_SECS"' in release

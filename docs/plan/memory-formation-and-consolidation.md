@@ -174,7 +174,10 @@ outcome even though the schema has no separate `unchanged` field.
 portability — preferences, user-model attributes, and procedure pointers are
 `portable`; facts and relationships default to `contextual`. The extractor may
 *lower* a candidate's portability but never raise it, so a model cannot make a belief
-travel further than its type allows. Portability governs how a belief behaves outside
+travel further than its type allows. Local provider-claim rendering clamps an
+over-ceiling proposal to that deterministic ceiling rather than discarding an
+otherwise grounded candidate; the governed service retains the ceiling check as a
+defense-in-depth rejection gate. Portability governs how a belief behaves outside
 the project it was learned in, and is defined in
 [memory retrieval and ranking](memory-retrieval-and-ranking.md).
 

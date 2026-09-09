@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -26,6 +27,7 @@ from agent_core.config import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
+    MEMORY_SUBJECT_MAX_LENGTH,
     BeliefType,
     MemoryAuthority,
     MemoryCandidate,
@@ -58,6 +60,7 @@ from agent_core.evals.memory_distillation import (
     DistillationEvaluationBelief,
     MemoryDistillationCase,
     load_distillation_corpus,
+    load_distillation_holdout,
     score_distillation_case,
 )
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
@@ -103,6 +106,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # fabricated artifact must carry the real digest to activate anything here.
 _FORMATION_CORPUS_SHA256 = load_formation_corpus(_REPOSITORY_ROOT)[1]
 _DISTILLATION_CORPUS_SHA256 = load_distillation_corpus(_REPOSITORY_ROOT)[1]
+_DISTILLATION_HOLDOUT_SHA256 = load_distillation_holdout(_REPOSITORY_ROOT)[1]
 
 
 def _candidate(**overrides: object) -> MemoryCandidate:
@@ -330,6 +334,7 @@ async def test_explicit_experience_is_repaired_as_a_skill_without_an_article() -
         ("I gave up swimming laps.", "User no longer swims laps.", "swimming laps"),
         ("I no longer run outdoors.", "User no longer runs outdoors.", "running outdoors"),
         ("I quit smoking.", "User no longer smokes.", "smoking"),
+        ("I don't take calls anymore.", "User no longer takes calls.", "calls"),
         ("That old memory saying I live in Rome is wrong.", None, None),
     ],
 )
@@ -409,6 +414,31 @@ async def test_retraction_reaches_a_belief_whose_key_was_composed_differently(
     assert retracted not in {belief.statement for belief in await service.list_memories()}
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I don't take calls before nine in the morning.",
+        "I do not eat gluten.",
+        "I never drink coffee after lunch.",
+    ],
+)
+async def test_a_standing_negative_claim_is_not_a_correction(message: str) -> None:
+    """ "I don't take calls before nine" states a constraint, not a change.
+
+    A correction says something has changed; "don't" and "do not" only say so
+    with a change marker such as "anymore". Treating every negative present
+    tense as a retraction vetoed standing constraints and, worse, rendered
+    them as retractions of beliefs that never existed.
+    """
+
+    assert not formation.contains_automatic_memory_correction(message)
+    event = _personal_agent_event().model_copy(update={"payload": {"content": message}})
+    candidates = await formation.HighRecallCandidateExtractor().extract(
+        [event], principal=principal(), scope="general"
+    )
+    assert all(candidate.polarity is Polarity.ASSERT for candidate in candidates)
+
+
 async def test_fallback_retraction_supersedes_the_belief_it_corrects() -> None:
     """Under formation@9 a retraction updates its subject and never creates memory."""
 
@@ -457,8 +487,11 @@ def test_provider_candidates_carry_polarity_and_corrections_pass_only_as_retract
         "sensitivity_guess": "internal",
         "claim_kind": "resource",
         "derivation": "direct",
+        "polarity": "assert",
         "evidence_spans": [{"source_event_id": 7, "text": "don't drive my BMW anymore"}],
     }
+    with pytest.raises(ValidationError):
+        _DistilledCandidate.model_validate({k: v for k, v in proposal.items() if k != "polarity"})
 
     retraction = _normalize_distilled_candidate(
         _DistilledCandidate.model_validate({**proposal, "polarity": "retract"}),
@@ -1400,6 +1433,7 @@ async def test_distillation_normalizes_provider_policy_fields_locally() -> None:
                             "sensitivity_guess": "public",
                             "claim_kind": "skill",
                             "derivation": "hypothesis",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -1508,6 +1542,7 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
                             "sensitivity_guess": "internal",
                             "claim_kind": "preference",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -1524,6 +1559,7 @@ async def test_one_invalid_provider_candidate_does_not_discard_valid_siblings() 
                             "sensitivity_guess": "internal",
                             "claim_kind": "habit",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -2037,6 +2073,7 @@ async def test_provider_fallback_completes_and_schedules_a_provider_repass() -> 
                             "sensitivity_guess": "internal",
                             "claim_kind": "interest",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {"source_event_id": source_id, "text": "personal AI agent"}
                             ],
@@ -2395,13 +2432,22 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version="policy@1",
-        scorer_version="distillation-scorer@3",
+        scorer_version="distillation-scorer@5",
         build_ref="0123456789abcdef0123456789abcdef01234567",
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=60,
         positive_case_count=48,
         seeded_case_count=12,
         represented_case_count=3,
+        holdout_sha256=_DISTILLATION_HOLDOUT_SHA256,
+        holdout_sample_count=40,
+        holdout_positive_case_count=32,
+        holdout_direct_must_form_recall=0.96,
+        holdout_hypothesis_must_form_recall=0.8,
+        holdout_benign_precision=0.91,
+        holdout_useful_recall_lift_percentage_points=40,
+        holdout_evidence_disposition_precision=0.9,
+        holdout_represented_case_count=2,
         direct_must_form_recall=0.96,
         hypothesis_must_form_recall=0.82,
         benign_precision=0.92,
@@ -2505,6 +2551,12 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "seeded_case_count": 0,
         "represented_case_count": 0,
         "provider_cost_usd": "999999999",
+        "holdout_sample_count": 29,
+        "holdout_direct_must_form_recall": 0.94,
+        "holdout_benign_precision": 0.89,
+        "holdout_useful_recall_lift_percentage_points": 14,
+        "holdout_represented_case_count": 0,
+        "holdout_sha256": "not-a-digest",
         "build_ref": "content-6973e8ddc75c6e40947e1f368abf2a96",
         "scorer_version": "distillation-scorer@1",
     }
@@ -2855,6 +2907,7 @@ async def test_distillation_grounds_evidence_that_contains_a_period() -> None:
                             "sensitivity_guess": "internal",
                             "claim_kind": "resource",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {
                                     "source_event_id": source_id,
@@ -3005,6 +3058,7 @@ async def test_combiner_keeps_distinct_claims_under_one_subject_apart() -> None:
                             "sensitivity_guess": "internal",
                             "claim_kind": "habit",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {"source_event_id": source_id, "text": "I run marathons"}
                             ],
@@ -3016,6 +3070,7 @@ async def test_combiner_keeps_distinct_claims_under_one_subject_apart() -> None:
                             "sensitivity_guess": "internal",
                             "claim_kind": "habit",
                             "derivation": "direct",
+                            "polarity": "assert",
                             "evidence_spans": [
                                 {"source_event_id": source_id, "text": "I run outdoors"}
                             ],
@@ -3071,6 +3126,325 @@ def test_anticipation_prefix_bound_holds_for_an_oversized_newest_event() -> None
     assert prefix["source_event_id"] == 1
     assert prefix["truncated"] is True
     assert len(prefix["text"].encode("utf-8")) == MAX_ANTICIPATION_PREFIX_BYTES
+
+
+def test_same_words_in_a_different_relationship_get_distinct_keys() -> None:
+    """Two claims built from the same words still commit under two keys."""
+
+    from agent_core.memory.distillation import _with_distinct_key
+
+    lent_to_alice = _candidate(
+        subject="book lending",
+        statement="User lent Alice Bob's book.",
+        claim_kind="project_fact",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "lent"}],
+    )
+    lent_to_bob = lent_to_alice.model_copy(update={"statement": "User lent Bob Alice's book."})
+
+    assert not _candidates_semantically_duplicate(lent_to_alice, lent_to_bob)
+    second = _with_distinct_key(lent_to_bob, [lent_to_alice])
+    assert second.subject.casefold() != lent_to_alice.subject.casefold()
+    assert second.subject.startswith("book lending")
+    third = _with_distinct_key(
+        lent_to_alice.model_copy(update={"statement": "User lent a book."}),
+        [lent_to_alice, second],
+    )
+    assert len({lent_to_alice.subject, second.subject, third.subject}) == 3
+
+
+def test_distinct_keys_survive_the_subject_length_bound() -> None:
+    """A claim whose subject already fills the bound still leaves under its own key.
+
+    Formation looks the store up by subject and belief type, so a suffix the
+    bound cuts back off would hand the second claim to the first's record to
+    reinforce or supersede instead of committing beside it.
+    """
+
+    from agent_core.memory.distillation import _with_distinct_key
+
+    lent_to_alice = _candidate(
+        subject="b" * MEMORY_SUBJECT_MAX_LENGTH,
+        statement="User lent Alice Bob's book.",
+        claim_kind="project_fact",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "lent"}],
+    )
+    lent_to_bob = lent_to_alice.model_copy(update={"statement": "User lent Bob Alice's book."})
+
+    second = _with_distinct_key(lent_to_bob, [lent_to_alice])
+    third = _with_distinct_key(
+        lent_to_alice.model_copy(update={"statement": "User lent a book."}),
+        [lent_to_alice, second],
+    )
+
+    subjects = [lent_to_alice.subject, second.subject, third.subject]
+    assert len({subject.casefold() for subject in subjects}) == 3
+    assert all(len(subject) <= MEMORY_SUBJECT_MAX_LENGTH for subject in subjects)
+
+
+async def test_retraction_targets_follow_the_verb_across_morphology_and_keys() -> None:
+    """A retraction ends the activity it names, however the belief was worded or keyed.
+
+    "User no longer runs outdoors" must reach "User is running outdoors every
+    day" filed under "outdoor running", and must not reach a belief that merely
+    mentions those words about something else, such as journaling runs, or a
+    belief about someone else.
+    """
+
+    _clock, factory, baseline, _retriever = await formation_stack()
+    await user_event(factory, "I run outdoors.")
+    seeds = [
+        ("outdoor running", "User is running outdoors every day."),
+        ("run journal", "User tracks runs outdoors in a journal."),
+        ("daughter's running", "User's daughter runs outdoors."),
+        ("morning routine", "User goes running outdoors most mornings."),
+        ("outdoor cycling", "User bikes outdoors on weekends."),
+    ]
+    for subject, statement in seeds:
+        await baseline.remember(
+            session_id=SESSION_ID,
+            run_id=None,
+            statement=statement,
+            subject=subject,
+            scope="general",
+            belief_type=BeliefType.USER_MODEL_ATTR,
+        )
+    retraction = _candidate(
+        subject="running outdoors",
+        statement="User no longer runs outdoors.",
+        claim_kind="habit",
+        polarity=Polarity.RETRACT,
+        source_event_ids=[1],
+        evidence_spans=[{"source_event_id": 1, "text": "no longer run outdoors"}],
+    )
+
+    async with factory() as uow:
+        targets = await baseline._retraction_targets(uow, retraction)
+
+    assert {target.statement for target in targets} == {
+        "User is running outdoors every day.",
+        "User goes running outdoors most mornings.",
+    }
+
+
+def test_provider_response_schemas_have_no_optional_property() -> None:
+    """Every stage schema must satisfy strict structured output.
+
+    The provider rejects a strict schema in which any object property is not
+    required, and the rejection surfaces only as a provider failure on every
+    call. A defaulted `polarity` did exactly that in a live evaluation: the
+    distillation stage fell back on all 67 cases and evidence-disposition
+    precision measured 0.000. This test fails on the schema, not on the bill.
+    """
+
+    from agent_core.memory.distillation import (
+        _AnticipationResponse,
+        _DistillationResponse,
+        _EpisodeResponse,
+    )
+
+    for response in (_EpisodeResponse, _AnticipationResponse, _DistillationResponse):
+        schema = response.model_json_schema()
+        objects = [schema, *schema.get("$defs", {}).values()]
+        for definition in objects:
+            if definition.get("type") != "object":
+                continue
+            properties = set(definition.get("properties", {}))
+            assert set(definition.get("required", [])) == properties, (
+                response.__name__,
+                definition.get("title"),
+                properties - set(definition.get("required", [])),
+            )
+            assert definition.get("additionalProperties") is False, definition.get("title")
+
+
+@pytest.mark.parametrize(
+    ("statement", "claim_kind", "reason"),
+    [
+        ("User has started doing an unspecified activity on weekends.", "habit", "vacuous"),
+        ("User does something on weekends.", "habit", "vacuous"),
+        ("User did the dishes for an hour.", "project_fact", "transient"),
+        ("User went to the dentist yesterday.", "project_fact", "transient"),
+    ],
+)
+def test_provider_candidates_with_no_durable_content_are_rejected(
+    statement: str, claim_kind: str, reason: str
+) -> None:
+    """A live run stored an "unspecified activity" and an hour of dishwashing.
+
+    Neither says anything recallable about the user: the first has no object,
+    the second is a completed one-off event. Local validation rejects both
+    and counts them, exactly as it rejects an ungrounded claim.
+    """
+
+    from agent_core.memory.distillation import _DistilledCandidate, _normalize_distilled_candidate
+
+    text = {
+        "vacuous": "Let me tell you what I have started doing on weekends.",
+        "transient": "I did the dishes for an hour and went to the dentist yesterday.",
+    }[reason]
+    event = _personal_agent_event().model_copy(update={"payload": {"content": text}})
+    span = text.split(".")[0]
+    candidate = _DistilledCandidate.model_validate(
+        {
+            "subject": "weekends" if reason == "vacuous" else "chores",
+            "statement": statement,
+            "source_event_ids": [7],
+            "sensitivity_guess": "internal",
+            "claim_kind": claim_kind,
+            "derivation": "direct",
+            "polarity": "assert",
+            "evidence_spans": [{"source_event_id": 7, "text": span}],
+        }
+    )
+    with pytest.raises(ValueError, match=r"recallable content|transient event"):
+        _normalize_distilled_candidate(candidate, by_sequence={7: event}, scope="general")
+
+
+def test_state_claims_under_one_key_merge_while_activities_stay_apart() -> None:
+    """An interest, preference, or relationship is its subject; a habit is not.
+
+    "Is interested in exoplanets" and "loves learning about exoplanets" are
+    one memory under the key "exoplanets", and a live run turned the second
+    into a duplicate with the key "exoplanets loves learning". "Runs
+    marathons" and "runs outdoors" under "running" remain two memories.
+    """
+
+    interested = _candidate(
+        subject="exoplanets",
+        statement="User is interested in exoplanets.",
+        claim_kind="interest",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "love learning about exoplanets"}],
+    )
+    loves = interested.model_copy(update={"statement": "User loves learning about exoplanets."})
+    marathons = _candidate(
+        subject="running",
+        statement="User runs marathons.",
+        claim_kind="habit",
+        source_event_ids=[9],
+        evidence_spans=[{"source_event_id": 9, "text": "run"}],
+    )
+    outdoors = marathons.model_copy(update={"statement": "User runs outdoors."})
+    hates = interested.model_copy(update={"statement": "User is not interested in exoplanets."})
+
+    assert _candidates_semantically_duplicate(interested, loves)
+    assert not _candidates_semantically_duplicate(marathons, outdoors)
+    assert not _candidates_semantically_duplicate(interested, hates)
+
+
+async def test_provider_claim_outranks_a_fallback_copy_of_the_same_claim() -> None:
+    """When the provider and the fallback state one claim, the provider's wins.
+
+    The fallback passes a frozen-extractor candidate through with a default
+    kind and a key composed from the source words ("on weekends"); the
+    provider names the kind and composes the key. A live run kept the
+    fallback's copy because the two tied on content, and the memory was then
+    scored under the wrong kind.
+    """
+
+    extractor, provider, factory = await _distillation_extractor([])
+    source_id = await user_event(factory, "I have started sailing on weekends.")
+    provider._script.turns = [
+        ScriptedTurn(text=_scripted_episode([source_id], ["I have started sailing on weekends."])),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(
+            text=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "subject": "weekend sailing",
+                            "statement": "User has started sailing on weekends.",
+                            "source_event_ids": [source_id],
+                            "sensitivity_guess": "internal",
+                            "claim_kind": "habit",
+                            "derivation": "direct",
+                            "polarity": "assert",
+                            "evidence_spans": [
+                                {
+                                    "source_event_id": source_id,
+                                    "text": "started sailing on weekends",
+                                }
+                            ],
+                        }
+                    ],
+                    "coverage": [
+                        {
+                            "coverage_unit_id": f"{source_id}:1",
+                            "decision": "formed",
+                            "candidate_indexes": [0],
+                            "prediction_indexes": [],
+                        }
+                    ],
+                }
+            )
+        ),
+    ]
+
+    candidates = await extractor.extract(
+        await session_events(factory), principal=principal(), scope="general"
+    )
+
+    sailing = [candidate for candidate in candidates if "sailing" in candidate.statement]
+    assert [(c.claim_kind.value, c.subject) for c in sailing] == [("habit", "weekend sailing")]
+
+
+async def test_anticipation_prefix_reaches_back_past_the_watermark() -> None:
+    """A continuing session's earlier text is the cue for its next consolidation.
+
+    The prefix was the current batch's text before the segment's earliest
+    episode, which is empty on every single-segment consolidation, so
+    anticipation could never attribute a redundancy in the common case. The
+    session's already-consolidated user text is still text before the
+    episode, and it becomes the cue, bounded by the same byte cap.
+    """
+
+    extractor, provider, factory = await _distillation_extractor([])
+    first = await user_event(factory, "I live in Portland and I work at Acme Labs.")
+    provider._script.turns = [
+        ScriptedTurn(
+            text=_scripted_episode([first], ["I live in Portland and I work at Acme Labs."])
+        ),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(text=_empty_distillation(first)),
+    ]
+    first_batch = [event for event in await session_events(factory) if event.sequence == first]
+    await extractor.extract(first_batch, principal=principal(), scope="general")
+
+    second = await user_event(factory, "I still live in Portland, and I have started sailing.")
+    provider._script.turns = [
+        *provider._script.turns,
+        ScriptedTurn(
+            text=_scripted_episode(
+                [second], ["I still live in Portland, and I have started sailing."]
+            )
+        ),
+        ScriptedTurn(text='{"predictions":[]}'),
+        ScriptedTurn(text=_empty_distillation(second)),
+    ]
+    second_batch = [event for event in await session_events(factory) if event.sequence == second]
+    await extractor.extract(second_batch, principal=principal(), scope="general")
+
+    anticipation = json.loads(_prompt_text(provider.requests[4]))
+    assert [event["source_event_id"] for event in anticipation["prefix_events"]] == [first]
+    assert anticipation["prefix_events"][0]["text"] == (
+        "I live in Portland and I work at Acme Labs."
+    )
+    assert anticipation["episode_cues"] == [{"episode_index": 0, "before_event_sequence": second}]
+    # The first consolidation had nothing before it and sent no prefix.
+    first_anticipation = json.loads(_prompt_text(provider.requests[1]))
+    assert first_anticipation["prefix_events"] == []
+
+
+def _prompt_text(request: Any) -> str:
+    """The user-turn prompt of one scripted-provider request."""
+
+    message = request.conversation[1]
+    assert isinstance(message, UserMessage)
+    part = message.content[0]
+    assert isinstance(part, TextPart)
+    return part.text
 
 
 async def test_long_batches_are_segmented_into_bounded_three_call_rounds() -> None:
@@ -3621,13 +3995,22 @@ async def _select_with(
                 model="scripted",
                 policy_profile="default",
                 policy_version=_runtime_policy_version(),
-                scorer_version="distillation-scorer@3",
+                scorer_version="distillation-scorer@5",
                 build_ref="9" * 40,
                 corpus_sha256=_DISTILLATION_CORPUS_SHA256,
                 sample_count=61,
                 positive_case_count=49,
                 seeded_case_count=5,
                 represented_case_count=1,
+                holdout_sha256=_DISTILLATION_HOLDOUT_SHA256,
+                holdout_sample_count=40,
+                holdout_positive_case_count=32,
+                holdout_direct_must_form_recall=0.96,
+                holdout_hypothesis_must_form_recall=0.8,
+                holdout_benign_precision=0.91,
+                holdout_useful_recall_lift_percentage_points=40,
+                holdout_evidence_disposition_precision=0.9,
+                holdout_represented_case_count=2,
                 direct_must_form_recall=1,
                 hypothesis_must_form_recall=1,
                 benign_precision=0.96,

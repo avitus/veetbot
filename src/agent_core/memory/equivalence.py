@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@3"]] = "distillation-scorer@3"
+DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@5"]] = "distillation-scorer@5"
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)*")
 _STOPWORDS = frozenset(
@@ -289,20 +289,194 @@ def negated(value: str) -> bool:
     "drives". An absence such as "without" is content, not polarity, and a
     negation inside a subordinate circumstance ("on days when not lifting")
     qualifies the claim rather than denying it. Scope is the clause: a fronted
-    circumstance ("When travelling, I cannot ...") ends at its comma and does
-    not hide the main clause's negation.
+    circumstance ("When travelling, I cannot ...") ends at its comma, or
+    without one where the main clause's subject begins, and does not hide the
+    main clause's negation.
     """
 
-    for clause in re.split(r"[,;]", value):
+    clauses = re.split(r"[,;]", value)
+    for index, clause in enumerate(clauses):
         terms = _tokens(clause)
         if terms and terms[0] in _SUBORDINATORS:
-            continue
+            if index < len(clauses) - 1:
+                # A fronted circumstance ends at its comma or semicolon, even
+                # when it carries its own subject: "Although I do not run,
+                # User bikes" is not negated.
+                continue
+            # With no separator it ends where the main clause's subject
+            # begins: "Although busy I do not take ..." is negated, "When I
+            # am not lifting I run" is not.
+            starts = [start for start, term in enumerate(terms) if term in _SUBJECT_TOKENS]
+            if not starts:
+                continue
+            terms = terms[starts[-1] :]
         for term in terms:
             if term in _SUBORDINATORS:
                 break
             if term in _NEGATIONS and term not in _ABSENCE:
                 return True
     return False
+
+
+_NAME = re.compile(r"\b[A-Z][a-z]+\b")
+_IRREGULAR_LEMMAS = {
+    "ate": "eat",
+    "attending": "attend",
+    "baking": "bake",
+    "biking": "bike",
+    "boxing": "box",
+    "coding": "code",
+    "commuting": "commute",
+    "cycling": "cycle",
+    "dancing": "dance",
+    "did": "do",
+    "does": "do",
+    "doing": "do",
+    "driven": "drive",
+    "driving": "drive",
+    "drove": "drive",
+    "eating": "eat",
+    "flew": "fly",
+    "flying": "fly",
+    "gave": "give",
+    "given": "give",
+    "goes": "go",
+    "going": "go",
+    "gone": "go",
+    "had": "have",
+    "has": "have",
+    "having": "have",
+    "hiking": "hike",
+    "jogging": "jog",
+    "lifting": "lift",
+    "made": "make",
+    "making": "make",
+    "meditating": "meditate",
+    "practicing": "practice",
+    "ran": "run",
+    "riding": "ride",
+    "rode": "ride",
+    "rowing": "row",
+    "running": "run",
+    "sailing": "sail",
+    "sat": "sit",
+    "sitting": "sit",
+    "skating": "skate",
+    "skiing": "ski",
+    "smoking": "smoke",
+    "studies": "study",
+    "studying": "study",
+    "surfing": "surf",
+    "swam": "swim",
+    "swimming": "swim",
+    "taken": "take",
+    "taking": "take",
+    "took": "take",
+    "tries": "try",
+    "volunteering": "volunteer",
+    "wearing": "wear",
+    "went": "go",
+    "wore": "wear",
+    "worn": "wear",
+    "writing": "write",
+    "written": "write",
+    "wrote": "write",
+}
+_SUBJECT_TOKENS = frozenset(
+    {"i", "i'd", "i'll", "i'm", "i've", "user", "users", "we", "we're", "we've"}
+)
+# Verbs and adverbs that carry an activity rather than being one: "goes
+# running", "keeps swimming", "usually runs".
+_LIGHT_LEADS = frozenset(
+    {
+        "always",
+        "enjoy",
+        "enjoys",
+        "go",
+        "goes",
+        "going",
+        "keep",
+        "keeps",
+        "kept",
+        "like",
+        "likes",
+        "love",
+        "loves",
+        "mostly",
+        "normally",
+        "often",
+        "prefer",
+        "prefers",
+        "regularly",
+        "sometimes",
+        "start",
+        "started",
+        "starting",
+        "tend",
+        "tends",
+        "try",
+        "tries",
+        "usually",
+        "went",
+    }
+)
+
+
+def lemma(term: str) -> str:
+    """A light lemma: inflection stripped so "running", "ran", and "runs" agree."""
+
+    if term in _IRREGULAR_LEMMAS:
+        return _IRREGULAR_LEMMAS[term]
+    if term.endswith("ing") and len(term) > 5:
+        base = term[:-3]
+        if base[-1] == base[-2] and base[-1] not in "aeiou":
+            base = base[:-1]
+        return base
+    if term.endswith("ies") and len(term) > 4:
+        return term[:-3] + "y"
+    if term.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return term[:-2]
+    if term.endswith("ed") and len(term) > 4:
+        base = term[:-2]
+        if base[-1] == base[-2] and base[-1] not in "aeiou":
+            base = base[:-1]
+        return base
+    if term.endswith("s") and not term.endswith("ss") and len(term) > 3:
+        return term[:-1]
+    return term
+
+
+def lemmatized_terms(value: str) -> set[str]:
+    """Content terms reduced to lemmas, for matching an activity across wordings."""
+
+    return {lemma(term) for term in _tokens(value) if _is_content(term)}
+
+
+def main_verb(value: str) -> str | None:
+    """The lemma of the first content word after any negation and light lead.
+
+    "User no longer runs outdoors" and "User goes running outdoors most
+    mornings" both give "run"; "User tracks runs outdoors in a journal" gives
+    "track", which is why a retraction of running does not end it.
+    """
+
+    for term in _tokens(value):
+        if not _is_content(term) or term in _LIGHT_LEADS:
+            continue
+        return lemma(term)
+    return None
+
+
+def proper_names(value: str) -> list[str]:
+    """Capitalized names in order of first appearance, excluding the subject word."""
+
+    found: list[str] = []
+    for match in _NAME.finditer(value):
+        if match.start() == 0 or match.group(0) in {"User", "The"}:
+            continue
+        if match.group(0) not in found:
+            found.append(match.group(0))
+    return found
 
 
 def absence_terms(value: str) -> frozenset[str]:
@@ -340,39 +514,45 @@ def ordered_terms(value: str) -> list[str]:
     return ordered
 
 
+def _longest_common_subsequence(left: list[str], right: list[str]) -> int:
+    lengths = [[0] * (len(right) + 1) for _ in range(len(left) + 1)]
+    for i, left_term in enumerate(left, start=1):
+        for j, right_term in enumerate(right, start=1):
+            lengths[i][j] = (
+                lengths[i - 1][j - 1] + 1
+                if left_term == right_term
+                else max(lengths[i - 1][j], lengths[i][j - 1])
+            )
+    return lengths[len(left)][len(right)]
+
+
 def shared_terms_in_order(left: str, right: str) -> bool:
-    """Whether the content terms both statements share appear in the same order.
+    """Whether the content terms both statements share keep their order.
 
     A bag of words cannot tell "hired Alice and fired Bob" from "hired Bob and
-    fired Alice"; the order of the terms they share can. Terms only one side
-    carries are ignored, so an elaboration is judged by the overlap rules.
+    fired Alice"; the order of the terms they share can. Shared proper names
+    must keep their exact order. Among the other shared terms one may move,
+    because "modify the routine to improve it" and "improve the routine" are
+    one claim, while a swap of two arguments ("the cat chased the dog") moves
+    two and never passes. Terms only one side carries are ignored, so an
+    elaboration is judged by the overlap rules.
     """
 
+    if not names_in_order(left, right):
+        return False
     left_ordered = ordered_terms(left)
     right_ordered = ordered_terms(right)
     shared = set(left_ordered) & set(right_ordered)
-    return [term for term in left_ordered if term in shared] == [
-        term for term in right_ordered if term in shared
-    ]
-
-
-_NAME = re.compile(r"\b[A-Z][a-z]+\b")
+    left_shared = [term for term in left_ordered if term in shared]
+    right_shared = [term for term in right_ordered if term in shared]
+    return _longest_common_subsequence(left_shared, right_shared) >= len(shared) - 1
 
 
 def names_in_order(left: str, right: str) -> bool:
     """Whether the proper names both statements share appear in the same order."""
 
-    def names(value: str) -> list[str]:
-        found: list[str] = []
-        for match in _NAME.finditer(value):
-            if match.start() == 0 or match.group(0) in {"User", "The"}:
-                continue
-            if match.group(0) not in found:
-                found.append(match.group(0))
-        return found
-
-    left_names = names(left)
-    right_names = names(right)
+    left_names = proper_names(left)
+    right_names = proper_names(right)
     shared = set(left_names) & set(right_names)
     return [name for name in left_names if name in shared] == [
         name for name in right_names if name in shared

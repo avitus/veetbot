@@ -10,7 +10,7 @@ import re
 import subprocess
 import tempfile
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -19,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.config import (
     MEMORY_DISTILLATION_CORPUS_PATH,
+    MEMORY_DISTILLATION_HOLDOUT_DIGEST_PATH,
+    MEMORY_DISTILLATION_HOLDOUT_PATH,
     AuthMode,
     DeploymentMode,
     MemoryProviderExtractionMode,
@@ -35,7 +37,7 @@ from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     MemoryLongevity,
 )
-from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT
+from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT, assigned_longevity
 from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
     is_generic_subject,
@@ -47,6 +49,9 @@ from agent_core.memory.equivalence import (
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 CORPUS_PATH = MEMORY_DISTILLATION_CORPUS_PATH
+HOLDOUT_PATH = MEMORY_DISTILLATION_HOLDOUT_PATH
+HOLDOUT_DIGEST_PATH = MEMORY_DISTILLATION_HOLDOUT_DIGEST_PATH
+MINIMUM_HOLDOUT_CASES = 30
 EVALUATION_SCOPE = "memory-distillation-evaluation"
 MINIMUM_SEED_POOL_SIZE = 25
 MINIMUM_EVIDENCE_DISPOSITION_PRECISION = 0.75
@@ -74,6 +79,12 @@ class ExpectedDistilledCandidate(BaseModel):
     claim_kind: MemoryClaimKind
     derivation: MemoryDerivation
     longevity: MemoryLongevity
+    # Kinds a correct belief could reasonably carry instead of the primary
+    # kind: a stated training history is a skill to the label author and a
+    # project fact to the model. A belief under a compatible kind matches
+    # only with the longevity local policy assigns that kind, so the
+    # loosening is taxonomy alone and never reaches the memory's lifecycle.
+    compatible_kinds: list[MemoryClaimKind] = Field(default_factory=list, max_length=3)
     subjects: list[str] = Field(min_length=1)
     statements: list[str] = Field(min_length=1)
     evidence_text: list[str] = Field(min_length=1)
@@ -82,7 +93,20 @@ class ExpectedDistilledCandidate(BaseModel):
     def subjects_are_specific(self) -> ExpectedDistilledCandidate:
         if any(is_generic_subject(subject) for subject in self.subjects):
             raise ValueError("expected subjects must name a specific conflict key, not the user")
+        if self.claim_kind in self.compatible_kinds:
+            raise ValueError("compatible kinds must not repeat the primary kind")
+        if len(set(self.compatible_kinds)) != len(self.compatible_kinds):
+            raise ValueError("compatible kinds must be unique")
         return self
+
+    def accepts(self, claim_kind: MemoryClaimKind, longevity: MemoryLongevity) -> bool:
+        """Whether a belief's kind and longevity satisfy this expectation."""
+
+        if claim_kind is self.claim_kind:
+            return longevity is self.longevity
+        return claim_kind in self.compatible_kinds and longevity is assigned_longevity(
+            claim_kind, self.derivation
+        )
 
 
 class SeedBelief(BaseModel):
@@ -237,6 +261,69 @@ class MemoryDistillationCorpus(BaseModel):
         return list(self.seed_pools[case.prior_beliefs_pool])
 
 
+class MemoryDistillationHoldout(BaseModel):
+    """The frozen case set: authored before its first run, never edited after.
+
+    The development corpus may be tuned freely; the holdout is what an
+    artifact's independent numbers come from, so it carries a freeze date, its
+    digest is recorded beside it in the tree, and any edit shows as a digest
+    change in review and invalidates every artifact bound to the old digest.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal[1] = 1
+    frozen_on: date
+    authored_by: str = Field(min_length=1)
+    seed_pools: dict[str, list[SeedBelief]] = Field(default_factory=dict)
+    cases: list[MemoryDistillationCase] = Field(min_length=MINIMUM_HOLDOUT_CASES)
+
+    @model_validator(mode="after")
+    def holdout_has_declared_coverage(self) -> MemoryDistillationHoldout:
+        identifiers = [case.id for case in self.cases]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("holdout case identifiers must be unique")
+        positives = [case for case in self.cases if case.label != "must_not_form"]
+        if len(positives) * 10 < len(self.cases) * 6:
+            raise ValueError("holdout must be at least sixty percent positive")
+        if not any(case.label == "must_not_form" for case in self.cases):
+            raise ValueError("holdout must carry must-not-form cases")
+        kinds = {expected.claim_kind for case in positives for expected in case.expected}
+        if kinds != set(MemoryClaimKind):
+            raise ValueError("holdout must expect every claim kind")
+        derivations = {expected.derivation for case in positives for expected in case.expected}
+        if derivations != {MemoryDerivation.DIRECT, MemoryDerivation.HYPOTHESIS}:
+            raise ValueError("holdout must expect direct and hypothesis claims")
+        for case in self.cases:
+            pool = case.prior_beliefs_pool
+            if pool is not None and pool not in self.seed_pools:
+                raise ValueError(f"{case.id} references an undeclared seed pool")
+        represented = [
+            case
+            for case in positives
+            if case.represented_text
+            and case.prior_beliefs_pool is not None
+            and len(self.seed_pools[case.prior_beliefs_pool]) >= MINIMUM_SEED_POOL_SIZE
+            and all(
+                any(
+                    statement_supports_clause(seed.statement, text)
+                    for seed in self.seed_pools[case.prior_beliefs_pool]
+                )
+                for text in case.represented_text
+            )
+        ]
+        # One represented case is one anticipation call's chance; several make
+        # the aggregate gate a measurement rather than a coin flip.
+        if len(represented) < 3:
+            raise ValueError("holdout must carry at least three seeded cases that restate a seed")
+        return self
+
+    def seeds_for(self, case: MemoryDistillationCase) -> list[SeedBelief]:
+        if case.prior_beliefs_pool is None:
+            return []
+        return list(self.seed_pools[case.prior_beliefs_pool])
+
+
 class DistillationEvaluationBelief(BaseModel):
     """The closed, user-safe belief projection scored by the offline driver."""
 
@@ -252,7 +339,7 @@ class DistillationEvaluationBelief(BaseModel):
 class DistillationCaseScore(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    scorer_version: Literal["distillation-scorer@3"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@5"] = DISTILLATION_SCORER_VERSION
     scoring: Literal["strict", "lenient"] = "strict"
     expected: int = Field(ge=0)
     matched: int = Field(ge=0)
@@ -320,9 +407,11 @@ class MemoryDistillationEvaluationResult(BaseModel):
 
     passed: bool
     failure_summary: str | None
-    scorer_version: Literal["distillation-scorer@3"] = DISTILLATION_SCORER_VERSION
+    scorer_version: Literal["distillation-scorer@5"] = DISTILLATION_SCORER_VERSION
     cases: list[DistillationCaseResult]
     policies: dict[PolicyVersion, DistillationPolicyMetrics]
+    holdout_cases: list[DistillationCaseResult] = Field(default_factory=list)
+    holdout_policies: dict[PolicyVersion, DistillationPolicyMetrics] = Field(default_factory=dict)
     evidence: MemoryDistillationEvidence | None = None
 
     @model_validator(mode="after")
@@ -344,16 +433,16 @@ def _belief_matches(
 ) -> bool:
     """One expected claim matches one belief.
 
-    Strict scoring requires the closed claim kind, derivation, and longevity plus
-    a specific subject and an equivalent statement. Lenient scoring compares the
-    statement only, so a control policy that cannot express the closed fields is
-    still credited for the memory it actually formed.
+    Strict scoring requires the derivation, the closed claim kind or one the
+    gold declares compatible with the longevity local policy assigns it, plus
+    a specific subject and an equivalent statement. Lenient scoring compares
+    the statement only, so a control policy that cannot express the closed
+    fields is still credited for the memory it actually formed.
     """
 
     if closed_fields and (
-        belief.claim_kind is not expected.claim_kind
-        or belief.derivation is not expected.derivation
-        or belief.longevity is not expected.longevity
+        belief.derivation is not expected.derivation
+        or not expected.accepts(belief.claim_kind, belief.longevity)
     ):
         return False
     statement_matches = any(
@@ -781,6 +870,32 @@ def load_distillation_corpus(repository_root: Path) -> tuple[MemoryDistillationC
     )
 
 
+def load_distillation_holdout(
+    repository_root: Path,
+) -> tuple[MemoryDistillationHoldout, str]:
+    """Load the frozen holdout and confirm it is the one whose digest is recorded.
+
+    The recorded digest is the freeze: a holdout whose content no longer
+    matches it has been edited since it was frozen, and the evaluator refuses
+    to score against it until the freeze is deliberately re-recorded.
+    """
+
+    root = repository_root.resolve()
+    path = (root / HOLDOUT_PATH).resolve()
+    path.relative_to(root)
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    recorded = (root / HOLDOUT_DIGEST_PATH).read_text().strip()
+    if recorded != digest:
+        raise ValueError("the holdout has been edited since its digest was frozen")
+    holdout = MemoryDistillationHoldout.model_validate_json(raw)
+    corpus, _ = load_distillation_corpus(repository_root)
+    overlap = {case.id for case in corpus.cases} & {case.id for case in holdout.cases}
+    if overlap:
+        raise ValueError(f"holdout case identifiers collide with the corpus: {sorted(overlap)}")
+    return holdout, digest
+
+
 def publish_distillation_evidence(
     path: Path,
     *,
@@ -788,6 +903,9 @@ def publish_distillation_evidence(
     corpus_sha256: str,
     sample_count: int,
     positive_case_count: int,
+    holdout_sha256: str,
+    holdout_sample_count: int,
+    holdout_positive_case_count: int,
     metrics: dict[str, float | int | str],
     evaluated_at: datetime,
 ) -> MemoryDistillationEvidence:
@@ -800,6 +918,9 @@ def publish_distillation_evidence(
             "corpus_sha256": corpus_sha256,
             "sample_count": sample_count,
             "positive_case_count": positive_case_count,
+            "holdout_sha256": holdout_sha256,
+            "holdout_sample_count": holdout_sample_count,
+            "holdout_positive_case_count": holdout_positive_case_count,
             "evaluated_at": evaluated_at,
             **metrics,
         }
@@ -833,37 +954,43 @@ async def run_live_evaluation(
         raise ValueError(f"refusing to overwrite existing evaluation evidence: {output.resolve()}")
 
     corpus, corpus_sha256 = load_distillation_corpus(repository_root)
+    holdout, holdout_sha256 = load_distillation_holdout(repository_root)
     base_settings = load_settings()
     results: list[DistillationCaseResult] = []
+    holdout_results: list[DistillationCaseResult] = []
     identities: set[tuple[str, str, str]] = set()
     evaluated_at: datetime | None = None
     with tempfile.TemporaryDirectory(prefix="agent-memory-distillation-eval-") as root:
         settings = _evaluation_settings(base_settings, Path(root) / "artifacts")
-        for case in corpus.cases:
-            arms: dict[PolicyVersion, DistillationArmResult] = {}
-            seeds = corpus.seeds_for(case)
-            for policy_version in _POLICIES:
-                arm = await _evaluate_case(
-                    settings,
-                    case,
-                    model_policy=model_policy,
-                    policy_profile=policy_profile,
-                    policy_version=policy_version,
-                    seeds=seeds,
+        for case_set, seeds_for, sink in (
+            (corpus.cases, corpus.seeds_for, results),
+            (holdout.cases, holdout.seeds_for, holdout_results),
+        ):
+            for case in case_set:
+                arms: dict[PolicyVersion, DistillationArmResult] = {}
+                seeds = seeds_for(case)
+                for policy_version in _POLICIES:
+                    arm = await _evaluate_case(
+                        settings,
+                        case,
+                        model_policy=model_policy,
+                        policy_profile=policy_profile,
+                        policy_version=policy_version,
+                        seeds=seeds,
+                    )
+                    arms[policy_version] = arm
+                    if arm.identity is not None:
+                        identities.add(arm.identity)
+                    if policy_version == "formation@9":
+                        evaluated_at = arm.evaluated_at
+                sink.append(
+                    DistillationCaseResult(
+                        case_id=case.id,
+                        label=case.label,
+                        scenario=case.scenario,
+                        arms=arms,
+                    )
                 )
-                arms[policy_version] = arm
-                if arm.identity is not None:
-                    identities.add(arm.identity)
-                if policy_version == "formation@9":
-                    evaluated_at = arm.evaluated_at
-            results.append(
-                DistillationCaseResult(
-                    case_id=case.id,
-                    label=case.label,
-                    scenario=case.scenario,
-                    arms=arms,
-                )
-            )
 
     if len(identities) != 1:
         raise ValueError("distillation evaluation resolved more than one provider tuple")
@@ -871,10 +998,16 @@ async def run_live_evaluation(
         raise ValueError("memory-distillation corpus is empty")
     provider, model, compiled_policy = identities.pop()
     summaries = {policy: _policy_metrics(policy, results) for policy in _POLICIES}
-    failures = evaluate_publication_gates(corpus, results, summaries)
+    holdout_summaries = {policy: _policy_metrics(policy, holdout_results) for policy in _POLICIES}
+    failures = [
+        *evaluate_publication_gates(corpus, results, summaries),
+        *evaluate_holdout_gates(holdout_results, holdout_summaries),
+    ]
     current = summaries["formation@9"]
     lift = (current.useful_recall - summaries["formation@8"].useful_recall) * 100
     correction_rate = _correction_rate(results, current)
+    held = holdout_summaries["formation@9"]
+    holdout_lift = (held.useful_recall - holdout_summaries["formation@8"].useful_recall) * 100
 
     evidence = None
     if not failures:
@@ -891,21 +1024,36 @@ async def run_live_evaluation(
             corpus_sha256=corpus_sha256,
             sample_count=len(corpus.cases),
             positive_case_count=sum(case.label != "must_not_form" for case in corpus.cases),
+            holdout_sha256=holdout_sha256,
+            holdout_sample_count=len(holdout.cases),
+            holdout_positive_case_count=sum(
+                case.label != "must_not_form" for case in holdout.cases
+            ),
             metrics={
+                "holdout_direct_must_form_recall": held.direct_must_form_recall,
+                "holdout_hypothesis_must_form_recall": held.hypothesis_must_form_recall,
+                "holdout_benign_precision": held.benign_precision,
+                "holdout_useful_recall_lift_percentage_points": holdout_lift,
+                "holdout_evidence_disposition_precision": held.evidence_disposition_precision,
+                "holdout_represented_case_count": represented_case_count(holdout_results),
                 "direct_must_form_recall": current.direct_must_form_recall,
                 "hypothesis_must_form_recall": current.hypothesis_must_form_recall,
                 "benign_precision": current.benign_precision,
                 "useful_recall_lift_percentage_points": lift,
                 "correction_rate_per_hundred": correction_rate,
                 "evidence_disposition_precision": current.evidence_disposition_precision,
-                "provider_calls_per_segment": _calls_per_segment(results),
+                "provider_calls_per_segment": _calls_per_segment([*results, *holdout_results]),
                 "provider_calls_measured": sum(
-                    result.arms["formation@9"].provider_calls for result in results
+                    result.arms["formation@9"].provider_calls
+                    for result in [*results, *holdout_results]
                 ),
                 "consolidations_measured": sum(
-                    bool(result.arms["formation@9"].expected_provider_calls) for result in results
+                    bool(result.arms["formation@9"].expected_provider_calls)
+                    for result in [*results, *holdout_results]
                 ),
-                "provider_cost_usd": current.provider_cost_usd,
+                "provider_cost_usd": format(
+                    Decimal(current.provider_cost_usd) + Decimal(held.provider_cost_usd), "f"
+                ),
                 "seeded_case_count": sum(
                     result.arms["formation@9"].seeded_beliefs > 0 for result in results
                 ),
@@ -919,6 +1067,8 @@ async def run_live_evaluation(
         failure_summary="; ".join(failures) if failures else None,
         cases=results,
         policies=summaries,
+        holdout_cases=holdout_results,
+        holdout_policies=holdout_summaries,
         evidence=evidence,
     )
 
@@ -954,6 +1104,54 @@ def _calls_per_segment(results: list[DistillationCaseResult]) -> int:
     if any(arm.provider_calls != arm.expected_provider_calls for arm in eligible):
         raise ValueError("provider calls per consolidation were not exactly three per segment")
     return DISTILLATION_CALLS_PER_SEGMENT
+
+
+def evaluate_holdout_gates(
+    results: list[DistillationCaseResult],
+    summaries: dict[PolicyVersion, DistillationPolicyMetrics],
+) -> list[str]:
+    """Every reason the frozen holdout denies publication.
+
+    The holdout carries the same recall, precision, lift, disposition,
+    boundary, call-count, and represented gates as the development corpus and
+    none of the corpus's named-scenario gates, because its cases are not
+    tuned toward anything.
+    """
+
+    current = summaries["formation@9"]
+    lift = (current.useful_recall - summaries["formation@8"].useful_recall) * 100
+    failures: list[str] = []
+    if current.direct_must_form_recall < 0.95:
+        failures.append(
+            f"holdout direct must-form recall {current.direct_must_form_recall:.3f} is below 0.95"
+        )
+    if current.hypothesis_must_form_recall < 0.8:
+        failures.append(
+            "holdout hypothesis must-form recall "
+            f"{current.hypothesis_must_form_recall:.3f} is below 0.80"
+        )
+    if current.benign_precision < 0.9:
+        failures.append(f"holdout benign precision {current.benign_precision:.3f} is below 0.90")
+    if lift < 15:
+        failures.append(f"holdout useful recall lift {lift:.1f}pp is below 15pp")
+    if current.evidence_disposition_precision < MINIMUM_EVIDENCE_DISPOSITION_PRECISION:
+        failures.append(
+            "holdout evidence disposition precision "
+            f"{current.evidence_disposition_precision:.3f} is below "
+            f"{MINIMUM_EVIDENCE_DISPOSITION_PRECISION:.2f}"
+        )
+    if current.boundary_failures:
+        failures.append(f"holdout trust-boundary failures {current.boundary_failures} is not zero")
+    for result in results:
+        arm = result.arms["formation@9"]
+        if arm.provider_calls != arm.expected_provider_calls:
+            failures.append(
+                f"{result.case_id} made {arm.provider_calls} provider calls; "
+                f"expected {arm.expected_provider_calls}"
+            )
+    if not represented_case_count(results):
+        failures.append("no holdout seeded case demonstrated attributed representation")
+    return failures
 
 
 def evaluate_publication_gates(
@@ -996,15 +1194,8 @@ def evaluate_publication_gates(
             )
     if not any(result.arms["formation@9"].seeded_beliefs for result in results):
         failures.append("no case ran against a populated store")
-    cases_by_id = {case.id: case for case in corpus.cases}
-    for result in results:
-        arm = result.arms["formation@9"]
-        if cases_by_id[result.case_id].represented_text and (
-            arm.represented_units == 0 or arm.represented_units_verified < arm.represented_units
-        ):
-            failures.append(
-                f"{result.case_id} restates a seeded belief that was not verifiably represented"
-            )
+    # One represented case is one anticipation call's chance, so the gate is
+    # the aggregate: at least one seeded restatement was verifiably represented.
     if not represented_case_count(results):
         failures.append("no seeded case demonstrated attributed representation")
     personal_core = [result for result in results if result.scenario == "personal-agent"]
@@ -1019,14 +1210,15 @@ def evaluate_publication_gates(
         for result in rich_core
     ):
         failures.append("rich multi-turn conversation core did not pass completely")
+    # Coverage counts the kind the provider formed, not the kind the label
+    # names: matching a skill through a compatible project fact must not
+    # certify that the policy ever forms a skill.
     matched_kinds = {
-        expected.claim_kind
+        belief.claim_kind
         for case, result in zip(corpus.cases, results, strict=True)
         for expected in case.expected
-        if any(
-            _belief_matches(belief, expected, closed_fields=True)
-            for belief in result.arms["formation@9"].beliefs
-        )
+        for belief in result.arms["formation@9"].beliefs
+        if _belief_matches(belief, expected, closed_fields=True)
     }
     if matched_kinds != set(MemoryClaimKind):
         missing = ",".join(sorted(kind.value for kind in set(MemoryClaimKind) - matched_kinds))

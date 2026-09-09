@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 from uuid import UUID
 
@@ -311,7 +312,7 @@ class ScheduleListTool:
 
     spec = ToolSpec(
         name=SCHEDULE_LIST_TOOL_NAME,
-        version="1.0.1",
+        version="1.0.2",
         description=(
             "List bounded schedule summaries with stable IDs and revisions. Use before "
             "changes; ask if zero or multiple schedules match."
@@ -379,9 +380,24 @@ class ScheduleListTool:
         }
         return ToolResult(
             ok=True,
-            content=[TextPart(text=f"Found {len(page.items)} schedule summaries.")],
+            content=[
+                TextPart(
+                    text=json.dumps(
+                        structured,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
+            ],
             structured=structured,
         )
+
+
+class LegacyScheduleListTool(ScheduleListTool):
+    """Compatibility registration for sessions pinned before the 1.0.2 repair."""
+
+    spec = ScheduleListTool.spec.model_copy(update={"version": "1.0.1"}, deep=True)
 
 
 class ScheduleUpdateTool:

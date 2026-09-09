@@ -51,6 +51,7 @@ from agent_core.memory.equivalence import (
     distinguishing_words,
     names_in_order,
     negated,
+    proper_names,
     statement_supports_clause,
     statements_compatible,
     statements_equivalent,
@@ -210,8 +211,11 @@ class _DistilledCandidate(BaseModel):
     claim_kind: MemoryClaimKind
     derivation: MemoryDerivation
     # A retraction names the belief a correction ends; consolidation updates
-    # that belief and never creates one from it.
-    polarity: Literal["assert", "retract"] = "assert"
+    # that belief and never creates one from it. Required, not defaulted: the
+    # provider's strict structured output rejects a schema with an optional
+    # property, and an optional field here once failed every distillation
+    # call in a live evaluation.
+    polarity: Literal["assert", "retract"]
     evidence_spans: list[EvidenceSpan] = Field(min_length=1, max_length=256)
 
 
@@ -284,6 +288,16 @@ def belief_type_for_claim_kind(claim_kind: MemoryClaimKind) -> BeliefType:
     return _BELIEF_TYPE_BY_CLAIM_KIND[claim_kind]
 
 
+def assigned_longevity(
+    claim_kind: MemoryClaimKind, derivation: MemoryDerivation
+) -> MemoryLongevity:
+    """The longevity local policy gives a provider candidate of this kind and derivation."""
+
+    if derivation is MemoryDerivation.HYPOTHESIS:
+        return MemoryLongevity.TENTATIVE
+    return _DIRECT_LONGEVITY_BY_CLAIM_KIND[claim_kind]
+
+
 def distillation_evidence_matches(
     evidence: MemoryDistillationEvidence,
     resolved_model: ResolvedModel,
@@ -291,6 +305,7 @@ def distillation_evidence_matches(
     policy_version: str,
     *,
     corpus_sha256: str | None = None,
+    holdout_sha256: str | None = None,
 ) -> bool:
     """Require the exact evaluated model and policy tuple for activation.
 
@@ -302,6 +317,8 @@ def distillation_evidence_matches(
     """
 
     if corpus_sha256 is not None and evidence.corpus_sha256 != corpus_sha256:
+        return False
+    if holdout_sha256 is not None and evidence.holdout_sha256 != holdout_sha256:
         return False
     expected = {
         "extractor_version": NEMORI_EXTRACTOR_VERSION,
@@ -324,6 +341,7 @@ def select_distillation_policy(
     mode: Literal["auto", "off", "required"],
     evidenced_older_policy: str = "formation@8",
     corpus_sha256: str | None = None,
+    holdout_sha256: str | None = None,
 ) -> str:
     """Select formation@9 only on its exact evidence tuple."""
 
@@ -336,6 +354,7 @@ def select_distillation_policy(
             policy_profile,
             policy_version,
             corpus_sha256=corpus_sha256,
+            holdout_sha256=holdout_sha256,
         )
     ):
         return NEMORI_FORMATION_POLICY_VERSION
@@ -537,6 +556,21 @@ def _higher_sensitivity(left: Sensitivity, right: Sensitivity) -> Sensitivity:
     return left if SENSITIVITY_ORDER[left] >= SENSITIVITY_ORDER[right] else right
 
 
+_VACUOUS_STATEMENT = re.compile(
+    r"\b(?:an?\s+)?(?:unspecified|unnamed|unknown|unstated|certain|various|some)\s+"
+    r"(?:activity|activities|thing|things|hobby|hobbies|task|tasks|pursuit|pursuits)\b"
+    r"|\bsomething\b|\ban activity\b",
+    re.IGNORECASE,
+)
+_TRANSIENT_EVENT = re.compile(
+    r"^User\s+(?:did|had|went|made|spent|took|ate|drank|watched|attended|visited|called"
+    r"|met|cleaned|washed|cooked|fixed|finished|bought)\b.*\b(?:for\s+(?:an?|\d+|one|two"
+    r"|three|four|five|several|a\s+few)\s+(?:hours?|minutes?|days?)|yesterday|today|tonight"
+    r"|this\s+(?:morning|afternoon|evening)|last\s+(?:night|week|weekend|month))\b",
+    re.IGNORECASE,
+)
+
+
 def _canonical_provider_statement(
     statement: str,
     derivation: MemoryDerivation,
@@ -556,6 +590,13 @@ def _canonical_provider_statement(
     compact = re.sub(r"^user(?=['\s])", "User", compact, flags=re.IGNORECASE)
     if _CANONICAL_USER_STATEMENT.match(compact) is None:
         raise ValueError("provider statement has no canonical user subject")
+    # A statement with no object ("an unspecified activity") or a completed
+    # one-off event ("did the dishes for an hour") says nothing recallable
+    # about the user; both are counted as rejections, never stored.
+    if _VACUOUS_STATEMENT.search(compact) is not None:
+        raise ValueError("provider statement has no recallable content")
+    if derivation is MemoryDerivation.DIRECT and _TRANSIENT_EVENT.match(compact) is not None:
+        raise ValueError("provider statement records a transient event")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None
     if derivation is MemoryDerivation.DIRECT and hedged:
         raise ValueError("direct statement uses hypothesis language")
@@ -846,13 +887,30 @@ def _mapped_terms(statement: str) -> set[str]:
     return {_SUBJECT_SYNONYMS.get(term, term) for term in content_terms(statement)}
 
 
-def _same_claim_under_one_key(left: str, right: str) -> bool:
-    """Whether two statements filed under one conflict key are one claim."""
+# A claim of these kinds is its subject: "interested in exoplanets" and "loves
+# learning about exoplanets" under the key "exoplanets" are one memory, and
+# only a contradiction separates them. An activity or fact under one key can
+# still be two claims ("runs marathons", "runs outdoors").
+_SUBJECT_IS_THE_CLAIM = frozenset(
+    {
+        MemoryClaimKind.CONSTRAINT,
+        MemoryClaimKind.INTEREST,
+        MemoryClaimKind.PREFERENCE,
+        MemoryClaimKind.RELATIONSHIP,
+        MemoryClaimKind.ROLE,
+    }
+)
+
+
+def _same_claim_under_one_key(left: str, right: str, claim_kind: MemoryClaimKind) -> bool:
+    """Whether two compatible statements filed under one conflict key are one claim."""
 
     left_terms = _mapped_terms(left)
     right_terms = _mapped_terms(right)
     if not left_terms or not right_terms or not names_in_order(left, right):
         return False
+    if claim_kind in _SUBJECT_IS_THE_CLAIM:
+        return True
     if left_terms <= right_terms or right_terms <= left_terms:
         return True
     return len(left_terms & right_terms) / min(len(left_terms), len(right_terms)) >= 0.6
@@ -863,16 +921,20 @@ def _outranks(candidate: MemoryCandidate, existing: MemoryCandidate) -> bool:
 
     A direct statement outranks a guess; between equals, the richer statement
     wins so "has a son named Robert who lives in Berlin" is not flattened to
-    "has a son" by arriving second.
+    "has a son" by arriving second. A tie goes to the newcomer: the fallback's
+    candidates are combined first with a default kind and a key composed from
+    the source words, and the provider's copy of the same claim names its
+    kind and composes its key, so a tie must not leave the poorer copy in
+    place.
     """
 
     if existing.derivation is MemoryDerivation.HYPOTHESIS:
         return candidate.derivation is MemoryDerivation.DIRECT or _mapped_terms(
             candidate.statement
-        ) > _mapped_terms(existing.statement)
+        ) >= _mapped_terms(existing.statement)
     if candidate.derivation is MemoryDerivation.HYPOTHESIS:
         return False
-    return _mapped_terms(candidate.statement) > _mapped_terms(existing.statement)
+    return _mapped_terms(candidate.statement) >= _mapped_terms(existing.statement)
 
 
 def _with_distinct_key(
@@ -896,9 +958,39 @@ def _with_distinct_key(
         return candidate
     words = distinguishing_words(candidate.statement, [existing.statement for existing in same_key])
     if not words:
-        return candidate
-    subject = f"{candidate.subject} {' '.join(words)}"[:MEMORY_SUBJECT_MAX_LENGTH].strip()
+        # The same words in a different relationship ("lent Alice Bob's
+        # book" beside "lent Bob Alice's book"): the names in this
+        # statement's order tell the two apart.
+        words = proper_names(candidate.statement)
+    taken = {
+        existing.subject.casefold()
+        for existing in combined
+        if existing.claim_kind is candidate.claim_kind
+    }
+    subject = _bounded_key(candidate.subject, " ".join(words))
+    if not words or subject.casefold() in taken:
+        ordinal = 2
+        while _bounded_key(subject, f"#{ordinal}").casefold() in taken:
+            ordinal += 1
+        subject = _bounded_key(subject, f"#{ordinal}")
     return candidate.model_copy(update={"subject": subject})
+
+
+def _bounded_key(base: str, suffix: str) -> str:
+    """Append ``suffix`` to ``base`` within the subject bound, suffix intact.
+
+    The suffix is what tells the key apart from the one it collided with, so
+    the base gives way to it: bounding the composed key from its end would
+    hand a subject that already fills the bound straight back its collision,
+    and formation would then reach the existing record instead of a new one.
+    """
+
+    if not suffix:
+        return base[:MEMORY_SUBJECT_MAX_LENGTH].strip()
+    room = MEMORY_SUBJECT_MAX_LENGTH - len(suffix) - 1
+    if room <= 0:
+        return suffix[:MEMORY_SUBJECT_MAX_LENGTH].strip()
+    return f"{base[:room].rstrip()} {suffix}".strip()
 
 
 def _candidates_semantically_duplicate(
@@ -936,7 +1028,7 @@ def _candidates_semantically_duplicate(
         " ".join(right.subject.casefold().split()),
     )
     if left.claim_kind is right.claim_kind and normalized_left_subject == normalized_right_subject:
-        return _same_claim_under_one_key(left.statement, right.statement)
+        return _same_claim_under_one_key(left.statement, right.statement, left.claim_kind)
     generic_subjects = {"user", "the user"}
     if (
         left.claim_kind is right.claim_kind
@@ -1046,6 +1138,13 @@ class NemoriAssistedCandidateExtractor:
 
         async with self._uow_factory() as uow:
             live_memories = await uow.memories.list_memories(principal, limit=50)
+            # The anticipation cue is the user's text before a segment's
+            # earliest episode. A session's already-consolidated text is still
+            # before it, so the cue reaches back past the watermark; without
+            # that, every single-segment consolidation, which is nearly all of
+            # them, ran anticipation with nothing to predict from.
+            history = await uow.events.list_after(selected[0].session_id, 0, principal)
+        prefix_pool = owned_user_events(history, principal)
         # Anticipation is provider egress: a sensitive or restricted belief
         # stays out of the request, so it can neither be predicted from nor
         # attributed as redundancy.
@@ -1178,7 +1277,7 @@ class NemoriAssistedCandidateExtractor:
 
             anticipation_raw, failure, stage_metric = await self._call(
                 stage="anticipation",
-                prompt=self._anticipation_prompt(selected, episodes, prior_memories),
+                prompt=self._anticipation_prompt(prefix_pool, episodes, prior_memories),
                 response_schema=_AnticipationResponse.model_json_schema(),
                 principal=principal,
                 run_id=segment[-1].run_id,
@@ -1482,7 +1581,12 @@ class NemoriAssistedCandidateExtractor:
             "source_event_id must name a supplied user event and every candidate must include "
             "exact evidence_spans copied from those events. Use direct for stated evidence and "
             "hypothesis only for inference. Write short third-person canonical statements "
-            "beginning with User, User's, or The user's. Set proposed_scope to the supplied "
+            "beginning with User, User's, or The user's, stating the claim itself as what the "
+            "user does, has, wants, or prefers (User swims most days; User prefers metric "
+            "units; User has a daughter), never as a description of a routine, goal, "
+            "preference, or resource (not: the user's routine includes swimming; the user's "
+            "goal is to; the user's preference is to). Name every activity: a claim with no "
+            "object is not memory. Set proposed_scope to the supplied "
             "scope. When the user states that something previously true no longer holds "
             "(no longer, stopped, gave up, don't anymore), emit it with polarity retract, "
             "named by the subject of the belief it ends and worded as the negated claim; "
