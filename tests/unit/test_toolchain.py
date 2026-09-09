@@ -354,6 +354,8 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "UnsetEnvironment=" not in scheduler
     assert "DATABASE_URL=" in schedule_environment
     assert "AGENT_SCHEDULE_WORKER_ENABLED=1" in schedule_environment
+    assert "AGENT_EMAIL_ENABLED=0" in schedule_environment
+    assert "GMAIL_ACCOUNTS_FILE=" in schedule_environment
     assert "AGENT_NOTIFICATION_API_ENABLED=0" in schedule_environment
     assert "AGENT_NOTIFICATION_DISPATCH_ENABLED=0" in schedule_environment
     assert not {
@@ -364,6 +366,9 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "FIRECRAWL_API_KEY",
         "KEENABLE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+        "GMAIL_READ_CREDENTIAL_FILE",
+        "GMAIL_WRITE_CREDENTIAL_FILE",
+        "GMAIL_SEND_CREDENTIAL_FILE",
     } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
     assert "agent worker --role notify" in notify
     assert "EnvironmentFile=/etc/veetbot/veetbot-notify.env" in notify

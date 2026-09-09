@@ -214,12 +214,21 @@ default account keeps the three legacy server ids. Every other account uses an
 account-qualified id, so account selection is fixed in the advertised tool
 name rather than accepted as a model-authored argument.
 
+The isolated production scheduler mirrors the email flag and, for named
+accounts, the manifest path in its separate environment. Its settings loader
+reads only the manifest's non-secret structure and account ids, derives the
+matching server-use scopes for the fresh-authority check, and never opens the
+referenced credential files. In legacy single-account mode the flag alone
+derives the original three scopes. The credential-bearing application and run
+workers remain the only roles that validate and load the OAuth documents;
+`AUTH_SCOPES` remains limited to the closed platform vocabulary.
+
 Per-server request timeouts and `maximum_output_bytes` use the adapter's
 defaults unless the deployment overrides them. When the flag is unset no row
 is composed: no `mcp.gmail_*` tool exists in the registry, none is advertised,
-and no `mcp.gmail_*.use` scope is granted. A missing or unreadable manifest or
-credential file while the flag is set is a configuration error at composition,
-not a connect failure later.
+and no `mcp.gmail_*.use` scope is granted. In a credential-bearing composition,
+a missing or unreadable manifest or credential file while the flag is set is a
+configuration error at composition, not a connect failure later.
 
 ## Policy, approvals, and trust
 
@@ -306,6 +315,9 @@ the read server; every label change, draft, or send it proposes parks in the
 approval queue; the existing approval trigger notifies the owner's phone
 content-free, and the schedule-outcome trigger reports the run itself. The
 cadence floor is daily until roadmap B5; Gmail push stays out with B3 and B4.
+The production scheduler's separate environment must mirror the email flag and
+named-account manifest so the fresh-authority check observes the same account
+roster while remaining credential-minimized.
 
 ## Bounds and failures
 

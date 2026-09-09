@@ -631,7 +631,11 @@ def _gmail_server_id(account_id: str, mode: str, *, is_default: bool) -> str:
     return f"gmail_{mode}" if is_default else f"gmail_{account_id}_{mode}"
 
 
-def _read_gmail_accounts_file(raw_path: str) -> tuple[tuple[str, ...], dict[str, str]]:
+def _read_gmail_accounts_file(
+    raw_path: str,
+    *,
+    load_credentials: bool = True,
+) -> tuple[tuple[str, ...], dict[str, str]]:
     path = Path(raw_path)
     if not path.is_absolute() or path.is_symlink():
         raise ConfigurationError("GMAIL_ACCOUNTS_FILE must be an absolute regular file")
@@ -683,8 +687,14 @@ def _read_gmail_accounts_file(raw_path: str) -> tuple[tuple[str, ...], dict[str,
             mode = credential_name.removeprefix("gmail_")
             field = f"{mode}_credential_file"
             raw_credential_path = account.get(field)
-            if not isinstance(raw_credential_path, str) or not raw_credential_path:
+            if (
+                not isinstance(raw_credential_path, str)
+                or not raw_credential_path
+                or not Path(raw_credential_path).is_absolute()
+            ):
                 raise ConfigurationError("GMAIL_ACCOUNTS_FILE has an invalid account shape")
+            if not load_credentials:
+                continue
             server_id = _gmail_server_id(account_id, mode, is_default=index == 0)
             credentials[server_id] = _read_gmail_credential_file(
                 raw_credential_path,
@@ -1019,6 +1029,7 @@ def validate_settings(
     *,
     require_auth_token: bool = True,
     require_execution_environment: bool = True,
+    require_email_credentials: bool = True,
 ) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
@@ -1075,7 +1086,11 @@ def validate_settings(
         for name in settings.credentials
         if name in _GMAIL_CREDENTIAL_FILES or _GMAIL_NAMED_CREDENTIAL.fullmatch(name)
     }
-    if settings.email_enabled and configured_gmail_credentials != expected_gmail_credentials:
+    if (
+        require_email_credentials
+        and settings.email_enabled
+        and configured_gmail_credentials != expected_gmail_credentials
+    ):
         raise ConfigurationError("email enablement requires every configured Gmail credential")
     if not settings.email_enabled and configured_gmail_credentials:
         raise ConfigurationError("Gmail credentials require AGENT_EMAIL_ENABLED=1")
@@ -1206,6 +1221,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         environ,
         require_auth_token=True,
         require_execution_environment=True,
+        load_email_credentials=True,
     )
 
 
@@ -1218,6 +1234,7 @@ def load_schedule_worker_settings(
         environ,
         require_auth_token=False,
         require_execution_environment=False,
+        load_email_credentials=False,
     )
 
 
@@ -1230,6 +1247,7 @@ def load_notification_worker_settings(
         environ,
         require_auth_token=False,
         require_execution_environment=False,
+        load_email_credentials=True,
     )
 
 
@@ -1238,6 +1256,7 @@ def _load_settings(
     *,
     require_auth_token: bool,
     require_execution_environment: bool,
+    load_email_credentials: bool,
 ) -> Settings:
 
     values = _environment(environ)
@@ -1331,15 +1350,22 @@ def _load_settings(
         raise ConfigurationError(
             "GMAIL_ACCOUNTS_FILE and legacy Gmail credential files are mutually exclusive"
         )
+    if configured_gmail_files and not load_email_credentials:
+        raise ConfigurationError(
+            "schedule worker Gmail configuration must not include credential files"
+        )
     email_account_ids: tuple[str, ...] = ()
     if email_enabled:
         if gmail_accounts_file:
-            email_account_ids, account_credentials = _read_gmail_accounts_file(gmail_accounts_file)
+            email_account_ids, account_credentials = _read_gmail_accounts_file(
+                gmail_accounts_file,
+                load_credentials=load_email_credentials,
+            )
             for credential_name, credential in account_credentials.items():
                 if credential_name in credentials:
                     raise ConfigurationError(f"duplicate credential source for {credential_name}")
                 credentials[credential_name] = SecretStr(credential)
-        else:
+        elif load_email_credentials:
             missing_gmail_files = [
                 variable
                 for credential_name, (variable, _scope) in _GMAIL_CREDENTIAL_FILES.items()
@@ -1503,5 +1529,6 @@ def _load_settings(
         settings,
         require_auth_token=require_auth_token,
         require_execution_environment=require_execution_environment,
+        require_email_credentials=load_email_credentials,
     )
     return settings

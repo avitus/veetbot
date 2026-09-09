@@ -334,8 +334,23 @@ The default account retains `mcp.gmail_read.*`, `mcp.gmail_write.*`, and
 `mcp.gmail_work_read.*`, `mcp.gmail_work_write.*`, and
 `mcp.gmail_work_send.*`. The two configuration forms are mutually exclusive.
 
+Mirror the non-secret activation metadata into the scheduler's separate
+environment so firing-time authorization sees the same accounts:
+
+```text
+AGENT_EMAIL_ENABLED=1
+GMAIL_ACCOUNTS_FILE=/etc/veetbot/gmail/accounts.json
+```
+
+For legacy single-account configuration, set `AGENT_EMAIL_ENABLED=1` there and
+leave `GMAIL_ACCOUNTS_FILE` empty. Never copy any
+`GMAIL_*_CREDENTIAL_FILE` variable into the schedule environment. The lean
+scheduler reads the manifest's account ids and derives their server-use scopes;
+it does not open an OAuth credential document.
+
 Run the production preflight as the same identity that owns the credentials,
-then restart the four units that compose application tools:
+then restart the units that compose application tools and current schedule
+authority:
 
 ```bash
 ssh root@api.veetbot.com '
@@ -349,7 +364,8 @@ ssh root@api.veetbot.com '
     .venv/bin/python scripts/check_production_deployment.py
   '\''
   systemctl restart \
-    veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+    veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api \
+    veetbot-schedule
   systemctl is-active \
     veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api \
     veetbot-schedule veetbot-notify
