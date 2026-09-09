@@ -10,12 +10,19 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    TextPart,
+    ToolResultItem,
+)
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.schedules import (
@@ -123,6 +130,7 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
         specs = {
             name: composition.tool_pipeline._registry.get(name).spec for name in LIFECYCLE_NAMES
         }
+        legacy_list_spec = composition.tool_pipeline._registry.get("schedule.list", "1.0.1").spec
         run_id = await composition.runs.submit("ready?")
         run = await composition.runs.wait_terminal(run_id)
         async with composition.uow_factory() as uow:
@@ -135,6 +143,8 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
     assert specs["schedule.list"].risk is RiskLevel.LOW
     assert specs["schedule.list"].idempotency is IdempotencyClass.READ_ONLY
     assert specs["schedule.list"].allow_parallel is True
+    assert specs["schedule.list"].version == "1.0.2"
+    assert legacy_list_spec.version == "1.0.1"
     assert specs["schedule.update"].required_scopes == {"schedule.write"}
     assert specs["schedule.update"].side_effect is SideEffectClass.EXTERNAL_WRITE
     assert specs["schedule.update"].risk is RiskLevel.HIGH
@@ -196,6 +206,69 @@ async def test_schedule_list_is_bounded_paginated_and_summary_only() -> None:
     assert "requested_scopes" not in encoded
     assert "policy_profile" not in encoded
     assert "principal_id" not in encoded
+
+
+async def test_schedule_list_summaries_reach_the_followup_model_request() -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="schedule.list",
+                        arguments={},
+                        call_id="find-briefing",
+                    )
+                ]
+            ),
+            ScriptedTurn(
+                text="I found the Mon-Fri technology briefing.",
+                context_contains="Mon-Fri technology briefing",
+            ),
+        ]
+    )
+    async with build(
+        settings=_enabled_settings(),
+        script=script,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        enabled_tools=["schedule.list"],
+    ) as composition:
+        await _seed_schedule(composition)
+        run_id = await composition.runs.submit("List my schedules.")
+        completed = await composition.runs.wait_terminal(run_id)
+        provider = composition.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        requests = [request.model_copy(deep=True) for request in provider.requests]
+
+    assert completed.status is RunStatus.COMPLETED
+    assert len(requests) == 2
+    result_item = next(
+        item
+        for item in requests[1].conversation
+        if isinstance(item, ToolResultItem) and item.call_id == "find-briefing"
+    )
+    [part] = result_item.content
+    assert isinstance(part, TextPart)
+    expected = {
+        "items": [
+            {
+                "cadence": {
+                    "kind": "DAILY",
+                    "local_time": "17:01:00",
+                    "timezone": "UTC",
+                },
+                "current_revision": 1,
+                "next_fire_at": "2026-09-02T17:01:00+00:00",
+                "pause_reason": None,
+                "schedule_id": str(SCHEDULE_ID),
+                "state": "ACTIVE",
+                "title": "Mon-Fri technology briefing",
+            }
+        ],
+        "next_cursor": None,
+    }
+    serialized = json.dumps(expected, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    assert f"\n{serialized}\n" in part.text
 
 
 async def test_schedule_pause_and_resume_run_through_approval_without_backfill() -> None:

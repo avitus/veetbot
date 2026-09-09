@@ -437,6 +437,7 @@ from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
 from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_LIFECYCLE_TOOL_NAMES,
+    LegacyScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
     SchedulePauseTool,
@@ -1493,6 +1494,7 @@ async def _compose(
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
         registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
+        registry.register(LegacyScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
         registry.register(SchedulePauseTool(schedule_service))
