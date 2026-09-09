@@ -281,6 +281,12 @@ When scheduled runs are enabled, separately copy
 values, and protect it with the same ownership and mode. The schedule unit never
 loads the shared environment because that file contains API, model-provider,
 web-provider, and browser-profile credentials that the scheduler must not see.
+If Gmail is enabled, mirror `AGENT_EMAIL_ENABLED=1` into this schedule
+environment. For named accounts also mirror the non-secret
+`GMAIL_ACCOUNTS_FILE` path; for legacy single-account configuration leave that
+path empty. Do not copy any `GMAIL_*_CREDENTIAL_FILE` variable. The schedule
+loader reads the manifest's account ids to derive current Gmail scopes but
+never opens the referenced OAuth credential documents.
 The tenant-scoped database role must not have PostgreSQL `BYPASSRLS` authority:
 schedule child-table isolation depends on the forced row-level-security policy
 on `schedules` applying inside each child-policy lookup. Reserve `BYPASSRLS`

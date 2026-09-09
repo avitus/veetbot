@@ -1078,6 +1078,7 @@ def _validate_schedule_role(settings: Settings) -> Principal:
         settings,
         require_auth_token=False,
         require_execution_environment=False,
+        require_email_credentials=False,
     )
     if not settings.schedule_worker_enabled:
         raise ConfigurationError("schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1")
@@ -1098,11 +1099,20 @@ def _validate_schedule_role(settings: Settings) -> Principal:
         raise ConfigurationError(
             "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
         )
+    email_scopes = {
+        scope
+        for row in email_server_configs(
+            settings.auth_tenant_id,
+            enabled=settings.email_enabled,
+            account_ids=settings.email_account_ids,
+        )
+        for scope in row.required_scopes
+    }
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes=set(settings.auth_scopes),
+        scopes={*settings.auth_scopes, *email_scopes},
     )
 
 
