@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import json
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -11,8 +12,8 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.schedule_wakeup import InMemoryScheduleWakeup
-from agent_core.bootstrap import build, build_schedule_worker
-from agent_core.config import ConfigurationError
+from agent_core.bootstrap import _validate_schedule_role, build, build_schedule_worker
+from agent_core.config import ConfigurationError, load_schedule_worker_settings
 from agent_core.domain.schedules import ScheduleOccurrence
 from agent_core.runtime.worker import DurableWorker
 from agent_core.scheduling.worker import ScheduleWorker
@@ -21,6 +22,118 @@ from tests.contract.test_schedule_repository_contract import revision, schedule
 from tests.integration.m2_support import memory_settings
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _production_schedule_environment(*, scopes: str) -> dict[str, str]:
+    return {
+        "DATABASE_URL": "postgresql+asyncpg://schedule@127.0.0.1:5432/agent",
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TENANT_ID": "tenant-production",
+        "AUTH_PRINCIPAL_ID": "operator",
+        "AUTH_ROLES": "user",
+        "AUTH_SCOPES": scopes,
+        "AGENT_SCHEDULE_API_ENABLED": "1",
+        "AGENT_SCHEDULE_WORKER_ENABLED": "1",
+    }
+
+
+def test_lean_schedule_role_derives_manifest_gmail_authority_without_credentials(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "gmail-accounts.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "default_account": "personal",
+                "accounts": [
+                    {
+                        "account_id": "personal",
+                        "read_credential_file": "/credentials/personal/read.json",
+                        "write_credential_file": "/credentials/personal/write.json",
+                        "send_credential_file": "/credentials/personal/send.json",
+                    },
+                    {
+                        "account_id": "work",
+                        "read_credential_file": "/credentials/work/read.json",
+                        "write_credential_file": "/credentials/work/write.json",
+                        "send_credential_file": "/credentials/work/send.json",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    configured_scopes = {
+        "session.read",
+        "schedule.read",
+        "schedule.write",
+        "schedule.cancel",
+    }
+    gmail_scopes = {
+        "mcp.gmail_read.use",
+        "mcp.gmail_write.use",
+        "mcp.gmail_send.use",
+        "mcp.gmail_work_read.use",
+        "mcp.gmail_work_write.use",
+        "mcp.gmail_work_send.use",
+    }
+    settings = load_schedule_worker_settings(
+        {
+            **_production_schedule_environment(scopes=",".join(sorted(configured_scopes))),
+            "AGENT_EMAIL_ENABLED": "1",
+            "GMAIL_ACCOUNTS_FILE": str(manifest),
+        }
+    )
+
+    assert settings.credentials == {}
+    assert settings.email_enabled is True
+    assert settings.email_account_ids == ("personal", "work")
+    principal = _validate_schedule_role(settings)
+    assert principal.scopes == configured_scopes | gmail_scopes
+
+
+def test_lean_schedule_role_derives_legacy_gmail_authority_without_credentials() -> None:
+    configured_scopes = {
+        "session.read",
+        "schedule.read",
+        "schedule.write",
+        "schedule.cancel",
+    }
+    settings = load_schedule_worker_settings(
+        {
+            **_production_schedule_environment(scopes=",".join(sorted(configured_scopes))),
+            "AGENT_EMAIL_ENABLED": "1",
+        }
+    )
+
+    assert settings.credentials == {}
+    assert settings.email_account_ids == ()
+    principal = _validate_schedule_role(settings)
+    assert principal.scopes == configured_scopes | {
+        "mcp.gmail_read.use",
+        "mcp.gmail_write.use",
+        "mcp.gmail_send.use",
+    }
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "mcp.gmail_read.admin",
+        "mcp.gmail_work.use",
+        "mcp.gmail_Work_read.use",
+        "mcp.unrelated.use",
+    ],
+)
+def test_lean_schedule_role_rejects_non_gmail_extension_scopes(scope: str) -> None:
+    settings = load_schedule_worker_settings(
+        _production_schedule_environment(scopes=f"schedule.read,{scope}")
+    )
+
+    with pytest.raises(ConfigurationError, match="unknown platform scopes"):
+        _validate_schedule_role(settings)
 
 
 async def test_schedule_worker_batches_and_isolates_definition_failures() -> None:

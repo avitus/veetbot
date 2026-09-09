@@ -662,6 +662,16 @@ separate least-privilege PostgreSQL builder for production. The production
 builder validates token-mode configured identity but neither loads nor receives
 the API bearer token or any execution-provider credential.
 
+When Gmail is active, the scheduler environment mirrors
+`AGENT_EMAIL_ENABLED` and, for named accounts, the non-secret
+`GMAIL_ACCOUNTS_FILE` path. Its credential-minimized loader validates the
+manifest shape and account ids, derives the exact `mcp.gmail_*.use` scopes for
+the current-authority snapshot, and never opens a referenced OAuth credential
+file. Legacy single-account mode derives only the original three Gmail scopes
+from the enabled flag. Gmail scopes therefore stay synchronized with account
+renames and removals without adding them to the closed `AUTH_SCOPES` platform
+vocabulary or placing credentials in the scheduler role.
+
 No in-memory scheduler queue is introduced. In-memory repositories exist only
 to run application and property tests; production startup refuses scheduling
 without PostgreSQL, a durable principal directory, and a non-development worker
