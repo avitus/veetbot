@@ -179,8 +179,8 @@ watermark: a session's already-consolidated user text is still text before
 the segment's earliest episode, so a continuing session is cued by what the
 user said earlier in it, bounded by the existing byte cap and with blinding
 unchanged. And activation evidence now comes from a frozen holdout as well as
-the development corpus: fifty-one cases authored on 2026-09-09 before any run,
-with their digest recorded in the tree, both digests bound into the artifact,
+the development corpus: fifty-one cases authored on 2026-09-09 before any run
+(re-frozen once, below), with their digest recorded in the tree, both digests bound into the artifact,
 the holdout's own thresholds gated, and the represented gate made the
 aggregate on both sets. The development corpus may be tuned; the holdout may
 only be re-frozen deliberately. The frozen holdout item and the cue item are
@@ -230,10 +230,15 @@ nothing to a live memory in any of the four seeded cases; the represented
 gate passed on the local verifier alone. Two gold gaps were noted and left:
 the holdout does not expect "User has a bakery" from "a mobile app for my
 bakery", and the development corpus expects the trip from "planning a trip to
-Japan" but not from "my partner and I are planning a trip". The holdout was
-not edited. What remains is an owner decision: prompt work validated on the
-development corpus before the holdout is run again, or `formation@10` keeps
-the tuple.
+Japan" but not from "my partner and I are planning a trip". The owner decided
+on 2026-09-09 to close both: the development case now expects the trip, and
+the holdout was re-frozen the same day, its digest re-recorded, with a
+resource expectation for the bakery on hold-hypothesis-004. That is the one
+edit the holdout has had since it was authored, made against a gap the
+transcript settles rather than against a score, and it is the reason the
+first run's numbers cannot be compared exactly with any later run. What
+remains is an owner decision: prompt work validated on the development corpus
+before the holdout is run again, or `formation@10` keeps the tuple.
 
 ## Consequences
 

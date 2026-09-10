@@ -692,7 +692,10 @@ milestones:
           five unseen projects against five of five near-identical corpus
           cases, over-specified restatements, a dropped conjunct, unrelatable
           duplicate wordings, and no anticipation attribution in any seeded
-          case. The holdout was not edited; formation@10 keeps the tuple.
+          case. On the owner's decision the development corpus now expects
+          the trip from "my partner and I are planning a trip", and the
+          holdout was re-frozen once, digest re-recorded, to expect the bakery
+          from "a mobile app for my bakery". formation@10 keeps the tuple.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-

@@ -53,7 +53,9 @@ never required anticipation to attribute anything (ADR-0087). The scorer is now
 `distillation-scorer@6`, the evidence schema is version 4 with a required
 `represented_case_count` and the frozen holdout's digest and thresholds, the
 67-case development corpus carries a seeded case whose restated clause must be
-verifiably represented, and the 51-case holdout carries three. The first run
+verifiably represented, and the 51-case holdout carries three. The holdout
+was re-frozen once, on 2026-09-09 after the first run, to add a resource
+expectation the transcript settles (ADR-0087). The first run
 over both sets, on 2026-09-09 at commit `c4360e3` under `distillation-scorer@5`
 (345 calls, USD 1.86), failed: holdout hypothesis must-form recall 0.200,
 holdout precision 0.677, holdout direct recall 0.923, and development-corpus
