@@ -514,12 +514,16 @@ public struct VeetbotAPIClient: Sendable {
 
     public func listSchedules(
         limit: Int = 50,
-        cursor: String? = nil
+        cursor: String? = nil,
+        states: [ScheduleStateKind] = []
     ) async throws -> Page<ScheduleListItemView> {
         var query = [
             URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
         ]
         if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        query.append(
+            contentsOf: states.map { URLQueryItem(name: "state", value: $0.rawValue) }
+        )
         do {
             return try await transport.send(
                 TransportRequest(method: .get, path: "/v1/schedules", queryItems: query)

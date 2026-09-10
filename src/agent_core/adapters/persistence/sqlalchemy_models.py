@@ -1123,6 +1123,13 @@ class ScheduleRow(Base):
         ),
         Index("ix_schedules_due", "state", "next_fire_at"),
         Index(
+            "ix_schedules_terminal_retention",
+            "tenant_id",
+            "updated_at",
+            "id",
+            postgresql_where=text("state IN ('COMPLETED','CANCELLED')"),
+        ),
+        Index(
             "ix_schedules_tenant_principal_updated",
             "tenant_id",
             "principal_id",

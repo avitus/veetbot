@@ -6,7 +6,7 @@ import builtins
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, tuple_, update
+from sqlalchemy import and_, delete, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,9 +109,12 @@ class InMemoryScheduleRepository:
         *,
         limit: int,
         cursor: ScheduleCursor | None = None,
+        states: frozenset[ScheduleState] | None = None,
     ) -> list[Schedule]:
         _positive_limit(limit)
         values = [value for value in self._schedules.values() if _owned_by(value, principal)]
+        if states is not None:
+            values = [value for value in values if value.state in states]
         values.sort(key=lambda item: (item.updated_at, item.id), reverse=True)
         if cursor is not None:
             values = [
@@ -120,6 +123,53 @@ class InMemoryScheduleRepository:
                 if (value.updated_at, value.id) < (cursor.updated_at, cursor.id)
             ]
         return values[:limit]
+
+    async def purge_terminal(self, tenant_id: str, *, before: datetime, limit: int) -> int:
+        boundary = _aware_utc(before)
+        candidates = sorted(
+            (
+                schedule
+                for schedule in self._schedules.values()
+                if schedule.tenant_id == tenant_id
+                and schedule.state in {ScheduleState.COMPLETED, ScheduleState.CANCELLED}
+                and schedule.updated_at <= boundary
+            ),
+            key=lambda item: (item.updated_at, item.id),
+        )[: _positive_limit(limit)]
+        schedule_ids = {schedule.id for schedule in candidates}
+        if not schedule_ids:
+            return 0
+        occurrence_ids = {
+            occurrence_id
+            for occurrence_id, occurrence in self._occurrences.items()
+            if occurrence.schedule_id in schedule_ids
+        }
+        self._idempotency = {
+            key: record
+            for key, record in self._idempotency.items()
+            if record.schedule_id not in schedule_ids
+        }
+        self._occurrence_keys = {
+            key: occurrence_id
+            for key, occurrence_id in self._occurrence_keys.items()
+            if occurrence_id not in occurrence_ids
+        }
+        self._occurrences = {
+            occurrence_id: occurrence
+            for occurrence_id, occurrence in self._occurrences.items()
+            if occurrence_id not in occurrence_ids
+        }
+        self._revisions = {
+            identity: revision
+            for identity, revision in self._revisions.items()
+            if identity[0] not in schedule_ids
+        }
+        self._schedules = {
+            schedule_id: schedule
+            for schedule_id, schedule in self._schedules.items()
+            if schedule_id not in schedule_ids
+        }
+        return len(schedule_ids)
 
     async def due(self, now: datetime, limit: int) -> builtins.list[UUID]:
         now_utc = _aware_utc(now)
@@ -448,11 +498,16 @@ class PostgresScheduleRepository:
         *,
         limit: int,
         cursor: ScheduleCursor | None = None,
+        states: frozenset[ScheduleState] | None = None,
     ) -> list[Schedule]:
         statement = select(ScheduleRow).where(
             ScheduleRow.tenant_id == principal.tenant_id,
             ScheduleRow.principal_id == principal.principal_id,
         )
+        if states is not None:
+            statement = statement.where(
+                ScheduleRow.state.in_(tuple(state.value for state in states))
+            )
         if cursor is not None:
             statement = statement.where(
                 or_(
@@ -468,6 +523,62 @@ class PostgresScheduleRepository:
             )
         ).all()
         return [schedule_to_domain(row) for row in rows]
+
+    async def purge_terminal(self, tenant_id: str, *, before: datetime, limit: int) -> int:
+        boundary = _aware_utc(before)
+        batch = _positive_limit(limit)
+        lock_acquired = await self._session.scalar(
+            select(
+                func.pg_try_advisory_xact_lock(
+                    func.hashtextextended("maintenance.schedule_terminal_retention", 0)
+                )
+            )
+        )
+        if not lock_acquired:
+            return 0
+        schedule_ids = builtins.list(
+            (
+                await self._session.scalars(
+                    select(ScheduleRow.id)
+                    .where(
+                        ScheduleRow.tenant_id == tenant_id,
+                        ScheduleRow.state.in_(
+                            (ScheduleState.COMPLETED.value, ScheduleState.CANCELLED.value)
+                        ),
+                        ScheduleRow.updated_at <= boundary,
+                    )
+                    .order_by(ScheduleRow.updated_at, ScheduleRow.id)
+                    .limit(batch)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        if not schedule_ids:
+            return 0
+        await self._session.execute(
+            delete(ScheduleIdempotencyKeyRow).where(
+                ScheduleIdempotencyKeyRow.schedule_id.in_(schedule_ids)
+            )
+        )
+        await self._session.execute(
+            delete(ScheduleOccurrenceRow).where(ScheduleOccurrenceRow.schedule_id.in_(schedule_ids))
+        )
+        await self._session.execute(
+            delete(ScheduleRevisionRow).where(ScheduleRevisionRow.schedule_id.in_(schedule_ids))
+        )
+        deleted = await self._session.execute(
+            delete(ScheduleRow)
+            .where(
+                ScheduleRow.id.in_(schedule_ids),
+                ScheduleRow.tenant_id == tenant_id,
+                ScheduleRow.state.in_(
+                    (ScheduleState.COMPLETED.value, ScheduleState.CANCELLED.value)
+                ),
+                ScheduleRow.updated_at <= boundary,
+            )
+            .returning(ScheduleRow.id)
+        )
+        return len(deleted.scalars().all())
 
     async def due(self, now: datetime, limit: int) -> builtins.list[UUID]:
         return builtins.list(

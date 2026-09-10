@@ -201,4 +201,5 @@ nav:
       - ADR-0086 Repaired provider-assisted formation@10 and policy-bound evidence: adr/0086-repaired-provider-assisted-formation.md
       - ADR-0087 Corrections retract, provider re-pass, and scorer@3 withdrawal: adr/0087-formation9-corrections-repass-and-scorer3.md
       - ADR-0088 Milestone 23 conversational schedule update: adr/0088-milestone-23-conversational-schedule-update.md
+      - ADR-0089 Recent terminal schedule history and bounded retention: adr/0089-terminal-schedule-history-and-retention.md
   - Changelog: changelog.md

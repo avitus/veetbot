@@ -38,6 +38,9 @@ scheduling:
   max_materializations_per_minute: 60
   daily_cost: 25
   monthly_cost: 250
+  terminal_retention_days: 30
+  terminal_purge_interval_seconds: 3600
+  terminal_purge_batch: 100
 notifications:
   claim_batch: 100
   lease_seconds: 30

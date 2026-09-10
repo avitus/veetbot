@@ -150,6 +150,19 @@ async def test_schedule_routes_cover_lifecycle_idempotency_pagination_and_scopes
             )
             assert cancelled.status_code == 200
 
+            current = await client.get(
+                "/v1/schedules",
+                params=[("state", "ACTIVE"), ("state", "PAUSED")],
+            )
+            assert current.status_code == 200
+            assert current.json()["items"] == []
+            history = await client.get(
+                "/v1/schedules",
+                params=[("state", "COMPLETED"), ("state", "CANCELLED")],
+            )
+            assert history.status_code == 200
+            assert [item["id"] for item in history.json()["items"]] == [str(schedule_id)]
+
         reader = principal.model_copy(update={"scopes": {"schedule.read"}}, deep=True)
         async with _client(composition, principal=reader) as read_only:
             denied = await read_only.post(

@@ -334,6 +334,20 @@ def test_device_channel_limits_are_versioned_knobs() -> None:
     }
 
 
+def test_terminal_schedule_retention_is_a_versioned_policy() -> None:
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert (
+        loaded["scheduling"]
+        | {
+            "terminal_retention_days": 30,
+            "terminal_purge_interval_seconds": 3600,
+            "terminal_purge_batch": 100,
+        }
+        == loaded["scheduling"]
+    )
+
+
 def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
     key_file = tmp_path / "AuthKey_TEST.p8"
     key_file.write_text("test APNs private key material", encoding="ascii")
@@ -951,13 +965,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_164_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_167_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 164
+    assert len(qualified_paths) == 167
+    assert {
+        "runtime/limits.yaml:scheduling.terminal_retention_days",
+        "runtime/limits.yaml:scheduling.terminal_purge_interval_seconds",
+        "runtime/limits.yaml:scheduling.terminal_purge_batch",
+    } <= qualified_paths
     assert {
         "runtime/limits.yaml:device.invocation_timeout_seconds",
         "runtime/limits.yaml:device.ingest_daily_cap",

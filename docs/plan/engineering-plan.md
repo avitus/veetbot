@@ -162,6 +162,19 @@ Version 3.2 (conversational schedule update pass, 2026-09-04):
   future active firing, and replays safely through the schedule idempotency
   ledger.
 
+Version 3.3 (recent schedule history and retention pass, 2026-09-10):
+
+- The native schedule browser defaults to actionable ACTIVE and PAUSED records
+  and gives the owner a separate Recent History section for COMPLETED and
+  CANCELLED records (ADR-0089).
+- The existing schedule index gains optional lifecycle-state filtering before
+  cursor pagination. Terminal schedule-owned state is retained for thirty days
+  and then removed by bounded, fleet-safe maintenance without deleting linked
+  durable runs or sessions.
+- Recurring schedules retain their IANA zone and daylight-saving semantics, but
+  the native cadence summary shows the zone only when it differs from the
+  device's current zone.
+
 ## 1. Mission
 
 Build a modern, general-purpose AI agent platform with a small, durable core and replaceable modules for:
@@ -3135,9 +3148,10 @@ Acceptance criteria:
   reproducible from their immutable revision and exact run link.
 - Pausing never backfills paused time, cancellation never reopens, and cancelling
   a schedule never cancels an already materialized run.
-- A client that was offline for every firing can later enumerate successful,
-  failed, cancelled, missed, and overlap-skipped occurrences and reach the exact
-  durable run result where one exists.
+- During the configured terminal-retention window, a client that was offline
+  for every firing can later enumerate successful, failed, cancelled, missed,
+  and overlap-skipped occurrences and reach the exact durable run result where
+  one exists.
 - No raw token, cookie, key, or credential is persisted or logged as schedule,
   revision, occurrence, event, session, or run state.
 
@@ -3820,16 +3834,18 @@ Acceptance criteria:
   immutable revision, affects only future occurrences, and preserves pinned
   execution authority and bounds that were not exposed to the model.
 - Conversational delete invokes terminal schedule cancellation, preserves the
-  retained schedule and occurrence ledger, and never cancels an already
-  materialized run.
+  schedule and occurrence ledger during their configured retention window, and
+  never cancels an already materialized run.
 - Missing authority, malformed or unknown identifiers, stale revisions,
   ambiguous discovery, illegal terminal transitions, and identical retries
   fail closed without changing the wrong schedule or duplicating an effect.
 
-The milestone does not include occurrence or run history tools, hard deletion,
-delegated scheduled-run scopes, new cadence kinds, new notification payloads,
-native lifecycle controls, or model-callable mutation of execution authority,
-policy, limits, timeout, misfire grace, or failure policy.
+The milestone does not include occurrence or run history tools, user- or
+model-initiated hard deletion, delegated scheduled-run scopes, new cadence
+kinds, new notification payloads, native lifecycle controls, or model-callable
+mutation of execution authority, policy, limits, timeout, misfire grace, or
+failure policy. ADR-0089 separately authorizes maintenance retention of
+terminal schedule-owned state.
 
 ### Milestone 24: SMS through the owner's iPhone
 
@@ -3916,17 +3932,22 @@ inline-keyboard approvals (B3), or a second business number.
 
 The owner authorized the native schedule browser on 2026-08-29 (ADR-0075) as
 a transport-only Apple client extension over the completed Milestone 11
-control plane. It is not a new milestone and does not reopen Milestone 11 or
-broaden Milestone 20's gates. The detailed display and compatibility contract
-is in [scheduling.md](scheduling.md#native-apple-schedule-browser).
+control plane, then authorized recent terminal history and bounded retention
+on 2026-09-10 (ADR-0089). It is not a new milestone and does not reopen
+Milestone 11 or broaden Milestone 20's gates. The detailed display,
+compatibility, and retention contract is in
+[scheduling.md](scheduling.md#native-apple-schedule-browser).
 
 Implement:
 
 - A schedule entry beside Memory in the native sidebar, opening a resizable
   list/detail browser that reloads authoritative server state when presented.
-- Cursor-paginated summary rows for every schedule retained for the calling
-  principal, with title, text-labeled lifecycle state, cadence, next firing,
-  and bounded instruction preview.
+- A default Current section with cursor-paginated ACTIVE and PAUSED summaries,
+  plus a user-selected Recent History section with cursor-paginated COMPLETED
+  and CANCELLED summaries retained for thirty days.
+- Title, text-labeled lifecycle state, cadence, next firing, and bounded
+  instruction preview in each row; recurring cadence shows its stored zone only
+  when that zone differs from the device's current zone.
 - Point-read detail containing the full instruction, current revision,
   cadence, execution bounds, and lifecycle timestamps; the client never treats
   the list preview as full content.
@@ -3937,13 +3958,18 @@ Acceptance criteria:
 
 - The surface makes only the existing schedule GET requests and requests no
   schedule write or cancellation authority.
-- ACTIVE, PAUSED, COMPLETED, and CANCELLED records can all be inspected, while
-  an unknown future state or cadence still renders without failing the page.
+- ACTIVE and PAUSED records appear by default; the owner can switch to recent
+  COMPLETED and CANCELLED records, while an unknown future state or cadence
+  returned by a compatible server still renders without failing the page.
+- The state filter is applied before pagination. Terminal schedule revisions,
+  occurrences, and idempotency rows age out after thirty days without deleting
+  linked runs, sessions, or content-free audit events.
 - Pagination ignores duplicate IDs, stops on a repeated cursor, survives a
   later-page error without discarding loaded rows, and offers a retry for the
   failed operation.
-- The iOS in-process UI fixture opens the schedule browser, lists a schedule,
-  follows its point read, and renders the full instruction in detail.
+- The iOS in-process UI fixture opens the schedule browser, lists a current
+  schedule, switches to recent history, and follows a point read to render the
+  full instruction in detail.
 
 Native creation, update, pause, resume, cancellation, occurrence history, and
 run history remain outside this read-only extension.

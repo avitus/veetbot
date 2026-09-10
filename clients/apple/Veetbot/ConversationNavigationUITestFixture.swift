@@ -7,6 +7,7 @@ enum ConversationNavigationUITestFixture {
     static let secondSessionID = "00000000-0000-0000-0000-000000000456"
     static let memoryID = "00000000-0000-0000-0000-000000000321"
     static let scheduleID = "00000000-0000-0000-0000-000000000654"
+    static let scheduleHistoryID = "00000000-0000-0000-0000-000000000656"
 
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
@@ -128,10 +129,20 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 {"items":[\(Self.memoryJSON)],"next_cursor":null}
                 """
         case ("GET", "/v1/schedules"):
+            let states = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .filter { $0.name == "state" }
+                .compactMap(\.value) ?? []
             statusCode = 200
-            body = """
-                {"items":[\(Self.scheduleSummaryJSON)],"next_cursor":null}
-                """
+            if states == ["COMPLETED", "CANCELLED"] {
+                body = """
+                    {"items":[\(Self.scheduleHistorySummaryJSON)],"next_cursor":null}
+                    """
+            } else {
+                body = """
+                    {"items":[\(Self.scheduleSummaryJSON)],"next_cursor":null}
+                    """
+            }
         case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)"):
             statusCode = 200
             body = Self.scheduleDetailJSON
@@ -184,6 +195,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let scheduleSummaryJSON = """
         {"id":"\(ConversationNavigationUITestFixture.scheduleID)","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","title":"Daily review","instruction_preview":"Preview from the schedule index.","cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"}
+        """
+
+    private static let scheduleHistorySummaryJSON = """
+        {"id":"\(ConversationNavigationUITestFixture.scheduleHistoryID)","state":"COMPLETED","pause_reason":null,"current_revision":1,"next_fire_at":null,"title":"Finished review","instruction_preview":"Recent completed schedule.","cadence":{"kind":"ONCE","at":"2026-08-28T16:00:00Z"},"created_at":"2026-08-28T00:00:00Z","updated_at":"2026-08-28T16:00:00Z"}
         """
 
     private static let scheduleDetailJSON = """

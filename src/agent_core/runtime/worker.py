@@ -194,8 +194,10 @@ class MaintenanceWorker:
         sweep_memory_decay: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
         sweep_device_invocations: Callable[[], Awaitable[int]] | None = None,
+        sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
+        terminal_schedule_sweep_interval_seconds: float = 3600,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -212,16 +214,23 @@ class MaintenanceWorker:
         self._sweep_memory_decay = sweep_memory_decay
         self._sweep_session_deletions = sweep_session_deletions
         self._sweep_device_invocations = sweep_device_invocations
+        self._sweep_terminal_schedules = sweep_terminal_schedules
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if memory_decay_interval_seconds <= 0:
             raise ValueError("memory decay interval must be positive")
+        if terminal_schedule_sweep_interval_seconds <= 0:
+            raise ValueError("terminal schedule sweep interval must be positive")
         self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
         self._last_artifact_orphan_sweep_at: datetime | None = None
         # Decay is a slow sweep on its own timer: the maintenance pass runs
         # every few seconds, and a belief may lose one step per interval.
         self._memory_decay_interval = timedelta(seconds=memory_decay_interval_seconds)
         self._last_memory_decay_sweep_at: datetime | None = None
+        self._terminal_schedule_sweep_interval = timedelta(
+            seconds=terminal_schedule_sweep_interval_seconds
+        )
+        self._last_terminal_schedule_sweep_at: datetime | None = None
         self._stopping = False
 
     def stop(self) -> None:
@@ -308,6 +317,17 @@ class MaintenanceWorker:
                 await self._sweep_session_deletions()
             except Exception:
                 logger.exception("session artifact deletion retry failed")
+        terminal_schedule_sweep_due = (
+            self._last_terminal_schedule_sweep_at is None
+            or self._clock.now() - self._last_terminal_schedule_sweep_at
+            >= self._terminal_schedule_sweep_interval
+        )
+        if self._sweep_terminal_schedules is not None and terminal_schedule_sweep_due:
+            self._last_terminal_schedule_sweep_at = self._clock.now()
+            try:
+                await self._sweep_terminal_schedules()
+            except Exception:
+                logger.exception("terminal schedule retention sweep failed")
         orphan_sweep_due = (
             self._last_artifact_orphan_sweep_at is None
             or self._clock.now() - self._last_artifact_orphan_sweep_at

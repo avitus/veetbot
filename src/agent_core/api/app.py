@@ -1051,9 +1051,15 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.read")],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
+        state: Annotated[list[ScheduleState] | None, Query()] = None,
     ) -> Page[ScheduleListItem]:
         try:
-            page = await services.schedules.list(authenticated, limit, cursor)
+            page = await services.schedules.list(
+                authenticated,
+                limit,
+                cursor,
+                states=None if state is None else frozenset(state),
+            )
         except ValueError as exc:
             raise MalformedRequestError("schedule cursor is malformed") from exc
         return Page(

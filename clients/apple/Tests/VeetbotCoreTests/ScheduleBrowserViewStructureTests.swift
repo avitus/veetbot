@@ -28,6 +28,57 @@ import Testing
     }
 
     @Test
+    func testBrowserSeparatesCurrentSchedulesFromRecentHistory() throws {
+        let source = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")
+
+        #expect(source.contains("Picker(\"Schedule view\", selection: $section)"))
+        #expect(source.contains("Text(\"Current\").tag(ScheduleBrowserSection.current)"))
+        #expect(
+            source.contains(
+                "Text(\"Recent History\").tag(ScheduleBrowserSection.recentHistory)"
+            )
+        )
+        #expect(source.contains(".task(id: section) { await model.reload(section) }"))
+    }
+
+    @Test
+    func testCadenceOnlyShowsATimeZoneWhenItDiffersFromTheDevice() {
+        let matching = ScheduleCadenceView(
+            kind: "DAILY",
+            at: nil,
+            localTime: "09:00:00",
+            timezone: "America/Los_Angeles",
+            weekdays: nil,
+            daysOfMonth: nil,
+            lastDay: nil,
+            dates: nil
+        )
+        let exceptional = ScheduleCadenceView(
+            kind: "WEEKLY",
+            at: nil,
+            localTime: "09:00:00",
+            timezone: "America/New_York",
+            weekdays: [1],
+            daysOfMonth: nil,
+            lastDay: nil,
+            dates: nil
+        )
+
+        #expect(
+            scheduleCadenceSummary(
+                matching,
+                deviceTimeZoneIdentifier: "America/Los_Angeles"
+            ) == "Daily · 09:00:00"
+        )
+        #expect(
+            scheduleCadenceSummary(
+                exceptional,
+                deviceTimeZoneIdentifier: "America/Los_Angeles"
+            ) == "Weekly · Mon · 09:00:00 · America/New_York"
+        )
+    }
+
+    @Test
     func testDetailLoadsThePointReadAndShowsTheFullInstruction() throws {
         let source = try source(at: "Veetbot/Views/ScheduleDetailView.swift")
 

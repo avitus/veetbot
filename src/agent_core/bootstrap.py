@@ -1324,6 +1324,9 @@ async def _compose(
     schedule_scan_batch: int,
     schedule_fallback_poll_seconds: float,
     schedule_admission_backoff_seconds: float,
+    schedule_terminal_retention_days: int,
+    schedule_terminal_purge_interval_seconds: float,
+    schedule_terminal_purge_batch: int,
     schedule_definition_limits: ScheduleDefinitionLimits,
     delegation_defaults: DelegationDefaults,
     delegation_caps: DelegationCaps,
@@ -2330,6 +2333,14 @@ async def _compose(
         async def sweep_session_deletions() -> int:
             return await public_session_service.purge_pending_artifacts(principal)
 
+        async def sweep_terminal_schedules() -> int:
+            async with uow_factory() as uow:
+                return await uow.schedules.purge_terminal(
+                    principal.tenant_id,
+                    before=clock.now() - timedelta(days=schedule_terminal_retention_days),
+                    limit=schedule_terminal_purge_batch,
+                )
+
         async def sweep_device_invocations() -> int:
             async with uow_factory() as uow:
                 return await uow.device_invocations.expire_overdue(
@@ -2506,11 +2517,15 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
                     ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
+                    ),
+                    terminal_schedule_sweep_interval_seconds=(
+                        schedule_terminal_purge_interval_seconds
                     ),
                 ),
                 schedule_worker_factory=schedule_worker_factory,
@@ -3173,6 +3188,11 @@ async def build(
             schedule_admission_backoff_seconds=float(
                 scheduling_config["admission_backoff_seconds"]
             ),
+            schedule_terminal_retention_days=int(scheduling_config["terminal_retention_days"]),
+            schedule_terminal_purge_interval_seconds=float(
+                scheduling_config["terminal_purge_interval_seconds"]
+            ),
+            schedule_terminal_purge_batch=int(scheduling_config["terminal_purge_batch"]),
             schedule_definition_limits=schedule_definition_limits,
             delegation_defaults=delegation_defaults,
             delegation_caps=delegation_caps,

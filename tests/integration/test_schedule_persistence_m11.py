@@ -19,6 +19,7 @@ from agent_core.domain.schedules import (
     ScheduleIdempotencyRecord,
     ScheduleOccurrence,
     ScheduleRevision,
+    ScheduleState,
 )
 from tests.contract.support import NOW, agent, run, session
 from tests.contract.test_schedule_idempotency_repository_contract import (
@@ -29,9 +30,11 @@ from tests.contract.test_schedule_occurrence_repository_contract import (
 )
 from tests.contract.test_schedule_repository_contract import (
     assert_schedule_repository_batches_owned_revisions,
+    assert_schedule_repository_filters_lifecycle_states_before_paginating,
     assert_schedule_repository_is_principal_isolated_and_revisioned,
     assert_schedule_repository_lists_and_finds_due_definitions_deterministically,
     assert_schedule_repository_mutates_state_and_revisions_with_cas,
+    assert_schedule_repository_purges_only_expired_terminal_records,
     revision,
     schedule,
 )
@@ -64,6 +67,8 @@ async def test_postgres_schedule_adapters_satisfy_shared_contracts() -> None:
             assert_schedule_repository_lists_and_finds_due_definitions_deterministically,
             assert_schedule_repository_mutates_state_and_revisions_with_cas,
             assert_schedule_repository_batches_owned_revisions,
+            assert_schedule_repository_filters_lifecycle_states_before_paginating,
+            assert_schedule_repository_purges_only_expired_terminal_records,
         ):
             with pytest.raises(_RollbackContractError):
                 async with composition.uow_factory() as uow:
@@ -160,6 +165,84 @@ async def test_schedule_repositories_commit_and_roll_back_as_one_unit() -> None:
                 )
                 == request
             )
+
+
+async def test_terminal_retention_removes_schedule_graph_but_preserves_linked_run() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        principal = composition.principal
+        schedule_id, session_id, run_id, occurrence_id = (uuid4() for _ in range(4))
+        terminal = _owned_schedule(principal, schedule_id).model_copy(
+            update={
+                "state": ScheduleState.COMPLETED,
+                "next_fire_at": None,
+                "updated_at": NOW + timedelta(days=1),
+            }
+        )
+        request = ScheduleIdempotencyRecord(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            key=f"schedule-{schedule_id}",
+            request_hash="b" * 64,
+            schedule_id=schedule_id,
+            created_at=NOW,
+        )
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(
+                session().model_copy(
+                    update={
+                        "id": session_id,
+                        "tenant_id": principal.tenant_id,
+                        "principal_id": principal.principal_id,
+                    }
+                )
+            )
+            linked_run = run(status=RunStatus.COMPLETED).model_copy(
+                update={
+                    "id": run_id,
+                    "session_id": session_id,
+                    "tenant_id": principal.tenant_id,
+                }
+            )
+            await uow.runs.create(linked_run)
+            await uow.schedules.create(terminal, _owned_revision(principal, schedule_id))
+            await uow.schedule_occurrences.insert(
+                ScheduleOccurrence(
+                    id=occurrence_id,
+                    schedule_id=schedule_id,
+                    schedule_revision=1,
+                    nominal_fire_at=NOW,
+                    disposition=OccurrenceDisposition.MATERIALIZED,
+                    session_id=session_id,
+                    run_id=run_id,
+                    authority_version="authority-1",
+                    materialized_at=NOW,
+                    created_at=NOW,
+                )
+            )
+            await uow.schedule_idempotency.create(request)
+
+        async with composition.uow_factory() as uow:
+            assert (
+                await uow.schedules.purge_terminal(
+                    principal.tenant_id,
+                    before=NOW + timedelta(days=31),
+                    limit=100,
+                )
+                == 1
+            )
+
+        async with composition.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.schedules.get(schedule_id, principal)
+            assert (
+                await uow.schedule_idempotency.get(
+                    principal.tenant_id, principal.principal_id, request.key
+                )
+                is None
+            )
+            assert await uow.runs.get(run_id, principal) == linked_run
+            assert (await uow.sessions.get(session_id, principal)).id == session_id
 
 
 async def test_session_erasure_marks_and_unlinks_schedule_occurrence() -> None:

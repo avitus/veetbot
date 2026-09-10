@@ -143,7 +143,10 @@ approval-gated update, pause, resume, and terminal cancellation through the
 existing schedule service. All twelve `gate.schedule.*` checks pass locally,
 covering immutable content/cadence edits with preserved execution authority,
 no-backfill resume, audit-preserving cancellation, exact-scope denial,
-fail-closed revision handling, and idempotent retry. Remaining:
+fail-closed revision handling, and idempotent retry. ADR-0089 separately adds a
+Current/Recent History native split and thirty-day maintenance retention for
+terminal schedule-owned state without adding a milestone gate or a
+conversational hard-delete capability. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
 

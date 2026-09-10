@@ -24,6 +24,7 @@ from agent_core.domain.schedules import (
     ScheduleDefinitionPatch,
     ScheduleOccurrence,
     ScheduleRecord,
+    ScheduleState,
 )
 from agent_core.domain.views import (
     ApprovalFilters,
@@ -226,7 +227,12 @@ class ScheduleService(Protocol):
     async def get(self, principal: Principal, schedule_id: UUID) -> ScheduleRecord: ...
 
     async def list(
-        self, principal: Principal, limit: int, cursor: str | None
+        self,
+        principal: Principal,
+        limit: int,
+        cursor: str | None,
+        *,
+        states: frozenset[ScheduleState] | None = None,
     ) -> Page[ScheduleRecord]: ...
 
     async def update(

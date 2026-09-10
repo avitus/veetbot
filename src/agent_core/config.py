@@ -196,7 +196,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 164 operator-reviewable knobs. Metadata such as
+# The design corpus declares 167 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -316,6 +316,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "scheduling.max_materializations_per_minute",
             "scheduling.daily_cost",
             "scheduling.monthly_cost",
+            "scheduling.terminal_retention_days",
+            "scheduling.terminal_purge_interval_seconds",
+            "scheduling.terminal_purge_batch",
             "notifications.claim_batch",
             "notifications.lease_seconds",
             "notifications.fallback_poll_seconds",
@@ -406,6 +409,9 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:scheduling.max_materializations_per_minute": 1,
         "runtime/limits.yaml:scheduling.daily_cost": 0.01,
         "runtime/limits.yaml:scheduling.monthly_cost": 0.01,
+        "runtime/limits.yaml:scheduling.terminal_retention_days": 1,
+        "runtime/limits.yaml:scheduling.terminal_purge_interval_seconds": 1,
+        "runtime/limits.yaml:scheduling.terminal_purge_batch": 1,
         "runtime/limits.yaml:notifications.claim_batch": 1,
         "runtime/limits.yaml:notifications.lease_seconds": 1,
         "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
