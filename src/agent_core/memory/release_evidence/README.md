@@ -68,9 +68,12 @@ still failed on direct recall 0.900 and precision 0.739, so the round ended
 without an artifact. The owner then decided, on 2026-09-10, that a personal
 agent is scored recall-first: the scorer credits a correct claim stated with
 more detail (`distillation-scorer@7`) and the holdout's precision floor is
-0.80, the corpus's 0.90 unchanged (ADR-0087). Re-scored offline, the last
+0.80, the corpus's 0.90 unchanged (ADR-0087). Re-scored offline, the previous
 run measures holdout direct recall 0.975, hypothesis recall 0.800, and
-precision 0.812 under that bar. Automatic selection therefore activates `formation@10` for the
+precision 0.812 under that bar; the run on the tree carrying it (commit
+`f7835e0`) measured 0.950, 0.800, and 0.768 and failed, showing that two
+runs of one unchanged policy differ by up to 0.11 per gate. Whether the
+harness gates on an aggregate of repeated runs is the owner's decision. Automatic selection therefore activates `formation@10` for the
 production tuple until `agent eval memory-distillation` passes on the tree
 that deploys and its artifact is bundled here.
 

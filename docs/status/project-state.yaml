@@ -627,7 +627,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Run formation@9 once on the deploying tree under distillation-scorer@7 and the 0.80 holdout precision floor decided 2026-09-10, bundle the artifact if it passes, and promote to main; formation@10 keeps the tuple until then
+        Owner decision after the run under distillation-scorer@7 and the 0.80 holdout floor failed on the draw (two runs of one unchanged policy differ by up to 0.11 per gate): gate on an aggregate of repeated runs, widen the margins, or stop; formation@10 keeps the tuple
     evidence:
       - check: independent review of the formation@9 branch (2026-09-04)
         outcome: passed_locally
@@ -720,6 +720,23 @@ milestones:
           0.200), lift 61.7 points, direct recall 0.900, and precision 0.739.
           The round ends under its own rule with no artifact; formation@10
           keeps the tuple. Two further holdout gaps were noted and left.
+      - check: recall-first bar (scorer@7, 0.80 holdout precision floor) and its run
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          Decided 2026-09-10 as a product decision for a personal agent:
+          the scorer credits a correct claim stated with more detail
+          (distillation-scorer@7) and the holdout precision floor is 0.80,
+          every other threshold unchanged; evidence schema 5. Re-scored
+          offline, the previous run would have passed at holdout direct
+          0.975, hypothesis 0.800, precision 0.812. The run on the tree
+          carrying the change (f7835e0, 366 calls, USD 2.15, same policy and
+          corpus) measured holdout direct 0.950 and hypothesis 0.800 but
+          precision 0.768, and development direct 0.961, precision 0.899,
+          hypothesis 0.667. Two runs of one unchanged policy differ by up
+          to 0.11 per gate, so a single run cannot decide gates set this
+          close to the policy's mean; the harness needs an aggregate or the
+          margins need widening, which is the owner's call. formation@10
+          keeps the tuple.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-

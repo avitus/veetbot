@@ -365,6 +365,25 @@ run of 2026-09-10 measures 0.975, 0.800, and 0.812. The second would pass;
 by one belief on precision, so a single run can still fail on variance, and
 that is to be reported rather than trimmed away.
 
+It did. The run on the tree carrying scorer@7 (commit `f7835e0`, 366
+calls, USD 2.15, the same policy, instruction, and corpus as the run
+before it) measured holdout direct recall 0.950 and hypothesis recall
+0.800, both passing, and precision 0.768, failing; on the development
+corpus direct recall 0.961 and precision 0.899, one belief under the floor,
+and hypothesis recall 0.667, six of nine. Two runs of one unchanged policy
+scored by one scorer therefore differ by 0.025 to 0.111 on every gate:
+holdout precision 0.812 then 0.768, development hypothesis recall 0.778
+then 0.667. The failures are the same shapes as before, a synonym the gold
+did not list ("sewing skills", "kernel debugging", "deployment scripts"),
+a hypothesis the sharper instruction draws where none was expected
+("likely has a job" from "after work", "composting knowledge"), and a
+category the model chose differently this time. None is a wrong memory.
+What the pair of runs establishes is that a single run is not a reliable
+instrument for gates set this close to the policy's mean: the same policy
+passes or fails on the draw. That is a property of the harness, and the
+options are an aggregate over repeated runs, wider margins, or stopping;
+the owner decides. `formation@10` keeps the tuple.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is
