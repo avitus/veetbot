@@ -50,13 +50,18 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@5`, the evidence schema is version 4 with a required
+`distillation-scorer@6`, the evidence schema is version 4 with a required
 `represented_case_count` and the frozen holdout's digest and thresholds, the
 67-case development corpus carries a seeded case whose restated clause must be
-verifiably represented, and the 51-case holdout carries three. Automatic selection therefore
-activates `formation@10` for the production tuple until `agent eval
-memory-distillation` is re-run on the tree that deploys and its artifact is
-bundled here.
+verifiably represented, and the 51-case holdout carries three. The first run
+over both sets, on 2026-09-09 at commit `c4360e3` under `distillation-scorer@5`
+(345 calls, USD 1.86), failed: holdout hypothesis must-form recall 0.200,
+holdout precision 0.677, holdout direct recall 0.923, and development-corpus
+direct recall 0.864 and precision 0.864. The runtime and scorer defects it
+exposed are fixed (ADR-0087); the provider-behaviour findings await the
+owner. Automatic selection therefore activates `formation@10` for the
+production tuple until `agent eval memory-distillation` passes on the tree
+that deploys and its artifact is bundled here.
 
 An earlier `formation@9` artifact was evaluated at commit `9013d20`, before the
 Milestone 24 policy rules merged, so its compiled policy version no longer
@@ -70,7 +75,7 @@ scorer equated negations, counts, supersets, and sibling activities, its corpus
 had been edited toward the implementation, every case ran against an empty
 store, and its build reference was an operator-typed label. A `formation@9`
 artifact may be bundled only when it carries `scorer_version`
-`distillation-scorer@5`, a forty-character commit `build_ref` that is an
+`distillation-scorer@6`, a forty-character commit `build_ref` that is an
 ancestor of the bundling tree, the digest of the checked-in corpus, at least
 one seeded case, at least one verifiably represented seeded case, the
 evidence-disposition precision, and the measured provider cost under the

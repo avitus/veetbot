@@ -2432,7 +2432,7 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version="policy@1",
-        scorer_version="distillation-scorer@5",
+        scorer_version="distillation-scorer@6",
         build_ref="0123456789abcdef0123456789abcdef01234567",
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=60,
@@ -3995,7 +3995,7 @@ async def _select_with(
                 model="scripted",
                 policy_profile="default",
                 policy_version=_runtime_policy_version(),
-                scorer_version="distillation-scorer@5",
+                scorer_version="distillation-scorer@6",
                 build_ref="9" * 40,
                 corpus_sha256=_DISTILLATION_CORPUS_SHA256,
                 sample_count=61,
@@ -4088,3 +4088,115 @@ async def test_automatic_selection_prefers_the_newest_evidenced_policy_and_honor
     assert unevidenced["outcome"] == "deterministic_fallback"
     assert unevidenced["reason"] == "pinned_policy_unevidenced"
     assert unevidenced["formation_policy_version"] == "formation@7"
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User trimmed the hedge in about an hour.",
+        "User replaced a failing router at work this week.",
+        "User spent the weekend repainting the hallway.",
+        "The user's electrician is coming at 4 p.m. today.",
+        "User recorded the first episode of the podcast yesterday.",
+        "User just finished the quarterly report this afternoon.",
+        "User did the dishes for an hour.",
+    ],
+)
+def test_one_off_events_are_rejected_whatever_their_verb(statement: str) -> None:
+    """A completed occasion is not memory, and its verb is not a whitelist.
+
+    The first holdout run stored a patched kernel module, a weekend of
+    rewiring, a mowed lawn, a plumber due at three, and a recorded episode:
+    each a single occasion the old rule missed because its verb was not one
+    of a dozen listed. A past-tense verb with a single-occasion marker, or an
+    appointment due today, is a one-off unless the verb begins a lasting
+    state.
+    """
+
+    from agent_core.memory.distillation import _canonical_provider_statement
+
+    with pytest.raises(ValueError, match="transient event"):
+        _canonical_provider_statement(statement, MemoryDerivation.DIRECT)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User adopted a rescue cat last month.",
+        "User moved to Porto last week.",
+        "User started composting last spring.",
+        "User wants to choose a web-search provider this week.",
+        "User restarted the 5x5 routine about a year ago.",
+        "User bought a split keyboard yesterday.",
+        "User is learning Japanese this year.",
+    ],
+)
+def test_a_lasting_change_with_a_date_is_not_a_one_off(statement: str) -> None:
+    from agent_core.memory.distillation import _canonical_provider_statement
+
+    assert _canonical_provider_statement(statement, MemoryDerivation.DIRECT) == statement
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User works at an organization.",
+        "User now leads an unspecified work area.",
+        "User lives in a city.",
+        "User has an undisclosed employer.",
+    ],
+)
+def test_a_generalized_or_unspecified_claim_is_rejected(statement: str) -> None:
+    """A claim whose object is a placeholder says nothing recallable.
+
+    Told that the user's employer was already known, the provider restated
+    the seed as "works at an organization" under the same key, which would
+    have replaced the specific belief with a vacuous one.
+    """
+
+    from agent_core.memory.distillation import _canonical_provider_statement
+
+    with pytest.raises(ValueError, match="recallable content"):
+        _canonical_provider_statement(statement, MemoryDerivation.DIRECT)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User runs on some days.",
+        "User works at Northwind.",
+        "User has some experience with Rust.",
+        "User leads a team of six data engineers.",
+    ],
+)
+def test_a_specific_claim_with_a_quantifier_survives(statement: str) -> None:
+    from agent_core.memory.distillation import _canonical_provider_statement
+
+    assert _canonical_provider_statement(statement, MemoryDerivation.DIRECT) == statement
+
+
+def test_one_claim_in_two_inflections_after_a_marker_is_one_candidate() -> None:
+    """ "before they turn fifty" and "before turning fifty" point the same way.
+
+    The first holdout run committed the Ironman goal twice because the object
+    after "before" was compared uninflected, so the two wordings failed the
+    compatibility floor and the combiner filed both.
+    """
+
+    from agent_core.memory.equivalence import directions_agree
+
+    they_turn = _candidate(
+        subject="finish an Ironman before they turn fifty",
+        statement="User wants to finish an Ironman before they turn fifty.",
+        claim_kind="goal",
+        evidence_spans=[{"source_event_id": 7, "text": "finish an Ironman before I turn fifty"}],
+    )
+    turning = they_turn.model_copy(
+        update={
+            "subject": "Ironman",
+            "statement": "User wants to finish an Ironman before turning fifty.",
+        }
+    )
+
+    assert directions_agree(they_turn.statement, turning.statement)
+    assert _candidates_semantically_duplicate(they_turn, turning)

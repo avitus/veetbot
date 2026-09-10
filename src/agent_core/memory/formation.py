@@ -658,6 +658,14 @@ class DeterministicCandidateExtractor:
                 continue
 
             ownership = re.fullmatch(r"i\s+(have|own|use|wear|drive)\s+(.+)", clause, re.I)
+            if (
+                ownership is not None
+                and ownership.group(1).casefold() == "have"
+                and _PRESENT_PERFECT_OBJECT.match(ownership.group(2)) is not None
+            ):
+                # "I have switched to a split keyboard" owns nothing: "have"
+                # before a participle is the present perfect.
+                ownership = None
             if ownership is not None:
                 rendered_verb = _OWNERSHIP_VERBS[ownership.group(1).casefold()]
                 for raw_item in _ITEM_BOUNDARY.split(ownership.group(2)):
@@ -963,6 +971,16 @@ _PAST_ACTIVITY_DURATION = re.compile(
 )
 _UNCERTAINTY_CUE = re.compile(
     r"\b(?:forget|forgot|not\s+sure|unsure|don't\s+remember|do\s+not\s+remember|roughly)\b",
+    re.IGNORECASE,
+)
+# What follows "I have" in the present perfect: a participle, or an adverb
+# before one. Two letters before "ed" keep "red hair" and "bed bugs" owned.
+_PRESENT_PERFECT_OBJECT = re.compile(
+    r"^(?:\w{2,}ed|been|done|gone|got|gotten|made|had|begun|become|come|taken|given|seen"
+    r"|written|spoken|driven|eaten|grown|known|shown|thrown|worn|chosen|broken|fallen"
+    r"|found|kept|lost|met|paid|sent|sold|stood|taught|told|thought|understood|quit|built"
+    r"|bought|brought|caught|dealt|felt|held|led|lent|meant|swum|run|never|not|already"
+    r"|just|recently|always|since)\b",
     re.IGNORECASE,
 )
 _FALSE_POSSESSION_PRESENT_PERFECT = re.compile(

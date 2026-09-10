@@ -114,10 +114,13 @@ an independent review reproduced eight release-blocking defects; each is
 fixed with a regression test (ADR-0087), the scorer advanced to
 `distillation-scorer@5`, and the `formation@9` artifact evaluated under the
 old scorer is withdrawn, so `formation@10` serves the production tuple until
-`formation@9` is re-evaluated on the deploying tree. Remaining:
+`formation@9` is re-evaluated on the deploying tree. On 2026-09-09 the first
+run over the development corpus and the frozen holdout failed on hypothesis
+recall, precision, and paraphrase-bound direct recall; the defects it exposed
+are fixed and the scorer is `distillation-scorer@6`. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Owner review of the frozen holdout, then the first scorer@5 run on the deploying tree over both case sets and the formation@9 rebundle; formation@10 serves the tuple until then
+- [ ] Owner decision on formation@9 after the first holdout run (2026-09-09) failed on hypothesis recall, precision, and paraphrase-bound direct recall: prompt work validated on the development corpus before another holdout run, or formation@10 keeps the tuple; the rebundle waits on a passing run under distillation-scorer@6
 
 ### Milestone 22 — Persona surface and curated belief promotion
 

@@ -556,17 +556,57 @@ def _higher_sensitivity(left: Sensitivity, right: Sensitivity) -> Sensitivity:
     return left if SENSITIVITY_ORDER[left] >= SENSITIVITY_ORDER[right] else right
 
 
+# A placeholder object ("an unspecified activity", "an organization") says
+# nothing recallable, and a claim generalized that far from a known belief
+# would replace the specific one under its key.
 _VACUOUS_STATEMENT = re.compile(
     r"\b(?:an?\s+)?(?:unspecified|unnamed|unknown|unstated|certain|various|some)\s+"
     r"(?:activity|activities|thing|things|hobby|hobbies|task|tasks|pursuit|pursuits)\b"
-    r"|\bsomething\b|\ban activity\b",
+    r"|\bsomething\b|\ban activity\b"
+    r"|\b(?:unspecified|unnamed|unstated|undisclosed)\b"
+    r"|\b(?:at|for|in|with|as|of)\s+an?\s+(?:organi[sz]ation|company|employer|firm|business"
+    r"|team|place|city|town|country|job|role|position|project|area|field|topic|subject"
+    r"|domain)$",
     re.IGNORECASE,
 )
+# A single occasion: a day, a part of one, or a duration measured in hours.
+_SINGLE_OCCASION = (
+    r"(?:yesterday|today|tonight|tomorrow"
+    r"|this\s+(?:morning|afternoon|evening|week|weekend)"
+    r"|last\s+(?:night|week|weekend|month)"
+    r"|the\s+(?:whole\s+|entire\s+)?weekend"
+    r"|(?:for|in|within|took)\s+(?:about\s+|roughly\s+|around\s+|nearly\s+|almost\s+)?"
+    r"(?:an?|one|two|three|four|five|six|several|a\s+few|a\s+couple\s+of|\d+)\s+"
+    r"(?:hours?|minutes?|days?))"
+)
+# A verb that begins a lasting state: what was adopted, joined, or started on
+# a date is still true afterwards.
+_LASTING_CHANGE_VERB = (
+    r"(?:started|began|restarted|resumed|moved|relocated|adopted|joined|became|got|gotten"
+    r"|bought|acquired|switched|enrolled|signed|launched|opened|founded|married|graduated"
+    r"|retired|quit|stopped|left|returned|settled|took\s+up|picked\s+up)"
+)
+# A completed one-off: a past-tense verb that is not a lasting change, with
+# a single occasion somewhere after it. The verb is any regular past tense or
+# a common irregular one rather than a list of chores, because the provider's
+# verb is whatever the user did.
 _TRANSIENT_EVENT = re.compile(
-    r"^User\s+(?:did|had|went|made|spent|took|ate|drank|watched|attended|visited|called"
-    r"|met|cleaned|washed|cooked|fixed|finished|bought)\b.*\b(?:for\s+(?:an?|\d+|one|two"
-    r"|three|four|five|several|a\s+few)\s+(?:hours?|minutes?|days?)|yesterday|today|tonight"
-    r"|this\s+(?:morning|afternoon|evening)|last\s+(?:night|week|weekend|month))\b",
+    r"^(?:User|The user's\s+\S+)\s+(?:(?:just|recently|finally|also|then)\s+)?"
+    rf"(?!{_LASTING_CHANGE_VERB}\b)"
+    r"(?:\w{2,}ed|did|had|went|made|spent|took|ate|drank|saw|met|ran|swam|sat|slept|spoke"
+    r"|told|wrote|read|paid|sent|built|cut|hit|put|drove|flew|rode|caught|taught|brought"
+    r"|thought|felt|held|kept|lost|found|gave|came|fell|broke|chose|forgot|woke|stood|led"
+    r"|fed|shot|hung|hurt|set|let|won|dealt|sold|fought|lit|dug|struck|swung|swept|threw"
+    r"|drew|knew|grew|blew|wore|tore|rose|froze)\b"
+    rf".*\b{_SINGLE_OCCASION}\b",
+    re.IGNORECASE,
+)
+# An appointment due today is the same kind of occasion in the present tense.
+_SCHEDULED_OCCASION = re.compile(
+    r"^(?:User|The user's\s+[^.]{1,40}?)\s+(?:is|are|has|have)\s+"
+    r"(?:(?:coming|arriving|visiting|due|scheduled|booked|meeting|seeing|flying|leaving"
+    r"|attending)\b|an?\s+\w+\s+(?:appointment|meeting|call|interview|flight|visit)\b)"
+    r".*\b(?:today|tonight|tomorrow|this\s+(?:morning|afternoon|evening))\b",
     re.IGNORECASE,
 )
 
@@ -595,7 +635,10 @@ def _canonical_provider_statement(
     # about the user; both are counted as rejections, never stored.
     if _VACUOUS_STATEMENT.search(compact) is not None:
         raise ValueError("provider statement has no recallable content")
-    if derivation is MemoryDerivation.DIRECT and _TRANSIENT_EVENT.match(compact) is not None:
+    if derivation is MemoryDerivation.DIRECT and (
+        _TRANSIENT_EVENT.match(compact) is not None
+        or _SCHEDULED_OCCASION.match(compact) is not None
+    ):
         raise ValueError("provider statement records a transient event")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None
     if derivation is MemoryDerivation.DIRECT and hedged:

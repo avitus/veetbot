@@ -622,7 +622,7 @@ def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
 def test_scorer_version_advanced_with_its_semantics() -> None:
     """A changed scorer cannot keep the version an old artifact was published under."""
 
-    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@5"
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@6"
 
 
 def test_represented_text_requires_a_pool_and_exact_user_text() -> None:
@@ -937,3 +937,55 @@ def test_holdout_gates_mirror_the_thresholds_without_scenario_rules() -> None:
         "no holdout seeded case demonstrated attributed representation"
         in evaluate_holdout_gates(unrepresented, summaries)
     )
+
+
+@pytest.mark.parametrize(
+    ("subject", "expected_subjects", "expected_statements"),
+    [
+        (
+            "weightlifting",
+            ["lifting weights", "weights"],
+            ["User lifts weights three times a week."],
+        ),
+        (
+            "tomato growing",
+            ["balcony gardening"],
+            ["User grows tomatoes on the balcony every summer."],
+        ),
+        (
+            "commuting by bicycle",
+            ["cycling to the office", "commute"],
+            ["User usually cycles to the office."],
+        ),
+        ("response brevity preference", ["answer style"], ["User prefers concise answers."]),
+    ],
+)
+def test_subject_rule_accepts_an_inflected_or_compounded_key(
+    subject: str, expected_subjects: list[str], expected_statements: list[str]
+) -> None:
+    """A key spelt as a variant of the gold's words names the same thing.
+
+    The first holdout run lost four statement-equivalent beliefs to their
+    keys alone: "weightlifting" against "lifting weights", "tomato growing"
+    against "tomatoes", "commuting" against "commute", and "preference"
+    against "prefers". The rule that a subject must name the gold conflict
+    key stands; it now compares lemmas and treats a stem as naming its
+    inflections and compounds.
+    """
+
+    assert subject_matches(subject, expected_subjects, expected_statements)
+
+
+def test_subject_rule_still_rejects_an_unrelated_or_generic_key() -> None:
+    assert not subject_matches("verbosity", ["answer style"], ["User prefers concise answers."])
+    assert not subject_matches("User", ["answer style"], ["User prefers concise answers."])
+    assert not subject_matches("running", ["marathon"], ["User wants to finish the marathon."])
+
+
+def test_lemma_strips_an_oes_plural() -> None:
+    from agent_core.memory.equivalence import lemma
+
+    assert lemma("tomatoes") == "tomato"
+    assert lemma("heroes") == "hero"
+    assert lemma("shoes") == "shoe"
+    assert lemma("goes") == "go"

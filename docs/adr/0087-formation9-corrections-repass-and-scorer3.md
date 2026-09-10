@@ -186,12 +186,66 @@ aggregate on both sets. The development corpus may be tuned; the holdout may
 only be re-frozen deliberately. The frozen holdout item and the cue item are
 therefore closed; the re-evaluation remains open until a run passes.
 
+## The first holdout run
+
+The first run over both sets, on 2026-09-09 at the dev head `c4360e3`, cost
+USD 1.86 over 345 provider calls and failed six gates. On the development
+corpus direct must-form recall was 0.864, precision 0.864, and the rich
+conversation matched eight of eleven; on the holdout direct must-form recall
+was 0.923 (thirty-six of thirty-nine), hypothesis must-form recall 0.200
+(one of five), and precision 0.677 (twenty-one extra beliefs among
+sixty-five). Every miss and every extra was traced to its cause.
+
+Four misses were runtime or scorer defects, each now fixed with a regression
+test. The one-off rule listed a dozen chores and so kept a patched kernel
+module, a weekend of rewiring, a mowed lawn, a plumber due at three, and a
+recorded episode; it now rejects any past-tense verb that is not a lasting
+change when a single occasion follows it, and an appointment due today. The
+placeholder rule missed "works at an organization" and "leads an unspecified
+work area", which the provider produced when told the employer was already
+known and which would have replaced the specific belief under its key; a bare
+"unspecified" and an indefinite generic object now count as no content. The
+fallback rendered "I have switched to a split keyboard" as a possession;
+"have" before a participle is the present perfect. And the object after a
+directional marker was compared uninflected, so "before they turn fifty" and
+"before turning fifty" failed the compatibility floor and the Ironman goal
+committed twice. The scorer's subject rule lost four statement-equivalent
+beliefs to their keys alone ("weightlifting" against "lifting weights",
+"tomato growing" against "tomatoes"); it now compares lemmas and lets a stem
+of five letters or more name its inflections and compounds. Those two scorer
+changes are `distillation-scorer@6`; no artifact was published under @5.
+
+The rest is provider behaviour that no local rule should paper over. The
+provider formed the software-development hypothesis for one of five holdout
+projects where the development corpus, whose three such cases all read
+"building a personal AI agent" or "building an API", had shown five of five;
+the corpus was too small to establish that behaviour. It over-specified
+("has a daughter who attends school", "adopted a greyhound last month",
+"currently uses SQLite"), dropped a conjunct ("grows tomatoes" for tomatoes
+and chillies), split one claim into two wordings the combiner cannot relate
+lexically ("bikes on the rest of the days" beside "cycles on some days they
+do not perform the 5x5 routine"), turned a question into a goal, and omitted
+the swimming habit it had formed in the previous run. Anticipation attributed
+nothing to a live memory in any of the four seeded cases; the represented
+gate passed on the local verifier alone. Two gold gaps were noted and left:
+the holdout does not expect "User has a bakery" from "a mobile app for my
+bakery", and the development corpus expects the trip from "planning a trip to
+Japan" but not from "my partner and I are planning a trip". The holdout was
+not edited. What remains is an owner decision: prompt work validated on the
+development corpus before the holdout is run again, or `formation@10` keeps
+the tuple.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is
-  re-evaluated (about one US dollar, run on the tree that deploys) and its
-  artifact rebundled. `formation@10` remains active for the tuple, so no
-  consolidation falls to deterministic formation.
+  re-evaluated (about two US dollars over both sets, run on the tree that
+  deploys) and its artifact rebundled. `formation@10` remains active for the
+  tuple, so no consolidation falls to deterministic formation. The first
+  holdout run failed, so that is where production stays.
+- Every holdout run leaks a little of the holdout into the next change; the
+  changes above were confined to defects that are wrong on any input, and the
+  provider-behaviour findings are for prompt work against the development
+  corpus, not for tuning against the holdout.
 - Attributed redundancy remains unreachable on a single-segment consolidation,
   because the blinded prefix is empty by construction; the new corpus case
   exercises the mechanism as designed, across a segment boundary. Giving

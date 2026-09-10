@@ -624,7 +624,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Owner review of the frozen holdout, then the first scorer@5 run on the deploying tree over both case sets and the formation@9 rebundle; formation@10 serves the tuple until then
+        Owner decision on formation@9 after the first holdout run (2026-09-09) failed on hypothesis recall, precision, and paraphrase-bound direct recall: prompt work validated on the development corpus before another holdout run, or formation@10 keeps the tuple; the rebundle waits on a passing run under distillation-scorer@6
     evidence:
       - check: independent review of the formation@9 branch (2026-09-04)
         outcome: passed_locally
@@ -636,7 +636,7 @@ milestones:
           provider's new polarity field and the fallback's own recognition; a
           forty-kilobyte turn no longer crashes consolidation because the
           episode narrative bound covers any single API message; the scorer,
-          now distillation-scorer@5, compares polarity, counts, large numbers,
+          now distillation-scorer@6, compares polarity, counts, large numbers,
           and shared directional markers, so tea-over-coffee never equals
           coffee-over-tea and one hundred miles never equals two hundred;
           represented-clause verification applies the same floor, so a
@@ -672,6 +672,27 @@ milestones:
           corpus. The anticipation cue now reaches past the watermark and a
           51-case frozen holdout, digest-recorded, is bound into the artifact
           beside the corpus.
+      - check: first run over the development corpus and the frozen holdout
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          The first run over both case sets, on 2026-09-09 at dev head c4360e3
+          under distillation-scorer@5 (345 provider calls, USD 1.86), failed
+          six gates: development-corpus direct recall 0.864 and precision
+          0.864 with the rich conversation at eight of eleven, and holdout
+          direct recall 0.923, hypothesis recall 0.200, and precision 0.677.
+          Every miss and extra was traced. Four were defects, each fixed with
+          a regression test: one-off events with any past-tense verb and
+          appointments due today are rejected, placeholder objects such as
+          "an organization" and "unspecified" are rejected, the fallback no
+          longer reads "I have switched" as a possession, and the object
+          after a directional marker is compared as a lemma so one goal in two
+          inflections is one candidate; the scorer's subject rule compares
+          lemmas and stems, making distillation-scorer@6. The rest is provider
+          behaviour: the software-development hypothesis formed for one of
+          five unseen projects against five of five near-identical corpus
+          cases, over-specified restatements, a dropped conjunct, unrelatable
+          duplicate wordings, and no anticipation attribution in any seeded
+          case. The holdout was not edited; formation@10 keeps the tuple.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-
