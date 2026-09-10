@@ -306,7 +306,7 @@ milestones:
           comparison rather than retrospectively repaired.
   "14":
     title: Inbound surfaces and pairing
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-20
     design: docs/plan/inbound-surfaces.md
     adr: docs/adr/0064-milestone-14-inbound-surfaces-and-pairing.md
@@ -320,6 +320,29 @@ milestones:
     deferred_scope:
       - Slack and email adapters, group and thread chats, webhook delivery
       - device-scoped tools, presence routing, hand-off, media intake
+    open_items:
+      - Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    evidence:
+      - check: twenty-one Milestone 14 gate.surface gates
+        outcome: passed_locally
+        detail: >-
+          Every entry in evals/gates/surface.yaml resolves to a live check.
+          The focused domain, API, ingress, Telegram, reply, deployment, and
+          persistence-schema suites pass, covering content-free default deny,
+          one-time pairing and lockout, fresh authority intersection, ordinary
+          run submission and input routing, restart-safe polling, redacted
+          chunked delivery, approval resolution, revocation, configuration,
+          and transport confinement.
+      - check: PostgreSQL surface persistence and migration lane
+        outcome: passed_locally
+        detail: >-
+          Eight focused cases pass against an isolated PostgreSQL database:
+          both adapters satisfy the shared surface contract, tenant predicates
+          and forced RLS isolate rows, active/daily/monthly admission ceilings
+          hold under the tenant advisory lock, an injected pre-commit ingress
+          crash rolls back and re-delivers once, and the full migration chain
+          passes clean and stepwise round-trip checks.
   "15":
     title: Operational hardening
     status: authorized
@@ -1097,7 +1120,7 @@ milestones:
           rides on.
   "25":
     title: WhatsApp business surface
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-26
     design: docs/plan/whatsapp-surface.md
     adr: docs/adr/0082-milestone-25-whatsapp-surface.md
@@ -1117,7 +1140,9 @@ milestones:
       - group and thread session keys and inline-keyboard approvals (B3)
       - a second business number or multi-tenant pairing UI
     open_items:
-      - Implementation start awaits the Milestone 14 surface ports
+      - Complete the owner Meta ceremony and obtain approval for the content-free utility template
+      - Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
     evidence:
       - check: Milestone 25 gate-area red phase
         outcome: observed_expected_failure
@@ -1128,6 +1153,16 @@ milestones:
           registry contained zero Milestone 25 entries rather than twelve;
           this was a behavioral gate failure rather than an environment,
           import, or fixture error.
+      - check: twelve Milestone 25 gate.whatsapp gates
+        outcome: passed_locally
+        detail: >-
+          Every entry in evals/gates/whatsapp.yaml resolves to a live check.
+          The signed bounded webhook, constant-time handshake, Meta message-id
+          normalization, fixed-origin outbound adapter, closed failures,
+          twenty-four-hour template selection, shared pairing and scope
+          boundary, redacted chunked replies, loopback-only deployment, RLS,
+          and default-off configuration all pass locally. The production Meta
+          ceremony and live-number smoke remain owner-controlled gates.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

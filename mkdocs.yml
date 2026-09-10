@@ -107,6 +107,7 @@ nav:
   - Security: security.md
   - Production Deployment: deployment.md
   - Gmail Integration Runbook: gmail-integration-runbook.md
+  - WhatsApp Integration Runbook: whatsapp-integration-runbook.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md

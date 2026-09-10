@@ -55,6 +55,34 @@ gates pass locally. Remaining:
 - [ ] Hosted CI on the milestone's final head
 - [ ] CodeRabbit review loop on the dev to main pull request (build step 7)
 
+### Milestone 14 — Inbound surfaces and pairing
+
+The channel-neutral surface model, five durable persistence ports, one-time
+pairing and lockout ceremony, session-key routing, shared ordinary-run
+submission, Telegram long polling, replies, notifications, approval and input
+round-trips, API and CLI management surfaces, admission limits, and isolated
+surface role are implemented. All twenty-one `gate.surface.*` entries now
+resolve to live checks and pass locally, including the PostgreSQL migration,
+RLS, admission, and crash/re-delivery lane. Remaining:
+
+- [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
+### Milestone 25 — WhatsApp business surface
+
+The optional WhatsApp Cloud API adapter now runs on the Milestone 14 surface
+seam: its loopback webhook verifies the handshake and raw-body signature,
+normalizes Meta message IDs into shared receipts, confines outbound calls to
+the Meta Graph origin, and enforces template-only delivery outside the
+twenty-four-hour window. All twelve `gate.whatsapp.*` entries resolve to live
+checks and pass locally. The
+[WhatsApp integration runbook](../whatsapp-integration-runbook.md) owns the
+remaining operator ceremony. Remaining:
+
+- [ ] Complete the owner Meta ceremony and obtain approval for the content-free utility template
+- [ ] Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
 ### Milestone 19 — Conversational schedule creation
 
 A parallel workstream, deliberately narrow: one-time schedule creation through
@@ -172,14 +200,9 @@ forwarding are built with the owner capture ceremony documented
 
 Specified, gated, and authorized, with implementation not yet begun.
 
-- **Milestone 14 — Inbound surfaces and pairing** — twenty-one gates; follows
-  Milestone 13 in the sequential order.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 25 — WhatsApp business surface** — twelve gates; a parallel
-  workstream whose documents, gates, and Meta ceremony proceed now and
-  whose implementation begins when Milestone 14's surface ports exist.
 
 
 ## Deferred

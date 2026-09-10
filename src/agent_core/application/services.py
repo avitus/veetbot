@@ -26,6 +26,7 @@ from agent_core.domain.schedules import (
     ScheduleRecord,
     ScheduleState,
 )
+from agent_core.domain.surfaces import IssuedPairingCode, Pairing
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -331,6 +332,30 @@ class NotificationService(Protocol):
     async def list(
         self, principal: Principal, limit: int, cursor: str | None
     ) -> Page[NotificationInboxItem]: ...
+
+
+class SurfaceService(Protocol):
+    async def list(self, principal: Principal) -> builtins.list[DeviceView]: ...
+
+    async def get(self, principal: Principal, surface_id: UUID) -> DeviceView: ...
+
+    async def issue_code(
+        self,
+        principal: Principal,
+        surface_id: UUID,
+        *,
+        granted_scopes: frozenset[str],
+        label: str | None,
+        idempotency_key: str,
+    ) -> IssuedPairingCode: ...
+
+    async def list_pairings(
+        self, principal: Principal, surface_id: UUID
+    ) -> builtins.list[Pairing]: ...
+
+    async def revoke_pairing(self, principal: Principal, pairing_id: UUID) -> Pairing: ...
+
+    async def delete_pairing(self, principal: Principal, pairing_id: UUID) -> None: ...
 
 
 class MemoryReadService(Protocol):

@@ -40,6 +40,7 @@ class DeviceKind(StrEnum):
 class PushProvider(StrEnum):
     APNS = "apns"
     TELEGRAM = "telegram"
+    WHATSAPP = "whatsapp"
 
 
 class PushEnvironment(StrEnum):
@@ -115,19 +116,22 @@ def device_routing_issue(
             "device.push_environment_without_apns",
             "only APNs registration accepts a push environment",
         )
-    if provider is PushProvider.TELEGRAM and kind is not DeviceKind.SURFACE:
+    if (
+        provider in {PushProvider.TELEGRAM, PushProvider.WHATSAPP}
+        and kind is not DeviceKind.SURFACE
+    ):
         return DeviceRoutingIssue(
-            "device.telegram_kind_invalid",
-            "Telegram registration requires a surface device",
+            f"device.{provider.value}_kind_invalid",
+            f"{provider.value.title()} registration requires a surface device",
         )
     if (
         kind is DeviceKind.SURFACE
         and provider is not None
-        and provider is not PushProvider.TELEGRAM
+        and provider not in {PushProvider.TELEGRAM, PushProvider.WHATSAPP}
     ):
         return DeviceRoutingIssue(
             "device.surface_routing_incomplete",
-            "surface registration accepts only Telegram routing",
+            "surface registration accepts only surface-provider routing",
         )
     return None
 
@@ -279,6 +283,46 @@ class Device(BaseModel):
             if instant is not None and instant < self.created_at:
                 raise ValueError("device lifecycle instant precedes creation")
         return self
+
+    def with_surface_route(
+        self,
+        provider: PushProvider,
+        token: str,
+        at: datetime,
+    ) -> Device:
+        """Return this active surface with one current provider delivery route."""
+
+        if self.kind is not DeviceKind.SURFACE:
+            raise ValueError("only surface devices accept a surface delivery route")
+        if provider not in {PushProvider.TELEGRAM, PushProvider.WHATSAPP}:
+            raise ValueError("surface delivery route requires a surface provider")
+        instant = _aware_utc(at, "surface route update")
+        return self.model_copy(
+            update={
+                "platform": provider.value,
+                "push_provider": provider,
+                "push_token": SecretStr(token),
+                "push_environment": None,
+                "push_token_updated_at": instant,
+                "push_token_invalidated_at": None,
+                "last_seen_at": instant,
+                "updated_at": instant,
+            }
+        )
+
+    def without_push_route(self, at: datetime) -> Device:
+        """Return this device with its secret delivery route invalidated."""
+
+        instant = _aware_utc(at, "push route invalidation")
+        return self.model_copy(
+            update={
+                "push_provider": None,
+                "push_token": None,
+                "push_environment": None,
+                "push_token_invalidated_at": instant,
+                "updated_at": instant,
+            }
+        )
 
 
 class DeviceCursor(BaseModel):

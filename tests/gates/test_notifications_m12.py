@@ -117,7 +117,7 @@ def test_notification_and_device_vocabularies_are_closed() -> None:
         "cli",
         "surface",
     }
-    assert {item.value for item in PushProvider} == {"apns", "telegram"}
+    assert {item.value for item in PushProvider} == {"apns", "telegram", "whatsapp"}
 
 
 def test_apple_and_server_notification_contract_cannot_drift() -> None:

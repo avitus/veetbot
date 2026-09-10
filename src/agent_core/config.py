@@ -124,6 +124,17 @@ class Settings:
     delegation_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
+    surface_api_enabled: bool = False
+    surface_worker_enabled: bool = False
+    surface_whatsapp_enabled: bool = False
+    surface_telegram_token: SecretStr | None = None
+    surface_whatsapp_token: SecretStr | None = None
+    surface_whatsapp_app_secret: SecretStr | None = None
+    surface_whatsapp_verify_token: SecretStr | None = None
+    surface_whatsapp_phone_number_id: str | None = None
+    surface_whatsapp_graph_api_version: str | None = None
+    surface_whatsapp_template_name: str = "veetbot_update_available"
+    surface_whatsapp_template_language: str = "en_US"
     email_enabled: bool = False
     email_account_ids: tuple[str, ...] = ()
     push_provider: PushProviderKind = PushProviderKind.DISABLED
@@ -416,6 +427,20 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:notifications.lease_seconds": 1,
         "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
         "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
+        "runtime/limits.yaml:surfaces.poll_timeout_seconds": 1,
+        "runtime/limits.yaml:surfaces.session_idle_seconds": 1,
+        "runtime/limits.yaml:surfaces.code_expiry_seconds": 1,
+        "runtime/limits.yaml:surfaces.code_max_attempts": 1,
+        "runtime/limits.yaml:surfaces.lockout_seconds": 1,
+        "runtime/limits.yaml:surfaces.per_sender_messages_per_minute": 1,
+        "runtime/limits.yaml:surfaces.max_active_runs_per_tenant": 1,
+        "runtime/limits.yaml:surfaces.daily_cost": 0.01,
+        "runtime/limits.yaml:surfaces.monthly_cost": 0.01,
+        "runtime/limits.yaml:surfaces.inbound_text_max_chars": 1,
+        "runtime/limits.yaml:surfaces.chunk_size": 1,
+        "runtime/limits.yaml:surfaces.claim_batch": 1,
+        "runtime/limits.yaml:surfaces.lease_seconds": 1,
+        "runtime/limits.yaml:surfaces.fallback_poll_seconds": 0.01,
         "runtime/limits.yaml:delegation.max_children_per_call": 1,
         "runtime/limits.yaml:delegation.max_live_children_per_parent": 1,
         "runtime/limits.yaml:delegation.max_depth": 1,
@@ -562,6 +587,30 @@ def _read_private_credential_file(raw_path: str) -> str:
         raise ConfigurationError("browser control-plane credential file is invalid") from exc
     if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
         raise ConfigurationError("browser control-plane credential file is invalid")
+    return value
+
+
+def _read_private_surface_secret_file(raw_path: str, name: str) -> str:
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or not 16 <= metadata.st_size <= 4096
+    ):
+        raise ConfigurationError(f"{name} must be a 0600 regular file from 16 bytes to 4 KiB")
+    try:
+        value = payload.decode("ascii").removesuffix("\n").removesuffix("\r")
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(f"{name} must contain one ASCII secret") from exc
+    if not 16 <= len(value) <= 4096 or any(character.isspace() for character in value):
+        raise ConfigurationError(f"{name} must contain one non-whitespace ASCII secret")
     return value
 
 
@@ -821,6 +870,21 @@ def _validate_config_document(
                 "runtime/limits.yaml:notifications.retry_delays_seconds "
                 "must contain positive numbers"
             )
+        surface_retry_delays = merged["surfaces"]["retry_delays_seconds"]
+        if (
+            not isinstance(surface_retry_delays, list)
+            or not surface_retry_delays
+            or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(value)
+                or value <= 0
+                for value in surface_retry_delays
+            )
+        ):
+            raise ConfigurationError(
+                "runtime/limits.yaml:surfaces.retry_delays_seconds must contain positive numbers"
+            )
     if relative == "sandbox/limits.yaml":
         resources = merged["resources"]
         for name, value in resources.items():
@@ -1042,6 +1106,7 @@ def validate_settings(
     require_auth_token: bool = True,
     require_execution_environment: bool = True,
     require_email_credentials: bool = True,
+    require_surface_credentials: bool = False,
 ) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
@@ -1076,6 +1141,46 @@ def validate_settings(
         raise ConfigurationError(
             "device channel and SMS flags must be enabled or disabled together"
         )
+    if settings.surface_api_enabled != settings.surface_worker_enabled:
+        raise ConfigurationError(
+            "surface API and worker flags must be enabled or disabled together"
+        )
+    if settings.surface_whatsapp_enabled and not (
+        settings.surface_api_enabled and settings.surface_worker_enabled
+    ):
+        raise ConfigurationError("WhatsApp requires surface API and worker enablement")
+    surface_secret_values = {
+        "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": settings.surface_telegram_token,
+        "AGENT_SURFACE_WHATSAPP_TOKEN_FILE": settings.surface_whatsapp_token,
+        "AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE": settings.surface_whatsapp_app_secret,
+        "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE": settings.surface_whatsapp_verify_token,
+    }
+    if require_surface_credentials and settings.surface_worker_enabled:
+        if settings.surface_telegram_token is None:
+            raise ConfigurationError(
+                "surface worker enablement requires AGENT_SURFACE_TELEGRAM_TOKEN_FILE"
+            )
+        if settings.surface_whatsapp_enabled:
+            required_whatsapp: dict[str, object | None] = {
+                **{
+                    name: value
+                    for name, value in surface_secret_values.items()
+                    if name != "AGENT_SURFACE_TELEGRAM_TOKEN_FILE"
+                },
+                "AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID": (
+                    settings.surface_whatsapp_phone_number_id
+                ),
+                "AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION": (
+                    settings.surface_whatsapp_graph_api_version
+                ),
+            }
+            missing_whatsapp = [name for name, value in required_whatsapp.items() if value is None]
+            if missing_whatsapp:
+                raise ConfigurationError(
+                    "WhatsApp enablement requires " + ", ".join(missing_whatsapp)
+                )
+    if not require_surface_credentials and any(surface_secret_values.values()):
+        raise ConfigurationError("surface secrets may be loaded only by the surface worker")
     if settings.email_account_ids and (
         not 1 <= len(settings.email_account_ids) <= _GMAIL_ACCOUNT_LIMIT
         or len(set(settings.email_account_ids)) != len(settings.email_account_ids)
@@ -1234,6 +1339,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         require_auth_token=True,
         require_execution_environment=True,
         load_email_credentials=True,
+        load_provider_credentials=True,
+        load_surface_credentials=False,
     )
 
 
@@ -1247,6 +1354,8 @@ def load_schedule_worker_settings(
         require_auth_token=False,
         require_execution_environment=False,
         load_email_credentials=False,
+        load_provider_credentials=True,
+        load_surface_credentials=False,
     )
 
 
@@ -1260,6 +1369,23 @@ def load_notification_worker_settings(
         require_auth_token=False,
         require_execution_environment=False,
         load_email_credentials=True,
+        load_provider_credentials=True,
+        load_surface_credentials=False,
+    )
+
+
+def load_surface_worker_settings(
+    environ: Mapping[str, str] | None = None,
+) -> Settings:
+    """Load the credential-minimized environment for inbound surface delivery."""
+
+    return _load_settings(
+        environ,
+        require_auth_token=False,
+        require_execution_environment=False,
+        load_email_credentials=False,
+        load_provider_credentials=False,
+        load_surface_credentials=True,
     )
 
 
@@ -1269,6 +1395,8 @@ def _load_settings(
     require_auth_token: bool,
     require_execution_environment: bool,
     load_email_credentials: bool,
+    load_provider_credentials: bool,
+    load_surface_credentials: bool,
 ) -> Settings:
 
     values = _environment(environ)
@@ -1287,16 +1415,20 @@ def _load_settings(
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     raw_dir = values.get("AGENT_CONFIG_DIR", "").strip()
     config_dir = Path(raw_dir).expanduser().resolve() if raw_dir else None
-    credentials = {
-        name.removesuffix("_API_KEY").lower(): SecretStr(value)
-        for name, value in values.items()
-        if name.endswith("_API_KEY") and name != "VEETBOT_OPENAI_KEY" and value.strip()
-    }
+    credentials = (
+        {
+            name.removesuffix("_API_KEY").lower(): SecretStr(value)
+            for name, value in values.items()
+            if name.endswith("_API_KEY") and name != "VEETBOT_OPENAI_KEY" and value.strip()
+        }
+        if load_provider_credentials
+        else {}
+    )
     browser_credential_file = values.get(
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
         "",
     ).strip()
-    if browser_credential_file:
+    if browser_credential_file and load_provider_credentials:
         if "browser_profile_control_plane" in credentials:
             raise ConfigurationError(
                 "configure exactly one browser control-plane credential source"
@@ -1305,7 +1437,7 @@ def _load_settings(
             _read_private_credential_file(browser_credential_file)
         )
     veetbot_openai_key = values.get("VEETBOT_OPENAI_KEY", "").strip()
-    if veetbot_openai_key:
+    if veetbot_openai_key and load_provider_credentials:
         credentials["openai"] = SecretStr(veetbot_openai_key)
     interpolation = {"OPENAI_MODEL": values.get("OPENAI_MODEL", "")}
     trajectory_export_enabled = _parse_flag(values, "AGENT_TRAJECTORY_EXPORT_ENABLED")
@@ -1349,6 +1481,35 @@ def _load_settings(
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
     device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
+    surface_api_enabled = _parse_flag(values, "AGENT_SURFACE_API_ENABLED")
+    surface_worker_enabled = _parse_flag(values, "AGENT_SURFACE_WORKER_ENABLED")
+    surface_whatsapp_enabled = _parse_flag(values, "AGENT_SURFACE_WHATSAPP_ENABLED")
+    surface_secret_files = {
+        "surface_telegram_token": "AGENT_SURFACE_TELEGRAM_TOKEN_FILE",
+        "surface_whatsapp_token": "AGENT_SURFACE_WHATSAPP_TOKEN_FILE",
+        "surface_whatsapp_app_secret": "AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE",
+        "surface_whatsapp_verify_token": "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE",
+    }
+    surface_secrets: dict[str, SecretStr | None] = dict.fromkeys(surface_secret_files)
+    if load_surface_credentials:
+        for field, variable in surface_secret_files.items():
+            raw_path = values.get(variable, "").strip()
+            if raw_path:
+                surface_secrets[field] = SecretStr(
+                    _read_private_surface_secret_file(raw_path, variable)
+                )
+    surface_whatsapp_phone_number_id = (
+        values.get("AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID", "").strip() or None
+    )
+    surface_whatsapp_graph_api_version = (
+        values.get("AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION", "").strip() or None
+    )
+    surface_whatsapp_template_name = values.get(
+        "AGENT_SURFACE_WHATSAPP_TEMPLATE_NAME", "veetbot_update_available"
+    ).strip()
+    surface_whatsapp_template_language = values.get(
+        "AGENT_SURFACE_WHATSAPP_TEMPLATE_LANGUAGE", "en_US"
+    ).strip()
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     gmail_accounts_file = values.get("GMAIL_ACCOUNTS_FILE", "").strip()
     configured_gmail_files = {
@@ -1512,6 +1673,17 @@ def _load_settings(
         delegation_enabled=delegation_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
+        surface_api_enabled=surface_api_enabled,
+        surface_worker_enabled=surface_worker_enabled,
+        surface_whatsapp_enabled=surface_whatsapp_enabled,
+        surface_telegram_token=surface_secrets["surface_telegram_token"],
+        surface_whatsapp_token=surface_secrets["surface_whatsapp_token"],
+        surface_whatsapp_app_secret=surface_secrets["surface_whatsapp_app_secret"],
+        surface_whatsapp_verify_token=surface_secrets["surface_whatsapp_verify_token"],
+        surface_whatsapp_phone_number_id=surface_whatsapp_phone_number_id,
+        surface_whatsapp_graph_api_version=surface_whatsapp_graph_api_version,
+        surface_whatsapp_template_name=surface_whatsapp_template_name,
+        surface_whatsapp_template_language=surface_whatsapp_template_language,
         email_enabled=email_enabled,
         email_account_ids=email_account_ids,
         push_provider=push_provider,
@@ -1542,5 +1714,6 @@ def _load_settings(
         require_auth_token=require_auth_token,
         require_execution_environment=require_execution_environment,
         require_email_credentials=load_email_credentials,
+        require_surface_credentials=load_surface_credentials,
     )
     return settings

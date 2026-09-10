@@ -51,6 +51,7 @@ from agent_core.ports.schedules import (
     ScheduleRepository,
 )
 from agent_core.ports.skills import SkillRepository
+from agent_core.ports.surfaces import SurfaceRepositories
 
 
 class RepositoryUnitOfWork(Protocol):
@@ -93,6 +94,7 @@ class RepositoryUnitOfWork(Protocol):
     device_ingest: DeviceIngestStore
     notification_outbox: NotificationOutbox
     delegations: DelegationRepository
+    surfaces: SurfaceRepositories
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None:

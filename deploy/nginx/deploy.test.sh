@@ -17,6 +17,7 @@ SYSTEMCTL_FAIL_MARKER="$TEST_ROOT/systemctl-failed"
 INSTALL_FAIL_MARKER="$TEST_ROOT/install-failed"
 SYMLINK_FAIL_MARKER="$TEST_ROOT/symlink-failed"
 SOURCE_CONFIG="$TEST_ROOT/candidate.conf"
+SURFACE_CONFIG="$TEST_ROOT/surface-candidate.conf"
 DOCS_ROOT="$DEPLOY_ROOT/shared/docs"
 DOCS_SOURCE="$TEST_ROOT/docs-source"
 DOCS_ARCHIVE="$TEST_ROOT/veetbot-docs.tar.gz"
@@ -179,9 +180,28 @@ grep -Fq 'nginx -t' "$LOG_FILE"
 grep -Fq 'systemctl reload nginx' "$LOG_FILE"
 
 mkdir -p "$DEPLOY_ROOT/releases/20260810-152233-abcdef0"
-printf 'VEETBOT_RELEASE_ID=20260810-152233-abcdef0\n' \
+printf '%s\n' \
+  'VEETBOT_RELEASE_ID=20260810-152233-abcdef0' \
+  'AGENT_SURFACE_WHATSAPP_ENABLED=0' \
   >"$DEPLOY_ROOT/releases/20260810-152233-abcdef0/.release.env"
 ln -s "$DEPLOY_ROOT/releases/20260810-152233-abcdef0" "$DEPLOY_ROOT/current"
+printf '%s\n' \
+  'server {' \
+  '  # VEETBOT_WHATSAPP_ROUTE_BEGIN' \
+  '  location = /webhooks/whatsapp { proxy_pass http://127.0.0.1:8002; }' \
+  '  # VEETBOT_WHATSAPP_ROUTE_END' \
+  '}' >"$SURFACE_CONFIG"
+VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy "$SURFACE_CONFIG"
+if grep -Fq 'location = /webhooks/whatsapp' "$AVAILABLE"; then
+  printf 'default-off Nginx deployment unexpectedly retained the WhatsApp route\n' >&2
+  exit 1
+fi
+printf '%s\n' \
+  'VEETBOT_RELEASE_ID=20260810-152233-abcdef0' \
+  'AGENT_SURFACE_WHATSAPP_ENABLED=1' \
+  >"$DEPLOY_ROOT/releases/20260810-152233-abcdef0/.release.env"
+VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy "$SURFACE_CONFIG"
+grep -Fq 'location = /webhooks/whatsapp' "$AVAILABLE"
 VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy \
   "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" \
   "$WEBSITE_ARCHIVE" "$WEBSITE_CHECKSUM"

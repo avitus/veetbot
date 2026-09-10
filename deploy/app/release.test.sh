@@ -14,6 +14,11 @@ ENV_FILE="$TEST_ROOT/veetbot.env"
 PROFILE_AUTH_FILE="$TEST_ROOT/browser-profile-auth"
 PROFILE_SESSION_FILE="$TEST_ROOT/browser-profile-session-secret"
 PROFILE_KEY_DIR="$TEST_ROOT/browser-profile-keys"
+SURFACE_ENV_FILE="$TEST_ROOT/veetbot-surface.env"
+SURFACE_TELEGRAM_FILE="$TEST_ROOT/telegram-bot-token"
+SURFACE_WA_ACCESS_FILE="$TEST_ROOT/whatsapp-access-token"
+SURFACE_WA_APP_FILE="$TEST_ROOT/whatsapp-app-secret"
+SURFACE_WA_HOOK_FILE="$TEST_ROOT/whatsapp-verify-token"
 LOG_FILE="$TEST_ROOT/commands.log"
 DOCKER_IMAGES="$TEST_ROOT/docker-images"
 mkdir -p "$BIN_DIR" "$DEPLOY_ROOT/releases" "$SYSTEMD_DIR" "$PROCESS_ROOT/4242"
@@ -24,6 +29,27 @@ printf '%s\n' 'key-v1' >"$PROFILE_KEY_DIR/current"
 printf '%s\n' 'c3ludGhldGljLWtleS1ub3QtdXNlZC1ieS1zdHVi' >"$PROFILE_KEY_DIR/key-v1.key"
 chmod 0600 "$PROFILE_AUTH_FILE" "$PROFILE_SESSION_FILE" \
   "$PROFILE_KEY_DIR/current" "$PROFILE_KEY_DIR/key-v1.key"
+printf '%s%s\n' 'telegram-test-' 'value-1234' >"$SURFACE_TELEGRAM_FILE"
+printf '%s%s\n' 'whatsapp-token-' 'value-1234' >"$SURFACE_WA_ACCESS_FILE"
+printf '%s%s\n' 'whatsapp-app-' 'value-1234' >"$SURFACE_WA_APP_FILE"
+printf '%s%s\n' 'whatsapp-hook-' 'value-1234' >"$SURFACE_WA_HOOK_FILE"
+chmod 0600 \
+  "$SURFACE_TELEGRAM_FILE" \
+  "$SURFACE_WA_ACCESS_FILE" \
+  "$SURFACE_WA_APP_FILE" \
+  "$SURFACE_WA_HOOK_FILE"
+printf '%s\n' \
+  "DATABASE_URL=postgresql+asyncpg://agent:test"\
+"@127.0.0.1:5432/agent" \
+  'DEPLOYMENT_MODE=production' \
+  'AUTH_MODE=token' \
+  'AUTH_TENANT_ID=test' \
+  'AUTH_PRINCIPAL_ID=surface' \
+  'AUTH_ROLES=surface' \
+  'AUTH_SCOPES=run.read,run.write,surface.read,surface.write' \
+  'AGENT_SURFACE_API_ENABLED=0' \
+  'AGENT_SURFACE_WORKER_ENABLED=0' \
+  'AGENT_SURFACE_WHATSAPP_ENABLED=0' >"$SURFACE_ENV_FILE"
 : >"$LOG_FILE"
 test_database_url='postgresql+asyncpg://agent:'
 test_database_url+='test@127.0.0.1:5432/agent'
@@ -195,6 +221,7 @@ make_stage() {
     "$stage/deploy/browser-profile-service.Dockerfile" \
     "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/deploy/veetbot-notify.env.example" \
+    "$stage/deploy/veetbot-surface.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_schedule_database_permissions.py" \
     "$stage/scripts/check_production_deployment.py"
@@ -205,7 +232,8 @@ make_stage() {
     veetbot-execution \
     veetbot-maintenance \
     veetbot-schedule \
-    veetbot-notify; do
+    veetbot-notify \
+    veetbot-surface; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
       >"$stage/deploy/systemd/$unit.service"
   done
@@ -219,6 +247,11 @@ make_stage() {
     'WorkingDirectory=/opt/veetbot/current' \
     'EnvironmentFile=/etc/veetbot/veetbot-notify.env' \
     >"$stage/deploy/systemd/veetbot-notify.service"
+  printf '%s\n' \
+    '[Service]' \
+    'WorkingDirectory=/opt/veetbot/current' \
+    'EnvironmentFile=/etc/veetbot/veetbot-surface.env' \
+    >"$stage/deploy/systemd/veetbot-surface.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
   printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "${1:-}" == scripts/check_schedule_database_permissions.py ]]; then exit 1; fi\n' \
@@ -235,6 +268,7 @@ run_release() {
   VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
   VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
   VEETBOT_NOTIFY_ENV_FILE="${VEETBOT_TEST_NOTIFY_ENV_FILE:-$TEST_ROOT/veetbot-notify.env}" \
+  VEETBOT_SURFACE_ENV_FILE="${VEETBOT_TEST_SURFACE_ENV_FILE:-$SURFACE_ENV_FILE}" \
   VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE="$PROFILE_AUTH_FILE" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
@@ -517,6 +551,45 @@ fi
 grep -Fq \
   'schedule worker notification flags must match the application notification flags' \
   "$TEST_ROOT/schedule-notification-mismatch.out"
+
+surface_env="$TEST_ROOT/surface-enabled.env"
+surface_worker_env="$TEST_ROOT/veetbot-surface-enabled.env"
+cp "$ENV_FILE" "$surface_env"
+printf '%s\n' \
+  'AGENT_SURFACE_API_ENABLED=1' \
+  'AGENT_SURFACE_WORKER_ENABLED=1' \
+  'AGENT_SURFACE_WHATSAPP_ENABLED=1' >>"$surface_env"
+printf '%s\n' \
+  "DATABASE_URL=$test_database_url" \
+  'DEPLOYMENT_MODE=production' \
+  'AUTH_MODE=token' \
+  'AUTH_TENANT_ID=test' \
+  'AUTH_PRINCIPAL_ID=surface' \
+  'AUTH_ROLES=surface' \
+  'AUTH_SCOPES=run.read,run.write,run.cancel,surface.read,surface.write,approval.read,approval.resolve' \
+  'AGENT_SURFACE_API_ENABLED=1' \
+  'AGENT_SURFACE_WORKER_ENABLED=1' \
+  'AGENT_SURFACE_WHATSAPP_ENABLED=1' \
+  "AGENT_SURFACE_TELEGRAM_TOKEN_FILE=$SURFACE_TELEGRAM_FILE" \
+  "AGENT_SURFACE_WHATSAPP_TOKEN_FILE=$SURFACE_WA_ACCESS_FILE" \
+  "AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE=$SURFACE_WA_APP_FILE" \
+  "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE=$SURFACE_WA_HOOK_FILE" \
+  'AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID=1234567890' \
+  'AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION=v23.0' >"$surface_worker_env"
+surface_id="20260810-152257-0000003"
+make_stage "$surface_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$surface_id" "$PROCESS_ROOT/4242/cwd"
+VEETBOT_TEST_ENV_FILE="$surface_env" \
+  VEETBOT_TEST_SURFACE_ENV_FILE="$surface_worker_env" \
+  run_release "$surface_id"
+grep -Fxq "EnvironmentFile=$surface_worker_env" \
+  "$SYSTEMD_DIR/veetbot-surface.service"
+grep -Fq \
+  'systemctl restart veetbot-surface veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  "$LOG_FILE"
+grep -Fxq 'AGENT_SURFACE_WHATSAPP_ENABLED=1' \
+  "$DEPLOY_ROOT/releases/$surface_id/.release.env"
 
 notify_env="$TEST_ROOT/notify.env"
 notify_worker_env="$TEST_ROOT/veetbot-notify.env"

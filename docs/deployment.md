@@ -126,6 +126,11 @@ TLS readiness endpoint until it reports the same release ID. Exhausting that
 bounded public-probe budget fails the CircleCI job after promotion; it is not a
 failure inside `deploy/app/release.sh`.
 
+The optional Telegram and WhatsApp channels run in the separate surface role.
+Use the [WhatsApp integration runbook](whatsapp-integration-runbook.md) for the
+Meta owner ceremony, secret-file installation, activation, pairing, live smoke,
+and rollback; do not place channel credentials in the application environment.
+
 A pre-promotion failure removes only its staged directory. A post-promotion
 failure remains visible for diagnosis and manual rollback. Database migrations
 are never downgraded automatically.
