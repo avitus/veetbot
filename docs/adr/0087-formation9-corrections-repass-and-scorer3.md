@@ -240,6 +240,28 @@ first run's numbers cannot be compared exactly with any later run. What
 remains is an owner decision: prompt work validated on the development corpus
 before the holdout is run again, or `formation@10` keeps the tuple.
 
+## The prompt round
+
+On 2026-09-10 the owner decided the four open questions: one bounded round
+of prompt work, up to three development-only runs and then one run over both
+sets, stopping if that run fails; varied hypothesis cases added to the
+development corpus so the round has a signal there; the scorer left strict,
+with over-specification addressed in the instruction; and the thresholds
+unchanged. Three things were built for it. `agent eval memory-distillation
+--development-only` scores the development corpus and reports its gates
+without reading the holdout or publishing, so tuning runs no longer spend the
+holdout. Seven cases (`hypothesis-varied-001` to `-007`) put the inference
+in domains the corpus lacked: a payroll rewrite in Kotlin, a head gasket on
+an old Volvo, family letters translated from Polish, a church sound desk, a
+home lab, a lined wool coat, and a grant application; five are must-form, so
+the hypothesis gate now spans eight must-form cases rather than three
+near-identical ones, and none reuses a holdout phrasing. The distillation
+instruction names the inference ("an activity that takes a skill the user has
+not stated" with three examples outside both case sets) and asks for each
+claim in the fewest words that keep it, one candidate per claim, with the
+several objects of one activity kept together. The runs and their outcome
+are recorded below as they happen.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

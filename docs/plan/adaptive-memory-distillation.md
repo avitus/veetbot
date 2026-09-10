@@ -520,8 +520,10 @@ rich production conversation run against a pool of at least twenty-five
 beliefs.
 
 That corpus is the development set: it may be tuned, and its alternatives
-have been edited after observing model output. Independent evidence comes
-from the frozen holdout, `evals/capability/memory-formation.v3-holdout.json`:
+have been edited after observing model output. A tuning run scores it alone:
+`--development-only` reports the development gates without reading the
+holdout or publishing, so prompt and policy work never spends the holdout.
+Independent evidence comes from the frozen holdout, `evals/capability/memory-formation.v3-holdout.json`:
 at least thirty cases authored before their first run, every claim kind, both
 derivations, must-not-form cases, and at least three seeded cases that
 restate a seed across a segment boundary. Its digest is recorded beside it in
@@ -582,6 +584,7 @@ The core scenarios include:
    routine, three activities, progress, and four training-history claims.
 
 The live-model command below evaluates all three policies over the same cases
+(with `--development-only`, the development corpus alone, publishing nothing)
 and publishes a never-overwritten `MemoryDistillationEvidence` only when:
 
 ```bash

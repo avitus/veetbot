@@ -1220,6 +1220,12 @@ async def test_one_consolidation_makes_exactly_three_batched_calls() -> None:
     assert "store it as a hypothesis" in instruction.text
     assert "exact evidence_spans" in instruction.text
     assert "ambiguous, inferred, ongoing, or sensitive" in instruction.text
+    # The first holdout run formed the software-development hypothesis for
+    # one unseen project in five and over-specified what it did form; the
+    # instruction now names the inference and asks for the claim alone.
+    assert "one hypothesis naming that experience" in instruction.text
+    assert "fewest words that keep it" in instruction.text
+    assert "never two wordings of one claim" in instruction.text
     assert extractor.last_audit.provider_calls == 3
     assert any(
         candidate.statement == "User is building a personal AI agent." for candidate in candidates

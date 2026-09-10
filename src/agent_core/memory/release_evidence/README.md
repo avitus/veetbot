@@ -52,7 +52,7 @@ its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
 `distillation-scorer@6`, the evidence schema is version 4 with a required
 `represented_case_count` and the frozen holdout's digest and thresholds, the
-67-case development corpus carries a seeded case whose restated clause must be
+74-case development corpus carries a seeded case whose restated clause must be
 verifiably represented, and the 51-case holdout carries three. The holdout
 was re-frozen once, on 2026-09-09 after the first run, to add a resource
 expectation the transcript settles (ADR-0087). The first run

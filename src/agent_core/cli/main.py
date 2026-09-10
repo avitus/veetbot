@@ -162,6 +162,7 @@ class _MemoryDistillationEvalModule(Protocol):
         policy_profile: str,
         build_ref: str,
         output: Path,
+        development_only: bool,
     ) -> Any | None: ...
 
 
@@ -1091,6 +1092,13 @@ def eval_memory_distillation(
             help="Full commit sha; resolved from CI or git HEAD when omitted.",
         ),
     ] = None,
+    development_only: Annotated[
+        bool,
+        typer.Option(
+            "--development-only",
+            help="Score the development corpus only; reads no holdout, publishes nothing.",
+        ),
+    ] = False,
 ) -> None:
     """Compare formation@7, formation@8, and formation@9 on corpus v3."""
 
@@ -1107,6 +1115,7 @@ def eval_memory_distillation(
                 policy_profile=policy_profile,
                 build_ref=capability.resolve_build_ref(Path.cwd(), build_ref),
                 output=output,
+                development_only=development_only,
             )
         )
     except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
@@ -1119,6 +1128,8 @@ def eval_memory_distillation(
     if not result.passed:
         typer.echo(f"memory-distillation evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
+    if result.development_only:
+        typer.echo("development-only run passed its gates; nothing was published", err=True)
 
 
 @eval_app.command("memory-benchmark")

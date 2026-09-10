@@ -412,12 +412,21 @@ class MemoryDistillationEvaluationResult(BaseModel):
     policies: dict[PolicyVersion, DistillationPolicyMetrics]
     holdout_cases: list[DistillationCaseResult] = Field(default_factory=list)
     holdout_policies: dict[PolicyVersion, DistillationPolicyMetrics] = Field(default_factory=dict)
+    # A tuning run scores the development corpus alone: it never reads the
+    # holdout, which every run against it spends, and never publishes.
+    development_only: bool = False
     evidence: MemoryDistillationEvidence | None = None
 
     @model_validator(mode="after")
     def outcome_matches_evidence(self) -> MemoryDistillationEvaluationResult:
-        if self.passed != (self.evidence is not None):
+        if self.evidence is not None and (not self.passed or self.development_only):
             raise ValueError("only passing distillation evaluation may carry evidence")
+        if self.passed and self.evidence is None and not self.development_only:
+            raise ValueError(
+                "a passing distillation evaluation publishes evidence unless it is development-only"
+            )
+        if self.development_only and (self.holdout_cases or self.holdout_policies):
+            raise ValueError("a development-only evaluation carries no holdout results")
         if self.passed and self.failure_summary is not None:
             raise ValueError("passing distillation evaluation cannot carry a failure")
         if not self.passed and not self.failure_summary:
@@ -940,8 +949,14 @@ async def run_live_evaluation(
     policy_profile: str,
     build_ref: str,
     output: Path,
+    development_only: bool = False,
 ) -> MemoryDistillationEvaluationResult | None:
-    """Evaluate all three frozen/new policies and publish only passing evidence."""
+    """Evaluate all three frozen/new policies and publish only passing evidence.
+
+    A development-only run scores the development corpus, reports its gates,
+    and stops: the holdout is not loaded and nothing is published, so prompt
+    and policy work can be measured without spending the holdout on it.
+    """
 
     if os.environ.get("RUN_LIVE_MODEL_TESTS") != "1":
         return None
@@ -954,18 +969,21 @@ async def run_live_evaluation(
         raise ValueError(f"refusing to overwrite existing evaluation evidence: {output.resolve()}")
 
     corpus, corpus_sha256 = load_distillation_corpus(repository_root)
-    holdout, holdout_sha256 = load_distillation_holdout(repository_root)
+    holdout: MemoryDistillationHoldout | None = None
+    holdout_sha256: str | None = None
+    if not development_only:
+        holdout, holdout_sha256 = load_distillation_holdout(repository_root)
     base_settings = load_settings()
     results: list[DistillationCaseResult] = []
     holdout_results: list[DistillationCaseResult] = []
     identities: set[tuple[str, str, str]] = set()
     evaluated_at: datetime | None = None
+    case_sets = [(corpus.cases, corpus.seeds_for, results)]
+    if holdout is not None:
+        case_sets.append((holdout.cases, holdout.seeds_for, holdout_results))
     with tempfile.TemporaryDirectory(prefix="agent-memory-distillation-eval-") as root:
         settings = _evaluation_settings(base_settings, Path(root) / "artifacts")
-        for case_set, seeds_for, sink in (
-            (corpus.cases, corpus.seeds_for, results),
-            (holdout.cases, holdout.seeds_for, holdout_results),
-        ):
+        for case_set, seeds_for, sink in case_sets:
             for case in case_set:
                 arms: dict[PolicyVersion, DistillationArmResult] = {}
                 seeds = seeds_for(case)
@@ -998,19 +1016,22 @@ async def run_live_evaluation(
         raise ValueError("memory-distillation corpus is empty")
     provider, model, compiled_policy = identities.pop()
     summaries = {policy: _policy_metrics(policy, results) for policy in _POLICIES}
-    holdout_summaries = {policy: _policy_metrics(policy, holdout_results) for policy in _POLICIES}
-    failures = [
-        *evaluate_publication_gates(corpus, results, summaries),
-        *evaluate_holdout_gates(holdout_results, holdout_summaries),
-    ]
+    holdout_summaries = (
+        {policy: _policy_metrics(policy, holdout_results) for policy in _POLICIES}
+        if holdout is not None
+        else {}
+    )
+    failures = [*evaluate_publication_gates(corpus, results, summaries)]
+    if holdout is not None:
+        failures.extend(evaluate_holdout_gates(holdout_results, holdout_summaries))
     current = summaries["formation@9"]
     lift = (current.useful_recall - summaries["formation@8"].useful_recall) * 100
     correction_rate = _correction_rate(results, current)
-    held = holdout_summaries["formation@9"]
-    holdout_lift = (held.useful_recall - holdout_summaries["formation@8"].useful_recall) * 100
 
     evidence = None
-    if not failures:
+    if not failures and holdout is not None and holdout_sha256 is not None:
+        held = holdout_summaries["formation@9"]
+        holdout_lift = (held.useful_recall - holdout_summaries["formation@8"].useful_recall) * 100
         evidence = publish_distillation_evidence(
             output.resolve(),
             identity={
@@ -1069,6 +1090,7 @@ async def run_live_evaluation(
         policies=summaries,
         holdout_cases=holdout_results,
         holdout_policies=holdout_summaries,
+        development_only=development_only,
         evidence=evidence,
     )
 

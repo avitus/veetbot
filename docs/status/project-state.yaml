@@ -624,7 +624,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Owner decision on formation@9 after the first holdout run (2026-09-09) failed on hypothesis recall, precision, and paraphrase-bound direct recall: prompt work validated on the development corpus before another holdout run, or formation@10 keeps the tuple; the rebundle waits on a passing run under distillation-scorer@6
+        Prompt round decided 2026-09-10: up to three development-only runs, then one run over both sets under distillation-scorer@6; the formation@9 rebundle waits on that run passing, and formation@10 keeps the tuple if it fails
     evidence:
       - check: independent review of the formation@9 branch (2026-09-04)
         outcome: passed_locally

@@ -409,6 +409,7 @@ def test_distillation_cli_command_is_registered() -> None:
     assert "formation@7" in result.output
     assert "formation@8" in result.output
     assert "formation@9" in result.output
+    assert "--development-only" in result.output
 
 
 def test_live_evaluation_refuses_a_non_commit_build_ref(
@@ -989,3 +990,84 @@ def test_lemma_strips_an_oes_plural() -> None:
     assert lemma("heroes") == "hero"
     assert lemma("shoes") == "shoe"
     assert lemma("goes") == "go"
+
+
+def test_a_development_only_result_passes_without_evidence() -> None:
+    """Tuning runs score the development corpus alone and publish nothing."""
+
+    result = memory_eval.MemoryDistillationEvaluationResult(
+        passed=True, failure_summary=None, cases=[], policies={}, development_only=True
+    )
+
+    assert result.evidence is None
+    assert result.holdout_cases == []
+    with pytest.raises(ValidationError, match="development-only"):
+        memory_eval.MemoryDistillationEvaluationResult(
+            passed=True, failure_summary=None, cases=[], policies={}
+        )
+
+
+def test_a_development_only_run_never_touches_the_holdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The holdout is spent by every run against it, so tuning runs skip it.
+
+    A development-only run loads the corpus, scores the three arms on it,
+    reports the publication gates, and neither reads the holdout nor writes
+    evidence, whatever the gates say.
+    """
+
+    import asyncio
+    from datetime import UTC, datetime
+
+    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+    monkeypatch.setattr(memory_eval, "require_committed_tree", lambda root, ref: None)
+    monkeypatch.setattr(memory_eval, "load_settings", lambda: object())
+    monkeypatch.setattr(memory_eval, "_evaluation_settings", lambda settings, root: settings)
+
+    def refuse(_root: Path) -> tuple[Any, str]:
+        raise AssertionError("a development-only run must not load the holdout")
+
+    monkeypatch.setattr(memory_eval, "load_distillation_holdout", refuse)
+
+    async def silent_arm(
+        _settings: Any,
+        case: Any,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        policy_version: Any,
+        seeds: Any,
+    ) -> Any:
+        return memory_eval.DistillationArmResult(
+            policy_version=policy_version,
+            beliefs=[],
+            score=memory_eval.score_distillation_case(case, []),
+            identity=("openai", "gpt-5.6-sol", "default@1"),
+            provider_calls=0,
+            expected_provider_calls=0,
+            evaluated_at=datetime(2026, 9, 10, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(memory_eval, "_evaluate_case", silent_arm)
+    output = tmp_path / "evidence.json"
+
+    result = asyncio.run(
+        memory_eval.run_live_evaluation(
+            Path.cwd(),
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0" * 40,
+            output=output,
+            development_only=True,
+        )
+    )
+
+    assert result is not None
+    assert result.development_only
+    assert result.holdout_cases == []
+    assert result.holdout_policies == {}
+    assert not result.passed
+    assert "direct must-form recall" in (result.failure_summary or "")
+    assert result.evidence is None
+    assert not output.exists()
