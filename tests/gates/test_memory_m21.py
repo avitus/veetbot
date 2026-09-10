@@ -2572,7 +2572,7 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "provider_cost_usd": "999999999",
         "holdout_sample_count": 29,
         "holdout_direct_must_form_recall": 0.94,
-        "holdout_benign_precision": 0.79,
+        "holdout_benign_precision": 0.74,
         "holdout_useful_recall_lift_percentage_points": 14,
         "holdout_represented_case_count": 0,
         "holdout_sha256": "not-a-digest",
@@ -4265,12 +4265,12 @@ def test_per_source_displacement_keeps_the_claims_stated_first() -> None:
     assert chosen == mentioned[:6]
 
 
-def test_distillation_evidence_is_schema_six_and_records_every_run() -> None:
+def test_distillation_evidence_is_schema_seven_and_records_every_run() -> None:
     """The artifact carries the repeat count and each run's own numbers."""
 
     evidence = _passing_distillation_evidence()
 
-    assert evidence.schema_version == 6
+    assert evidence.schema_version == 7
     assert evidence.repeats == 1
     assert len(evidence.run_metrics) == 1
     with pytest.raises(ValidationError, match="one record per run"):

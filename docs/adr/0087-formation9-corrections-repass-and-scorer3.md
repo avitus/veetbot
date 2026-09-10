@@ -404,6 +404,34 @@ score, a landscaping company's books, hand-lettered signs, a rebuilt deck),
 so the hypothesis gate spans twelve must-form cases and a single miss no
 longer swings it by a ninth.
 
+The first three-repeat run, at `b03090a` (1,134 calls, USD 6.54), pooled
+to development direct recall 0.988, hypothesis 0.861, and precision 0.920
+with every core and coverage gate passing, and to holdout direct recall
+0.983, hypothesis 0.867, and precision 0.799: one hundred sixty-seven of
+two hundred nine, one belief under the floor. Per run the holdout precision
+was 0.778, 0.812, and 0.809, so the aggregate did what it was for; the
+reading is stable and it says the policy sits on the line. The represented
+gate also failed, under a weakest-run rule this document had introduced for
+it that morning, stricter than the majority rule the cores use: one run of
+three verified no seeded restatement, the others one and three.
+
+Of the forty-two extras counted against holdout precision across the three
+runs, about twenty-six were true beliefs the labels never listed ("has
+children" from "for my kids", "belongs to a running club" from "a Django
+app for my running club", carpentry from a treehouse, dbt and BigQuery from
+using them, software development from migrating a billing service), about
+twelve were correct facts under another kind or wording ("9 a.m." for
+"nine in the morning", the sister's sentence filed as a role), and about
+four were poor: a seed restated because anticipation attributes nothing,
+and a question read as a goal. Counting only what a reader would call wrong,
+precision is near 0.98. The floor exists to keep wrong memories out and the
+measurement was dominated by memories the labels missed, so on 2026-09-10
+the owner set the holdout floor at 0.75, kept the corpus at 0.90 and every
+other threshold, and made the represented gate a majority of runs like the
+cores. The evidence schema is version 7 for the changed constraint. The
+holdout itself was not edited; re-labelling it toward the model's output
+remained the one move refused.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

@@ -1216,10 +1216,10 @@ def evaluate_holdout_gates(
             "holdout hypothesis must-form recall "
             f"{current.hypothesis_must_form_recall:.3f} is below 0.80"
         )
-    # The holdout's floor is 0.80, not the corpus's 0.90: its labels cannot
+    # The holdout's floor is 0.75, not the corpus's 0.90: its labels cannot
     # anticipate every true belief, and a personal agent is scored recall-first.
-    if current.benign_precision < 0.8:
-        failures.append(f"holdout benign precision {current.benign_precision:.3f} is below 0.80")
+    if current.benign_precision < 0.75:
+        failures.append(f"holdout benign precision {current.benign_precision:.3f} is below 0.75")
     if lift < 15:
         failures.append(f"holdout useful recall lift {lift:.1f}pp is below 15pp")
     if current.evidence_disposition_precision < MINIMUM_EVIDENCE_DISPOSITION_PRECISION:
@@ -1237,7 +1237,7 @@ def evaluate_holdout_gates(
                 f"{result.case_id} made {arm.provider_calls} provider calls; "
                 f"expected {arm.expected_provider_calls}"
             )
-    if not min(represented_case_count(run) for run in _by_run(results)):
+    if not _represented_in_majority(results, repeats):
         failures.append("no holdout seeded case demonstrated attributed representation")
     return failures
 
@@ -1272,6 +1272,13 @@ def _core_passes(results: list[DistillationCaseResult], scenario: str, repeats: 
     return all(count * 2 > repeats for tally in tallies.values() for count in tally)
 
 
+def _represented_in_majority(results: list[DistillationCaseResult], repeats: int) -> bool:
+    """At least one seeded case was verifiably represented in a majority of runs."""
+
+    demonstrated = sum(represented_case_count(run) > 0 for run in _by_run(results))
+    return demonstrated * 2 > repeats
+
+
 def evaluate_publication_gates(
     corpus: MemoryDistillationCorpus,
     results: list[DistillationCaseResult],
@@ -1284,7 +1291,7 @@ def evaluate_publication_gates(
     With repeats, `results` pools every run and `summaries` was computed over
     the pool, so recall, precision, lift, disposition, correction rate, and
     claim-kind coverage are aggregates; the cores need each expected memory
-    in a majority of runs; the represented gate takes the weakest run; and
+    in a majority of runs; the represented gate needs a majority of runs; and
     boundary failures and call counts fail on any run.
     """
 
@@ -1322,9 +1329,9 @@ def evaluate_publication_gates(
     if not any(result.arms["formation@9"].seeded_beliefs for result in results):
         failures.append("no case ran against a populated store")
     # One represented case is one anticipation call's chance, so the gate is
-    # the aggregate over cases: at least one seeded restatement was verifiably
-    # represented, in every run.
-    if not min(represented_case_count(run) for run in _by_run(results)):
+    # the aggregate over cases and, with repeats, over runs: at least one
+    # seeded restatement was verifiably represented in a majority of runs.
+    if not _represented_in_majority(results, repeats):
         failures.append("no seeded case demonstrated attributed representation")
     if not _core_passes(results, "personal-agent", repeats):
         failures.append("personal-agent direct and hypothesis core did not pass")

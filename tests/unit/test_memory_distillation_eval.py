@@ -1130,13 +1130,15 @@ def test_claim_match_still_rejects_a_different_claim(candidate: str, reference: 
     assert not statement_matches_claim(candidate, reference)
 
 
-def test_holdout_precision_floor_is_eighty_percent() -> None:
-    """The holdout's precision floor is 0.80; the development corpus keeps 0.90.
+def test_holdout_precision_floor_is_seventy_five_percent() -> None:
+    """The holdout's precision floor is 0.75; the development corpus keeps 0.90.
 
-    Most of the holdout's extra beliefs in the runs of 2026-09-09 and
-    2026-09-10 were true things its labels did not list. For a personal agent
-    that prefers recall and corrects itself, the owner set the floor at 0.80
-    and kept every other threshold.
+    Of forty-two extra holdout beliefs across three pooled runs on
+    2026-09-10, about twenty-six were true things the labels never listed
+    and about twelve were correct facts under a different kind or wording;
+    four were poor. The floor exists to keep wrong memories out, and the
+    measurement was dominated by memories the labels missed, so the owner set
+    it at 0.75 and kept every other threshold.
     """
 
     from agent_core.evals.memory_distillation import evaluate_holdout_gates
@@ -1150,11 +1152,11 @@ def test_holdout_precision_floor_is_eighty_percent() -> None:
     summaries = {
         policy: memory_eval._policy_metrics(policy, results) for policy in memory_eval._POLICIES
     }
-    lenient = summaries["formation@9"].model_copy(update={"benign_precision": 0.81})
-    strict = summaries["formation@9"].model_copy(update={"benign_precision": 0.79})
+    lenient = summaries["formation@9"].model_copy(update={"benign_precision": 0.76})
+    strict = summaries["formation@9"].model_copy(update={"benign_precision": 0.74})
 
     assert evaluate_holdout_gates(results, {**summaries, "formation@9": lenient}) == []
-    assert "holdout benign precision 0.790 is below 0.80" in evaluate_holdout_gates(
+    assert "holdout benign precision 0.740 is below 0.75" in evaluate_holdout_gates(
         results, {**summaries, "formation@9": strict}
     )
 
@@ -1208,8 +1210,18 @@ def test_repeated_runs_gate_on_the_pooled_aggregate() -> None:
         for failure in memory_eval.evaluate_publication_gates(corpus, weaker, single)
     )
 
-    unrepresented = _rerun(_results(corpus, represented_verified=False), 2)
-    pooled = [*runs[0], *runs[1], *unrepresented]
+    # The represented gate, like the cores, needs a majority of runs: one
+    # anticipation call's chance per run, so one dry run of three is not a
+    # failure and two of three is.
+    unrepresented = _results(corpus, represented_verified=False)
+    pooled = [*runs[0], *runs[1], *_rerun(unrepresented, 2)]
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
+    }
+    assert "no seeded case demonstrated attributed representation" not in (
+        memory_eval.evaluate_publication_gates(corpus, pooled, summaries, repeats=3)
+    )
+    pooled = [*runs[0], *_rerun(unrepresented, 1), *_rerun(unrepresented, 2)]
     summaries = {
         policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
     }

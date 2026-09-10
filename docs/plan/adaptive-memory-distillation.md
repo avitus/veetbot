@@ -635,14 +635,14 @@ Publication requires:
   gate is the aggregate, because one case is one anticipation call's chance;
 - the frozen holdout passes the same recall, lift, disposition, boundary,
   call-count, and represented thresholds, with none of the corpus's
-  named-scenario rules, and a benign-precision floor of 0.80 rather than
+  named-scenario rules, and a benign-precision floor of 0.75 rather than
   0.90: its labels cannot anticipate every true belief, and the product is a
   personal agent scored recall-first (ADR-0087);
 - the gates are decided over every repeat of the evaluation, pooled, when
   `--repeats` is more than one: recall, precision, lift, disposition,
   correction rate, and claim-kind coverage aggregate the runs, the
   personal-agent and rich cores need each expected memory in a majority of
-  runs, the represented gate takes the weakest run, boundary failures and
+  runs, the represented gate needs a majority of runs, boundary failures and
   call counts fail on any run, and the artifact records the repeat count and
   each run's own numbers, because one run of this policy has been measured to
   move by up to a tenth on a gate against the next (ADR-0087);

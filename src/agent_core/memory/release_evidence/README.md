@@ -50,7 +50,7 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@7`, the evidence schema is version 6 with a required
+`distillation-scorer@7`, the evidence schema is version 7 with a required
 `represented_case_count` and the frozen holdout's digest and thresholds, the
 78-case development corpus carries a seeded case whose restated clause must be
 verifiably represented, and the 51-case holdout carries three. The holdout
@@ -76,7 +76,16 @@ runs of one unchanged policy differ by up to 0.11 per gate. The owner
 therefore decided that the gates are decided over repeated runs, pooled
 (`--repeats`), with the artifact recording the repeat count and each run's
 own numbers; the development corpus gained four more hypothesis cases so
-that gate spans twelve must-form cases. Automatic selection therefore activates `formation@10` for the
+that gate spans twelve must-form cases. The first three-repeat run (commit
+`b03090a`, 1,134 calls, USD 6.54) pooled to development direct recall
+0.988, hypothesis 0.861, precision 0.920, and holdout direct recall 0.983,
+hypothesis 0.867, precision 0.799, one belief under the 0.80 floor, with
+the represented gate failing only under a weakest-run rule the aggregate
+had introduced. Of the forty-two holdout extras, about twenty-six were true
+beliefs the labels never listed and about twelve correct facts under
+another kind or wording; the owner set the holdout precision floor at 0.75
+and the represented gate to a majority of runs, consistent with the cores
+(ADR-0087). Automatic selection therefore activates `formation@10` for the
 production tuple until `agent eval memory-distillation` passes on the tree
 that deploys and its artifact is bundled here.
 

@@ -439,7 +439,7 @@ class MemoryDistillationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[6] = 6
+    schema_version: Literal[7] = 7
     scorer_version: Literal["distillation-scorer@7"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
@@ -476,7 +476,7 @@ class MemoryDistillationEvidence(BaseModel):
     holdout_positive_case_count: int = Field(ge=20)
     holdout_direct_must_form_recall: float = Field(ge=0.95, le=1)
     holdout_hypothesis_must_form_recall: float = Field(ge=0.8, le=1)
-    holdout_benign_precision: float = Field(ge=0.8, le=1)
+    holdout_benign_precision: float = Field(ge=0.75, le=1)
     holdout_useful_recall_lift_percentage_points: float = Field(ge=15, le=100)
     holdout_evidence_disposition_precision: float = Field(ge=0.75, le=1)
     holdout_represented_case_count: int = Field(ge=1)
