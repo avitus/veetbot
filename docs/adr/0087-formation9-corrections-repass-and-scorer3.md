@@ -432,13 +432,24 @@ cores. The evidence schema is version 7 for the changed constraint. The
 holdout itself was not edited; re-labelling it toward the model's output
 remained the one move refused.
 
+The run on the tree carrying those rules, `0e3ca2f` (three repeats, 1,134
+calls, USD 6.53), passed every gate on both sets: development direct recall
+0.988, hypothesis recall 0.889, precision 0.916, a 76-point lift, and
+disposition precision 0.996; holdout direct recall 0.967, hypothesis recall
+0.933, precision 0.796, and a 68-point lift, with per-run holdout precision
+0.786, 0.794, and 0.809. Its artifact is bundled, bound to both digests and
+`distillation-scorer@7`, and merging it activates `formation@9` for the
+production tuple.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is
   re-evaluated (about two US dollars over both sets, run on the tree that
   deploys) and its artifact rebundled. `formation@10` remains active for the
   tuple, so no consolidation falls to deterministic formation. The first
-  holdout run failed, so that is where production stays.
+  holdout run failed; the three-repeat run of 2026-09-10 at `0e3ca2f`
+  passed under the recall-first bar, and its bundled artifact activates
+  `formation@9` on the tuple once merged and deployed.
 - Every holdout run leaks a little of the holdout into the next change; the
   changes above were confined to defects that are wrong on any input, and the
   provider-behaviour findings are for prompt work against the development

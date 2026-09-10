@@ -1,0 +1,73 @@
+{
+  "benign_precision": 0.9156626506024096,
+  "boundary_failures": 0,
+  "build_ref": "0e3ca2f8d6291baa2b81d39e12b7c265306da255",
+  "comparative_policies": [
+    "formation@7",
+    "formation@8",
+    "formation@9"
+  ],
+  "consolidations_measured": 366,
+  "corpus_sha256": "ae3b6be09ab41668ff80ed35b4f388b89643a406ff689f753469b6ac6659609d",
+  "correction_rate_per_hundred": 0.0,
+  "direct_must_form_recall": 0.9876543209876543,
+  "evaluated_at": "2026-09-10T22:48:00.797582Z",
+  "evidence_disposition_precision": 0.9957264957264957,
+  "extractor_version": "nemori-assisted-v1",
+  "formation_policy_version": "formation@9",
+  "holdout_benign_precision": 0.7961165048543689,
+  "holdout_direct_must_form_recall": 0.9666666666666667,
+  "holdout_evidence_disposition_precision": 1.0,
+  "holdout_hypothesis_must_form_recall": 0.9333333333333333,
+  "holdout_positive_case_count": 43,
+  "holdout_represented_case_count": 5,
+  "holdout_sample_count": 51,
+  "holdout_sha256": "f59f1403a1228738f3fabf8df248c5ecc102aecb2018f00dc0eab2a8f87ee80b",
+  "holdout_useful_recall_lift_percentage_points": 68.33333333333333,
+  "hypothesis_must_form_recall": 0.8888888888888888,
+  "model": "gpt-5.6-sol",
+  "model_policy": "balanced",
+  "policy_profile": "default",
+  "policy_version": "default@19be675c1b3c+hb03f69cf",
+  "positive_case_count": 65,
+  "provider": "openai",
+  "provider_calls_measured": 1134,
+  "provider_calls_per_segment": 3,
+  "provider_cost_usd": "6.5339775",
+  "repeats": 3,
+  "represented_case_count": 3,
+  "run_metrics": [
+    {
+      "benign_precision": 0.9099099099099099,
+      "direct_must_form_recall": 0.9814814814814815,
+      "holdout_benign_precision": 0.7857142857142857,
+      "holdout_direct_must_form_recall": 0.975,
+      "holdout_hypothesis_must_form_recall": 1.0,
+      "hypothesis_must_form_recall": 0.8333333333333334,
+      "provider_cost_usd": "2.2157425"
+    },
+    {
+      "benign_precision": 0.9357798165137615,
+      "direct_must_form_recall": 1.0,
+      "holdout_benign_precision": 0.7941176470588235,
+      "holdout_direct_must_form_recall": 0.95,
+      "holdout_hypothesis_must_form_recall": 0.8,
+      "hypothesis_must_form_recall": 0.8333333333333334,
+      "provider_cost_usd": "2.1510365"
+    },
+    {
+      "benign_precision": 0.9017857142857143,
+      "direct_must_form_recall": 0.9814814814814815,
+      "holdout_benign_precision": 0.8088235294117647,
+      "holdout_direct_must_form_recall": 0.975,
+      "holdout_hypothesis_must_form_recall": 1.0,
+      "hypothesis_must_form_recall": 1.0,
+      "provider_cost_usd": "2.1671985"
+    }
+  ],
+  "sample_count": 78,
+  "schema_version": 7,
+  "scorer_version": "distillation-scorer@7",
+  "seeded_case_count": 18,
+  "useful_recall_lift_percentage_points": 76.28205128205127
+}

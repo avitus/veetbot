@@ -123,10 +123,12 @@ recall, precision, and paraphrase-bound direct recall; the defects it exposed
 are fixed and the scorer is `distillation-scorer@6`. A bounded prompt round
 on 2026-09-10 lifted holdout hypothesis recall to 0.800 and the development
 corpus to full direct recall, but the holdout still failed on direct recall
-and precision, so `formation@10` keeps the tuple. Remaining:
+and precision. The owner then set a recall-first bar (`distillation-scorer@7`,
+a 0.75 holdout precision floor) and gating over three pooled repeats; the run
+at `0e3ca2f` passed and its `formation@9` artifact is bundled. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Run formation@9 with three pooled repeats on the deploying tree (decided 2026-09-10), bundle the artifact if the aggregate passes, and promote to main; formation@10 keeps the tuple until then
+- [ ] Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
 
 ### Milestone 22 — Persona surface and curated belief promotion
 

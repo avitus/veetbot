@@ -42,7 +42,21 @@ cases (pets, diet, a project fact, and a goal) are the same shape of gap the
 frozen policy showed on an empty store, so the floor is met rather than
 exceeded, and that is stated here instead of rounded up.
 
-No `formation@9` artifact is bundled. The artifact produced on 2026-09-03 at
+`openai-balanced-gpt-5.6-sol-default-formation9.json` is the activation
+evidence for `formation@9` on the same tuple. It was produced on 2026-09-10
+by `agent eval memory-distillation --repeats 3` at commit
+`0e3ca2f8d6291baa2b81d39e12b7c265306da255` under `distillation-scorer@7`:
+three pooled repeats over the 78-case development corpus and the 51-case
+frozen holdout (1,134 calls, USD 6.53), measuring development direct
+must-form recall 0.988, hypothesis recall 0.889, precision 0.916, a
+76-point useful-recall lift, and disposition precision 0.996, and holdout
+direct recall 0.967, hypothesis recall 0.933, precision 0.796, and a
+68-point lift; per-run holdout precision was 0.786, 0.794, and 0.809, and
+the artifact records each run. With it bundled, automatic selection
+activates `formation@9` for the production tuple and `formation@10` is the
+evidenced fallback.
+
+An earlier `formation@9` artifact, produced on 2026-09-03 at
 commit `a904417ff95882cccc922095b02b1702849027f0` under `distillation-scorer@2`
 (97.7 percent direct and 100 percent hypothesis must-form recall, 94.8 percent
 benign precision, a 65.4 percentage-point useful-recall lift, 183 calls over 61
@@ -85,9 +99,8 @@ had introduced. Of the forty-two holdout extras, about twenty-six were true
 beliefs the labels never listed and about twelve correct facts under
 another kind or wording; the owner set the holdout precision floor at 0.75
 and the represented gate to a majority of runs, consistent with the cores
-(ADR-0087). Automatic selection therefore activates `formation@10` for the
-production tuple until `agent eval memory-distillation` passes on the tree
-that deploys and its artifact is bundled here.
+(ADR-0087). Between that withdrawal and the artifact above, automatic selection
+activated `formation@10` for the production tuple.
 
 An earlier `formation@9` artifact was evaluated at commit `9013d20`, before the
 Milestone 24 policy rules merged, so its compiled policy version no longer

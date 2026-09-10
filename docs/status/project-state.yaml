@@ -630,7 +630,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Run formation@9 with three pooled repeats on the deploying tree (decided 2026-09-10), bundle the artifact if the aggregate passes, and promote to main; formation@10 keeps the tuple until then
+        Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
     evidence:
       - check: attributed communication-source formation
         outcome: passed_locally
@@ -758,6 +758,20 @@ milestones:
           close to the policy's mean; the harness needs an aggregate or the
           margins need widening, which is the owner's call. formation@10
           keeps the tuple.
+      - check: formation@9 activation evidence over three pooled repeats
+        outcome: passed_locally
+        detail: >-
+          Decided 2026-09-10: the gates are decided over repeated runs,
+          pooled, with the cores and the represented gate needing a majority
+          of runs; the holdout precision floor is 0.75 after a tally of the
+          extras showed most were true beliefs the labels never listed. The
+          run at 0e3ca2f (three repeats, 1,134 calls, USD 6.53) passed every
+          gate: development direct recall 0.988, hypothesis 0.889, precision
+          0.916, lift 76 points, disposition 0.996, and holdout direct recall
+          0.967, hypothesis 0.933, precision 0.796, lift 68 points; per-run
+          holdout precision 0.786, 0.794, 0.809. The artifact is bundled
+          under distillation-scorer@7 and evidence schema 7, bound to both
+          digests, and the bundle tests pass on the tree.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-
