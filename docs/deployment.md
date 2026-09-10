@@ -598,7 +598,13 @@ all six required verification lanes pass:
   serial group, archives and verifies the macOS application with
   `pipeline.number` as its build number, creates the signed installer package
   directly with `productbuild`, verifies the package signature, and uploads it
-  to App Store Connect with `altool` and progress logging. This keeps signing
+  to App Store Connect with `altool` and progress logging. The upload is bound
+  to fifteen minutes: `altool` retries a rejected upload part without limit
+  while still logging, so CircleCI's no-output timeout never fires, and on
+  2026-09-09 one such loop held the macOS runner for over forty minutes. A
+  healthy upload finishes in about a minute; past the bound the step
+  terminates `altool` and fails with exit 124, and a rerun is safe because
+  Apple rejects a build number it has already accepted. This keeps signing
   and packaging separate from Apple API delivery.
 
 Both deployment jobs use CircleCI's shared production serial group in addition

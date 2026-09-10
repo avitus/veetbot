@@ -1048,6 +1048,14 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert productbuild_index < package_command.index("pkgutil --check-signature")
     assert '--file "$pkg_path"' in upload_command
     assert "--type macos" in upload_command
+    # altool retries a rejected upload part without limit, so the step bounds
+    # the upload itself; CircleCI's no-output timeout never fires while the
+    # retry loop keeps logging.
+    assert "upload_timeout_secs=900" in upload_command
+    assert 'kill -0 "$altool_pid"' in upload_command
+    assert 'kill -TERM "$altool_pid"' in upload_command
+    assert "exit 124" in upload_command
+    assert 'wait "$altool_pid"' in upload_command
     assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
     assert '--apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"' in upload_command
     assert '--p8-file-path "$asc_auth_file"' in upload_command
