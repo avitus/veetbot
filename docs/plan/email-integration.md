@@ -305,6 +305,13 @@ credential-shaped values into messaging actions applies to `send_message`
 arguments unchanged. Approval notifications about mail remain content-free:
 no subject, sender, or body fragment rides a push.
 
+ADR-0090 separates trusted authoring from attributed memory evidence. A
+successful first-party `search_threads` or `get_thread` result may therefore
+form a bounded Gmail-attributed, tentative, local, sensitive memory through the
+governed formation service. The result remains `EXTERNAL_UNTRUSTED`, never gains
+policy or action authority, cannot retract or supersede an owner belief, and a
+lookalike third-party MCP server is not an admitted source.
+
 ## Proactive monitoring
 
 The recipe, not new runtime: a daily or weekly schedule whose instruction is a

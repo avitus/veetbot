@@ -99,7 +99,10 @@ forgetting, persistence, comparative activation evidence, the honesty of
 that evidence: a scorer that cannot be fooled, a seeded evaluation store, a
 fallback that never fabricates, verified coverage dispositions, and bounded
 segmentation, and the repaired provider-assisted `formation@10` control with
-its explicit policy precedence (ADR-0086). The local implementation, static and contract suites, strict
+its explicit policy precedence (ADR-0086). ADR-0090 widens the existing
+source-grounding gate so authenticated communication channels can form bounded,
+attributed memories without upgrading correspondent content to owner speech.
+The local implementation, static and contract suites, strict
 documentation build, and Apple package tests pass locally; the fresh
 PostgreSQL 16 integration lane passed in hosted CI on pull request 90
 (CircleCI build 2668); and the 2026-09-03 three-arm live production-tuple

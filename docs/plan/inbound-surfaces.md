@@ -21,8 +21,8 @@ presence and a capability set, unified under one session-key resolver (DM per
 user, group per participant, thread shared)", and requires that "an unknown
 sender on a Surface is default-denied and must complete an explicit pairing
 step (one-time code, expiry, rate-limit, lockout) before any run is created on
-their behalf" (engineering-plan.md:4428-4429). Section 22 repeats the
-default-deny as a security-baseline item (engineering-plan.md:4051), ADR-0017
+their behalf" (engineering-plan.md:4449-4450). Section 22 repeats the
+default-deny as a security-baseline item (engineering-plan.md:4072), ADR-0017
 decided the pairing shape, and the seam audit found the rest: "Surfaces are
 Devices with an empty capability set", the session-key resolver is "the one
 genuinely new mechanism in Section 29", pairing "needs a home and an endpoint
@@ -352,6 +352,12 @@ audit concluded. The runtime-metadata context row the context builder already
 renders gains `surface=telegram` for surface-seeded runs, as platform data, so
 the model can keep replies short.
 
+For automatic memory formation, that paired and principal-bound seed is an
+owner assertion with surface attribution (ADR-0090), not foreign correspondent
+content. An unpaired sender still writes no content, and a future third-party
+pairing must use the attributed-communication lane rather than inherit owner
+memory authority.
+
 ## Replies, notifications, approvals, and questions
 
 A reply is not a notification. Milestone 12's trigger catalog is closed at
@@ -390,7 +396,7 @@ resolution entry point.
 
 ## Security
 
-- Default-deny and pairing before any run (engineering-plan.md:4051, ADR-0017
+- Default-deny and pairing before any run (engineering-plan.md:4072, ADR-0017
   decision 5). An unpaired sender stores no content.
 - Pairing codes: at least forty bits, salted hash, constant-time comparison,
   ten-minute expiry, five attempts, one-hour per-sender lockout, returned
@@ -410,7 +416,7 @@ resolution entry point.
   never exceeds the paired principal: `granted_scopes` is a subset of the
   minter's scopes at minting, intersected with the principal's current scopes
   at every message, and revocation is effective before the next message
-  (engineering-plan.md:3318-3320).
+  (engineering-plan.md:3329-3331).
 - Outbound redaction: secrets and raw provider errors never reach the chat;
   reasoning is never in events and so never in a reply.
 - Abuse controls: per-sender messages per minute, per-tenant active surface

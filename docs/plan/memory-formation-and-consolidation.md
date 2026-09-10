@@ -34,7 +34,8 @@ over raw capture.
   lossy side-channel. This makes memory re-derivable, auditable, and correctable
   (see "Re-derivation" below).
 - **Formation is deliberate and gated**, never an implicit effect of reading
-  content. Untrusted content can never *directly* create a belief.
+  content. Untrusted content can never create owner-authority belief; the
+  attributed-communication exception is locally rendered and remains inferred.
 - **Precision over recall.** Prefer to miss a fact than to fabricate one.
 - **Everything is provenance-linked, user-visible, and reversible.** Every belief
   points back to the events and the consolidation run that produced it; the user
@@ -124,11 +125,15 @@ explicit + scheduled, with turn-boundary as a cheap flagger only.
   candidates, not beliefs: they enter here and pass through every stage below,
   including the trust gate. A fact the run derived from untrusted content is still
   untrusted.
-- **Trust gate at selection.** Spans that are solely `EXTERNAL_UNTRUSTED`
-  (tool output, web content) are never a *direct* formation source (Section 11.2).
-  Such content can only become memory once the user or the agent affirms it; it is
-  evidence, not a source. This is the primary prompt-injection defense on the
-  write path.
+- **Typed trust gate at selection.** Arbitrary spans that are solely
+  `EXTERNAL_UNTRUSTED` (web, browser, file, or unknown tool content) are never a
+  formation source. ADR-0090 admits one narrower class: a recognized,
+  principal-scoped communication event may form a bounded attributed summary
+  without becoming an owner assertion. Gmail and SMS retain untrusted policy
+  treatment and can produce only inferred, tentative, local, sensitive
+  hypotheses that cannot retract owner memory. This distinction, plus exact
+  event-shape admission, is the primary prompt-injection defense on the write
+  path.
 
 ### 3. Extract candidates
 
@@ -480,8 +485,10 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - Formation is autonomous but **fully transparent and reversible**: every belief
   links to its source events and formation run; the user can list, inspect, edit,
   and delete; those actions are events.
-- **Untrusted content can never directly form memory** — only user statements and
-  the agent's own affirmed conclusions.
+- **Untrusted content can never form owner-authority memory.** Owner statements
+  and the agent's affirmed conclusions remain the only owner/affirmed sources.
+  A recognized communication may form only a channel-attributed, inferred,
+  tentative summary under ADR-0090; arbitrary untrusted content remains barred.
 - **Never form** secrets, credentials, tokens, raw untrusted instructions, or
   private reasoning (ADR-0006/0007).
 - **Formation is fully autonomous**: no belief requires synchronous human confirmation. Safety rests on the deterministic eligibility gates, the untrusted-content write ban, and after-the-fact transparency and reversibility; sensitive or ambiguous beliefs are committed but flagged for review.
@@ -543,12 +550,16 @@ the deterministic fallback while preserving the model-assisted design above:
    twelve proposals per consolidation and preserves accepted candidate
    `valid_from` and expiry hints on the resulting record.
 4. The service independently verifies every candidate source against the selected
-   log prefix. Every source must be a `user.message.created` event authored by the
-   owning principal; this rule applies even when a later model-assisted extractor
-   proposes the candidate. The service also rejects a proposed scope that differs
-   from the consolidation job's authorized scope. Automatic beliefs are
-   `inferred` and `provisional`, while sensitive proposals are also flagged for
-   review.
+   log prefix. An owner-assertion source must be a `user.message.created` event
+   authored by the principal or an authenticated paired surface bound to that
+   principal. An attributed-communication source must match a closed,
+   repository-owned event contract: first-party Gmail read output or
+   device-ingested SMS in version 1. Such candidates are forced to inferred
+   authority, hypothesis derivation, tentative longevity, local portability,
+   at least sensitive classification, and affirmative channel attribution; they
+   cannot retract or supersede owner memory. The service also rejects a proposed
+   scope that differs from the consolidation job's authorized scope. This rule
+   applies even when a later model-assisted extractor proposes the candidate.
 5. Candidate subjects are conflict keys, not a generic `user` bucket. Device
    entities remain separate; answer style, interface theme, indentation style,
    and measurement units are separate preference subjects. Unclassified
@@ -597,8 +608,8 @@ duplicate artifact would leave the activated policy version wrong or ambiguous.
 
 The first provider-assisted implementation is a dedicated maintenance extractor,
 not an interactive call or a general-purpose subagent. It implements the same
-`MemoryCandidateExtractor` port, receives only the owning principal's selected
-user events plus a compact view of at most fifty existing beliefs, advertises no
+`MemoryCandidateExtractor` port, receives only selected owner assertions plus a
+compact view of at most fifty existing beliefs, advertises no
 tools, and requests one schema-constrained semantic-claim batch. The provider
 selects from a closed claim-kind vocabulary, cites an exact evidence substring,
 and supplies source-grounded values; it does not author final belief prose or
@@ -693,9 +704,13 @@ first formation layer (Section 20).
    durable entities forms two separate, provenance-linked beliefs, and an
    independent preference in the same utterance remains a third belief.
    **M10.**
-7. **Automatic-source integrity** — automatic candidates name only source events
-   authored by the owning principal; model, tool, and foreign-principal content
-   cannot become a direct source. **M10.**
+7. **Automatic-source integrity** — automatic candidates name only admitted
+   owner assertions or recognized principal-scoped communications. Paired
+   surfaces retain owner attribution; Gmail and SMS form only attributed,
+   tentative, sensitive hypotheses. Assistant, model, arbitrary tool or web,
+   malformed, unpaired, foreign-principal, and foreign-tenant content cannot
+   become a source. ADR-0090 widens the implementation under Milestone 21
+   without moving this original gate's assignment. **M10.**
 8. **Idle lifecycle** — a terminal run enqueues one idempotent formation flag,
    returns without extracting, and maintenance consolidates the session only once
    both the session-idle boundary and the flag's persisted `not_before` have

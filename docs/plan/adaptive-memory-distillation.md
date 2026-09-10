@@ -426,9 +426,10 @@ surfaces. None is policy instruction; recalled text remains memory-trust data.
 Formation rejects only the following trust-boundary failures before ranking:
 
 - a cited event or span does not exist, is not owned by the tenant and
-  principal, or is not a trusted user source;
-- assistant, model, tool, or externally untrusted text is presented as a user
-  observation;
+  principal, or is neither an owner assertion nor a recognized communication
+  source;
+- assistant, model, arbitrary tool, or externally untrusted text is presented
+  as a user observation;
 - the authoritative source span is a credential, secret, or PII beyond explicit policy;
 - untrusted instruction text is being promoted as an instruction rather than
   remembered as the fact that the user encountered it;
@@ -803,8 +804,12 @@ short units of work with idempotent derivation keys.
     nothing. Registered as `gate.memory.predictability_attributed`, case.
     **M21.**
 12. **Every automatic claim is source-grounded.** Over generated ownership and
-    event-kind combinations, all evidence spans occur exactly in owned trusted
-    user events, and assistant, tool, model, foreign-principal, or foreign-
+    event-kind combinations, every evidence span occurs exactly in an admitted
+    source. Principal and authenticated paired-surface messages are owner
+    assertions. First-party Gmail read results and device-ingested SMS may form
+    only locally rendered, channel-attributed, tentative, sensitive hypotheses;
+    they cannot retract or supersede owner memory. Assistant, model, arbitrary
+    or lookalike tool, web, malformed, unpaired, foreign-principal, and foreign-
     tenant content commits nothing. Registered as
     `gate.memory.source_grounding`, property. **M21.**
 13. **Decision telemetry accounts for every proposal.** Direct, hypothesis,

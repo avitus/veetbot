@@ -5,6 +5,8 @@
 - Related: Milestone 10, ADR-0003, ADR-0018, ADR-0023, ADR-0045, ADR-0057
 - Superseded in part: ADR-0057 replaces decisions 7 through 9 where they govern
   production activation, the provider budget, call audit, and policy selection.
+- Superseded in part: ADR-0090 widens decision 4's source gate to recognized,
+  principal-scoped communication evidence under strict attribution ceilings.
 - User authorization: authorize Milestone 10 and continue building a rich,
   comprehensive memory system
 - User authorization: activate a richer extractor because memory formation is a

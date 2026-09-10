@@ -618,6 +618,9 @@ milestones:
       - comparative formation corpus and exact-tuple activation evidence
       - the repaired provider-assisted formation@10 control, policy precedence,
         and policy-bound release evidence (owner-authorized 2026-09-03, ADR-0086)
+      - attributed communication-source formation for Gmail, SMS, and paired
+        surfaces without upgrading correspondent trust (owner-authorized
+        2026-09-10, ADR-0090)
     deferred_scope:
       - reinforcement learning, fine-tuning, or a learned memory policy
       - embeddings, pgvector, an external memory provider, or new retrieval arms
@@ -629,6 +632,24 @@ milestones:
       - >-
         Run formation@9 with three pooled repeats on the deploying tree (decided 2026-09-10), bundle the artifact if the aggregate passes, and promote to main; formation@10 keeps the tuple until then
     evidence:
+      - check: attributed communication-source formation
+        outcome: passed_locally
+        detail: >-
+          The production-shaped regression that previously committed zero
+          memories now commits five from five work Gmail thread reads. Each is
+          locally rendered with Gmail attribution, inferred authority,
+          hypothesis derivation, tentative thirty-day longevity, local
+          portability, sensitive classification, exact source-event
+          provenance, and review flagging. The separately versioned
+          communication-attribution-v1 adapter composes outside formation@10,
+          so its provider prompt, schema, evidence, and precedence stay frozen.
+          Focused gates also cover search/read de-duplication, SMS framing,
+          paired-surface owner attribution, malformed and lookalike tools,
+          injection rejection, the twenty-candidate communication ceiling, and
+          protection of owner-authority beliefs. The deterministic benchmark's
+          metrics and probes remain exactly unchanged; its checked-in baseline
+          records the composed extractor identity so drift detection includes
+          communication-attribution-v1.
       - check: independent review of the formation@9 branch (2026-09-04)
         outcome: passed_locally
         detail: >-
@@ -1158,7 +1179,8 @@ readiness:
     accepting some provisional false positives in exchange for materially
     higher useful recall and evidence-based forgetting; adaptive-memory-
     distillation.md declared twenty-four `gate.memory.*` entries, thirty-one
-    after ADR-0086 and ADR-0087.
+    after ADR-0086 and ADR-0087; ADR-0090 widens the existing source-grounding
+    gate to attributed communication without changing the census.
     On 2026-09-01 the owner authorized Milestone 22, the persona surface and
     curated belief promotion, as a seventh parallel workstream (ADR-0079),
     resolving the readiness review's last memory partial: a formed belief

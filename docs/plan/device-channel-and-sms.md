@@ -230,7 +230,9 @@ the roadmap or in this document's open questions.
    digest stores one receipt and seeds one run. **M24.**
 10. **Untrusted triage routing.** An ingested message enters the standing
     triage session as device-originated untrusted content and cannot
-    resolve a consequential action to a plain allow. **M24.**
+    resolve a consequential action to a plain allow. Under ADR-0090 it may form
+    only an SMS-attributed, tentative, local, sensitive memory and can never be
+    treated as owner speech or retract owner memory. **M24.**
 11. **No body in logs.** Message bodies appear in no process log line and
     no event besides the designated content event. **M24.**
 12. **Default off.** With either flag unset, no device-channel route

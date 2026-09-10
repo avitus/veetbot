@@ -734,7 +734,7 @@ call sites.
 ### Pinning, and the contradiction with availability routing
 
 Section 10 (`engineering-plan.md:1402`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:3050-3057`) wants routing to move work
+provider. Milestone 10 (`engineering-plan.md:3061-3068`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 

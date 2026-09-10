@@ -352,6 +352,7 @@ from agent_core.mcp.configuration import (
     validate_mcp_config,
 )
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
     distillation_evidence_matches,
@@ -1880,6 +1881,10 @@ async def _compose(
                 derivation_key=selection_key,
                 created_at=clock.now(),
             )
+        )
+    if not memory_provider_evaluation_mode and not memory_distillation_evaluation_mode:
+        memory_extractor = AttributedCommunicationCandidateExtractor(
+            memory_extractor or DeterministicCandidateExtractor()
         )
     memory_service = GovernedMemoryService(
         uow_factory,

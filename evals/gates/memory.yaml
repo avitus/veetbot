@@ -429,8 +429,8 @@
   milestone: 21
   kind: property
   spec: docs/plan/adaptive-memory-distillation.md#hard-gates
-  statement: "**Every automatic claim is source-grounded.** Exact spans resolve only to owned trusted user events."
-  check: tests/gates/test_memory_m21.py::test_every_automatic_claim_is_source_grounded
+  statement: "**Every automatic claim is source-grounded.** Exact spans resolve only to owner assertions or recognized principal-scoped communications; correspondent content stays attributed and tentative while arbitrary external content forms nothing."
+  check: tests/gates/test_memory_m21.py::test_communication_sources_are_attributed_and_arbitrary_external_sources_rejected
 - id: gate.memory.formation_reason_telemetry
   milestone: 21
   kind: case

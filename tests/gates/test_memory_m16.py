@@ -62,6 +62,7 @@ from agent_core.evals.memory_benchmark_driver import (
     run_deterministic_benchmark,
     run_deterministic_scenario,
 )
+from agent_core.memory.communication_sources import COMMUNICATION_ATTRIBUTION_VERSION
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
     MAX_INFERRED_CONFIDENCE,
@@ -289,7 +290,9 @@ async def test_bench_single_scenario_forms_and_recalls(tmp_path: Path) -> None:
     result = await run_deterministic_scenario(settings, _driven_scenario(), corpus=_corpus())
 
     assert result.scenario_id == "mb-gate-driver-001"
-    assert result.extractor_name == DeterministicCandidateExtractor.name
+    assert result.extractor_name == (
+        f"{DeterministicCandidateExtractor.name}+{COMMUNICATION_ATTRIBUTION_VERSION}"
+    )
     assert [counts.session_id for counts in result.consolidations] == ["s01", "s02"]
     assert [counts.scope for counts in result.consolidations] == ["general", "general"]
     assert [counts.committed for counts in result.consolidations] == [2, 1]

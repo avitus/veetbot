@@ -6,6 +6,8 @@
   ADR-0014 (memory surface and external providers), Section 6.8 (event log),
   Section 20 (evaluation), Section 27.6 (child runs), Section 30 (self-improving skills)
 - Detailed design: `docs/plan/memory-formation-and-consolidation.md`
+- Superseded in part: ADR-0090 narrows decision 3 by admitting recognized
+  communications as attributed, tentative evidence without upgrading trust.
 
 ## Context
 

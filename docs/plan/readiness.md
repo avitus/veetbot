@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4303-4380`
+Section 28 of the plan is not empty — `engineering-plan.md:4324-4401`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -580,7 +580,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1392`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4382` requires a container-escape attempt as
+    `engineering-plan.md:4403` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -1004,7 +1004,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:679` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3266` and `engineering-plan.md:3267` and picked
+`engineering-plan.md:3277` and `engineering-plan.md:3278` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1409,12 +1409,16 @@ policy binding of every bundled artifact, is designed in the same document.
 The trust boundary is narrow rather than a general suppression rule. Invalid or
 foreign provenance, assistant-as-user attribution, credentials, PII beyond
 explicit policy, promoted untrusted instructions, isolation failures, and
-durable corrections still form nothing. Ambiguity, inference, ongoing state,
-and sensitivity permitted by policy instead affect derivation, confidence,
-longevity, expiry, and viewing ceilings. This is the specific distinction the
-prior designs did not make strongly enough.
+durable corrections still form nothing. ADR-0090 adds a typed communication
+exception after a production Gmail run formed zero memories: repository-owned,
+principal-scoped Gmail and SMS events may form only channel-attributed,
+tentative, local, sensitive hypotheses, while paired-surface owner messages use
+the existing owner-assertion lane and arbitrary external content remains barred.
+Ambiguity, inference, ongoing state, and sensitivity permitted by policy instead
+affect derivation, confidence, longevity, expiry, and viewing ceilings. This is
+the specific distinction the prior designs did not make strongly enough.
 
-The readiness verdict is **Authorized**: ADR-0077, thirty-one new
+The readiness verdict is **Authorized**: ADR-0077 and ADR-0090, thirty-one new
 `gate.memory.*` entries, the Milestone 21 census row, a nine-step build
 sequence, explicit migration and erasure rules, and a comparative corpus
 contract specify the whole workstream before production-code changes begin.
@@ -1540,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4382-4540` for links to other documents returned
+`engineering-plan.md:4403-4561` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1761,7 +1765,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2634` against
-    `model-gateway.md:1810` and `milestone-map.md:1659`. The map
+    `model-gateway.md:1810` and `milestone-map.md:1669`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1770,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4382` requires a test the harness's case set
+    `engineering-plan.md:4403` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
