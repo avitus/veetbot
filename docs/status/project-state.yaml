@@ -624,7 +624,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Prompt round decided 2026-09-10: up to three development-only runs, then one run over both sets under distillation-scorer@6; the formation@9 rebundle waits on that run passing, and formation@10 keeps the tuple if it fails
+        Owner decision after the prompt round of 2026-09-10 ended with the holdout still failing (direct recall 0.900, precision 0.739; hypothesis recall reached 0.800): formation@10 keeps the tuple, and any further formation@9 work needs a new authorization
     evidence:
       - check: independent review of the formation@9 branch (2026-09-04)
         outcome: passed_locally
@@ -696,6 +696,27 @@ milestones:
           the trip from "my partner and I are planning a trip", and the
           holdout was re-frozen once, digest re-recorded, to expect the bakery
           from "a mobile app for my bakery". formation@10 keeps the tuple.
+      - check: bounded prompt round over the development corpus and the holdout
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          Decided 2026-09-10 as up to three development-only runs and one run
+          over both sets. The development-only mode was added so tuning runs
+          never read the holdout; seven varied hypothesis cases were added;
+          the instruction now names the skill an activity implies, states
+          each claim in the fewest words that keep it, splits listed
+          activities with their own frequency, and keeps a possession named
+          in passing. Run 1 found the hypothesis sentence over-triggering and
+          the enumerations described rather than split; run 2 traced the
+          rich conversation's missing swimming habit to the per-source bound
+          displacing the alphabetically last subject, and ties now break by
+          stated order; run 3 left two faithful wordings, accepted as
+          development alternatives. Run 4 over both sets (366 calls, USD
+          2.07, commit 77d4d23) reached development direct recall 1.000,
+          precision 0.939, and the full rich core, missing only hypothesis
+          recall 0.778, and on the holdout hypothesis recall 0.800 (from
+          0.200), lift 61.7 points, direct recall 0.900, and precision 0.739.
+          The round ends under its own rule with no artifact; formation@10
+          keeps the tuple. Two further holdout gaps were noted and left.
       - check: formation@10 activation evidence on a populated store
         outcome: passed
         detail: >-

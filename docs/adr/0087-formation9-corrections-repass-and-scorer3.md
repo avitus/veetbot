@@ -287,6 +287,42 @@ message. The tie-break is now the order the proposals were made, which is
 the order the user stated them; the bound itself is unchanged. That is a
 change to the design document's ordering rule, made here.
 
+Run 3 (development only, 210 calls, USD 1.08): direct 0.980, hypothesis
+0.778, precision 0.920, rich core ten of eleven. The swimming habit formed.
+The two misses were wordings the transcript supports, "strength-training
+progress has not stalled yet" and "live sound operation experience", and
+both were accepted as development alternatives; the instruction was not
+changed again.
+
+Run 4, the round's one run over both sets (366 calls, USD 2.07, at commit
+`77d4d23`), failed. The development corpus reached direct 1.000, precision
+0.939, and the full rich core, and missed only the hypothesis gate at 0.778:
+the garden-planner and sound-desk hypotheses, formed in earlier runs, were
+not formed this time. The holdout improved where the round aimed and not
+elsewhere: hypothesis must-form recall 0.800 against 0.200 before the
+round, useful-recall lift 61.7 points, but direct must-form recall 0.900
+(thirty-six of forty) and precision 0.739 (eighteen extra beliefs among
+sixty-nine). The four direct misses are over-specified or reshuffled
+wordings of correct claims: "has written firmware for insulin pumps for
+eight years", "always prefers metric measurements, never imperial",
+"currently uses SQLite", and "waters their balcony tomatoes and chillies
+every evening". Of the eighteen extras, five are hypotheses the sharper
+instruction now draws where the holdout expects none (carpentry from a
+treehouse, software development from a billing migration, balcony
+gardening, dbt and BigQuery, Rust rather than software development), two
+are the holdout's own gaps noted and left alone (children from "for my
+kids", the billing migration's software-development inference, which the
+corpus rule would expect), four are the over-specified wordings above
+counted again, two split one sentence about a sister into a role and a
+location, and the rest are a restated seed, a merged promotion, a one-off
+bread section, and a numeral for "nine". Under the owner's rule the round
+ends here: `formation@10` keeps the production tuple, the artifact is not
+bundled, and the round's changes stay because each is right on its own
+terms. What the holdout says now is narrower than before the round: the
+inference works, and what remains is the strict scorer's treatment of a
+correct claim stated with one qualifier too many, which is a scorer or
+threshold question for the owner, not a prompt one.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

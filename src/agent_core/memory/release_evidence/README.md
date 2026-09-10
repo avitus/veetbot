@@ -60,8 +60,12 @@ over both sets, on 2026-09-09 at commit `c4360e3` under `distillation-scorer@5`
 (345 calls, USD 1.86), failed: holdout hypothesis must-form recall 0.200,
 holdout precision 0.677, holdout direct recall 0.923, and development-corpus
 direct recall 0.864 and precision 0.864. The runtime and scorer defects it
-exposed are fixed (ADR-0087); the provider-behaviour findings await the
-owner. Automatic selection therefore activates `formation@10` for the
+exposed are fixed (ADR-0087). A bounded prompt round on 2026-09-10 (three
+development-only runs, then one run over both sets at commit `77d4d23`,
+366 calls, USD 2.07) lifted holdout hypothesis recall to 0.800 and the
+development corpus to direct 1.000 and precision 0.939, but the holdout
+still failed on direct recall 0.900 and precision 0.739, so the round ended
+without an artifact. Automatic selection therefore activates `formation@10` for the
 production tuple until `agent eval memory-distillation` passes on the tree
 that deploys and its artifact is bundled here.
 

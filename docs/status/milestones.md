@@ -117,10 +117,13 @@ old scorer is withdrawn, so `formation@10` serves the production tuple until
 `formation@9` is re-evaluated on the deploying tree. On 2026-09-09 the first
 run over the development corpus and the frozen holdout failed on hypothesis
 recall, precision, and paraphrase-bound direct recall; the defects it exposed
-are fixed and the scorer is `distillation-scorer@6`. Remaining:
+are fixed and the scorer is `distillation-scorer@6`. A bounded prompt round
+on 2026-09-10 lifted holdout hypothesis recall to 0.800 and the development
+corpus to full direct recall, but the holdout still failed on direct recall
+and precision, so `formation@10` keeps the tuple. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Prompt round decided 2026-09-10: up to three development-only runs, then one run over both sets under distillation-scorer@6; the formation@9 rebundle waits on that run passing, and formation@10 keeps the tuple if it fails
+- [ ] Owner decision after the prompt round of 2026-09-10 ended with the holdout still failing (direct recall 0.900, precision 0.739; hypothesis recall reached 0.800): formation@10 keeps the tuple, and any further formation@9 work needs a new authorization
 
 ### Milestone 22 — Persona surface and curated belief promotion
 
