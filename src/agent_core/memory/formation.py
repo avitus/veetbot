@@ -317,15 +317,15 @@ def _select_nemori_candidates(
 ) -> list[tuple[MemoryCandidate, MemoryAuthority]]:
     """Choose a broad, useful formation@9 batch without silent truncation."""
 
+    # Ties within one source event break by the order the proposals were
+    # made, which follows the order the user stated them; the subject's
+    # spelling used to decide, so the same activity lost every time.
     ranked = sorted(
         enumerate(proposals),
         key=lambda indexed: (
             indexed[1][0].derivation is MemoryDerivation.HYPOTHESIS,
             -_FUTURE_USEFULNESS[indexed[1][0].claim_kind],
             min(indexed[1][0].source_event_ids),
-            indexed[1][0].subject.casefold(),
-            indexed[1][0].claim_kind.value,
-            indexed[1][0].statement.casefold(),
             indexed[0],
         ),
     )

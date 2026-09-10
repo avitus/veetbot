@@ -262,6 +262,31 @@ claim in the fewest words that keep it, one candidate per claim, with the
 several objects of one activity kept together. The runs and their outcome
 are recorded below as they happen.
 
+Run 1 (development only, 210 calls, USD 1.09): direct 0.902, hypothesis
+0.750, precision 0.863, rich core ten of eleven. The new hypothesis sentence
+over-triggered, adding experience for an activity just started and restating
+a role as experience, and named the activity ("Polish translation
+experience") rather than the skill; the fewest-words sentence dropped a
+possession named in passing; enumerated activities came back as descriptions
+of the list. The instruction was revised on each point, automotive repair
+was added as a synonym, and the lifelong training history accepts habit,
+which the claim-shape table allows for a routine.
+
+Run 2 (development only, 210 calls, USD 1.10): direct 0.980, hypothesis
+0.875, precision 0.890, rich core ten of eleven. Three labels were
+completed on the development set: the garden planner that ships in autumn
+implies software-development experience by the corpus's own rule, server
+administration is systems administration, and a pottery interest stated
+"lately" may keep the word. The rich conversation's missing swimming habit,
+absent in every live run, was traced by running the case alone with the
+provider's candidates and the commit decisions logged: the provider and the
+fallback both proposed it, and the per-source bound of six displaced it
+every time because the ordering's final tie-break was the subject's
+spelling, so "swimming" always lost to "biking" and "running" from the same
+message. The tie-break is now the order the proposals were made, which is
+the order the user stated them; the bound itself is unchanged. That is a
+change to the design document's ordering rule, made here.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

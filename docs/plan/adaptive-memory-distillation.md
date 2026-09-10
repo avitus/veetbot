@@ -340,7 +340,8 @@ The deterministic ordering is:
 2. higher future-usefulness score;
 3. a candidate introducing a claim kind or subject not yet represented;
 4. source event sequence;
-5. normalized subject, claim kind, and statement.
+5. the order the proposals were made, which follows the order the user
+   stated them.
 
 Future usefulness is a local closed rubric over claim kind and longevity, not a
 fourth model call. Ongoing projects, goals, stable constraints, roles,

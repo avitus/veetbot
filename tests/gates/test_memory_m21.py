@@ -4206,3 +4206,35 @@ def test_one_claim_in_two_inflections_after_a_marker_is_one_candidate() -> None:
 
     assert directions_agree(they_turn.statement, turning.statement)
     assert _candidates_semantically_duplicate(they_turn, turning)
+
+
+def test_per_source_displacement_keeps_the_claims_stated_first() -> None:
+    """Ties inside one source event break by the order the user stated them.
+
+    The rich conversation lost its swimming habit in every live run: the
+    first message yields more proposals than the six-per-source bound, and
+    the final tie-break was the subject's spelling, so "swimming" always
+    lost to "biking" and "running". Alphabetical order says nothing about
+    memory; what the user said first is the fairer claim on a slot.
+    """
+
+    from agent_core.memory.formation import _select_nemori_candidates
+
+    mentioned = ["zumba", "yoga", "walking", "tennis", "swimming", "rowing", "boxing"]
+    proposals = [
+        (
+            _candidate(
+                subject=activity,
+                statement=f"User does {activity} on the rest of the days.",
+                claim_kind="habit",
+                source_event_ids=[7],
+                evidence_spans=[{"source_event_id": 7, "text": activity}],
+            ),
+            MemoryAuthority.INFERRED,
+        )
+        for activity in mentioned
+    ]
+
+    chosen = [candidate.subject for candidate, _authority in _select_nemori_candidates(proposals)]
+
+    assert chosen == mentioned[:6]
