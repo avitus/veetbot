@@ -163,6 +163,7 @@ class _MemoryDistillationEvalModule(Protocol):
         build_ref: str,
         output: Path,
         development_only: bool,
+        repeats: int,
     ) -> Any | None: ...
 
 
@@ -1099,6 +1100,14 @@ def eval_memory_distillation(
             help="Score the development corpus only; reads no holdout, publishes nothing.",
         ),
     ] = False,
+    repeats: Annotated[
+        int,
+        typer.Option(
+            "--repeats",
+            min=1,
+            help="Run the whole evaluation this many times and gate on the pooled aggregate.",
+        ),
+    ] = 1,
 ) -> None:
     """Compare formation@7, formation@8, and formation@9 on corpus v3."""
 
@@ -1116,6 +1125,7 @@ def eval_memory_distillation(
                 build_ref=capability.resolve_build_ref(Path.cwd(), build_ref),
                 output=output,
                 development_only=development_only,
+                repeats=repeats,
             )
         )
     except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:

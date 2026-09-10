@@ -31,6 +31,7 @@ from agent_core.config import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
+    DistillationRunMetrics,
     MemoryAuthority,
     MemoryClaimKind,
     MemoryDerivation,
@@ -352,6 +353,9 @@ class DistillationCaseScore(BaseModel):
     boundary_failures: int = Field(ge=0)
     evidence_units: int = Field(default=0, ge=0)
     evidence_units_formed: int = Field(default=0, ge=0)
+    # Which expected claims matched, in the case's order, so repeated runs can
+    # be judged per expected memory rather than all-or-nothing per run.
+    expectation_matches: list[bool] = Field(default_factory=list)
 
 
 class DistillationArmResult(BaseModel):
@@ -381,6 +385,7 @@ class DistillationCaseResult(BaseModel):
     label: Literal["must_form", "reasonable_to_form", "must_not_form"]
     scenario: str
     arms: dict[PolicyVersion, DistillationArmResult]
+    run_index: int = Field(default=0, ge=0)
 
 
 class DistillationPolicyMetrics(BaseModel):
@@ -415,6 +420,8 @@ class MemoryDistillationEvaluationResult(BaseModel):
     # A tuning run scores the development corpus alone: it never reads the
     # holdout, which every run against it spends, and never publishes.
     development_only: bool = False
+    # How many times the whole evaluation ran; the gates pool every run.
+    repeats: int = Field(default=1, ge=1)
     evidence: MemoryDistillationEvidence | None = None
 
     @model_validator(mode="after")
@@ -542,6 +549,7 @@ def score_distillation_case(
         boundary_failures=false_positives if case.scenario == "trust-boundary" else 0,
         evidence_units=evidence_units,
         evidence_units_formed=evidence_units_formed,
+        expectation_matches=[belief_index is not None for belief_index in assignment],
     )
 
 
@@ -917,6 +925,8 @@ def publish_distillation_evidence(
     holdout_positive_case_count: int,
     metrics: dict[str, float | int | str],
     evaluated_at: datetime,
+    repeats: int = 1,
+    run_metrics: list[DistillationRunMetrics] | None = None,
 ) -> MemoryDistillationEvidence:
     """Validate all gates before creating, never replacing, one artifact."""
 
@@ -931,6 +941,23 @@ def publish_distillation_evidence(
             "holdout_sample_count": holdout_sample_count,
             "holdout_positive_case_count": holdout_positive_case_count,
             "evaluated_at": evaluated_at,
+            "repeats": repeats,
+            "run_metrics": run_metrics
+            or [
+                DistillationRunMetrics(
+                    direct_must_form_recall=float(metrics["direct_must_form_recall"]),
+                    hypothesis_must_form_recall=float(metrics["hypothesis_must_form_recall"]),
+                    benign_precision=float(metrics["benign_precision"]),
+                    holdout_direct_must_form_recall=float(
+                        metrics["holdout_direct_must_form_recall"]
+                    ),
+                    holdout_hypothesis_must_form_recall=float(
+                        metrics["holdout_hypothesis_must_form_recall"]
+                    ),
+                    holdout_benign_precision=float(metrics["holdout_benign_precision"]),
+                    provider_cost_usd=str(metrics["provider_cost_usd"]),
+                )
+            ],
             **metrics,
         }
     )
@@ -950,18 +977,25 @@ async def run_live_evaluation(
     build_ref: str,
     output: Path,
     development_only: bool = False,
+    repeats: int = 1,
 ) -> MemoryDistillationEvaluationResult | None:
     """Evaluate all three frozen/new policies and publish only passing evidence.
 
     A development-only run scores the development corpus, reports its gates,
     and stops: the holdout is not loaded and nothing is published, so prompt
     and policy work can be measured without spending the holdout on it.
+
+    With repeats, the whole evaluation runs that many times and the gates are
+    decided over the pool of every run, because one run of this policy has
+    been measured to move by up to a tenth on a gate against the next.
     """
 
     if os.environ.get("RUN_LIVE_MODEL_TESTS") != "1":
         return None
     if not model_policy.strip() or not policy_profile.strip() or not build_ref.strip():
         raise ValueError("model policy, policy profile, and build ref must be non-empty")
+    if repeats < 1:
+        raise ValueError("repeats must be at least one")
     if _BUILD_REF.match(build_ref.strip()) is None:
         raise ValueError("build ref must be the full forty-character commit sha")
     require_committed_tree(repository_root, build_ref.strip())
@@ -983,32 +1017,34 @@ async def run_live_evaluation(
         case_sets.append((holdout.cases, holdout.seeds_for, holdout_results))
     with tempfile.TemporaryDirectory(prefix="agent-memory-distillation-eval-") as root:
         settings = _evaluation_settings(base_settings, Path(root) / "artifacts")
-        for case_set, seeds_for, sink in case_sets:
-            for case in case_set:
-                arms: dict[PolicyVersion, DistillationArmResult] = {}
-                seeds = seeds_for(case)
-                for policy_version in _POLICIES:
-                    arm = await _evaluate_case(
-                        settings,
-                        case,
-                        model_policy=model_policy,
-                        policy_profile=policy_profile,
-                        policy_version=policy_version,
-                        seeds=seeds,
+        for run_index in range(repeats):
+            for case_set, seeds_for, sink in case_sets:
+                for case in case_set:
+                    arms: dict[PolicyVersion, DistillationArmResult] = {}
+                    seeds = seeds_for(case)
+                    for policy_version in _POLICIES:
+                        arm = await _evaluate_case(
+                            settings,
+                            case,
+                            model_policy=model_policy,
+                            policy_profile=policy_profile,
+                            policy_version=policy_version,
+                            seeds=seeds,
+                        )
+                        arms[policy_version] = arm
+                        if arm.identity is not None:
+                            identities.add(arm.identity)
+                        if policy_version == "formation@9":
+                            evaluated_at = arm.evaluated_at
+                    sink.append(
+                        DistillationCaseResult(
+                            case_id=case.id,
+                            label=case.label,
+                            scenario=case.scenario,
+                            arms=arms,
+                            run_index=run_index,
+                        )
                     )
-                    arms[policy_version] = arm
-                    if arm.identity is not None:
-                        identities.add(arm.identity)
-                    if policy_version == "formation@9":
-                        evaluated_at = arm.evaluated_at
-                sink.append(
-                    DistillationCaseResult(
-                        case_id=case.id,
-                        label=case.label,
-                        scenario=case.scenario,
-                        arms=arms,
-                    )
-                )
 
     if len(identities) != 1:
         raise ValueError("distillation evaluation resolved more than one provider tuple")
@@ -1021,9 +1057,32 @@ async def run_live_evaluation(
         if holdout is not None
         else {}
     )
-    failures = [*evaluate_publication_gates(corpus, results, summaries)]
+    failures = [*evaluate_publication_gates(corpus, results, summaries, repeats=repeats)]
     if holdout is not None:
-        failures.extend(evaluate_holdout_gates(holdout_results, holdout_summaries))
+        failures.extend(evaluate_holdout_gates(holdout_results, holdout_summaries, repeats=repeats))
+    run_metrics: list[DistillationRunMetrics] = []
+    for run_index, run in enumerate(_by_run(results)):
+        run_summary = _policy_metrics("formation@9", run)
+        held_run = (
+            _policy_metrics("formation@9", _by_run(holdout_results)[run_index])
+            if holdout is not None
+            else run_summary
+        )
+        run_metrics.append(
+            DistillationRunMetrics(
+                direct_must_form_recall=run_summary.direct_must_form_recall,
+                hypothesis_must_form_recall=run_summary.hypothesis_must_form_recall,
+                benign_precision=run_summary.benign_precision,
+                holdout_direct_must_form_recall=held_run.direct_must_form_recall,
+                holdout_hypothesis_must_form_recall=held_run.hypothesis_must_form_recall,
+                holdout_benign_precision=held_run.benign_precision,
+                provider_cost_usd=format(
+                    Decimal(run_summary.provider_cost_usd)
+                    + (Decimal(held_run.provider_cost_usd) if holdout is not None else 0),
+                    "f",
+                ),
+            )
+        )
     current = summaries["formation@9"]
     lift = (current.useful_recall - summaries["formation@8"].useful_recall) * 100
     correction_rate = _correction_rate(results, current)
@@ -1082,6 +1141,8 @@ async def run_live_evaluation(
                 "boundary_failures": current.boundary_failures,
             },
             evaluated_at=evaluated_at,
+            repeats=repeats,
+            run_metrics=run_metrics,
         )
     return MemoryDistillationEvaluationResult(
         passed=not failures,
@@ -1091,6 +1152,7 @@ async def run_live_evaluation(
         holdout_cases=holdout_results,
         holdout_policies=holdout_summaries,
         development_only=development_only,
+        repeats=repeats,
         evidence=evidence,
     )
 
@@ -1131,6 +1193,8 @@ def _calls_per_segment(results: list[DistillationCaseResult]) -> int:
 def evaluate_holdout_gates(
     results: list[DistillationCaseResult],
     summaries: dict[PolicyVersion, DistillationPolicyMetrics],
+    *,
+    repeats: int = 1,
 ) -> list[str]:
     """Every reason the frozen holdout denies publication.
 
@@ -1173,17 +1237,56 @@ def evaluate_holdout_gates(
                 f"{result.case_id} made {arm.provider_calls} provider calls; "
                 f"expected {arm.expected_provider_calls}"
             )
-    if not represented_case_count(results):
+    if not min(represented_case_count(run) for run in _by_run(results)):
         failures.append("no holdout seeded case demonstrated attributed representation")
     return failures
+
+
+def _by_run(results: list[DistillationCaseResult]) -> list[list[DistillationCaseResult]]:
+    runs: dict[int, list[DistillationCaseResult]] = {}
+    for result in results:
+        runs.setdefault(result.run_index, []).append(result)
+    return [runs[index] for index in sorted(runs)]
+
+
+def _core_passes(results: list[DistillationCaseResult], scenario: str, repeats: int) -> bool:
+    """Every expected memory of every core case formed in a majority of runs.
+
+    One run decides nothing on its own once the evaluation is repeated: a
+    core memory that forms in two runs of three is formed, and one that
+    forms in one of three is not. With a single run this is the old rule,
+    every expected memory in that run.
+    """
+
+    tallies: dict[str, list[int]] = {}
+    for result in results:
+        if result.scenario != scenario:
+            continue
+        score = result.arms["formation@9"].score
+        flags = score.expectation_matches or [score.matched == score.expected] * score.expected
+        tally = tallies.setdefault(result.case_id, [0] * len(flags))
+        for index, flag in enumerate(flags):
+            tally[index] += int(flag)
+    if not tallies:
+        return False
+    return all(count * 2 > repeats for tally in tallies.values() for count in tally)
 
 
 def evaluate_publication_gates(
     corpus: MemoryDistillationCorpus,
     results: list[DistillationCaseResult],
     summaries: dict[PolicyVersion, DistillationPolicyMetrics],
+    *,
+    repeats: int = 1,
 ) -> list[str]:
-    """Every reason the comparative run may not publish activation evidence."""
+    """Every reason the comparative run may not publish activation evidence.
+
+    With repeats, `results` pools every run and `summaries` was computed over
+    the pool, so recall, precision, lift, disposition, correction rate, and
+    claim-kind coverage are aggregates; the cores need each expected memory
+    in a majority of runs; the represented gate takes the weakest run; and
+    boundary failures and call counts fail on any run.
+    """
 
     current = summaries["formation@9"]
     previous = summaries["formation@8"]
@@ -1219,28 +1322,22 @@ def evaluate_publication_gates(
     if not any(result.arms["formation@9"].seeded_beliefs for result in results):
         failures.append("no case ran against a populated store")
     # One represented case is one anticipation call's chance, so the gate is
-    # the aggregate: at least one seeded restatement was verifiably represented.
-    if not represented_case_count(results):
+    # the aggregate over cases: at least one seeded restatement was verifiably
+    # represented, in every run.
+    if not min(represented_case_count(run) for run in _by_run(results)):
         failures.append("no seeded case demonstrated attributed representation")
-    personal_core = [result for result in results if result.scenario == "personal-agent"]
-    if not personal_core or any(
-        result.arms["formation@9"].score.matched != result.arms["formation@9"].score.expected
-        for result in personal_core
-    ):
+    if not _core_passes(results, "personal-agent", repeats):
         failures.append("personal-agent direct and hypothesis core did not pass")
-    rich_core = [result for result in results if result.scenario == "rich-conversation"]
-    if not rich_core or any(
-        result.arms["formation@9"].score.matched != result.arms["formation@9"].score.expected
-        for result in rich_core
-    ):
+    if not _core_passes(results, "rich-conversation", repeats):
         failures.append("rich multi-turn conversation core did not pass completely")
     # Coverage counts the kind the provider formed, not the kind the label
     # names: matching a skill through a compatible project fact must not
     # certify that the policy ever forms a skill.
+    cases_by_id = {case.id: case for case in corpus.cases}
     matched_kinds = {
         belief.claim_kind
-        for case, result in zip(corpus.cases, results, strict=True)
-        for expected in case.expected
+        for result in results
+        for expected in cases_by_id[result.case_id].expected
         for belief in result.arms["formation@9"].beliefs
         if _belief_matches(belief, expected, closed_fields=True)
     }

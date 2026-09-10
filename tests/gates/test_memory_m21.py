@@ -29,6 +29,7 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
     MEMORY_SUBJECT_MAX_LENGTH,
     BeliefType,
+    DistillationRunMetrics,
     MemoryAuthority,
     MemoryCandidate,
     MemoryClaimKind,
@@ -2465,6 +2466,18 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         consolidations_measured=61,
         provider_cost_usd="1.25",
         boundary_failures=0,
+        repeats=1,
+        run_metrics=[
+            DistillationRunMetrics(
+                direct_must_form_recall=0.96,
+                hypothesis_must_form_recall=0.82,
+                benign_precision=0.92,
+                holdout_direct_must_form_recall=0.96,
+                holdout_hypothesis_must_form_recall=0.8,
+                holdout_benign_precision=0.81,
+                provider_cost_usd="1.25",
+            )
+        ],
         evaluated_at=NOW,
     )
 
@@ -4017,6 +4030,18 @@ async def _select_with(
                 holdout_useful_recall_lift_percentage_points=40,
                 holdout_evidence_disposition_precision=0.9,
                 holdout_represented_case_count=2,
+                repeats=1,
+                run_metrics=[
+                    DistillationRunMetrics(
+                        direct_must_form_recall=0.96,
+                        hypothesis_must_form_recall=0.82,
+                        benign_precision=0.92,
+                        holdout_direct_must_form_recall=0.96,
+                        holdout_hypothesis_must_form_recall=0.8,
+                        holdout_benign_precision=0.81,
+                        provider_cost_usd="1.25",
+                    )
+                ],
                 direct_must_form_recall=1,
                 hypothesis_must_form_recall=1,
                 benign_precision=0.96,
@@ -4240,9 +4265,17 @@ def test_per_source_displacement_keeps_the_claims_stated_first() -> None:
     assert chosen == mentioned[:6]
 
 
-def test_distillation_evidence_is_schema_five_with_the_eighty_percent_holdout_floor() -> None:
+def test_distillation_evidence_is_schema_six_and_records_every_run() -> None:
+    """The artifact carries the repeat count and each run's own numbers."""
+
     evidence = _passing_distillation_evidence()
 
-    assert evidence.schema_version == 5
+    assert evidence.schema_version == 6
+    assert evidence.repeats == 1
+    assert len(evidence.run_metrics) == 1
+    with pytest.raises(ValidationError, match="one record per run"):
+        evidence.model_copy(update={"repeats": 3}).model_validate(
+            {**evidence.model_dump(mode="python"), "repeats": 3}
+        )
     assert evidence.holdout_benign_precision == 0.81
     assert evidence.benign_precision >= 0.9

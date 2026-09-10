@@ -384,6 +384,26 @@ passes or fails on the draw. That is a property of the harness, and the
 options are an aggregate over repeated runs, wider margins, or stopping;
 the owner decides. `formation@10` keeps the tuple.
 
+## Gating on an aggregate of repeated runs
+
+The owner chose the aggregate on 2026-09-10. `agent eval
+memory-distillation --repeats N` runs the whole evaluation N times, both
+sets and all three arms each time, and decides the gates over the pool:
+recall, precision, lift, disposition, correction rate, and claim-kind
+coverage are computed over every run's results together, which for recall
+is exactly the mean of the runs; the personal-agent and rich cores need each
+expected memory formed in a majority of runs rather than every memory in
+one run; the represented gate takes the weakest run; boundary failures and
+call counts still fail on any run. The artifact carries the repeat count and
+each run's own direct recall, hypothesis recall, precision, and cost on both
+sets, so the spread is visible to whoever reads it, and its schema is
+version 6. The thresholds are unchanged. Three repeats cost about six US
+dollars; that is the price of an instrument whose reading does not turn on
+the draw. The development corpus also gained four hypothesis cases (a film
+score, a landscaping company's books, hand-lettered signs, a rebuilt deck),
+so the hypothesis gate spans twelve must-form cases and a single miss no
+longer swings it by a ninth.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is

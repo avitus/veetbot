@@ -410,6 +410,7 @@ def test_distillation_cli_command_is_registered() -> None:
     assert "formation@8" in result.output
     assert "formation@9" in result.output
     assert "--development-only" in result.output
+    assert "--repeats" in result.output
 
 
 def test_live_evaluation_refuses_a_non_commit_build_ref(
@@ -1155,4 +1156,77 @@ def test_holdout_precision_floor_is_eighty_percent() -> None:
     assert evaluate_holdout_gates(results, {**summaries, "formation@9": lenient}) == []
     assert "holdout benign precision 0.790 is below 0.80" in evaluate_holdout_gates(
         results, {**summaries, "formation@9": strict}
+    )
+
+
+def _rerun(
+    results: list[memory_eval.DistillationCaseResult], run_index: int
+) -> list[memory_eval.DistillationCaseResult]:
+    return [result.model_copy(update={"run_index": run_index}) for result in results]
+
+
+def test_repeated_runs_gate_on_the_pooled_aggregate() -> None:
+    """Gates are decided over every repeat, not by the draw of one run.
+
+    Two runs of one unchanged policy differed by up to 0.11 per gate on
+    2026-09-10, so the owner decided to gate on an aggregate: recall,
+    precision, lift, and disposition pool every run; the personal-agent and
+    rich cores need each expected memory in a majority of runs rather than
+    all of them in one; the represented gate takes the weakest run; and
+    boundary failures and call counts still fail on any run.
+    """
+
+    corpus = MemoryDistillationCorpus.model_validate(_corpus_payload())
+    full = _results(corpus, represented_verified=True)
+    runs = [_rerun(full, 0), _rerun(full, 1)]
+    weaker = []
+    for result in _rerun(full, 2):
+        if result.case_id == "rich-conversation-900":
+            arm = result.arms["formation@9"]
+            case = next(case for case in corpus.cases if case.id == result.case_id)
+            beliefs = arm.beliefs[1:]
+            arm = arm.model_copy(
+                update={"beliefs": beliefs, "score": score_distillation_case(case, beliefs)}
+            )
+            result = result.model_copy(update={"arms": {**result.arms, "formation@9": arm}})
+        weaker.append(result)
+    runs.append(weaker)
+    pooled = [result for run in runs for result in run]
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
+    }
+
+    failures = memory_eval.evaluate_publication_gates(corpus, pooled, summaries, repeats=3)
+
+    assert not any("rich multi-turn" in failure for failure in failures), failures
+    assert not any("direct must-form recall" in failure for failure in failures), failures
+    single = {
+        policy: memory_eval._policy_metrics(policy, weaker) for policy in memory_eval._POLICIES
+    }
+    assert any(
+        "rich multi-turn" in failure
+        for failure in memory_eval.evaluate_publication_gates(corpus, weaker, single)
+    )
+
+    unrepresented = _rerun(_results(corpus, represented_verified=False), 2)
+    pooled = [*runs[0], *runs[1], *unrepresented]
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
+    }
+    assert "no seeded case demonstrated attributed representation" in (
+        memory_eval.evaluate_publication_gates(corpus, pooled, summaries, repeats=3)
+    )
+
+
+def test_a_result_records_its_repeat_count() -> None:
+    result = memory_eval.MemoryDistillationEvaluationResult(
+        passed=True, failure_summary=None, cases=[], policies={}, development_only=True, repeats=3
+    )
+
+    assert result.repeats == 3
+    assert (
+        memory_eval.MemoryDistillationEvaluationResult(
+            passed=True, failure_summary=None, cases=[], policies={}, development_only=True
+        ).repeats
+        == 1
     )
