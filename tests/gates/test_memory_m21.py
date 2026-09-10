@@ -4323,6 +4323,8 @@ async def test_automatic_selection_prefers_the_newest_evidenced_policy_and_honor
         "User recorded the first episode of the podcast yesterday.",
         "User just finished the quarterly report this afternoon.",
         "User did the dishes for an hour.",
+        "User's electrician is coming at 4 p.m. today.",
+        "User's brother visited yesterday.",
     ],
 )
 def test_one_off_events_are_rejected_whatever_their_verb(statement: str) -> None:

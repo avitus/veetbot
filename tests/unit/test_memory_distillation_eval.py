@@ -1174,7 +1174,7 @@ def test_repeated_runs_gate_on_the_pooled_aggregate() -> None:
     2026-09-10, so the owner decided to gate on an aggregate: recall,
     precision, lift, and disposition pool every run; the personal-agent and
     rich cores need each expected memory in a majority of runs rather than
-    all of them in one; the represented gate takes the weakest run; and
+    all of them in one; the represented gate also needs a majority of runs; and
     boundary failures and call counts still fail on any run.
     """
 

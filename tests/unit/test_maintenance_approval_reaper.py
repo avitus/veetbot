@@ -179,8 +179,10 @@ async def test_composed_maintenance_purges_terminal_schedules_after_thirty_days(
     recent_id = UUID("00000000-0000-0000-0000-000000000812")
     async with build(settings=_settings(tmp_path), script=_script(), clock=clock) as app:
         async with app.uow_factory() as uow:
+            # ADR-0089: a terminal record at or beyond the thirty-day cutoff is
+            # purged, so the expired record sits exactly on the cutoff.
             for schedule_id, updated_at in (
-                (expired_id, _START - timedelta(days=31)),
+                (expired_id, _START - timedelta(days=30)),
                 (recent_id, _START - timedelta(days=29)),
             ):
                 await uow.schedules.create(

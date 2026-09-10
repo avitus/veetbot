@@ -443,13 +443,12 @@ production tuple.
 
 ## Consequences
 
-- Merging this deactivates `formation@9` in production until it is
-  re-evaluated (about two US dollars over both sets, run on the tree that
-  deploys) and its artifact rebundled. `formation@10` remains active for the
-  tuple, so no consolidation falls to deterministic formation. The first
-  holdout run failed; the three-repeat run of 2026-09-10 at `0e3ca2f`
-  passed under the recall-first bar, and its bundled artifact activates
-  `formation@9` on the tuple once merged and deployed.
+- The bundled artifact from the three-repeat run of 2026-09-10 at `0e3ca2f`
+  activates `formation@9` for the production tuple once this merges and
+  deploys, with `formation@10` as the evidenced fallback, so no
+  consolidation falls to deterministic formation. Between the withdrawal of
+  the earlier artifact on 2026-09-04 and that merge, `formation@10` served
+  the tuple.
 - Every holdout run leaks a little of the holdout into the next change; the
   changes above were confined to defects that are wrong on any input, and the
   provider-behaviour findings are for prompt work against the development

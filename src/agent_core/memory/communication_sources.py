@@ -346,8 +346,11 @@ def _candidate(item: _CommunicationItem, scope: str) -> MemoryCandidate:
         evidence_spans=[
             EvidenceSpan(
                 source_event_id=item.source.event.sequence,
+                # The governed source gate needs the span verbatim in the
+                # admitted text; the SMS body is admitted uncollapsed, so the
+                # span is the body, not the whitespace-collapsed excerpt.
                 text=(
-                    item.excerpt[:8192]
+                    raw[:8192]
                     if item.source.channel == "sms"
                     else _source_span(raw, item.excerpt, item.subject, item.correspondent)
                 ),

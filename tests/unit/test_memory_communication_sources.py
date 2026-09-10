@@ -448,3 +448,56 @@ async def test_communication_candidate_cannot_be_recast_to_retract_owner_memory(
     assert stored_owner.status.value == "active"
     assert stored_owner.authority is MemoryAuthority.USER
     assert result.run.superseded == 0
+
+
+def test_sms_evidence_span_is_the_uncollapsed_body() -> None:
+    """A body with a newline or a double space must still pass the source gate.
+
+    The governed source gate requires every evidence span verbatim in the
+    admitted text. The SMS body is admitted stripped but not collapsed, so a
+    span taken from the whitespace-collapsed excerpt was not a substring of
+    it and the candidate was silently counted as rejected provenance.
+    """
+
+    body = "Bring the signed brief.\n\nAlso  two copies."
+    event = _event(
+        1,
+        event_type="user.message.created",
+        actor_type="device",
+        actor_id=PRINCIPAL_ID,
+        payload={
+            "content": DEVICE_TRIAGE_INSTRUCTION.format(sender="+15555550123", body=body),
+            "trust": TrustLevel.EXTERNAL_UNTRUSTED.value,
+            "origin": {
+                "kind": "device_ingest",
+                "device_id": str(UUID(int=10)),
+                "channel": "sms",
+                "digest": hashlib.sha256(b"receipt").hexdigest(),
+            },
+        },
+    )
+
+    source = formation_source(event, principal())
+    candidates = communication_candidates([event], principal=principal(), scope="general")
+
+    assert source is not None
+    assert len(candidates) == 1
+    span = candidates[0].evidence_spans[0]
+    assert span.source_event_id == 1
+    assert span.text in source.text
+
+
+def test_sms_markers_match_the_device_triage_instruction() -> None:
+    """The SMS markers restate fragments of the triage instruction.
+
+    If that wording changes without these, every inbound SMS silently stops
+    forming memory, so the fragments are checked against the instruction here.
+    """
+
+    from agent_core.memory import communication_sources
+
+    rendered = DEVICE_TRIAGE_INSTRUCTION.format(sender="SENDER", body="BODY")
+
+    assert rendered.startswith(communication_sources._SMS_PREFIX)
+    assert communication_sources._SMS_SENDER_END in rendered
+    assert communication_sources._SMS_BODY_MARKER in rendered

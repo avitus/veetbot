@@ -591,7 +591,7 @@ _LASTING_CHANGE_VERB = (
 # a common irregular one rather than a list of chores, because the provider's
 # verb is whatever the user did.
 _TRANSIENT_EVENT = re.compile(
-    r"^(?:User|The user's\s+\S+)\s+(?:(?:just|recently|finally|also|then)\s+)?"
+    r"^(?:User|(?:The user's|User's)\s+\S+)\s+(?:(?:just|recently|finally|also|then)\s+)?"
     rf"(?!{_LASTING_CHANGE_VERB}\b)"
     r"(?:\w{2,}ed|did|had|went|made|spent|took|ate|drank|saw|met|ran|swam|sat|slept|spoke"
     r"|told|wrote|read|paid|sent|built|cut|hit|put|drove|flew|rode|caught|taught|brought"
@@ -603,7 +603,7 @@ _TRANSIENT_EVENT = re.compile(
 )
 # An appointment due today is the same kind of occasion in the present tense.
 _SCHEDULED_OCCASION = re.compile(
-    r"^(?:User|The user's\s+[^.]{1,40}?)\s+(?:is|are|has|have)\s+"
+    r"^(?:User|(?:The user's|User's)\s+[^.]{1,40}?)\s+(?:is|are|has|have)\s+"
     r"(?:(?:coming|arriving|visiting|due|scheduled|booked|meeting|seeing|flying|leaving"
     r"|attending)\b|an?\s+\w+\s+(?:appointment|meeting|call|interview|flight|visit)\b)"
     r".*\b(?:today|tonight|tomorrow|this\s+(?:morning|afternoon|evening))\b",
