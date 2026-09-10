@@ -123,7 +123,7 @@ corpus to full direct recall, but the holdout still failed on direct recall
 and precision, so `formation@10` keeps the tuple. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Owner decision after the prompt round of 2026-09-10 ended with the holdout still failing (direct recall 0.900, precision 0.739; hypothesis recall reached 0.800): formation@10 keeps the tuple, and any further formation@9 work needs a new authorization
+- [ ] Run formation@9 once on the deploying tree under distillation-scorer@7 and the 0.80 holdout precision floor decided 2026-09-10, bundle the artifact if it passes, and promote to main; formation@10 keeps the tuple until then
 
 ### Milestone 22 — Persona surface and curated belief promotion
 

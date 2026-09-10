@@ -50,7 +50,7 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@6`, the evidence schema is version 4 with a required
+`distillation-scorer@7`, the evidence schema is version 5 with a required
 `represented_case_count` and the frozen holdout's digest and thresholds, the
 74-case development corpus carries a seeded case whose restated clause must be
 verifiably represented, and the 51-case holdout carries three. The holdout
@@ -65,7 +65,12 @@ development-only runs, then one run over both sets at commit `77d4d23`,
 366 calls, USD 2.07) lifted holdout hypothesis recall to 0.800 and the
 development corpus to direct 1.000 and precision 0.939, but the holdout
 still failed on direct recall 0.900 and precision 0.739, so the round ended
-without an artifact. Automatic selection therefore activates `formation@10` for the
+without an artifact. The owner then decided, on 2026-09-10, that a personal
+agent is scored recall-first: the scorer credits a correct claim stated with
+more detail (`distillation-scorer@7`) and the holdout's precision floor is
+0.80, the corpus's 0.90 unchanged (ADR-0087). Re-scored offline, the last
+run measures holdout direct recall 0.975, hypothesis recall 0.800, and
+precision 0.812 under that bar. Automatic selection therefore activates `formation@10` for the
 production tuple until `agent eval memory-distillation` passes on the tree
 that deploys and its artifact is bundled here.
 
@@ -81,7 +86,7 @@ scorer equated negations, counts, supersets, and sibling activities, its corpus
 had been edited toward the implementation, every case ran against an empty
 store, and its build reference was an operator-typed label. A `formation@9`
 artifact may be bundled only when it carries `scorer_version`
-`distillation-scorer@6`, a forty-character commit `build_ref` that is an
+`distillation-scorer@7`, a forty-character commit `build_ref` that is an
 ancestor of the bundling tree, the digest of the checked-in corpus, at least
 one seeded case, at least one verifiably represented seeded case, the
 evidence-disposition precision, and the measured provider cost under the

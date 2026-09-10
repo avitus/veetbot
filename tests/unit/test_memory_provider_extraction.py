@@ -2377,7 +2377,7 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version=_runtime_policy_version(),
-        scorer_version="distillation-scorer@6",
+        scorer_version="distillation-scorer@7",
         build_ref=_DISTILLATION_BUILD_REF,
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=61,

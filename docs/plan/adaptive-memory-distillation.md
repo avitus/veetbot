@@ -536,17 +536,21 @@ digests and the holdout's own recall, precision, lift, disposition, and
 represented counts, and activation binds the holdout digest exactly as it
 binds the corpus digest.
 
-Scoring is `distillation-scorer@6`. A belief matches a gold claim when its
+Scoring is `distillation-scorer@7`. A belief matches a gold claim when its
 derivation agrees, its claim kind is the gold kind with the gold longevity or a
 compatible kind with the longevity local policy assigns that kind, its subject
 names the gold conflict key (a lemma of the subject names a lemma of the gold
 key or statement, or an inflection or compound of one, so "weightlifting"
-names "lifting weights"; the user bucket never does), and its statement is
-equivalent: equal after normalization, or sharing three quarters of the
-combined content terms with the same polarity, the same absence conditions,
-the same counts, the same large numbers when both carry one, the same object,
-compared as a lemma, after every directional marker both share, the terms
-they share in the same order, and at most one term the gold lacks. Elaborations, negations, added or
+names "lifting weights"; the user bucket never does), and its statement
+states the claim: equal after normalization, or, with the same polarity, the
+same absence conditions, the same counts, the same large numbers when both
+carry one, the same object, compared as a lemma, after every directional
+marker both share, and the terms they share in the same order, either
+carrying every content lemma of the gold however much it adds, or sharing
+three quarters of the combined lemmas and adding at most one. Inflections
+agree and bare qualifiers such as "currently" are not content, so a correct
+claim stated with more detail is the claim; the runtime combiner keeps the
+stricter equivalence because merging is irreversible. Elaborations, negations, added or
 removed absence conditions, different counts or distances, reversed
 comparisons or origins, swapped arguments, and sibling activities never
 match. Negation is scoped to the clause: a negation inside a subordinate
@@ -628,9 +632,11 @@ Publication requires:
   seeded case that restates a seeded belief across a segment boundary had that
   clause verifiably represented by an anticipation attributed to the seed; the
   gate is the aggregate, because one case is one anticipation call's chance;
-- the frozen holdout passes the same recall, precision, lift, disposition,
-  boundary, call-count, and represented thresholds, with none of the corpus's
-  named-scenario rules;
+- the frozen holdout passes the same recall, lift, disposition, boundary,
+  call-count, and represented thresholds, with none of the corpus's
+  named-scenario rules, and a benign-precision floor of 0.80 rather than
+  0.90: its labels cannot anticipate every true belief, and the product is a
+  personal agent scored recall-first (ADR-0087);
 - every eligible consolidation made exactly three calls per planned segment,
   and the artifact records the measured call and consolidation totals;
 - all lifecycle timing, promotion, and self-citation checks pass, and the

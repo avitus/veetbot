@@ -2438,7 +2438,7 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version="policy@1",
-        scorer_version="distillation-scorer@6",
+        scorer_version="distillation-scorer@7",
         build_ref="0123456789abcdef0123456789abcdef01234567",
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=60,
@@ -2450,7 +2450,7 @@ def _passing_distillation_evidence() -> MemoryDistillationEvidence:
         holdout_positive_case_count=32,
         holdout_direct_must_form_recall=0.96,
         holdout_hypothesis_must_form_recall=0.8,
-        holdout_benign_precision=0.91,
+        holdout_benign_precision=0.81,
         holdout_useful_recall_lift_percentage_points=40,
         holdout_evidence_disposition_precision=0.9,
         holdout_represented_case_count=2,
@@ -2559,7 +2559,7 @@ def test_comparative_evidence_proves_marked_useful_recall_lift() -> None:
         "provider_cost_usd": "999999999",
         "holdout_sample_count": 29,
         "holdout_direct_must_form_recall": 0.94,
-        "holdout_benign_precision": 0.89,
+        "holdout_benign_precision": 0.79,
         "holdout_useful_recall_lift_percentage_points": 14,
         "holdout_represented_case_count": 0,
         "holdout_sha256": "not-a-digest",
@@ -4001,7 +4001,7 @@ async def _select_with(
                 model="scripted",
                 policy_profile="default",
                 policy_version=_runtime_policy_version(),
-                scorer_version="distillation-scorer@6",
+                scorer_version="distillation-scorer@7",
                 build_ref="9" * 40,
                 corpus_sha256=_DISTILLATION_CORPUS_SHA256,
                 sample_count=61,
@@ -4238,3 +4238,11 @@ def test_per_source_displacement_keeps_the_claims_stated_first() -> None:
     chosen = [candidate.subject for candidate, _authority in _select_nemori_candidates(proposals)]
 
     assert chosen == mentioned[:6]
+
+
+def test_distillation_evidence_is_schema_five_with_the_eighty_percent_holdout_floor() -> None:
+    evidence = _passing_distillation_evidence()
+
+    assert evidence.schema_version == 5
+    assert evidence.holdout_benign_precision == 0.81
+    assert evidence.benign_precision >= 0.9

@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@6"]] = "distillation-scorer@6"
+DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@7"]] = "distillation-scorer@7"
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)*")
 _STOPWORDS = frozenset(
@@ -714,6 +714,63 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     union = candidate_terms | reference_terms
     shared = candidate_terms & reference_terms
     if len(shared) / len(union) < 0.75:
+        return False
+    return len(candidate_terms - reference_terms) <= 1
+
+
+# Bare qualifiers that place a claim in time without changing it.
+_QUALIFIER_TERMS = frozenset(
+    {
+        "currently",
+        "now",
+        "always",
+        "lately",
+        "recently",
+        "still",
+        "already",
+        "presently",
+        "nowadays",
+    }
+)
+
+
+def _claim_terms(value: str) -> set[str]:
+    return {
+        lemma(term) for term in _tokens(value) if _is_content(term) and term not in _QUALIFIER_TERMS
+    }
+
+
+def statement_matches_claim(candidate: str, reference: str) -> bool:
+    """Whether a formed belief states a gold claim, possibly with more detail.
+
+    The scorer's rule since distillation-scorer@7. Equal normalized text
+    matches. Otherwise the two must be compatible (polarity, absence
+    conditions, counts, numbers, directions) and keep their shared terms in
+    order; then a belief carrying every content lemma of the gold matches
+    however many words it adds, and one that does not must share three
+    quarters of the combined lemmas and add at most one. Inflections agree
+    and bare qualifiers such as "currently" are not content, so "has written
+    firmware for eight years" states "eight years of experience writing
+    firmware", while a different count, a reversed comparison, a negation,
+    an added absence, a dropped conjunct, or a sibling activity never does.
+    The runtime combiner keeps the stricter `statements_equivalent`, because
+    merging is irreversible and scoring is not.
+    """
+
+    if normalized_statement(candidate) == normalized_statement(reference):
+        return True
+    candidate_terms = _claim_terms(candidate)
+    reference_terms = _claim_terms(reference)
+    if not candidate_terms or not reference_terms:
+        return False
+    if not statements_compatible(candidate, reference):
+        return False
+    if not shared_terms_in_order(candidate, reference):
+        return False
+    if reference_terms <= candidate_terms:
+        return True
+    union = candidate_terms | reference_terms
+    if len(candidate_terms & reference_terms) / len(union) < 0.75:
         return False
     return len(candidate_terms - reference_terms) <= 1
 

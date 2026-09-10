@@ -245,7 +245,7 @@ def test_bundled_build_refs_are_commits_this_tree_descends_from() -> None:
 
 
 def test_no_formation9_artifact_ships_until_the_scorer_change_is_re_evaluated() -> None:
-    """The scorer moved to distillation-scorer@6; the @2 artifact was withdrawn."""
+    """The scorer moved to distillation-scorer@7; the @2 artifact was withdrawn."""
 
     for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
         evidence = load_memory_release_evidence(path)

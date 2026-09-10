@@ -623,7 +623,7 @@ def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
 def test_scorer_version_advanced_with_its_semantics() -> None:
     """A changed scorer cannot keep the version an old artifact was published under."""
 
-    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@6"
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@7"
 
 
 def test_represented_text_requires_a_pool_and_exact_user_text() -> None:
@@ -1071,3 +1071,88 @@ def test_a_development_only_run_never_touches_the_holdout(
     assert "direct must-form recall" in (result.failure_summary or "")
     assert result.evidence is None
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("candidate", "reference"),
+    [
+        (
+            "User has written firmware for insulin pumps for eight years.",
+            "User has eight years of experience writing firmware for insulin pumps.",
+        ),
+        ("User's database currently uses SQLite.", "The user's database is SQLite for now."),
+        (
+            "User always prefers metric measurements, never imperial.",
+            "User wants measurements in metric, never imperial.",
+        ),
+        ("User has a son named Robert who lives in Berlin.", "User has a son."),
+        (
+            "User is starting a podcast about local history.",
+            "User has started a local history podcast.",
+        ),
+    ],
+)
+def test_claim_match_accepts_an_elaboration_of_the_gold(candidate: str, reference: str) -> None:
+    """A correct claim stated with more detail is the claim, not a different one.
+
+    The owner decided on 2026-09-10 that a personal agent should be scored
+    recall-first: a belief that carries every content term of the gold, with
+    the same polarity, counts, numbers, directions, and term order, matches
+    however many words it adds. Inflections agree, and bare qualifiers such
+    as "currently" and "always" are not content. This is
+    distillation-scorer@7; the runtime combiner keeps the stricter rule.
+    """
+
+    from agent_core.memory.equivalence import statement_matches_claim
+
+    assert statement_matches_claim(candidate, reference)
+
+
+@pytest.mark.parametrize(
+    ("candidate", "reference"),
+    [
+        (
+            "User ran 200 miles in training last month.",
+            "User ran 100 miles in training last month.",
+        ),
+        ("User prefers coffee to tea.", "User prefers tea to coffee."),
+        ("User runs without music.", "User runs with music."),
+        ("User does not run outdoors.", "User runs outdoors."),
+        ("User grows tomatoes.", "User grows tomatoes and chillies on their balcony every summer."),
+        ("User bikes on the rest of the days.", "User swims on the rest of the days."),
+        ("User has a daughter.", "User has two daughters."),
+    ],
+)
+def test_claim_match_still_rejects_a_different_claim(candidate: str, reference: str) -> None:
+    from agent_core.memory.equivalence import statement_matches_claim
+
+    assert not statement_matches_claim(candidate, reference)
+
+
+def test_holdout_precision_floor_is_eighty_percent() -> None:
+    """The holdout's precision floor is 0.80; the development corpus keeps 0.90.
+
+    Most of the holdout's extra beliefs in the runs of 2026-09-09 and
+    2026-09-10 were true things its labels did not list. For a personal agent
+    that prefers recall and corrects itself, the owner set the floor at 0.80
+    and kept every other threshold.
+    """
+
+    from agent_core.evals.memory_distillation import evaluate_holdout_gates
+
+    root = Path(__file__).resolve().parents[2]
+    holdout, _digest = memory_eval.load_distillation_holdout(root)
+    corpus_like = MemoryDistillationCorpus.model_construct(
+        cases=holdout.cases, seed_pools=holdout.seed_pools
+    )
+    results = _results(corpus_like, represented_verified=True)
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, results) for policy in memory_eval._POLICIES
+    }
+    lenient = summaries["formation@9"].model_copy(update={"benign_precision": 0.81})
+    strict = summaries["formation@9"].model_copy(update={"benign_precision": 0.79})
+
+    assert evaluate_holdout_gates(results, {**summaries, "formation@9": lenient}) == []
+    assert "holdout benign precision 0.790 is below 0.80" in evaluate_holdout_gates(
+        results, {**summaries, "formation@9": strict}
+    )

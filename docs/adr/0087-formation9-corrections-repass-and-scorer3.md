@@ -323,6 +323,48 @@ inference works, and what remains is the strict scorer's treatment of a
 correct claim stated with one qualifier too many, which is a scorer or
 threshold question for the owner, not a prompt one.
 
+## Recall first: scorer@7 and the holdout floor
+
+On 2026-09-10 the owner decided the bar itself, as a product decision for a
+personal agent that prefers recall and tolerates the occasional wrong belief
+it can later correct. Two things changed and everything else held.
+
+The scorer credits a correct claim stated with more detail. Since the first
+review the statement rule had required three quarters of the combined
+content terms and at most one term the gold lacked, written to stop
+supersets from matching after a scorer that equated "100 miles" with "200
+miles" had inflated the numbers. It then failed "has written firmware for
+insulin pumps for eight years" against "eight years of experience writing
+firmware for insulin pumps" and "waters their balcony tomatoes and chillies
+every evening" against "waters their plants every evening". Under
+`distillation-scorer@7` every check that catches a wrong memory stands:
+polarity, absence conditions, counts, numbers, directions, and term order.
+Past those, a belief carrying every content lemma of the gold matches
+however many words it adds; inflections agree; bare qualifiers such as
+"currently" and "always" are not content. The residual risk is an added
+term that changes meaning without tripping those checks, "daughter-in-law"
+against "daughter" for one, which is rare and visible in review. The runtime
+combiner keeps the stricter equivalence, because a merge is irreversible and
+a score is not.
+
+The holdout's benign-precision floor is 0.80; the development corpus keeps
+0.90 and every recall, lift, disposition, and boundary threshold is
+unchanged on both sets. The reason is what the two holdout runs showed: most
+of the extra beliefs counted against precision were true things the labels
+did not list, carpentry from building a treehouse, software development from
+migrating a billing service, children from "for my kids". The gate was
+measuring the labeler's foresight as much as the policy's accuracy, and
+re-labelling the holdout toward the model's output is the contamination this
+document has refused throughout. A lower floor stated openly is a claim that
+means what it says. The evidence schema is version 5 for the changed
+constraint.
+
+Re-scored offline from their logs, the run of 2026-09-09 measures holdout
+direct recall 1.000, hypothesis recall 0.200, and precision 0.800, and the
+run of 2026-09-10 measures 0.975, 0.800, and 0.812. The second would pass;
+by one belief on precision, so a single run can still fail on variance, and
+that is to be reported rather than trimmed away.
+
 ## Consequences
 
 - Merging this deactivates `formation@9` in production until it is
