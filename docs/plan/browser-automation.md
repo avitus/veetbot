@@ -470,11 +470,14 @@ URL or provider diagnostics. Scope and profile ownership are checked first;
 rejection starts no provider operation and leaves the profile available for a
 corrected retry.
 
-The native Website Access surface accepts these explicit origins as a comma-
-or newline-separated list. A site that serves required scripts, stylesheets,
-images, or sign-in controls from other origins needs those origins listed too;
-the client does not infer or automatically grant them. The same exact-origin
-allowlist continues to govern both navigation and resource loading.
+The native Website Access surface requires one Website URL: a home page or a
+login page. An omitted scheme defaults to HTTPS. The client derives the primary
+allowed origin from that URL and opens the full URL, preserving its path, query,
+and fragment. Advanced settings optionally accepts additional explicit origins
+as a comma- or newline-separated list. A site that redirects or serves required
+scripts, stylesheets, images, or sign-in controls from other origins needs those
+origins listed too; the client does not infer or automatically grant them. The
+same exact-origin allowlist continues to govern navigation and resource loading.
 
 `POST /v1/sessions` also accepts an optional `browser_profile_id` from a trusted
 authenticated client surface. Supplying it requires `browser.profile.read`; the

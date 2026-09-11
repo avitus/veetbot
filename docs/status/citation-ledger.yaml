@@ -13,7 +13,7 @@ citations:
   - cite: "docs/plan/bootstrap-and-composition.md#docs/plan/sandbox-isolation.md:1605"
     excerpt: "17. **`fake` is a fourth `SandboxMechanism` value and a prod"
     digest: "cc6a37fcae6c6649"
-  - cite: "docs/plan/email-integration.md#docs/plan/browser-automation.md:546-550"
+  - cite: "docs/plan/email-integration.md#docs/plan/browser-automation.md:549-553"
     excerpt: "Browser mutation uses the existing effect-sent boundary. Onc"
     digest: "43076826d2dad9ad"
   - cite: "docs/plan/email-integration.md#docs/plan/operational-hardening.md:321-325"

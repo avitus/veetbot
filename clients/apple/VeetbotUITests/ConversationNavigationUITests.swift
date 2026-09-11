@@ -171,16 +171,13 @@ final class ConversationNavigationUITests: XCTestCase {
         scrollUntilVisible(websiteAccess)
         XCTAssertTrue(websiteAccess.exists)
 
-        let origin = app.textFields["website-access.origin"]
-        let login = app.textFields["website-access.login-url"]
-        scrollUntilVisible(origin)
-        XCTAssertTrue(origin.exists)
-        origin.tap()
-        origin.typeText("https://example.org")
-        scrollUntilVisible(login)
-        XCTAssertTrue(login.exists)
-        login.tap()
-        login.typeText("https://example.org/login")
+        let website = app.textFields["website-access.url"]
+        scrollUntilVisible(website)
+        XCTAssertTrue(website.exists)
+        XCTAssertFalse(app.textFields["website-access.origin"].exists)
+        XCTAssertFalse(app.textFields["website-access.login-url"].exists)
+        website.tap()
+        website.typeText("example.org")
         if app.keyboards.buttons["Return"].exists {
             app.keyboards.buttons["Return"].tap()
         }

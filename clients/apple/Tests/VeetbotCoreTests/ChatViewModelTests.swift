@@ -883,8 +883,7 @@ import Testing
         )
         #expect(
             await model.createWebsiteAccess(
-                origin: "https://example.org",
-                loginURL: "https://example.org/login"
+                websiteURL: "https://example.org/login"
             ) != nil
         )
 
@@ -953,6 +952,83 @@ import Testing
         #expect(await configurationStore.loadBrowserProfileID() == nil)
     }
 
+    @Test(arguments: [
+        ("https://example.org", "https://example.org", "https://example.org"),
+        ("example.org", "https://example.org", "https://example.org"),
+        ("  www.example.org/login?next=%2Flearn#sign-in  ",
+         "https://www.example.org/login?next=%2Flearn#sign-in", "https://www.example.org"),
+        ("https://www.example.org/?isLoggingIn=true",
+         "https://www.example.org/?isLoggingIn=true", "https://www.example.org"),
+        ("example.org/login?next=https://example.org/learn",
+         "https://example.org/login?next=https://example.org/learn", "https://example.org"),
+        ("HTTPS://WWW.EXAMPLE.ORG:443/login", "https://www.example.org/login",
+         "https://www.example.org"),
+    ])
+    func testWebsiteAccessDerivesOriginFromOneURL(
+        input: String, expectedLoginURL: String, expectedOrigin: String
+    ) async throws {
+        let profileID = UUID()
+        let authenticationID = UUID()
+        let lock = NSLock()
+        var submittedOrigins: [String]?
+        var submittedLoginURL: String?
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"), ("GET", "/v1/browser-profiles"):
+                return try response(
+                    for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-profiles"):
+                let body = try requestJSONObject(request)
+                lock.withLock { submittedOrigins = body["allowed_origins"] as? [String] }
+                return try response(
+                    for: request, statusCode: 201,
+                    body: #"{"id":"\#(profileID.uuidString)","allowed_origins":["\#(expectedOrigin)"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}"#
+                )
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                let body = try requestJSONObject(request)
+                lock.withLock { submittedLoginURL = body["login_url"] as? String }
+                return try response(
+                    for: request, statusCode: 201,
+                    body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque"}"#
+                )
+            default:
+                Issue.record("unexpected website setup request")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+
+        let launchURL = await model.createWebsiteAccess(websiteURL: input)
+
+        #expect(launchURL != nil)
+        #expect(lock.withLock { submittedOrigins } == [expectedOrigin])
+        #expect(lock.withLock { submittedLoginURL } == expectedLoginURL)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test(arguments: [
+        "", "   ", "http://example.org/login", "https://", "not a website",
+        "https://example.org:8443/login", "https://user@example.org/login",
+    ])
+    func testInvalidWebsiteURLDoesNotCreateAProfile(input: String) async throws {
+        let lock = NSLock()
+        var mutationCount = 0
+        let model = try configuredModel { request in
+            if request.httpMethod != "GET" {
+                lock.withLock { mutationCount += 1 }
+            }
+            return try response(
+                for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#
+            )
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+
+        #expect(await model.createWebsiteAccess(websiteURL: input) == nil)
+        #expect(lock.withLock { mutationCount } == 0)
+        #expect(model.errorMessage != nil)
+    }
+
     @Test(arguments: [", ", "\n"])
     func testWebsiteAccessSendsEveryExplicitlyAllowedOrigin(separator: String) async throws {
         let profileID = UUID()
@@ -986,8 +1062,8 @@ import Testing
         }
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         let launchURL = await model.createWebsiteAccess(
-            origin: "  " + origins.joined(separator: separator) + "  ",
-            loginURL: "  https://www.example.org/login  "
+            websiteURL: "  https://www.example.org/login  ",
+            additionalOrigins: "  " + origins.joined(separator: separator) + "  "
         )
 
         #expect(launchURL != nil)
@@ -1063,8 +1139,7 @@ import Testing
         )
 
         let launchURL = await model.createWebsiteAccess(
-            origin: "https://example.org",
-            loginURL: "https://example.org/login"
+            websiteURL: "https://example.org/login"
         )
         #expect(launchURL?.fragment == "capability=opaque")
 
@@ -1147,8 +1222,7 @@ import Testing
 
         #expect(
             await model.createWebsiteAccess(
-                origin: "https://example.org",
-                loginURL: "https://example.org/login"
+                websiteURL: "https://example.org/login"
             ) == nil
         )
 
@@ -1350,8 +1424,7 @@ import Testing
             await model.configure(baseURLString: "https://veetbot.test", token: token)
         )
         let launchURL = await model.createWebsiteAccess(
-            origin: "https://example.org",
-            loginURL: "https://example.org/login"
+            websiteURL: "https://example.org/login"
         )
         #expect(launchURL?.fragment == "capability=opaque")
         #expect(model.browserAuthentication?.status == .authenticationRequired)

@@ -487,6 +487,7 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
             rejected = await client.post(path, json={"login_url": login_url})
 
         assert rejected.status_code == expected_status
+        assert "Check the Website origin and Login page fields" not in rejected.text
         error = rejected.json()["error"]
         assert error["code"] == expected_code
         assert error["details"] == {}

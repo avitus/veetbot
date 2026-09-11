@@ -314,7 +314,8 @@ class BrowserProfileManagementService:
                 if login_origin not in profile.allowed_origins:
                     raise BrowserLoginURLValidationError(
                         "The login page must use one of the profile's exact website origins, "
-                        "including www. Check the Website origin and Login page fields."
+                        "including www. Use a URL on an allowed origin or start over "
+                        "with the intended website URL."
                     )
                 existing = await uow.browser_authentications.list(
                     principal,

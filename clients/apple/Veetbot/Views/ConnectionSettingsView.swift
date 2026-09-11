@@ -49,8 +49,8 @@ public struct ConnectionSettingsView: View {
     @State private var baseURL = ""
     @State private var token = ""
     @State private var isSaving = false
-    @State private var websiteOrigin = ""
-    @State private var websiteLoginURL = ""
+    @State private var websiteURL = ""
+    @State private var websiteAdditionalOrigins = ""
 
     public init(
         model: ChatViewModel,
@@ -180,33 +180,42 @@ public struct ConnectionSettingsView: View {
                 if model.isConfigured {
                     VStack(alignment: .leading, spacing: 16) {
                         settingsField(
-                            title: "Allowed website origins",
+                            title: "Website URL",
                             help:
-                                "Include the login page’s exact HTTPS origin, including www. If the site needs other domains for images, scripts, or sign-in, explicitly list their HTTPS origins too, separated by commas or new lines. Only listed origins are allowed."
+                                "Enter the website’s home page or login page. Veetbot opens it in an isolated browser where you sign in privately. HTTPS is added if omitted."
                         ) {
-                            TextField("https://www.example.com, https://static.example.com", text: $websiteOrigin)
+                            TextField("example.com or https://example.com/login", text: $websiteURL)
                                 .textFieldStyle(.roundedBorder)
-                                .accessibilityIdentifier("website-access.origin")
+                                .accessibilityIdentifier("website-access.url")
                                 #if os(iOS)
                             .textContentType(.URL)
                             .textInputAutocapitalization(.never)
                             .keyboardType(.URL)
                                 #endif
                         }
-                        settingsField(
-                            title: "Login page",
-                            help:
-                                "Veetbot opens this page in an isolated browser. Enter your username, password, passkey, or MFA there—not in chat or these settings."
-                        ) {
-                            TextField("https://example.com/login", text: $websiteLoginURL)
-                                .textFieldStyle(.roundedBorder)
-                                .accessibilityIdentifier("website-access.login-url")
-                                #if os(iOS)
-                            .textContentType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
-                                #endif
+                        DisclosureGroup("Advanced settings") {
+                            settingsField(
+                                title: "Additional allowed origins (optional)",
+                                help:
+                                    "If the site redirects or needs other domains to load or sign in, list their exact HTTPS origins, separated by commas or new lines. The Website URL’s origin is already included."
+                            ) {
+                                TextField("https://static.example.com", text: $websiteAdditionalOrigins)
+                                    .textFieldStyle(.roundedBorder)
+                                    .accessibilityIdentifier("website-access.additional-origins")
+                                    #if os(iOS)
+                                .textContentType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                    #endif
+                            }
+                            .padding(.top, 8)
                         }
+                        Text(
+                            "Veetbot reuses your saved browser session. Sign in again when the website requires it; Veetbot does not save your password for automatic login."
+                        )
+                        .appFont(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         Button {
                             addWebsiteAccess()
                         } label: {
@@ -216,9 +225,7 @@ public struct ConnectionSettingsView: View {
                         .tint(AppTheme.turquoise)
                         .disabled(
                             model.isManagingWebsiteAccess
-                                || websiteOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty
-                                || websiteLoginURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                                || websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
                                 .isEmpty
                                 || (model.browserAuthentication.map { $0.status != .ready } ?? false)
                         )
@@ -545,8 +552,8 @@ public struct ConnectionSettingsView: View {
     private func addWebsiteAccess() {
         Task {
             await model.createWebsiteAccess(
-                origin: websiteOrigin,
-                loginURL: websiteLoginURL
+                websiteURL: websiteURL,
+                additionalOrigins: websiteAdditionalOrigins
             )
         }
     }
@@ -555,8 +562,8 @@ public struct ConnectionSettingsView: View {
         openURL(launchURL) { accepted in
             if accepted {
                 model.websiteAuthenticationLaunchOpened()
-                websiteOrigin = ""
-                websiteLoginURL = ""
+                websiteURL = ""
+                websiteAdditionalOrigins = ""
             } else {
                 Task { await model.websiteAuthenticationLaunchFailed() }
             }

@@ -828,17 +828,44 @@ public final class ChatViewModel: ObservableObject {
 
     @discardableResult
     public func createWebsiteAccess(
-        origin: String,
-        loginURL: String
+        websiteURL: String,
+        additionalOrigins: String = ""
     ) async -> URL? {
         guard let api else { return nil }
-        let normalizedOrigins = origin.components(separatedBy: CharacterSet(charactersIn: ",\n\r"))
+        let input = websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasScheme = input.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
+        let candidate = hasScheme ? input : "https://" + input
+        guard
+            var components = URLComponents(string: candidate),
+            components.scheme?.lowercased() == "https",
+            let host = components.host, !host.isEmpty,
+            components.user == nil, components.password == nil,
+            components.port == nil || components.port == 443
+        else {
+            errorMessage = "Enter a valid HTTPS website URL without a username or password."
+            return nil
+        }
+        components.scheme = "https"
+        components.host = host.lowercased()
+        components.port = nil
+        guard let normalizedLoginURL = components.url?.absoluteString else {
+            errorMessage = "Enter a valid HTTPS website URL."
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        guard let primaryOrigin = components.url?.absoluteString else {
+            errorMessage = "Enter a valid HTTPS website URL."
+            return nil
+        }
+        let extraOrigins = additionalOrigins
+            .components(separatedBy: CharacterSet(charactersIn: ",\n\r"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let normalizedLoginURL = loginURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedOrigins.isEmpty, !normalizedLoginURL.isEmpty else {
-            errorMessage = "Enter both the website origin and its login page."
-            return nil
+        var normalizedOrigins = [primaryOrigin]
+        for origin in extraOrigins where !normalizedOrigins.contains(origin) {
+            normalizedOrigins.append(origin)
         }
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
