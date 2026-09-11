@@ -11,7 +11,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from agent_core.config import Settings, load_config_document, load_settings
+from agent_core.config import PRODUCTION_MODEL_POLICY, Settings, load_config_document, load_settings
 
 
 def _run(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
@@ -70,10 +70,10 @@ def _model_policy_failures(settings: Settings) -> list[str]:
     model_policies = policies.get("model_policies")
     if not isinstance(model_policies, dict):
         return ["models/policies.yaml does not declare model_policies"]
-    balanced = model_policies.get("balanced")
-    if not isinstance(balanced, dict) or not isinstance(balanced.get("provider"), str):
-        return ["production default model policy 'balanced' is not declared"]
-    provider = balanced["provider"]
+    selected = model_policies.get(PRODUCTION_MODEL_POLICY)
+    if not isinstance(selected, dict) or not isinstance(selected.get("provider"), str):
+        return [f"production default model policy {PRODUCTION_MODEL_POLICY!r} is not declared"]
+    provider = selected["provider"]
     if provider in {"openai", "anthropic"} and provider not in settings.credentials:
         return [f"production model provider credential is missing: {provider}"]
     return []

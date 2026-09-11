@@ -1,5 +1,7 @@
 schema_version: 1
 formation:
+  # Temporary evaluated memory model; chat defaults are selected independently.
+  model_policy: balanced
   session_boundary_enabled: true
   scheduled_enabled: true
   scheduled_interval_seconds: 86400

@@ -32,7 +32,7 @@ CORPUS = ROOT / "tests/fixtures/models/invalid-profiles.yaml"
     ("deployment_mode", "requested_policy", "expected"),
     [
         (DeploymentMode.DEVELOPMENT, None, "fake-balanced"),
-        (DeploymentMode.PRODUCTION, None, "balanced"),
+        (DeploymentMode.PRODUCTION, None, "astra"),
         (DeploymentMode.DEVELOPMENT, "local", "local"),
         (DeploymentMode.PRODUCTION, "flagship", "flagship"),
     ],

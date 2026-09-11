@@ -117,6 +117,7 @@ class PersonaNominationProfile(_ProfileModel):
 class FormationProfile(_ProfileModel):
     """When consolidation runs and which formation behaviors are enabled."""
 
+    model_policy: str = Field(default="balanced", pattern=r"^[a-z][a-z0-9_-]*$", max_length=64)
     session_boundary_enabled: bool = True
     scheduled_enabled: bool = True
     scheduled_interval_seconds: int = Field(default=86_400, ge=1)

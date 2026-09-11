@@ -135,6 +135,17 @@ policy, `formation@10` where its artifact matches and otherwise `formation@8`;
 `required` refuses rather than claiming an unevaluated policy is active. A
 content-free selection audit records the decision and the policy it chose.
 
+ADR-0091 separates maintenance model selection from chat. For routed agents,
+`formation.model_policy` in `memory/profiles.yaml` selects the memory model
+through the existing static router; its shipped value `balanced` explicitly
+resolves to GPT-5.6 Sol. Production chat defaults to `astra`, while `flagship`
+and `fable` select Claude Fable 5.1. Non-routed fake compositions keep their
+fake policy, and explicit evaluation modes use the requested evaluation model
+policy. Selection audits name both policies; activation and provider requests
+use the actual memory tuple. Off mode still resolves no extraction model.
+Sol remains temporary while Milestone 21 evaluates scorer semantics and a
+controlled Astra comparison. All exact-evidence checks above remain required.
+
 ## The integrated episode
 
 Raw events remain the source of truth. An integrated episode is a derived,

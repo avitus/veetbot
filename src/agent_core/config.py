@@ -28,6 +28,8 @@ from agent_core.domain.memory import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
+PRODUCTION_MODEL_POLICY = "astra"
+
 
 class ConfigurationError(ValueError):
     """Raised when deployment configuration is incomplete or unsafe."""
@@ -207,7 +209,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 167 operator-reviewable knobs. Metadata such as
+# The design corpus declares 168 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -353,6 +355,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "device.invocation_poll_seconds",
         ),
         "memory/profiles.yaml": (
+            "formation.model_policy",
             "formation.session_boundary_enabled",
             "formation.scheduled_enabled",
             "formation.scheduled_interval_seconds",

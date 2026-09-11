@@ -654,7 +654,7 @@ def test_production_preflight_normalizes_command_timeout(
     assert "timed out" in result.stderr
 
 
-def test_production_preflight_requires_the_balanced_provider_credential(tmp_path: Path) -> None:
+def test_production_preflight_requires_the_chat_default_provider_credential(tmp_path: Path) -> None:
     environment = {
         "DATABASE_URL": "postgresql+asyncpg://" + "agent:agent@localhost:5432/agent",
         "DEPLOYMENT_MODE": "development",
@@ -669,7 +669,7 @@ def test_production_preflight_requires_the_balanced_provider_credential(tmp_path
 
     overlay = tmp_path / "models" / "policies.yaml"
     overlay.parent.mkdir(parents=True)
-    overlay.write_text("model_policies:\n  balanced:\n    provider: ollama\n", encoding="utf-8")
+    overlay.write_text("model_policies:\n  astra:\n    provider: ollama\n", encoding="utf-8")
     local = load_settings({**environment, "AGENT_CONFIG_DIR": str(tmp_path)})
     assert production_check._model_policy_failures(local) == []
 

@@ -644,6 +644,9 @@ milestones:
       - attributed communication-source formation for Gmail, SMS, and paired
         surfaces without upgrading correspondent trust (owner-authorized
         2026-09-10, ADR-0090)
+      - independent maintenance model selection retaining evaluated GPT-5.6 Sol
+        while chat defaults migrate to Astra and Fable (owner-authorized
+        2026-09-11, ADR-0091)
     deferred_scope:
       - reinforcement learning, fine-tuning, or a learned memory policy
       - embeddings, pgvector, an external memory provider, or new retrieval arms
@@ -655,10 +658,39 @@ milestones:
       - >-
         Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
       - >-
-        Complete the owner-requested Astra/Fable model migration without
-        disabling evaluated provider-assisted memory: the Astra formation@9
-        and formation@10 evaluations of 2026-09-11 did not pass.
+        Memory formation temporarily remains on GPT-5.6 Sol under ADR-0091;
+        audit scorer semantics and compare Sol/Astra under controlled reasoning
+        settings before changing the memory tuple with new activation evidence.
     evidence:
+      - check: Independent memory model selection (2026-09-11, ADR-0091)
+        outcome: passed_locally
+        detail: >-
+          New production sessions select astra, flagship and fable select
+          Claude Fable 5.1, and formation.model_policy independently retains
+          balanced on GPT-5.6 Sol. The existing formation@9 release evidence
+          activates without modification. Thirty focused configuration,
+          selection, provider-profile, and preflight tests pass; thirteen
+          PostgreSQL model-upgrade, adapter-loop, and memory tests pass.
+          The make check code and deployment partitions pass: formatting,
+          lint, strict mypy over 620 files, 1,987 static tests, 467 contract
+          tests, and deployment-script tests. Its strict documentation build
+          exposed the new ADR's missing navigation entry; after adding it,
+          make docs-check and make test-website pass. The 168-entry knob
+          inventory and secret-scanner suites pass all 106 selected tests;
+          the existing allowlist fingerprint is unchanged at its moved line.
+          The upgrade check preserves the existing agent version and verifies
+          a new session receives Astra while the memory selection audit names
+          Sol and formation@9. Explicit evaluations still select Astra;
+          unevidenced or unresolved memory selections retain auto fallback and
+          required refusal. Before implementation, uv run pytest
+          tests/unit/test_model_selection.py tests/unit/test_memory_profiles.py
+          tests/gates/test_model_profiles_m3.py
+          tests/unit/test_toolchain.py::test_production_preflight_requires_the_chat_default_provider_credential
+          -q failed nine tests on the absent independent policy setting,
+          missing chat-policy audit field, old production default, and old
+          preflight target. No formation prompt, scorer, threshold, evidence
+          artifact, or production configuration changed. Memory formation
+          remains active work, and this is a temporary model choice.
       - check: Astra model migration and memory evaluation (2026-09-11)
         outcome: memory_activation_blocked
         detail: >-
@@ -1282,5 +1314,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-10T17:00:00Z
+last_updated: 2026-09-11T23:29:14Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

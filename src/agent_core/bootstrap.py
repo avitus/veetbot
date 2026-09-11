@@ -320,6 +320,7 @@ from agent_core.config import (
     MEMORY_DISTILLATION_HOLDOUT_PATH,
     MEMORY_FORMATION_CORPUS_PATH,
     PACKAGE_ROOT,
+    PRODUCTION_MODEL_POLICY,
     AuthMode,
     BrowserProviderKind,
     ConfigurationError,
@@ -2091,6 +2092,15 @@ async def _compose(
     memory_extractor: MemoryCandidateExtractor | None = None
     memory_policy_version = FORMATION_POLICY_VERSION
     memory_mode = settings.memory_provider_extraction_mode
+    extraction_model_policy = (
+        agent.model_policy
+        if (
+            agent.model_policy in NON_ROUTED_MODEL_POLICIES
+            or memory_provider_evaluation_mode
+            or memory_distillation_evaluation_mode
+        )
+        else memory_profiles.formation.model_policy
+    )
     extraction_model: ResolvedModel | None = None
     evidence_build_ref: str | None = None
     evidence_corpus_sha256: str | None = None
@@ -2103,17 +2113,17 @@ async def _compose(
         or memory_distillation_evaluation_mode
     ):
         try:
-            if agent.model_policy in NON_ROUTED_MODEL_POLICIES:
+            if extraction_model_policy in NON_ROUTED_MODEL_POLICIES:
                 extraction_model = ResolvedModel(
                     provider="fake",
                     model="scripted",
                     credential_ref="fake",
-                    policy_name=agent.model_policy,
+                    policy_name=extraction_model_policy,
                     resolved_at=clock.now(),
                 )
             else:
                 extraction_model = await model_router.resolve(
-                    agent.model_policy,
+                    extraction_model_policy,
                     tenant_id=principal.tenant_id,
                     required=frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING}),
                 )
@@ -2359,6 +2369,7 @@ async def _compose(
             str(agent.id),
             agent.version,
             agent.model_policy,
+            extraction_model_policy,
             agent.policy_profile,
             ruleset.policy_version,
             memory_mode.value,
@@ -2375,7 +2386,7 @@ async def _compose(
             else settings.memory_formation_policy_pin.value,
         )
     )
-    selection_key = f"memory.provider_extraction.selection:v3:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v4:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -2394,7 +2405,8 @@ async def _compose(
                     "policy_profile": agent.policy_profile,
                     "policy_version": ruleset.policy_version,
                     "formation_policy_version": memory_policy_version,
-                    "model_policy": agent.model_policy,
+                    "model_policy": extraction_model_policy,
+                    "chat_model_policy": agent.model_policy,
                     "provider": None if extraction_model is None else extraction_model.provider,
                     "model": None if extraction_model is None else extraction_model.model,
                     "evidence_source": evidence_source,
@@ -3307,7 +3319,7 @@ def _effective_model_policy(
     if requested_policy is not None:
         return requested_policy
     if deployment_mode is DeploymentMode.PRODUCTION:
-        return "balanced"
+        return PRODUCTION_MODEL_POLICY
     return "fake-balanced"
 
 
