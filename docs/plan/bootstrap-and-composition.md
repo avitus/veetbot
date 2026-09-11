@@ -1371,3 +1371,14 @@ the plan's text stands with an annotation rather than a replacement.
     enumerated.** Which groups exist — durability, isolation, concurrency,
     recovery — should be fixed when the first contract suite is written,
     against a real port rather than in the abstract.
+
+
+## Email semantic activation evidence
+
+Milestone 26 adds `Settings.email_semantic_evidence`, read from
+`AGENT_EMAIL_SEMANTIC_EVIDENCE`. It is an optional path to a reviewed semantic
+email evaluation artifact. The composition selects evidence for the resolved
+provider/model and exact release identity using the mechanism in
+[email-experience.md](email-experience.md). Missing evidence leaves semantic
+formation disabled; stale or mismatched evidence cannot enable it. This is
+independent of the Email UX flag and the existing Chat memory policy selection.

@@ -263,7 +263,7 @@ Nothing here runs with networking disabled, and the specification says which
 process is which rather than leaving it to be inferred. The Milestone 8
 adapter spawns a stdio server as an ordinary child process of the worker, and
 [tool-system.md](tool-system.md) states the consequence
-(tool-system.md:1007-1009): a stdio child inherits the worker's network
+(tool-system.md:1008-1010): a stdio child inherits the worker's network
 position, which in this platform is a privileged one, which is why stdio
 servers are operator-configured only. The restriction that applies to the
 worker is that the worker itself dials nothing on a `gmail_*` call; the child
@@ -370,17 +370,17 @@ request has been dispatched, and the corpus already owns the machinery that
 says so. The executor watermarks every call whose side effect is not `NONE`
 before the tool implementation runs — the conservative rule
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
-`mark_effect_sent` implements (tool-system.md:652-656) — so `effect_sent_at`
+`mark_effect_sent` implements (tool-system.md:653-657) — so `effect_sent_at`
 is set on every write and send before its request leaves the worker, and the
 recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
-`UNCERTAIN` (tool-system.md:667). A rate limit, a 5xx, or a lost response
+`UNCERTAIN` (tool-system.md:668). A rate limit, a 5xx, or a lost response
 observed after dispatch is therefore reported by the server as the
 undetermined-outcome code, resolves to the platform's `uncertain` outcome with
-`tool.outcome_unknown` and `retryable: false` (tool-system.md:806-810), and is
+`tool.outcome_unknown` and `retryable: false` (tool-system.md:807-811), and is
 blocked from being proposed again in the run by the unified breaker's
-threshold-of-one row (tool-system.md:849). This is the rule
+threshold-of-one row (tool-system.md:850). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:1787-1789) and the one
+after the watermark (tool-system.md:1788-1790) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:549-553), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
@@ -538,3 +538,17 @@ the mailbox. The platform does not guess, and it does not send again.
 These seventeen registry-backed gates are the milestone's blocking delivery
 contract. They do not advance the verified gate ceiling, which still moves
 only in milestone order.
+
+## Milestone 26 application extension
+
+[ADR-0092](../adr/0092-client-modes-and-email-experience.md) authorizes the
+[email experience](email-experience.md) as a new parallel milestone. Its typed
+application services and bounded normalized read/change/reply metadata extend
+Milestone 18's tool-only surface, preserving account-isolated MCP credentials,
+package import isolation, every existing approval floor and uncertainty rule.
+Foreground-request-driven refresh is not interval scheduling or background
+monitoring. Internal drafts do not mutate Gmail; sending remains approved by
+value. Primary mailbox identity can be verified through the existing read grant;
+no new OAuth scope is authorized for automatic alias discovery. Only explicitly
+verified existing aliases may be used. Milestone 18's gates and owner-smoke
+completion requirements remain independently binding.

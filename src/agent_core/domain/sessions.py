@@ -20,6 +20,10 @@ SESSION_RESERVED_METADATA_KEYS = frozenset(
         SESSION_BROWSER_PROFILE_METADATA_KEY,
         SESSION_SCHEDULE_ID_METADATA_KEY,
         SESSION_RUN_KIND_METADATA_KEY,
+        "email_operational",
+        "email_thread_id",
+        "email_account_id",
+        "email_account_servers",
     }
 )
 DEFAULT_PROJECT_SCOPE = "general"

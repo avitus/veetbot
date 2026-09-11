@@ -212,6 +212,102 @@ import UserNotifications
     }
 
     @Test
+    func testColdAndWarmEmailNotificationsRouteWithoutReplacingChatState() async throws {
+        let sessionID = UUID()
+        let threadID = UUID()
+        let runID = UUID()
+        let approvalID = UUID()
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            }
+            if request.url?.path == "/v1/sessions/\(sessionID)" {
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Email discussion","metadata":{"email_thread_id":"\(threadID)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":null}
+                    """)
+            }
+            Issue.record("Email notification unexpectedly replaced Chat: \(request.url?.path ?? "")")
+            return try response(for: request, statusCode: 500, body: "{}")
+        }
+        var routed: [(UUID, UUID?)] = []
+        model.emailNotificationHandler = { routed.append(($0, $1)) }
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "approval_requested", "title": "Approval needed",
+            "status": "WAITING_FOR_APPROVAL", "session_id": sessionID.uuidString,
+            "run_id": runID.uuidString, "approval_id": approvalID.uuidString,
+            "notification_id": UUID().uuidString,
+        ]]))
+        let delegate = NotificationApplicationDelegateBase(remoteRegistrationEnabled: false)
+        delegate.received(payload: payload)
+        delegate.attach(to: model)
+        #expect(routed.isEmpty)
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(routed.count == 1)
+        #expect(routed.first?.0 == threadID)
+        #expect(routed.first?.1 == approvalID)
+        model.composerText = "Keep the unfinished Chat message"
+        await model.openNotification(payload)
+        #expect(routed.count == 2)
+        #expect(model.composerText == "Keep the unfinished Chat message")
+        #expect(model.selectedSessionID == nil)
+        #expect(model.runState.activeRunID == nil)
+    }
+
+    @Test
+    func testModeSwitchPreservesLiveChatAndUsesSameConnectionForEmailHandoff() async throws {
+        let chatSessionID = UUID()
+        let discussionID = UUID()
+        let threadID = UUID()
+        let runID = UUID()
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let model = try configuredModel { request in
+            lock.withLock { requests.append(request) }
+            let path = request.url!.path
+            if path == "/v1/sessions" || path.hasSuffix("/messages") {
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            }
+            if path == "/v1/email/threads/\(threadID)" {
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(threadID)","account_id":"work","subject":"Shared discussion","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the agenda","reason":"A colleague","needs_reply":false,"draft_id":null,"session_id":"\(discussionID)","priority":0.9,"complete":true,"messages":[],"draft":null}
+                    """)
+            }
+            if path == "/v1/sessions/\(chatSessionID)" || path == "/v1/sessions/\(discussionID)" {
+                let id = path.hasSuffix(discussionID.uuidString) ? discussionID : chatSessionID
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(id)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Shared agent","metadata":{},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":null}
+                    """)
+            }
+            Issue.record("Unexpected mode request: \(path)")
+            return try response(for: request, statusCode: 500, body: "{}")
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "same-owner-token"))
+        await model.openSharedSession(chatSessionID)
+        model.composerText = "Keep my unfinished Chat message"
+        model.runState.begin(runID: runID, status: .running)
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        await coordinator.email.openThread(threadID)
+        coordinator.mode = .chat
+        #expect(coordinator.chat === model)
+        #expect(model.selectedSessionID == chatSessionID)
+        #expect(model.runState.activeRunID == runID)
+        #expect(model.runState.runStatus == .running)
+        #expect(model.composerText == "Keep my unfinished Chat message")
+        #expect(coordinator.email.selectedThreadID == threadID)
+        coordinator.mode = .email
+        await coordinator.discussSelectedThread()
+        #expect(coordinator.mode == .chat)
+        #expect(model.selectedSessionID == discussionID)
+        #expect(coordinator.email.selectedThreadID == threadID)
+        #expect(model.composerText == "Keep my unfinished Chat message")
+        let observed = lock.withLock { requests }
+        #expect(observed.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer same-owner-token" })
+        #expect(observed.allSatisfy { $0.url?.host == "veetbot.test" })
+        #expect(!observed.contains { $0.httpMethod == "POST" }, "mode handoff must not forge an owner message or create another agent")
+    }
+
+    @Test
     func testHistoryPaginationHasNoArbitraryPageCapAndRejectsLoops() throws {
         var seen: Set<String> = []
 

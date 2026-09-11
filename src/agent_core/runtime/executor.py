@@ -78,6 +78,7 @@ type TokenCompleteCallback = Callable[[UUID], None]
 type RunCompleteCallback = Callable[[UUID, int | None], Awaitable[None]]
 type ChildSuspensionCallback = Callable[[UUID, UUID], Awaitable[None]]
 type FinalizationWriteProbe = Callable[[str], None]
+type TaskRunner = Callable[[RunContext], Awaitable[RunOutcome | None]]
 logger = logging.getLogger(__name__)
 
 
@@ -296,6 +297,7 @@ class RunExecutor:
         on_model_event: ModelEventCallback | None = None,
         notification_producer: RunNotificationProducer | None = None,
         finalization_write_probe: FinalizationWriteProbe | None = None,
+        task_runner: TaskRunner | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
@@ -325,6 +327,7 @@ class RunExecutor:
         self._on_model_event = on_model_event
         self._notification_producer = notification_producer
         self._finalization_write_probe = finalization_write_probe
+        self._task_runner = task_runner
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
@@ -751,8 +754,12 @@ class RunExecutor:
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")
+            task_outcome: RunOutcome | None = None
             try:
-                await self._resume_pending_tools(context)
+                if self._task_runner is not None:
+                    task_outcome = await self._task_runner(context)
+                if task_outcome is None:
+                    await self._resume_pending_tools(context)
             except ApprovalRequiredError as exc:
                 if exc.approval_id not in context.checkpoint.pending_approval_ids:
                     context.checkpoint.pending_approval_ids.append(exc.approval_id)
@@ -817,7 +824,7 @@ class RunExecutor:
                     },
                 )
             else:
-                outcome = await run_loop(context)
+                outcome = task_outcome if task_outcome is not None else await run_loop(context)
         except RunCancelledError:
             outcome = RunOutcome(
                 kind=(
@@ -858,7 +865,8 @@ class RunExecutor:
         except WorkerFencedError:
             outcome = RunOutcome(kind=OutcomeKind.FENCED)
         except Exception as exc:
-            logger.exception(
+            # Validation errors can embed private model inputs in their traceback.
+            logger.error(
                 "run_execution_failed",
                 extra={"run_id": str(run.id), "error_class": type(exc).__name__},
             )

@@ -301,6 +301,7 @@ class SDKMCPClient:
                         name=tool.name,
                         description=tool.description or "",
                         input_schema=dict(tool.input_schema),
+                        application_only=(tool.meta or {}).get("veetbot/application-only") is True,
                     )
                     for tool in listed_tools.tools
                 ),

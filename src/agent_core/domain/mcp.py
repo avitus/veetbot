@@ -105,6 +105,7 @@ class MCPRemoteTool(BaseModel):
     name: str
     description: str = ""
     input_schema: dict[str, Any]
+    application_only: bool = False
 
 
 class MCPRemotePrompt(BaseModel):

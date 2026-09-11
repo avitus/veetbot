@@ -23,7 +23,6 @@ enum ConversationScrollTarget: Equatable {
 public struct ChatView: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
-    @State private var draft = ""
     @State private var artifactSelection: ArtifactSelection?
 
     public init(model: ChatViewModel) {
@@ -165,7 +164,7 @@ public struct ChatView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            ComposerTextEditor(text: $draft, onSubmit: submitDraft)
+            ComposerTextEditor(text: $model.composerText, onSubmit: submitDraft)
                 .frame(minHeight: 42, maxHeight: 120)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -187,7 +186,7 @@ public struct ChatView: View {
     }
 
     private var canSendDraft: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !model.isSending
             && (!state.isRunActive || state.runStatus == .waitingForUser)
     }
@@ -214,8 +213,8 @@ public struct ChatView: View {
 
     private func submitDraft() {
         guard canSendDraft else { return }
-        let message = draft
-        draft = ""
+        let message = model.composerText
+        model.composerText = ""
         Task {
             let sent = await model.send(message)
             if sent {
@@ -227,8 +226,8 @@ public struct ChatView: View {
                     for: nil
                 )
 #endif
-            } else if draft.isEmpty {
-                draft = message
+            } else if model.composerText.isEmpty {
+                model.composerText = message
             }
         }
     }

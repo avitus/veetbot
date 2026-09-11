@@ -64,6 +64,19 @@ test("terms page explains authorization, approvals, and service limits", async (
   assert.match(html, /href="\/privacy"/i);
 });
 
+test("email mode discloses historical learning and distinct retention windows", async () => {
+  const html = await htmlFor("/privacy");
+  assert.match(html, /Email mode.*while.*active/i);
+  assert.match(html, /received, archived, and Sent/i);
+  assert.match(html, /writing style.*memories.*Chat/i);
+  assert.match(html, /hosted.*model/i);
+  assert.match(html, /30 days after.*last access/i);
+  assert.match(html, /sent or discarded.*30 days/i);
+  assert.match(html, /operational.*until.*session.*source exclusion/i);
+  assert.match(html, /no more than 35 days/i);
+  assert.match(html, /pause.*learning.*reset/i);
+});
+
 test("finished site is a static DigitalOcean artifact with no Sites runtime", async () => {
   const [page, layout, packageJson, config] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

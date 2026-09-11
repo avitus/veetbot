@@ -4001,6 +4001,65 @@ Acceptance criteria:
 Native creation, update, pause, resume, cancellation, occurrence history, and
 run history remain outside this read-only extension.
 
+### Milestone 26: Client modes and adaptive email experience
+
+The owner approved the complete client modes and email proposal and explicitly
+requested a new milestone on 2026-09-11 (ADR-0092). Milestone 26 is an independent
+parallel workstream; the verified gate ceiling remains 12. The canonical
+[email-experience.md](email-experience.md) defines its thirty-two blocking gates,
+exact approved quality thresholds, source lifecycle and implementation contracts.
+
+Implement:
+
+- A shared Chat/Email mode shell on iPhone, iPad and Mac, preserving one owner,
+  agent, persona, memory, connection and ordinary run machinery and existing Chat
+  state. A mode changes presentation and task context, never authority.
+- Both existing Gmail accounts in a short high-precision priority view. Refresh
+  on entry and foreground return and every sixty seconds while visible. Only
+  fresh client requests admit bounded work; no unattended monitor is authorized.
+- Reliable account-qualified incremental synchronization and resumable historical
+  received and Sent analysis without a fixed age cutoff, with honest partial
+  coverage, checkpoints, provider failure recovery and no duplicate learning.
+- Shared explainable sender/content importance and contextual writing-style
+  profiles, explicit feedback precedence, undo/reset, supported relationship
+  evidence and protection against learning from the system's own unedited output.
+- Relevant automatic internal drafts for at most three reply-worthy threads,
+  versioned cross-device editing, correct reply headers and verified recipients,
+  exact-message approval for every external send, atomic local claims and no
+  retry of potentially dispatched non-idempotent messages.
+- Separately versioned and evaluated semantic correspondence formation with exact
+  source provenance, inferred authority, owner-correction precedence, historical
+  source-time lifecycle and shared contextual recall. Preserve existing extractor
+  policies, the old adapter's LOCAL contract and trusted persona affirmation.
+- Scoped application APIs, ordinary durable task execution and tool policy,
+  complete source erasure and retention. Gmail network and OAuth implementation
+  remains isolated in the existing first-party MCP package.
+- Atomic aggregate automatic-email reservations across all accounts, clients and
+  ingestion, ranking, style, drafting and formation stages: USD 20 per UTC day
+  and USD 200 per rolling thirty days. Lower applicable limits prevail; retries
+  count and no new slice renews an exhausted aggregate allowance.
+
+Acceptance criteria:
+
+- Every one of the thirty-two declared gates passes with real implementation
+  checks; no pending or private quality requirement is counted as complete.
+- All functional and approved quality requirements in the detailed design pass,
+  including frozen chronological importance holdouts, personalized style/reply
+  quality, semantic precision/recall, source erasure and adversarial isolation.
+- Local, PostgreSQL and all three Apple platform lanes pass, with recorded
+  performance/cost calibration and explicitly authorized real-mailbox acceptance
+  on both accounts. Hosted CI and CodeRabbit review pass on the final head;
+  separately authorized merge/delivery is verified at the merged revision.
+- Existing milestones and security requirements are preserved. Completing this
+  parallel workstream does not advance the sequential verified ceiling.
+
+Excluded: background monitoring, Gmail push/digests, automatic Gmail writes,
+Gmail draft synchronization, standing send grants, another provider, public OAuth,
+attachments, calendar, permanent mailbox deletion, terminal UI work, autonomous
+sending, offline-authoritative edits, model routing and a general learned memory
+policy. PR creation, deployment and live sends retain explicit authorization
+boundaries; implementation approval is not authorization for those actions.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

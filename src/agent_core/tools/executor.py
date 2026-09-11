@@ -1201,7 +1201,8 @@ class ToolPipeline:
             raise
         # Tool implementation failures are deliberately normalized at this boundary.
         except Exception as exc:
-            logger.exception(
+            # Exception text may contain private upstream bodies or credentials.
+            logger.error(
                 "tool_execution_failed",
                 extra={
                     "tool_name": tool.spec.name,

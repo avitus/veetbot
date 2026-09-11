@@ -476,11 +476,17 @@ class PublicSessionService:
         effective_limit = min(max(limit, 1), 200)
         decoded = _decode_session_cursor(cursor)
         async with self._uow_factory() as uow:
-            rows = await uow.sessions.list(
-                principal,
-                limit=effective_limit + 1,
-                cursor=decoded,
-            )
+            rows: list[Session] = []
+            while len(rows) <= effective_limit:
+                scanned = await uow.sessions.list(
+                    principal,
+                    limit=effective_limit + 1,
+                    cursor=decoded,
+                )
+                rows.extend(row for row in scanned if not row.metadata.get("email_operational"))
+                if len(scanned) < effective_limit + 1:
+                    break
+                decoded = SessionCursor(updated_at=scanned[-1].updated_at, id=scanned[-1].id)
             latest_runs = await uow.runs.latest_for_sessions(
                 [row.id for row in rows[:effective_limit]], principal
             )

@@ -351,6 +351,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `skill` `memory` `schedule` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `web` | builtin, external data | build time |
+| `email` | builtin, cached Email experience | build time, Email mode flag |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 
@@ -2030,3 +2031,23 @@ evidence that the surface is the same one.
    is a model that knows it is about to do something long and would rather
    compact deliberately than be compacted mid-step. It would be a fifth
    control tool and a `ToolSpec`, not a redesign, if it is ever wanted.
+
+## Milestone 26 application-only MCP capabilities
+
+The approved [email experience](email-experience.md) adds bounded application
+read capabilities that deterministic ingestion invokes through the same registry
+and policy pipeline. A registered ToolSpec has `model_visible`, default true.
+Only MCP metadata `veetbot/application-only: true` changes its presentation to
+false; this removes the capability from model advertisement, grants no authority,
+and never permits an otherwise denied call. Other tools retain their existing
+visibility. Credential, effect, risk, scope, validation and auditing rules apply
+unchanged. The first-party Gmail sync roster preserves this metadata through SDK
+discovery and mapping; native clients still invoke only application APIs.
+
+
+Milestone 26 also reserves the builtin `email` domain for `email.context` and
+`email.feedback`. Their cached-data and current-owner-feedback-only contracts
+are classified in [builtin-tools.md](builtin-tools.md). Registration is
+conditional on `AGENT_EMAIL_MODE_ENABLED`; neither tool invokes Gmail, admits
+a model task, nor bypasses the normal approval path. Feedback remains a scoped,
+replay-safe write to the same owner ledger used by the Email APIs.

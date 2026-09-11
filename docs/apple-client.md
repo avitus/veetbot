@@ -26,9 +26,12 @@ execute; it fails instead of accepting the Command Line Tools behavior that can
 compile the bundle without running it. `make test-apple-ui` also requires full
 Xcode. It uses a debug-only hook to resize the real macOS SwiftUI window,
 terminates the app, and verifies the relaunched window has the same size. It
+also exercises the Mac Email mode and exact draft approval journey. It
 then selects available iPhone and iPad simulators and launches a debug-only,
 in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
+Email journeys cover mode switching, feedback, editing, learning controls and
+compact-trait navigation on both simulator families.
 Both targets run in the required CircleCI Apple job.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
@@ -260,3 +263,59 @@ specializations when the event payload contains them and otherwise falls back
 to the public content/trust view. The server additions for authoritative history
 and deletion are limited to the session list and delete routes described by
 ADR-0050; no richer tool-detail route was added.
+
+## Milestone 26 client modes
+
+The approved [email experience](plan/email-experience.md) adds Chat and Email
+presentation modules on iPhone, iPad and Mac, sharing the existing connection,
+identity, agent, persona and memory. The mode shell preserves Chat streaming,
+composer and navigation while email uses scoped server-owned projections and
+versioned drafts. Foreground-only refresh, adaptive layouts, exact-send approval
+and all existing transport-only client boundaries remain mandatory. Milestone
+26's new native evidence is required independently of existing Apple gates.
+
+`AppCoordinator` retains the Chat and Email view models and the mode shell keeps
+both navigation trees mounted. Email uses the Chat connection's authenticated
+transport. Its compact navigation opens a thread from the inbox; regular iPad
+and Mac layouts show the list beside thread detail. The initial inbox requests
+five important threads, with account filtering, search, Other mail, pagination,
+per-account freshness and historical coverage. Background updates preserve row
+order and announce newly qualifying mail. Opening Email or returning it to the
+foreground starts refresh; the client admits a new refresh every sixty seconds
+while Email remains visible, and stops admission when hidden or backgrounded.
+
+Thread detail renders text and attachment metadata without remote content.
+Feedback distinguishes people, topics, thread importance and reply need, reports
+the applied scope and judgment, and supports Undo. Learning controls expose
+pause/resume, scoped resets and explicit source exclusion. Draft edits autosave
+with optimistic revisions; conflicts preserve local and server versions, and
+draft history can restore earlier text into the editor. The Writing style menu
+can explicitly endorse the displayed wording as an example after saving any
+edits; a save conflict prevents endorsement. The action binds the current draft
+revision and preserves the learning pause state. The learning pane discloses
+historical/Sent analysis, shared memories and style, and hosted-model processing.
+Coverage counts describe threads retrieved, not completed semantic analysis.
+Review & Send verifies
+the approval's exact tool/account, provider thread, recipients, subject and body
+against the frozen draft before presenting the existing approve-once action.
+The client never invokes Gmail or substitutes a retry send after uncertainty.
+
+Mail and unsaved edits stay in process memory; there is no durable offline mail
+cache or authoritative offline write queue. A connection change, forgotten
+credentials, reauthentication failure or denied email read scope clears Email
+state. Unsupported servers show the Email capability as unavailable while Chat
+remains usable. `EmailViewModelTests` covers conflict preservation, exact approval
+matching, refresh admission, account isolation, cursor and expanded-list
+handling, feedback scope and late-response isolation; native UI journeys cover
+mode switching, keyboard editing, learning controls and explicit send review.
+
+Run `uv run pytest tests/native/test_email_m26.py -q` for the three executable
+native Email gate checks. This integration-marked bridge invokes real Swift
+tests and focused XCTest journeys on Mac, iPhone and iPad, then verifies the
+fresh xcresult pass counts with no skipped or expected failures. The iPad lane
+also exercises compact navigation through a DEBUG-only launch-time size-class
+override; ordinary launches retain the system's size class. Shared-state and
+foreground checks also execute the backend's shared-profile/context and bounded
+refresh-admission regressions. These checks need full Xcode and both simulator
+families, but no database or live mailbox. An unavailable Apple lane is skipped
+by pytest and remains an unpassed active gate in the gate report.

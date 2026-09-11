@@ -58,6 +58,13 @@ title: Current Milestone
   tenth parallel workstream whose implementation begins when Milestone
   14's ports exist; its receipt-key generalization of the surface seam is
   named in ADR-0082.
+- **Milestone 26 — Client modes and adaptive email experience:** authorized on
+  2026-09-11 as a new independent parallel workstream under ADR-0092;
+  [email-experience.md](email-experience.md) contains the approved complete
+  design and thirty-two gates. Twenty-seven backend and native acceptance checks
+  are bound; four private quality gates and integrated release evidence remain
+  pending, and the milestone remains in progress. Aggregate automatic
+  email budgets are USD 20/day and USD 200/rolling thirty days.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -344,6 +351,8 @@ ADR-0090's attributed-communication amendment to source grounding.
 Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
 plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 
+- [Milestone 26 — Client modes and adaptive email experience](engineering-plan.md#milestone-26-client-modes-and-adaptive-email-experience)
+
 ## Completion rule
 
 Milestone 10 completed after all thirty-eight Milestone 10 gates and all 204
@@ -419,3 +428,8 @@ the persona editor is half of what the milestone delivers, all relevant
 local, PostgreSQL, and hosted lanes pass on the final head, and the final
 CodeRabbit review is clean. Because it is a parallel workstream, completion
 does not advance the verified gate ceiling past the sequential milestones.
+
+Milestone 26 completes only when all thirty-two gates and approved quality
+requirements, relevant local/PostgreSQL/native lanes, authorized owner mailbox
+smoke, final-head hosted review and production delivery evidence pass. Until then
+its status remains in progress; the verified sequential ceiling stays at 12.

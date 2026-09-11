@@ -77,6 +77,11 @@ public protocol PushRegistrationRequesting: AnyObject {
 
 @MainActor
 public final class ChatViewModel: ObservableObject {
+    @Published public var composerText = ""
+    @Published public private(set) var connectionGeneration = UUID()
+    @Published public private(set) var isReconfiguring = false
+    public var currentAPIClient: VeetbotAPIClient? { api }
+    public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
     @Published public private(set) var baseURL: URL?
@@ -199,6 +204,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        isConfigured = false
+        connectionGeneration = UUID()
+        composerText = ""
         await abandonWebsiteAuthenticationCeremony()
         var revokeError: Error?
         if let api {
@@ -273,6 +281,16 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
+            if let emailNotificationHandler {
+                let session = try await api.getSession(link.sessionID)
+                if let value = session.metadata["email_thread_id"]?.stringValue,
+                    let threadID = UUID(uuidString: value) {
+                    let approvalID: UUID?
+                    if case .approval(let id) = link.focus { approvalID = id } else { approvalID = nil }
+                    await emailNotificationHandler(threadID, approvalID)
+                    return
+                }
+            }
             let entry: SessionHistoryEntry
             if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
@@ -401,6 +419,17 @@ public final class ChatViewModel: ObservableObject {
 
     public func newSession() {
         resetSelectedSession()
+    }
+
+    public func reportConnectionError(_ error: Error) { present(error) }
+
+    public func openSharedSession(_ id: UUID) async {
+        guard let api else { return }
+        do {
+            let session = try await api.getSession(id)
+            try await store(session: session, lastRunID: session.activeRunID ?? session.lastRunID)
+            if let entry = history.first(where: { $0.sessionID == id }) { await selectSession(entry) }
+        } catch { present(error) }
     }
 
     private func resetSelectedSession() {
@@ -1135,6 +1164,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func install(_ configuration: ConnectionConfiguration) async throws {
+        isReconfiguring = true
+        defer { isReconfiguring = false }
+        connectionGeneration = UUID()
         await artifactCache.removeAll()
         pendingSubmission = nil
         let transport = HTTPTransport(

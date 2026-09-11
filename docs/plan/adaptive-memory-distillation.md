@@ -926,3 +926,13 @@ principal consolidation, session-history retrieval arm, artifact retrieval
 arm, or external memory service. It does not add a new public write API. Those
 remain separate roadmap choices. The milestone is a higher-recall formation
 and honest-forgetting change over the existing governed memory system.
+
+## Milestone 26 semantic email policy
+
+The approved [email experience](email-experience.md) under ADR-0092 adds a
+separately versioned and evaluated correspondence extractor. Its contextual
+cross-project recall, exact semantic source grounding and historical lifecycle
+are an explicit extension, not an in-place change to formation@9, formation@10
+or communication-attribution-v1. Existing policy evidence, precedence, authority
+and gates remain binding; new-policy activation waits for its own quality and
+source-lifecycle evidence. Old LOCAL excerpt memories retain that portability.

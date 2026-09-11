@@ -842,3 +842,13 @@ None outstanding for the read path. The snapshot budget is now a default with a
 measured tuning loop (see [Sizing the snapshot](#sizing-the-snapshot)) rather than an
 open decision. The temporal entity graph, which supplies the later graph-expansion arm,
 is not yet specified.
+
+## Milestone 26 shared email recall
+
+The separately evaluated semantic email policy authorized by ADR-0092 may emit
+CONTEXTUAL memories for relevant recall across the same owner's accounts and
+Chat, as specified in [email-experience.md](email-experience.md). The existing
+LOCAL communication adapter remains LOCAL. This changes a relevance ceiling,
+not tenant, principal, sensitivity or action authority. Expired dated email
+facts are excluded from current snapshots and available only through deliberate
+historical/as-of recall; rereading or import never refreshes their evidence age.

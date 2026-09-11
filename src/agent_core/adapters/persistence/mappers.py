@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Literal, cast
 
 from pydantic import SecretStr
@@ -16,6 +17,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     DeviceRegistrationIdempotencyRow,
     DeviceRow,
     DeviceTriageSessionRow,
+    EmailRecordRow,
     EventRow,
     IdempotencyKeyRow,
     ModelCallRow,
@@ -46,6 +48,7 @@ from agent_core.domain.devices import (
     PushEnvironment,
     PushProvider,
 )
+from agent_core.domain.email import EmailRecord
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import (
     CostSource,
@@ -893,4 +896,30 @@ def device_triage_mapping_values(mapping: DeviceTriageMapping) -> dict[str, Any]
         "tenant_id": mapping.tenant_id,
         "channel": mapping.channel,
         "session_id": mapping.session_id,
+    }
+
+
+def email_record_to_domain(row: EmailRecordRow) -> EmailRecord:
+    return EmailRecord(
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        kind=row.kind,
+        key=row.key,
+        revision=row.revision,
+        payload=deepcopy(row.payload),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def email_record_values(record: EmailRecord) -> dict[str, Any]:
+    return {
+        "tenant_id": record.tenant_id,
+        "principal_id": record.principal_id,
+        "kind": record.kind,
+        "key": record.key,
+        "revision": record.revision,
+        "payload": deepcopy(record.payload),
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
     }

@@ -21,7 +21,8 @@ from gmail_mcp.constants import (
     OUTPUT_MAXIMUM_BYTES,
     UPSTREAM_MAXIMUM_BYTES,
 )
-from gmail_mcp.errors import GmailError
+from gmail_mcp.errors import GmailError, GmailResourceNotFoundError
+from gmail_mcp.sync import GmailSync
 
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"[ \t\r\f\v]+")
@@ -228,6 +229,8 @@ class GmailClient:
             raise GmailError("gmail.outcome_unknown" if mutating else "gmail.rate_limited")
         if status >= 500:
             raise GmailError("gmail.outcome_unknown" if mutating else "gmail.provider_unavailable")
+        if status == 404 and not mutating:
+            raise GmailResourceNotFoundError()
         if 300 <= status < 400 or status >= 400:
             raise GmailError("gmail.provider_rejected")
         try:
@@ -482,6 +485,39 @@ class GmailClient:
             ]
         }
 
+    async def get_profile(self) -> dict[str, Any]:
+        return await GmailSync(self).get_profile()
+
+    async def sync_changes(
+        self,
+        start_history_id: str,
+        max_results: int = 100,
+        page_token: str | None = None,
+    ) -> dict[str, Any]:
+        return await GmailSync(self).sync_changes(start_history_id, max_results, page_token)
+
+    async def get_thread_page(
+        self,
+        thread_id: str,
+        max_messages: int = 10,
+        page_token: str | None = None,
+    ) -> dict[str, Any]:
+        return await GmailSync(self).get_thread_page(thread_id, max_messages, page_token)
+
+    async def get_message_body(
+        self,
+        message_id: str,
+        offset: int = 0,
+        max_bytes: int = 65536,
+        expected_history_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await GmailSync(self).get_message_body(
+            message_id,
+            offset,
+            max_bytes,
+            expected_history_id,
+        )
+
     @classmethod
     def _raw_message(
         cls,
@@ -491,6 +527,8 @@ class GmailClient:
         body: str,
         cc: str | None,
         bcc: str | None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
     ) -> str:
         message = EmailMessage()
         message["To"] = cls._required_header(to, "to", maximum=8192)
@@ -500,6 +538,23 @@ class GmailClient:
             message["Cc"] = cls._required_header(cc, "cc", maximum=8192)
         if bcc is not None:
             message["Bcc"] = cls._required_header(bcc, "bcc", maximum=8192)
+        if in_reply_to is not None:
+            in_reply_to = cls._required_header(in_reply_to, "in_reply_to", maximum=998)
+            if re.fullmatch(r"<[^<>\s@]+@[^<>\s@]+>", in_reply_to) is None:
+                raise GmailError("gmail.arguments_invalid")
+            message["In-Reply-To"] = cls._required_header(
+                in_reply_to,
+                "in_reply_to",
+                maximum=998,
+            )
+        if references is not None:
+            references = cls._required_header(references, "references", maximum=8192)
+            if (
+                re.fullmatch(r"<[^<>\s@]+@[^<>\s@]+>(?:[ \t]+<[^<>\s@]+@[^<>\s@]+>)*", references)
+                is None
+            ):
+                raise GmailError("gmail.arguments_invalid")
+            message["References"] = cls._required_header(references, "references", maximum=8192)
         message.set_content(body)
         return base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
 
@@ -511,9 +566,19 @@ class GmailClient:
         cc: str | None = None,
         bcc: str | None = None,
         thread_id: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
     ) -> dict[str, Any]:
         message: dict[str, object] = {
-            "raw": self._raw_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+            "raw": self._raw_message(
+                to=to,
+                subject=subject,
+                body=body,
+                cc=cc,
+                bcc=bcc,
+                in_reply_to=in_reply_to,
+                references=references,
+            )
         }
         if thread_id is not None:
             message["threadId"] = self._required_text(thread_id, "thread_id", maximum=1024)
@@ -590,9 +655,19 @@ class GmailClient:
         cc: str | None = None,
         bcc: str | None = None,
         thread_id: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
     ) -> dict[str, Any]:
         request: dict[str, object] = {
-            "raw": self._raw_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+            "raw": self._raw_message(
+                to=to,
+                subject=subject,
+                body=body,
+                cc=cc,
+                bcc=bcc,
+                in_reply_to=in_reply_to,
+                references=references,
+            )
         }
         if thread_id is not None:
             request["threadId"] = self._required_text(thread_id, "thread_id", maximum=1024)

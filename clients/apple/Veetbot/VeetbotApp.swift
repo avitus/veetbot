@@ -14,7 +14,7 @@ struct VeetbotApp: App {
     #endif
 
     init() {
-        #if DEBUG && os(iOS)
+        #if DEBUG
         _model = StateObject(
             wrappedValue: ConversationNavigationUITestFixture.makeModelIfRequested()
                 ?? ChatViewModel()
