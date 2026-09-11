@@ -832,9 +832,11 @@ public final class ChatViewModel: ObservableObject {
         loginURL: String
     ) async -> URL? {
         guard let api else { return nil }
-        let normalizedOrigin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedOrigins = origin.components(separatedBy: CharacterSet(charactersIn: ",\n\r"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         let normalizedLoginURL = loginURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedOrigin.isEmpty, !normalizedLoginURL.isEmpty else {
+        guard !normalizedOrigins.isEmpty, !normalizedLoginURL.isEmpty else {
             errorMessage = "Enter both the website origin and its login page."
             return nil
         }
@@ -843,7 +845,7 @@ public final class ChatViewModel: ObservableObject {
         var createdProfileID: UUID?
         do {
             let profile = try await api.createBrowserProfile(
-                allowedOrigins: [normalizedOrigin]
+                allowedOrigins: normalizedOrigins
             )
             createdProfileID = profile.id
             let ceremony = try await api.beginBrowserAuthentication(

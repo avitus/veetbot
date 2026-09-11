@@ -953,6 +953,48 @@ import Testing
         #expect(await configurationStore.loadBrowserProfileID() == nil)
     }
 
+    @Test(arguments: [", ", "\n"])
+    func testWebsiteAccessSendsEveryExplicitlyAllowedOrigin(separator: String) async throws {
+        let profileID = UUID()
+        let authenticationID = UUID()
+        let origins = ["https://www.example.org", "https://static.example.org"]
+        let profile = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://www.example.org","https://static.example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}"#
+        let lock = NSLock()
+        var submittedOrigins: [String]?
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"), ("GET", "/v1/browser-profiles"):
+                return try response(
+                    for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-profiles"):
+                let body = try requestJSONObject(request)
+                lock.withLock { submittedOrigins = body["allowed_origins"] as? [String] }
+                return try response(for: request, statusCode: 201, body: profile)
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                let body = try requestJSONObject(request)
+                #expect(body["login_url"] as? String == "https://www.example.org/login")
+                return try response(
+                    for: request,
+                    statusCode: 201,
+                    body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque"}"#
+                )
+            default:
+                Issue.record("unexpected website setup request")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let launchURL = await model.createWebsiteAccess(
+            origin: "  " + origins.joined(separator: separator) + "  ",
+            loginURL: "  https://www.example.org/login  "
+        )
+
+        #expect(launchURL != nil)
+        #expect(lock.withLock { submittedOrigins } == origins)
+        #expect(model.errorMessage == nil)
+    }
+
     @Test
     func testFailedWebsiteAuthenticationLaunchCancelsAndDeletesUnusedProfile() async throws {
         let profileID = try #require(

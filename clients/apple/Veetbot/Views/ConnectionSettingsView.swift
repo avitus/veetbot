@@ -180,10 +180,11 @@ public struct ConnectionSettingsView: View {
                 if model.isConfigured {
                     VStack(alignment: .leading, spacing: 16) {
                         settingsField(
-                            title: "Website origin",
-                            help: "Use one exact HTTPS origin, such as https://example.com."
+                            title: "Allowed website origins",
+                            help:
+                                "Include the login page’s exact HTTPS origin, including www. If the site needs other domains for images, scripts, or sign-in, explicitly list their HTTPS origins too, separated by commas or new lines. Only listed origins are allowed."
                         ) {
-                            TextField("https://example.com", text: $websiteOrigin)
+                            TextField("https://www.example.com, https://static.example.com", text: $websiteOrigin)
                                 .textFieldStyle(.roundedBorder)
                                 .accessibilityIdentifier("website-access.origin")
                                 #if os(iOS)

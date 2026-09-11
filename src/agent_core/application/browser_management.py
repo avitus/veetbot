@@ -13,6 +13,7 @@ from typing import Protocol, Self
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.errors import BrowserLoginURLValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
@@ -26,6 +27,7 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     BrowserProfileView,
     BrowserProviderError,
+    browser_origin,
     normalize_browser_origin,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
@@ -303,6 +305,17 @@ class BrowserProfileManagementService:
                     or profile.provider_ref is None
                 ):
                     raise ConflictError("browser profile cannot authenticate in its current state")
+                try:
+                    login_origin = browser_origin(login_url)
+                except ValueError as exc:
+                    raise BrowserLoginURLValidationError(
+                        "Enter a public HTTPS login page URL."
+                    ) from exc
+                if login_origin not in profile.allowed_origins:
+                    raise BrowserLoginURLValidationError(
+                        "The login page must use one of the profile's exact website origins, "
+                        "including www. Check the Website origin and Login page fields."
+                    )
                 existing = await uow.browser_authentications.list(
                     principal,
                     profile_id=profile_id,

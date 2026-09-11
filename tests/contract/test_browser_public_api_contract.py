@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import builtins
+import json
 from datetime import timedelta
 from types import MappingProxyType, SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import httpx
+import pytest
 
+from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
+from agent_core.adapters.browser.profiles import InMemoryBrowserProfileControlPlane
+from agent_core.adapters.credentials import MappingCredentialResolver
+from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.api import create_app
+from agent_core.application.browser_management import (
+    BrowserProfileManagementService,
+    BrowserUnitOfWorkFactory,
+)
 from agent_core.application.errors import SessionMetadataValidationError
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
@@ -24,7 +34,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.sessions import SessionStatus
 from agent_core.domain.views import Page, SessionView
-from tests.contract.support import NOW, principal
+from tests.contract.support import NOW, memory_uow_factory, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000d7")
 AUTHENTICATION_ID = UUID("00000000-0000-0000-0000-0000000000d8")
@@ -405,6 +415,104 @@ async def test_browser_write_requests_reject_malformed_origins_and_grant_windows
 
     assert malformed_origin.status_code == 400
     assert inverted_window.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("login_url", "request_owner", "expected_status", "expected_code"),
+    [
+        ("https://www.duolingo.com/?isLoggingIn=true", "owner", 400, "malformed_request"),
+        ("https://duolingo.com.other.example/login", "owner", 400, "malformed_request"),
+        ("Duolingo.com", "owner", 400, "malformed_request"),
+        ("http://duolingo.com/login", "owner", 400, "malformed_request"),
+        ("https://user:" + "private-value@duolingo.com/login", "owner", 400, "malformed_request"),
+        ("https://127.0.0.1/login", "owner", 400, "malformed_request"),
+        ("https://www.duolingo.com/login", "other_principal", 404, "not_found"),
+        ("https://www.duolingo.com/login", "other_tenant", 404, "not_found"),
+        ("https://www.duolingo.com/login", "without_scope", 403, "authorization_error"),
+    ],
+)
+async def test_browser_login_validation_precedes_provider_dispatch_and_allows_retry(
+    login_url: str,
+    request_owner: str,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    clock, uow_factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
+    requesting = owner
+    if request_owner == "other_principal":
+        requesting = owner.model_copy(update={"principal_id": "another-principal"})
+    elif request_owner == "other_tenant":
+        requesting = owner.model_copy(update={"tenant_id": "another-tenant"})
+    elif request_owner == "without_scope":
+        requesting = owner.model_copy(update={"scopes": {"browser.profile.read"}})
+    provider_requests: list[httpx.Request] = []
+
+    def provider_response(request: httpx.Request) -> httpx.Response:
+        provider_requests.append(request)
+        if json.loads(request.content)["login_url"] != "https://duolingo.com/?isLoggingIn=true":
+            # The isolated provider already rejects the reported www mismatch.
+            return httpx.Response(409, json={"error": {"code": "tool.browser.url_disallowed"}})
+        return httpx.Response(
+            201,
+            json={
+                "id": str(AUTHENTICATION_ID),
+                "profile_id": str(PROFILE_ID),
+                "status": "authentication_required",
+                "expires_at": (NOW + timedelta(minutes=5)).isoformat(),
+                "launch_url": "https://login.example.test/authentication#capability=one-time",
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(provider_response)) as provider:
+        profiles = BrowserProfileManagementService(
+            uow_factory=cast(BrowserUnitOfWorkFactory, uow_factory),
+            lifecycle=InMemoryBrowserProfileControlPlane(),
+            authentications=HostedBrowserSessionControlPlane(
+                base_url="https://login.example.test",
+                credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+                client=provider,
+            ),
+            clock=clock,
+            ids=SequenceIdFactory([PROFILE_ID]),
+        )
+        created = await profiles.create(owner, ("https://Duolingo.com/",))
+        services = SimpleNamespace(browser_profiles=profiles)
+        app = create_app(services, settings(), requesting, lambda: str(PROFILE_ID), _ready)
+        path = f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies"
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://127.0.0.1",
+        ) as client:
+            rejected = await client.post(path, json={"login_url": login_url})
+
+        assert rejected.status_code == expected_status
+        error = rejected.json()["error"]
+        assert error["code"] == expected_code
+        assert error["details"] == {}
+        assert error["request_id"] == str(PROFILE_ID)
+        assert login_url not in rejected.text
+        assert "private-value" not in rejected.text
+        if expected_status == 400:
+            assert "HTTPS" in error["message"] or "exact website origins" in error["message"]
+        assert provider_requests == []
+        async with uow_factory() as uow:
+            unchanged = await uow.browser_profiles.get(PROFILE_ID, owner)
+            assert unchanged.generation == created.generation
+            assert unchanged.status == created.status
+            assert await uow.browser_authentications.list(owner, profile_id=PROFILE_ID) == []
+
+        app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://127.0.0.1",
+        ) as client:
+            retried = await client.post(
+                path, json={"login_url": "https://duolingo.com/?isLoggingIn=true"}
+            )
+        assert retried.status_code == 201
+        assert retried.json()["launch_url"] is not None
+        assert len(provider_requests) == 1
 
 
 async def test_browser_write_routes_reject_principals_without_exact_scopes() -> None:

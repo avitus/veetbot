@@ -45,7 +45,12 @@ On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
 
-Website Access creates and lists dedicated browser profiles. The app opens the
+Website Access creates and lists dedicated browser profiles. The Allowed website
+origins field accepts exact HTTPS origins as a comma- or newline-separated list.
+Include the login hostname with `www` when present and explicitly include any
+supporting origins the site needs for scripts, styles, images, or sign-in.
+Unlisted origins remain blocked, which can leave a site blank when its required
+scripts are served elsewhere. The app opens the
 server-provided isolated login ceremony only after a separate Continue in web
 browser action, where the user enters website
 credentials directly; usernames, passwords, passkeys, MFA values, cookies, and
