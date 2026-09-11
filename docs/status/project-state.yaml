@@ -654,7 +654,31 @@ milestones:
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
         Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
+      - >-
+        Complete the owner-requested Astra/Fable model migration without
+        disabling evaluated provider-assisted memory: the Astra formation@9
+        and formation@10 evaluations of 2026-09-11 did not pass.
     evidence:
+      - check: Astra model migration and memory evaluation (2026-09-11)
+        outcome: memory_activation_blocked
+        detail: >-
+          Build 06af8fe configures gpt-6-astra for balanced and
+          claude-fable-5-1 for flagship. Both passed a live calculator tool
+          round trip using the existing provider credentials. The three-repeat
+          formation@9 comparison ran the unchanged 78-case development corpus
+          and 51-case frozen holdout under distillation-scorer@7; independent
+          evaluation arms ran with concurrency six while scoring and
+          publication used the canonical evaluator. Its 1,134 distillation
+          calls cost USD 10.479343. Development direct recall was 0.981,
+          hypothesis recall 0.722, and precision 0.855; holdout direct recall
+          was 0.900, hypothesis recall 0.867, and precision 0.706. Development
+          hypothesis recall and precision, the rich conversation core, and
+          holdout direct recall and precision failed their existing gates.
+          Both sets had zero boundary failures and disposition precision 1.0.
+          The separate twenty-five-case formation@10 evaluation failed its
+          zero-fabrication gate with three provider candidates classified as
+          fabricated by its scorer. Neither evaluator published an Astra
+          activation artifact. Production configuration was not changed.
       - check: attributed communication-source formation
         outcome: passed_locally
         detail: >-

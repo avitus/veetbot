@@ -14,6 +14,8 @@ title: Changelog
   window. No provider adapter or reasoning settings change.
 - Memory activation remains subject to evidence for the exact model and
   policy. Existing GPT-5.6 Sol evidence cannot activate either new model.
+  The initial Astra distillation and fallback-extractor evaluations failed
+  their existing gates, so the production switch remains pending.
 
 ## 2026-09-10 — Current schedules and recent terminal history
 

@@ -157,6 +157,7 @@ at `0e3ca2f` passed and its `formation@9` artifact is bundled. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 - [ ] Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
+- [ ] Complete the owner-requested Astra/Fable model migration without disabling evaluated provider-assisted memory: the Astra formation@9 and formation@10 evaluations of 2026-09-11 did not pass.
 
 ### Milestone 22 — Persona surface and curated belief promotion
 
