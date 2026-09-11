@@ -11,7 +11,7 @@ import pytest
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.application.notification_producer import NotificationProducer
 from agent_core.domain.notifications import NotificationKind, NotificationStatus
-from agent_core.domain.runs import RunLimits, RunStatus
+from agent_core.domain.runs import OutcomeKind, RunCheckpoint, RunLimits, RunOutcome, RunStatus
 from agent_core.domain.schedules import (
     OccurrenceDisposition,
     OnceCadence,
@@ -20,6 +20,8 @@ from agent_core.domain.schedules import (
     ScheduleRevision,
     ScheduleState,
 )
+from agent_core.runtime.cancellation import RunCancellationToken
+from agent_core.runtime.executor import _FinalizationContext, _finalize_once
 from tests.contract.support import (
     AGENT_ID,
     NOW,
@@ -29,9 +31,59 @@ from tests.contract.support import (
     principal,
     run,
 )
+from tests.contract.test_approval_repository_contract import request as approval_request
 
 SCHEDULE_ID = UUID(int=401)
 OCCURRENCE_ID = UUID(int=402)
+
+
+async def test_approval_transition_copies_only_the_stored_tool_name_into_the_notification() -> None:
+    clock, factory = await memory_uow_factory()
+    ids = SequenceIdFactory()
+    running = run(status=RunStatus.RUNNING)
+    approval = approval_request().model_copy(
+        update={
+            "tool_name": "email.send",
+            "action_summary": "Sensitive approval summary",
+            "arguments": {"body": "Sensitive message body"},
+        }
+    )
+    async with factory() as uow:
+        await uow.runs.create(running)
+        await uow.approvals.create(approval)
+    context = _FinalizationContext(
+        run=running,
+        checkpoint=RunCheckpoint(
+            run_id=running.id,
+            version=0,
+            status=RunStatus.RUNNING,
+            created_at=NOW,
+            pending_approval_ids=[approval.id],
+        ),
+        uow_factory=factory,
+        lease=None,
+        clock=clock,
+        ids=ids,
+        token=RunCancellationToken(clock, None),
+        principal=principal(),
+        notification_producer=NotificationProducer(clock=clock, ids=ids),
+        finalization_write_probe=None,
+    )
+
+    await _finalize_once(
+        context,
+        RunOutcome(
+            kind=OutcomeKind.SUSPENDED,
+            suspension={"kind": "approval", "approval_id": str(approval.id)},
+        ),
+    )
+
+    async with factory() as uow:
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+    assert notification.payload.tool_name == "email.send"
+    assert "Sensitive" not in notification.payload.model_dump_json()
+    assert notification.approval_id == approval.id
+    assert notification.expires_at == approval.expires_at
 
 
 def _schedule() -> Schedule:

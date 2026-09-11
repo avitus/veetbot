@@ -7,6 +7,7 @@ import json
 import os
 from datetime import timedelta
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 import pytest
@@ -17,7 +18,12 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.determinism import FixedClock
 from agent_core.domain.devices import PushEnvironment
-from agent_core.domain.notifications import DeliveryOutcome
+from agent_core.domain.notifications import (
+    NOTIFICATION_TITLES,
+    DeliveryOutcome,
+    NotificationKind,
+    NotificationPayload,
+)
 from tests.contract.support import NOW
 from tests.contract.test_push_transport_contract import push_message, push_target
 
@@ -92,7 +98,12 @@ async def test_apns_signs_addresses_and_refreshes_provider_token(
     assert message.expires_at is not None
     assert first_headers["apns-expiration"] == str(int(message.expires_at.timestamp()))
     assert json.loads(requests[0].content) == {
-        "aps": {"alert": {"title": "Test notification"}},
+        "aps": {
+            "alert": {
+                "title": "Test notification",
+                "body": "Notifications are working on this device.",
+            }
+        },
         "veetbot": message.payload.model_dump(mode="json", exclude_none=True),
     }
 
@@ -117,6 +128,171 @@ async def test_apns_signs_addresses_and_refreshes_provider_token(
     assert "fake-device-token" not in repr(transport)
     assert key_path.read_text(encoding="ascii") not in repr(transport)
     await transport.aclose()
+
+
+@pytest.mark.parametrize(
+    ("kind", "details", "title", "body"),
+    [
+        (
+            "approval_requested",
+            {"status": "WAITING_FOR_APPROVAL", "tool_name": "email.send"},
+            "Approval needed",
+            "Review email.send to let this run continue.",
+        ),
+        (
+            "approval_requested",
+            {"status": "WAITING_FOR_APPROVAL"},
+            "Approval needed",
+            "This run is paused. Open Veetbot to review the requested action.",
+        ),
+        (
+            "question_asked",
+            {"status": "WAITING_FOR_USER"},
+            "The agent has a question",
+            "This run is waiting for your answer. Open Veetbot to respond.",
+        ),
+        (
+            "run_failed",
+            {"status": "FAILED"},
+            "Run failed",
+            "This run stopped before finishing. Open Veetbot to see the error.",
+        ),
+        (
+            "schedule_run_finished",
+            {"status": "COMPLETED"},
+            "Scheduled run completed",
+            "The scheduled task finished successfully. Open Veetbot to view the result.",
+        ),
+        (
+            "schedule_run_finished",
+            {"status": "FAILED"},
+            "Scheduled run failed",
+            "The scheduled task stopped before finishing. Open Veetbot to see the error.",
+        ),
+        (
+            "schedule_run_finished",
+            {"status": "CANCELLED"},
+            "Scheduled run cancelled",
+            "The scheduled task was cancelled before it finished.",
+        ),
+        (
+            "schedule_occurrence_skipped",
+            {"status": "MISSED"},
+            "Scheduled run missed",
+            "The start window passed before this task could run.",
+        ),
+        (
+            "schedule_occurrence_skipped",
+            {"status": "SKIPPED_OVERLAP"},
+            "Scheduled run skipped",
+            "An earlier run of this schedule was still active.",
+        ),
+        (
+            "schedule_occurrence_skipped",
+            {"status": "AUTHORIZATION_FAILED"},
+            "Scheduled run blocked",
+            "The required access was no longer available. Review the schedule in Veetbot.",
+        ),
+        (
+            "schedule_occurrence_skipped",
+            {"status": "CONFIGURATION_FAILED"},
+            "Scheduled run needs attention",
+            "The schedule could not start with its current configuration. Review it in Veetbot.",
+        ),
+        (
+            "ops_alert",
+            {"signal": "disk_free", "severity": "critical", "reason_code": "ops.disk_free"},
+            "Production alert",
+            "Critical: Disk space needs attention.",
+        ),
+        (
+            "ops_recovered",
+            {"signal": "disk_free", "severity": "recovered", "reason_code": "ops.disk_free"},
+            "Production recovered",
+            "Disk space has recovered.",
+        ),
+        ("test", {}, "Test notification", "Notifications are working on this device."),
+        (
+            "device_invocation",
+            {"status": "pending", "tool_name": "device.sms.send"},
+            "Text message ready to review",
+            "Open Veetbot on your iPhone to review the recipient and message, "
+            "then choose whether to send.",
+        ),
+        (
+            "device_invocation",
+            {"status": "pending"},
+            "Your device has a pending action",
+            "Open Veetbot on the requested device to review and complete the action.",
+        ),
+        (
+            "device_invocation",
+            {"status": "pending", "tool_name": "device.camera.capture"},
+            "Your device has a pending action",
+            "Open Veetbot on the requested device to review device.camera.capture.",
+        ),
+        (
+            "ops_alert",
+            {"signal": "future_signal", "severity": "warn", "reason_code": "ops.future_signal"},
+            "Production alert",
+            "Warning: A production health check needs attention.",
+        ),
+    ],
+)
+async def test_apns_alerts_explain_every_kind_without_changing_the_tap_payload(
+    tmp_path: Path,
+    kind: str,
+    details: dict[str, str],
+    title: str,
+    body: str,
+) -> None:
+    identifiers = {
+        "approval_requested": ("session_id", "run_id", "approval_id"),
+        "question_asked": ("session_id", "run_id", "question_id"),
+        "run_failed": ("session_id", "run_id"),
+        "schedule_run_finished": ("session_id", "run_id", "schedule_id", "occurrence_id"),
+        "schedule_occurrence_skipped": ("schedule_id", "occurrence_id"),
+        "device_invocation": ("invocation_id", "device_id"),
+    }
+    payload = NotificationPayload.model_validate(
+        {
+            "kind": kind,
+            "title": NOTIFICATION_TITLES[NotificationKind(kind)],
+            "notification_id": UUID(int=900),
+            **{name: UUID(int=index + 1) for index, name in enumerate(identifiers.get(kind, ()))},
+            **details,
+        }
+    )
+    requests: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    key_path, _key = _private_key_file(tmp_path)
+    transport = APNsPushTransport(
+        key_file=key_path,
+        key_id="KEY123",
+        team_id="TEAM123",
+        topic="com.veetbot.app",
+        clock=FixedClock(NOW),
+        clients={
+            PushEnvironment.SANDBOX: httpx.AsyncClient(
+                base_url="https://api.sandbox.push.apple.com:443",
+                transport=httpx.MockTransport(record),
+            )
+        },
+    )
+    try:
+        await transport.deliver(
+            push_target(), push_message().model_copy(update={"payload": payload})
+        )
+        wire = json.loads(requests[0].content)
+        assert wire["aps"]["alert"] == {"title": title, "body": body}
+        assert wire["veetbot"] == payload.model_dump(mode="json", exclude_none=True)
+        assert len(requests[0].content) < 4096
+    finally:
+        await transport.aclose()
 
 
 @pytest.mark.parametrize(

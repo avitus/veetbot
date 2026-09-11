@@ -1068,6 +1068,7 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
         if context.notification_producer is not None and not child_run_suspension:
             question_id = None
             approval_expires_at = None
+            approval_tool_name = None
             if status is RunStatus.WAITING_FOR_USER:
                 raw_question_id = payload.get("question_id")
                 if raw_question_id is None:
@@ -1076,6 +1077,7 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             if approval_id is not None:
                 approval = await uow.approvals.get(approval_id, context.principal)
                 approval_expires_at = approval.expires_at
+                approval_tool_name = approval.tool_name
             await context.notification_producer.for_run_transition(
                 uow,
                 run=context.run,
@@ -1084,6 +1086,7 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
                 approval_id=approval_id,
                 question_id=question_id,
                 approval_expires_at=approval_expires_at,
+                approval_tool_name=approval_tool_name,
             )
             if context.finalization_write_probe is not None:
                 context.finalization_write_probe("notification")

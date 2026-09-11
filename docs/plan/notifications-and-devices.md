@@ -307,6 +307,18 @@ stream and the export (ADR-0006, ADR-0032, [scheduling.md](scheduling.md)'s
 Apple's servers and the lock screen of a phone that may be face-up on a table.
 The client fetches details after the tap, when it is online and authenticated.
 
+APNs presentation uses a templated alert title and body derived only from this
+closed payload. The `veetbot` dictionary retains its version and fixed title so
+installed clients can still validate and open the notification. The visible
+alert distinguishes completed, failed, and cancelled scheduled runs, and missed,
+overlapping, unauthorized, and misconfigured occurrences. Every kind explains
+the outcome or next action. Approval production copies the persisted approval's
+registry tool name; device-action production copies the invocation's tool name.
+Absent tool names use a generic next-action template. Operations alerts name
+the declared health signal and severity through fixed display labels, with a
+generic health-check label for an unrecognized signal. No template uses a
+schedule title, user text, arguments, question, failure message, or summary.
+
 ## Triggers
 
 Exactly six transitions enqueue, and each is observed where the corpus
@@ -743,6 +755,12 @@ notification state of its own. Concretely:
   derived from the build configuration, the platform, a device name, and the
   bundle identifier; it re-posts on launch and on token change and revokes on
   disconnect;
+- authorization is requested only while the system status is undetermined;
+  an existing grant proceeds to push registration and an existing denial is
+  respected without a recurring application error. The equivalent
+  `UNError.notificationsNotAllowed` rejection is also nonfatal; unrelated
+  registration failures remain visible. Enabling notifications again is an
+  operating-system setting, followed by client registration;
 - the `aps-environment` entitlement is added beside the existing keychain
   entitlement, the push capability is enabled on the application identifier,
   and provisioning profiles are regenerated — owner actions outside the

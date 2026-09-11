@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UserNotifications
 
 public struct LoadedArtifact: Sendable {
     public let metadata: ArtifactView
@@ -386,6 +387,15 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func reportNotificationRegistrationFailure(_ error: Error) {
+        let systemError = error as NSError
+        // A saved denial is a preference, not a failed conversation. In
+        // particular, macOS may return this error when permission is requested
+        // again; leave any unrelated application error intact.
+        if systemError.domain == UNErrorDomain,
+            systemError.code == UNError.notificationsNotAllowed.rawValue
+        {
+            return
+        }
         present(error)
     }
 

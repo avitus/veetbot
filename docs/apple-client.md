@@ -200,6 +200,20 @@ the saved connection to install before following the same path. The client keeps
 only transient navigation focus and never persists notification state; offline
 recovery remains the server's `/v1/notifications` authority.
 
+Notification alerts explain the next action, include the tool name for approvals
+and device actions when available, and distinguish schedule outcomes and skip
+reasons. They retain the content-free boundary: task titles, conversation text,
+recipients, message bodies, and failure details are fetched after opening the app.
+
+On macOS, **System Settings → Notifications → Veetbot → Allow Notifications**
+controls permission. On iOS, use **Settings → Notifications → Veetbot**.
+The client checks existing authorization before asking, respects a denial
+without showing a repeated application error, and still reports other push
+registration failures. After turning permission on, relaunch Veetbot to register
+for push delivery. A denied permission is separate from signing: a distributed
+macOS build must also contain the `com.apple.developer.aps-environment`
+entitlement, while iOS uses `aps-environment`.
+
 Deleting a row is an irreversible `Delete Everywhere` operation. The client
 first asks the server to delete the session and its associated conversation
 data, then removes the local history row and cached artifact bytes only after a

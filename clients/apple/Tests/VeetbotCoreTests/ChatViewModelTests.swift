@@ -1,9 +1,35 @@
 import Foundation
 import Testing
+import UserNotifications
 
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct ChatViewModelTests {
+    @Test
+    func testDeniedNotificationPermissionDoesNotPresentARepeatedAppError() throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: "existing-token"),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore()
+        )
+        let denied = NSError(domain: UNErrorDomain, code: UNError.notificationsNotAllowed.rawValue)
+        model.reportNotificationRegistrationFailure(denied)
+        model.reportNotificationRegistrationFailure(denied)
+        #expect(model.errorMessage == nil)
+
+        let unavailable = NSError(
+            domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
+            userInfo: [NSLocalizedDescriptionKey: "Push registration is offline"]
+        )
+        model.reportNotificationRegistrationFailure(unavailable)
+        #expect(model.errorMessage == "Push registration is offline")
+        model.reportNotificationRegistrationFailure(denied)
+        #expect(model.errorMessage == "Push registration is offline")
+    }
+
     @Test
     func testConfigureReportsTheCurrentAttemptFailure() async {
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"

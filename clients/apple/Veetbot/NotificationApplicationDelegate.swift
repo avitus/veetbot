@@ -81,10 +81,20 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
         #endif
         Task { [weak self] in
             do {
-                let granted = try await center.requestAuthorization(
-                    options: [.alert, .badge, .sound]
-                )
-                guard granted else { return }
+                let settings = await center.notificationSettings()
+                switch settings.authorizationStatus {
+                case .notDetermined:
+                    let granted = try await center.requestAuthorization(
+                        options: [.alert, .badge, .sound]
+                    )
+                    guard granted else { return }
+                case .authorized, .provisional, .ephemeral:
+                    break
+                case .denied:
+                    return
+                @unknown default:
+                    return
+                }
                 self?.registerWithOperatingSystem()
             } catch {
                 self?.model?.reportNotificationRegistrationFailure(error)
@@ -104,8 +114,7 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
     /// a capability lands here, and the redelivered token re-registers the
     /// device with the capability set it now declares.
     func requestPushRegistration() {
-        guard remoteRegistrationEnabled else { return }
-        registerWithOperatingSystem()
+        requestRemoteNotificationsAfterConnection()
     }
 
     /// This device as the next registration will describe it, including the

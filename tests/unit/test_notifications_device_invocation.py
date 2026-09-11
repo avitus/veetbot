@@ -134,6 +134,9 @@ async def test_producer_enqueues_once_and_dedupes_on_replay() -> None:
     assert row.dedupe_key == device_invocation_key(INVOCATION_ID)
     assert row.payload.invocation_id == INVOCATION_ID
     assert row.payload.device_id == DEVICE_ID
+    assert row.payload.tool_name == "device.sms.send"
+    assert "hello" not in row.payload.model_dump_json()
+    assert "+15550000000" not in row.payload.model_dump_json()
     assert row.status is NotificationStatus.PENDING
     assert row.target_device_id() == DEVICE_ID
 

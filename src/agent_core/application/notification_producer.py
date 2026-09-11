@@ -53,6 +53,7 @@ class NotificationProducer:
         approval_id: UUID | None = None,
         question_id: UUID | None = None,
         approval_expires_at: datetime | None = None,
+        approval_tool_name: str | None = None,
     ) -> bool:
         now = self._clock.now()
         notification_id = self._ids.new_id()
@@ -90,6 +91,9 @@ class NotificationProducer:
                     kind=kind,
                     title=NOTIFICATION_TITLES[kind],
                     status=status,
+                    tool_name=(
+                        approval_tool_name if kind is NotificationKind.APPROVAL_REQUESTED else None
+                    ),
                     session_id=run.session_id,
                     run_id=run.id,
                     approval_id=approval_id,
@@ -260,6 +264,7 @@ class NotificationProducer:
                     kind=kind,
                     title=NOTIFICATION_TITLES[kind],
                     status=DeviceInvocationSubjectStatus.PENDING,
+                    tool_name=invocation.tool_name,
                     invocation_id=invocation.id,
                     device_id=invocation.device_id,
                     notification_id=notification_id,
