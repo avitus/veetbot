@@ -21,6 +21,7 @@ from agent_core.domain.memory import MemoryCorrection, RecallQuery, RecallResult
 from agent_core.domain.messages import ModelLimits, ResolvedModel
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.memory.profiles import SnapshotProfiles
+from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.web_fetch import WebFetchTool
 from tests.contract.memory_fixtures import formation_stack, memory
@@ -208,6 +209,7 @@ async def test_context_planner_does_not_require_snapshot_config_without_memory()
 async def test_context_planner_rebuilds_the_truncated_version_six_tool_roster(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Older plans recover missing tools once, then persist and reuse the new epoch."""
     clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(
         _memory_uow_repositories(
@@ -227,6 +229,7 @@ async def test_context_planner_rebuilds_the_truncated_version_six_tool_roster(
     model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
 
     def planner() -> EventContextPlanner:
+        """Reconstruct a planner against the same durable session events."""
         return EventContextPlanner(
             factory,
             registry,
@@ -249,6 +252,39 @@ async def test_context_planner_rebuilds_the_truncated_version_six_tool_roster(
     assert repaired.epoch == previous.epoch + 1
     assert await planner().current(session().id) == repaired
     assert await current_planner.plan(session(), configured_agent, principal(), model) == repaired
+
+
+async def test_context_planner_preserves_first_occurrence_priority_at_the_tool_cap() -> None:
+    """A duplicate configured name cannot demote the first requested capability."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    config["classes"]["tool_definitions"]["max_items"] = 1
+    registry = StaticToolRegistry()
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    configured_agent = agent().model_copy(
+        update={"enabled_tools": ["web.fetch", "system.current_time", "web.fetch"]}
+    )
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+
+    plan = await planner.plan(
+        session(),
+        configured_agent,
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+
+    assert plan.tool_names == ("web.fetch",)
 
 
 async def test_context_planner_sizes_snapshot_from_final_model_visible_bytes() -> None:

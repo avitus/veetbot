@@ -1275,6 +1275,7 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
 async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
     tmp_path: Path,
 ) -> None:
+    """Two Gmail catalogs retain explicit capabilities within both context caps."""
     settings = replace(
         load_settings(
             {

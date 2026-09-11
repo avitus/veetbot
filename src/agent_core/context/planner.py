@@ -268,6 +268,7 @@ class EventContextPlanner:
         persona_affirmed: tuple[UUID, ...] = (),
         persona_items: int = 0,
     ) -> ContextPlan:
+        """Select authorized tools, enforce prefix bounds, and persist a new epoch."""
         classes = self._config.get("classes")
         if not isinstance(classes, dict):
             raise ValueError("context classes configuration must be a mapping")
@@ -303,7 +304,9 @@ class EventContextPlanner:
         # Explicit agent capabilities take precedence over discovered tools when
         # the item cap binds. Alphabetical truncation lets a growing MCP catalog
         # silently evict enabled capabilities such as web.fetch and workspace.*.
-        configured_order = {name: index for index, name in enumerate(agent.enabled_tools)}
+        configured_order = {
+            name: index for index, name in enumerate(dict.fromkeys(agent.enabled_tools))
+        }
         tools = sorted(
             sorted(
                 tools,

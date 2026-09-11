@@ -254,7 +254,7 @@ carries an item cap for the same reason and is capped at twenty;
 it, which never yields because a third `skill.load` fails instead.
 
 After authorization and session-environment filtering, tools explicitly named in
-`AgentSpec.enabled_tools` receive slots first, in their configured order. Discovered
+`AgentSpec.enabled_tools` receive slots first, in first-occurrence order. Discovered
 tools fill the remaining slots in name order. The selected set is then sorted by
 name for stable rendering. Adding an MCP account must not evict an explicitly
 enabled web, clock, or workspace capability merely because its name sorts earlier.
