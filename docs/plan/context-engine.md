@@ -253,6 +253,16 @@ carries an item cap for the same reason and is capped at twenty;
 [skills.md](skills.md) argues that number and the 6,000-token body class beside
 it, which never yields because a third `skill.load` fails instead.
 
+After authorization and session-environment filtering, tools explicitly named in
+`AgentSpec.enabled_tools` receive slots first, in their configured order. Discovered
+tools fill the remaining slots in name order. The selected set is then sorted by
+name for stable rendering. Adding an MCP account must not evict an explicitly
+enabled web, clock, or workspace capability merely because its name sorts earlier.
+The item and token ceilings still apply; excess discovered tools require a narrower
+catalog or explicit agent configuration. Builder version `context-builder@7`
+rebuilds older plans through the ordinary logged epoch rotation, so existing
+sessions recover the configured capabilities without replacing their history.
+
 The token side of the tool-definition cap measures the conservative larger form
 of the **model-visible** provider contract: name, description, and input schema
 plus provider framing. The complete pinned `ToolSpec` still participates in the

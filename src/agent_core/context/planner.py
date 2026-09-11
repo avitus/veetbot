@@ -36,7 +36,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@6"
+BUILDER_VERSION = "context-builder@7"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
@@ -300,7 +300,20 @@ class EventContextPlanner:
             and agent.metadata.get("run_kind") != _SKILL_REVIEW_RUN_KIND
         ):
             tools = [tool for tool in tools if tool.name != _SKILL_LOAD_TOOL_NAME]
-        tools = tools[:maximum_tools]
+        # Explicit agent capabilities take precedence over discovered tools when
+        # the item cap binds. Alphabetical truncation lets a growing MCP catalog
+        # silently evict enabled capabilities such as web.fetch and workspace.*.
+        configured_order = {name: index for index, name in enumerate(agent.enabled_tools)}
+        tools = sorted(
+            sorted(
+                tools,
+                key=lambda tool: (
+                    configured_order.get(tool.name, len(configured_order)),
+                    tool.name,
+                ),
+            )[:maximum_tools],
+            key=lambda tool: tool.name,
+        )
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
