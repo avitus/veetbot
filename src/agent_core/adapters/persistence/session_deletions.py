@@ -11,6 +11,10 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_core.adapters.persistence.email_erasure import (
+    erase_memory_source_locked,
+    erase_postgres_source,
+)
 from agent_core.adapters.persistence.mappers import artifact_to_domain
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
@@ -46,6 +50,18 @@ class PostgresSessionDeletionRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def erase_email_source(
+        self,
+        principal: Principal,
+        account_id: str,
+        thread_id: str,
+        message_ids: frozenset[str],
+        erased_at: datetime,
+    ) -> dict[str, int]:
+        return await erase_postgres_source(
+            self._session, principal, account_id, thread_id, message_ids, erased_at
+        )
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
         session_row = (
@@ -310,6 +326,44 @@ class InMemorySessionDeletionRepository:
         self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
+
+    async def erase_email_source(
+        self,
+        principal: Principal,
+        account_id: str,
+        thread_id: str,
+        message_ids: frozenset[str],
+        erased_at: datetime,
+    ) -> dict[str, int]:
+        locks = sorted(
+            {
+                id(lock): lock
+                for lock in (
+                    self._lock,
+                    self._sessions._lock,
+                    self._runs._lock,
+                    self._events._lock,
+                    self._invocations._lock,
+                    self._checkpoints._lock,
+                    self._episodes._lock,
+                    self._artifacts._lock,
+                    self._memories._lock,
+                    self._traces._lock,
+                    self._trajectory_exports._lock,
+                    self._knowledge._lock,
+                )
+            }.values(),
+            key=id,
+        )
+        for lock in locks:
+            await lock.acquire()
+        try:
+            return erase_memory_source_locked(
+                self, principal, account_id, thread_id, message_ids, erased_at
+            )
+        finally:
+            for lock in reversed(locks):
+                lock.release()
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
         # Every collaborator normally protects its state with its own lock. Take

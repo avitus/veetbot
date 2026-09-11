@@ -2450,6 +2450,8 @@ class GovernedMemoryService:
         longevity: MemoryLongevity = MemoryLongevity.DURABLE,
         evidence_at: datetime | None = None,
         attributed_external: bool = False,
+        semantic_external: bool = False,
+        audit_model: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
     ) -> tuple[MemoryRecord, str]:
@@ -2461,7 +2463,15 @@ class GovernedMemoryService:
             and derivation is MemoryDerivation.HYPOTHESIS
             and longevity is MemoryLongevity.TENTATIVE
             and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
-            and portability is Portability.LOCAL
+            and (
+                portability is Portability.LOCAL
+                or (
+                    semantic_external
+                    and portability is Portability.CONTEXTUAL
+                    and self._policy_version == "email-semantic@1"
+                    and trigger == "email-semantic@1"
+                )
+            )
         )
         if attributed_external:
             if not attributed_shape:
@@ -2503,7 +2513,7 @@ class GovernedMemoryService:
                 session_id=session_id,
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
-                model=self._extractor.name,
+                model=audit_model or self._extractor.name,
                 policy_version=self._policy_version,
                 candidates_proposed=1,
                 committed=0,
@@ -2533,6 +2543,21 @@ class GovernedMemoryService:
                 )
                 for current in sorted(related, key=lambda item: item.store_position, reverse=True)
             ]
+            if semantic_external:
+                # Import order is not evidence order. A historical message cannot
+                # supersede or cast doubt on a newer source merely because its
+                # operational event was appended later. One message can also
+                # contain several independent facts about the same subject.
+                classified = [
+                    (
+                        current,
+                        "independent"
+                        if relation == "same_source" and current.statement != clean_statement
+                        else relation,
+                    )
+                    for current, relation in classified
+                    if evidence_at is None or evidence_at >= current.valid_from
+                ]
             # A replay is a no-op whichever related belief the ordering reaches
             # first, so it is decided over all of them before any is acted on.
             # A conflict leaves both halves of the pair live and lifts the

@@ -157,7 +157,7 @@ at `0e3ca2f` passed and its `formation@9` artifact is bundled. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 - [ ] Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
-- [ ] Memory formation temporarily remains on GPT-5.6 Sol under ADR-0091; audit scorer semantics and compare Sol/Astra under controlled reasoning settings before changing the memory tuple with new activation evidence.
+- [ ] Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093; audit scorer semantics and compare Sol/Astra under controlled reasoning settings before changing the memory tuple with new activation evidence.
 
 ### Milestone 22 — Persona surface and curated belief promotion
 
@@ -196,6 +196,21 @@ forwarding are built with the owner capture ceremony documented
 ([deployment.md](../deployment.md#the-sms-capture-ceremony)). Remaining:
 
 - [ ] Owner end-to-end verification on a physical iPhone
+
+### Milestone 26 — Client modes and adaptive email experience
+
+The owner approved the complete email experience and aggregate automatic-email
+budgets on 2026-09-11 under ADR-0092. Twenty-seven of its thirty-two registered
+gates now bind implemented backend and native acceptance checks; four private
+quality gates and the integrated release gate remain pending. No private quality or owner-smoke
+evidence is claimed. The milestone stays in progress and the verified ceiling
+remains Milestone 12. Remaining:
+
+- [ ] Calibrate aggregate cost and performance with authorized representative mailbox work
+- [ ] Execute frozen private importance, reply relevance and writing-style evaluations with the owner
+- [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
+- [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
+- [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
 
 ## Authorized
 

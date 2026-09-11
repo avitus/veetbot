@@ -548,6 +548,7 @@ async def _generated_gmail_discovery(mode: str) -> MCPDiscovery:
                 name=tool.name,
                 description=tool.description or "",
                 input_schema=tool.input_schema,
+                application_only=(tool.meta or {}).get("veetbot/application-only") is True,
             )
             for tool in tools
         )

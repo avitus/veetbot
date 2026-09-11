@@ -80,6 +80,7 @@ test-apple-ui:
 		-destination 'platform=macOS' \
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailModeAndExactDraftApprovalOnMac \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM= || exit $$?; \
 	iphone_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \

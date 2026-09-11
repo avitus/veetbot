@@ -36,7 +36,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@7"
+BUILDER_VERSION = "context-builder@8"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
@@ -295,6 +295,9 @@ class EventContextPlanner:
         )
         if self._session_tool_filter is not None:
             tools = self._session_tool_filter(session, tools)
+        # Application orchestration retains registered tools without spending
+        # model context on transport pagination and synchronization protocols.
+        tools = [tool for tool in tools if tool.model_visible]
         if (
             catalog is not None
             and not catalog.entries

@@ -6,7 +6,7 @@ development hypothesis recall and precision, the rich conversation core, and
 holdout direct recall and precision. The separate `formation@10` evaluation
 also failed. The detailed aggregate outcomes are recorded in project state;
 the GPT-5.6 Sol artifacts below remain bound to that model and cannot activate
-Astra. ADR-0091 preserves evaluated memory with the independent
+Astra. ADR-0093 preserves evaluated memory with the independent
 `formation.model_policy: balanced` selection in `memory/profiles.yaml`, while
 new production chats default to `astra`. Sol is a temporary choice; memory
 formation remains active work. Audit scorer semantics and run a controlled

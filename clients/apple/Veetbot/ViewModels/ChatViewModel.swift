@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UserNotifications
 
 public struct LoadedArtifact: Sendable {
     public let metadata: ArtifactView
@@ -76,6 +77,11 @@ public protocol PushRegistrationRequesting: AnyObject {
 
 @MainActor
 public final class ChatViewModel: ObservableObject {
+    @Published public var composerText = ""
+    @Published public private(set) var connectionGeneration = UUID()
+    @Published public private(set) var isReconfiguring = false
+    public var currentAPIClient: VeetbotAPIClient? { api }
+    public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
     @Published public private(set) var baseURL: URL?
@@ -198,6 +204,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        isConfigured = false
+        connectionGeneration = UUID()
+        composerText = ""
         await abandonWebsiteAuthenticationCeremony()
         var revokeError: Error?
         if let api {
@@ -272,6 +281,16 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
+            if let emailNotificationHandler {
+                let session = try await api.getSession(link.sessionID)
+                if let value = session.metadata["email_thread_id"]?.stringValue,
+                    let threadID = UUID(uuidString: value) {
+                    let approvalID: UUID?
+                    if case .approval(let id) = link.focus { approvalID = id } else { approvalID = nil }
+                    await emailNotificationHandler(threadID, approvalID)
+                    return
+                }
+            }
             let entry: SessionHistoryEntry
             if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
@@ -386,11 +405,31 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func reportNotificationRegistrationFailure(_ error: Error) {
+        let systemError = error as NSError
+        // A saved denial is a preference, not a failed conversation. In
+        // particular, macOS may return this error when permission is requested
+        // again; leave any unrelated application error intact.
+        if systemError.domain == UNErrorDomain,
+            systemError.code == UNError.notificationsNotAllowed.rawValue
+        {
+            return
+        }
         present(error)
     }
 
     public func newSession() {
         resetSelectedSession()
+    }
+
+    public func reportConnectionError(_ error: Error) { present(error) }
+
+    public func openSharedSession(_ id: UUID) async {
+        guard let api else { return }
+        do {
+            let session = try await api.getSession(id)
+            try await store(session: session, lastRunID: session.activeRunID ?? session.lastRunID)
+            if let entry = history.first(where: { $0.sessionID == id }) { await selectSession(entry) }
+        } catch { present(error) }
     }
 
     private func resetSelectedSession() {
@@ -828,22 +867,51 @@ public final class ChatViewModel: ObservableObject {
 
     @discardableResult
     public func createWebsiteAccess(
-        origin: String,
-        loginURL: String
+        websiteURL: String,
+        additionalOrigins: String = ""
     ) async -> URL? {
         guard let api else { return nil }
-        let normalizedOrigin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedLoginURL = loginURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedOrigin.isEmpty, !normalizedLoginURL.isEmpty else {
-            errorMessage = "Enter both the website origin and its login page."
+        let input = websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasScheme = input.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
+        let candidate = hasScheme ? input : "https://" + input
+        guard
+            var components = URLComponents(string: candidate),
+            components.scheme?.lowercased() == "https",
+            let host = components.host, !host.isEmpty,
+            components.user == nil, components.password == nil,
+            components.port == nil || components.port == 443
+        else {
+            errorMessage = "Enter a valid HTTPS website URL without a username or password."
             return nil
+        }
+        components.scheme = "https"
+        components.host = host.lowercased()
+        components.port = nil
+        guard let normalizedLoginURL = components.url?.absoluteString else {
+            errorMessage = "Enter a valid HTTPS website URL."
+            return nil
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        guard let primaryOrigin = components.url?.absoluteString else {
+            errorMessage = "Enter a valid HTTPS website URL."
+            return nil
+        }
+        let extraOrigins = additionalOrigins
+            .components(separatedBy: CharacterSet(charactersIn: ",\n\r"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var normalizedOrigins = [primaryOrigin]
+        for origin in extraOrigins where !normalizedOrigins.contains(origin) {
+            normalizedOrigins.append(origin)
         }
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
         var createdProfileID: UUID?
         do {
             let profile = try await api.createBrowserProfile(
-                allowedOrigins: [normalizedOrigin]
+                allowedOrigins: normalizedOrigins
             )
             createdProfileID = profile.id
             let ceremony = try await api.beginBrowserAuthentication(
@@ -1096,6 +1164,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func install(_ configuration: ConnectionConfiguration) async throws {
+        isReconfiguring = true
+        defer { isReconfiguring = false }
+        connectionGeneration = UUID()
         await artifactCache.removeAll()
         pendingSubmission = nil
         let transport = HTTPTransport(

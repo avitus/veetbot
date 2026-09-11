@@ -138,6 +138,8 @@ class Settings:
     surface_whatsapp_template_name: str = "veetbot_update_available"
     surface_whatsapp_template_language: str = "en_US"
     email_enabled: bool = False
+    email_mode_enabled: bool = False
+    email_semantic_evidence: Path | None = None
     email_account_ids: tuple[str, ...] = ()
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
@@ -1514,6 +1516,13 @@ def _load_settings(
         "AGENT_SURFACE_WHATSAPP_TEMPLATE_LANGUAGE", "en_US"
     ).strip()
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
+    email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
+    raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
+    email_semantic_evidence = (
+        Path(raw_email_semantic_evidence).expanduser().resolve()
+        if raw_email_semantic_evidence
+        else None
+    )
     gmail_accounts_file = values.get("GMAIL_ACCOUNTS_FILE", "").strip()
     configured_gmail_files = {
         credential_name: (variable, values.get(variable, "").strip(), scope)
@@ -1688,6 +1697,8 @@ def _load_settings(
         surface_whatsapp_template_name=surface_whatsapp_template_name,
         surface_whatsapp_template_language=surface_whatsapp_template_language,
         email_enabled=email_enabled,
+        email_mode_enabled=email_mode_enabled,
+        email_semantic_evidence=email_semantic_evidence,
         email_account_ids=email_account_ids,
         push_provider=push_provider,
         apns_key_file=apns_key_file,

@@ -18,10 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.auth import Authenticator
+from agent_core.api.email import email_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
+    BrowserLoginURLValidationError,
     MemoryCursorError,
     SessionMessageCursorError,
     SessionMetadataValidationError,
@@ -33,6 +35,7 @@ from agent_core.application.services import (
     BrowserProfileService,
     DeviceIngestService,
     DeviceService,
+    EmailService,
     MemoryReadService,
     NotificationService,
     PersonaService,
@@ -176,6 +179,9 @@ class ApplicationServices(Protocol):
 
     @property
     def persona(self) -> PersonaService: ...
+
+    @property
+    def email(self) -> EmailService: ...
 
 
 class UpdatePersonaEntryRequest(BaseModel):
@@ -442,6 +448,9 @@ def _error_response(
     details: dict[str, object] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+    if request.url.path.startswith("/v1/email/"):
+        # Unhandled errors are rendered outside the ordinary request middleware.
+        headers = {**(headers or {}), "Cache-Control": "private, no-store"}
     return JSONResponse(
         status_code=status,
         content={
@@ -546,7 +555,8 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def internal_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception(
+        # Exception text can contain private request or model content.
+        logger.error(
             "api_request_failed",
             extra={"request_id": _request_id(request), "error_class": type(exc).__name__},
         )
@@ -908,11 +918,14 @@ def create_app(
         body: BeginBrowserAuthenticationRequest,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserAuthenticationView:
-        return await services.browser_profiles.begin_authentication(
-            authenticated,
-            profile_id,
-            login_url=body.login_url,
-        )
+        try:
+            return await services.browser_profiles.begin_authentication(
+                authenticated,
+                profile_id,
+                login_url=body.login_url,
+            )
+        except BrowserLoginURLValidationError as exc:
+            raise MalformedRequestError(str(exc)) from exc
 
     @app.get(
         "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
@@ -1592,5 +1605,8 @@ def create_app(
                 else None
             ),
         )
+
+    if settings.email_mode_enabled:
+        app.include_router(email_router(services.email, secured))
 
     return app

@@ -135,7 +135,7 @@ policy, `formation@10` where its artifact matches and otherwise `formation@8`;
 `required` refuses rather than claiming an unevaluated policy is active. A
 content-free selection audit records the decision and the policy it chose.
 
-ADR-0091 separates maintenance model selection from chat. For routed agents,
+ADR-0093 separates maintenance model selection from chat. For routed agents,
 `formation.model_policy` in `memory/profiles.yaml` selects the memory model
 through the existing static router; its shipped value `balanced` explicitly
 resolves to GPT-5.6 Sol. Production chat defaults to `astra`, while `flagship`
@@ -937,3 +937,13 @@ principal consolidation, session-history retrieval arm, artifact retrieval
 arm, or external memory service. It does not add a new public write API. Those
 remain separate roadmap choices. The milestone is a higher-recall formation
 and honest-forgetting change over the existing governed memory system.
+
+## Milestone 26 semantic email policy
+
+The approved [email experience](email-experience.md) under ADR-0092 adds a
+separately versioned and evaluated correspondence extractor. Its contextual
+cross-project recall, exact semantic source grounding and historical lifecycle
+are an explicit extension, not an in-place change to formation@9, formation@10
+or communication-attribution-v1. Existing policy evidence, precedence, authority
+and gates remain binding; new-policy activation waits for its own quality and
+source-lifecycle evidence. Old LOCAL excerpt memories retain that portability.

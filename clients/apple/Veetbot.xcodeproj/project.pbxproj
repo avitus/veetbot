@@ -51,6 +51,10 @@
 		10000000000000000000002B /* DeviceInvocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* DeviceInvocationService.swift */; };
 		10000000000000000000002C /* SmsComposeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* SmsComposeSheet.swift */; };
 		10000000000000000000002D /* ForwardMessageIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* ForwardMessageIntent.swift */; };
+		1000000000000000000000A1 /* EmailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A1 /* EmailModels.swift */; };
+		1000000000000000000000A2 /* EmailAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A2 /* EmailAPIClient.swift */; };
+		1000000000000000000000A3 /* EmailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A3 /* EmailViewModel.swift */; };
+		1000000000000000000000A4 /* EmailModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A4 /* EmailModeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,6 +116,10 @@
 		20000000000000000000002E /* ForwardMessageIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardMessageIntent.swift; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A520 /* Veetbot.macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.macOS.entitlements; sourceTree = "<group>"; };
+		2000000000000000000000A1 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
+		2000000000000000000000A2 /* EmailAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailAPIClient.swift; sourceTree = "<group>"; };
+		2000000000000000000000A3 /* EmailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailViewModel.swift; sourceTree = "<group>"; };
+		2000000000000000000000A4 /* EmailModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModeView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -169,6 +177,7 @@
 				200000000000000000000003 /* EventModels.swift */,
 				200000000000000000000004 /* JSONValue.swift */,
 				20000000000000000000001F /* NotificationModels.swift */,
+				2000000000000000000000A1 /* EmailModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -181,6 +190,7 @@
 				200000000000000000000007 /* VeetbotAPIClient.swift */,
 				200000000000000000000020 /* DeviceRegistrationCoordinator.swift */,
 				20000000000000000000002C /* DeviceInvocationService.swift */,
+				2000000000000000000000A2 /* EmailAPIClient.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -216,6 +226,7 @@
 				200000000000000000000029 /* PersonaViewModel.swift */,
 				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
+				2000000000000000000000A3 /* EmailViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -237,6 +248,7 @@
 				200000000000000000000028 /* ScheduleDetailView.swift */,
 				20000000000000000000002D /* SmsComposeSheet.swift */,
 				200000000000000000000015 /* RootView.swift */,
+				2000000000000000000000A4 /* EmailModeView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -403,6 +415,10 @@
 				100000000000000000000027 /* ScheduleDetailView.swift in Sources */,
 				10000000000000000000002C /* SmsComposeSheet.swift in Sources */,
 				100000000000000000000015 /* RootView.swift in Sources */,
+				1000000000000000000000A4 /* EmailModeView.swift in Sources */,
+				1000000000000000000000A3 /* EmailViewModel.swift in Sources */,
+				1000000000000000000000A2 /* EmailAPIClient.swift in Sources */,
+				1000000000000000000000A1 /* EmailModels.swift in Sources */,
 				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */,
 				10000000000000000000002D /* ForwardMessageIntent.swift in Sources */,

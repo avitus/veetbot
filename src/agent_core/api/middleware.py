@@ -45,6 +45,21 @@ class RequestBoundaryMiddleware:
 
         method = str(scope.get("method", ""))
         path = str(scope.get("path", ""))
+        if path == "/v1/email" or path.startswith("/v1/email/"):
+            downstream_send = send
+
+            async def private_email_send(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    response_headers = [
+                        (key, value)
+                        for key, value in message.get("headers", [])
+                        if key.lower() != b"cache-control"
+                    ]
+                    response_headers.append((b"cache-control", b"private, no-store"))
+                    message["headers"] = response_headers
+                await downstream_send(message)
+
+            send = private_email_send
         has_body = method in {"POST", "PUT", "PATCH"}
         is_versioned_api = path.startswith("/v1/")
         if has_body and is_versioned_api:

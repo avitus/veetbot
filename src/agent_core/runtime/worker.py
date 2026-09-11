@@ -186,6 +186,7 @@ class MaintenanceWorker:
         sweep_approvals: Callable[[], Awaitable[int]] | None = None,
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
         sweep_artifacts: Callable[[], Awaitable[int]] | None = None,
+        sweep_email_cache: Callable[[], Awaitable[int]] | None = None,
         sweep_sandboxes: SandboxSweep | None = None,
         sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
         sweep_memory: Callable[[], Awaitable[int]] | None = None,
@@ -206,6 +207,7 @@ class MaintenanceWorker:
         self._sweep_approvals = sweep_approvals
         self._sweep_exports = sweep_exports
         self._sweep_artifacts = sweep_artifacts
+        self._sweep_email_cache = sweep_email_cache
         self._sweep_sandboxes = sweep_sandboxes
         self._sweep_artifact_orphans = sweep_artifact_orphans
         self._sweep_memory = sweep_memory
@@ -287,6 +289,11 @@ class MaintenanceWorker:
                 await self._sweep_artifacts()
             except Exception:
                 logger.exception("general artifact expiry sweep failed")
+        if self._sweep_email_cache is not None:
+            try:
+                await self._sweep_email_cache()
+            except Exception:
+                logger.exception("email cache expiry sweep failed")
         if self._sweep_memory is not None:
             try:
                 await self._sweep_memory()

@@ -13,3 +13,10 @@ class GmailError(RuntimeError):
             raise ValueError("unknown Gmail failure code")
         self.code = code
         super().__init__(code)
+
+
+class GmailResourceNotFoundError(GmailError):
+    """Internal typed 404; only its ordinary stable code crosses MCP."""
+
+    def __init__(self) -> None:
+        super().__init__("gmail.provider_rejected")

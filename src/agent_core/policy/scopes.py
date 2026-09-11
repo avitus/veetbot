@@ -39,6 +39,8 @@ PLATFORM_SCOPES = frozenset(
         "memory.read",
         "persona.read",
         "persona.write",
+        "email.read",
+        "email.write",
     }
 )
 _SCOPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")

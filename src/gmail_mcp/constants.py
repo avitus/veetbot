@@ -16,7 +16,15 @@ GOOGLE_SCOPES: Final = {
 }
 
 ROSTERS: Final = {
-    "read": ("search_threads", "get_thread", "list_labels"),
+    "read": (
+        "search_threads",
+        "get_thread",
+        "list_labels",
+        "get_profile",
+        "sync_changes",
+        "get_thread_page",
+        "get_message_body",
+    ),
     "write": ("create_draft", "modify_labels", "trash_thread", "untrash_thread"),
     "send": ("send_message",),
 }

@@ -35,6 +35,7 @@ class RunNotificationProducer(Protocol):
         approval_id: UUID | None = None,
         question_id: UUID | None = None,
         approval_expires_at: datetime | None = None,
+        approval_tool_name: str | None = None,
     ) -> bool: ...
 
 

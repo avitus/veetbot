@@ -274,7 +274,7 @@ the GPT-5.6 Sol artifacts do not authorize Astra or Fable. Without matching
 evidence, `auto` uses deterministic formation and `required` refuses startup.
 
 Memory formation deliberately remains on GPT-5.6 Sol while chat uses the new
-defaults (ADR-0091). `formation.model_policy: balanced` in
+defaults (ADR-0093). `formation.model_policy: balanced` in
 `memory/profiles.yaml` independently selects its evidenced tuple, so the
 bundled `formation@9` evidence still activates and `formation@10` remains its
 evidenced fallback. An `AGENT_CONFIG_DIR` overlay may change that reference,

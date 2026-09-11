@@ -961,3 +961,13 @@ large body; without it the right answer would have been the turn layer.
 the caps, the loading tool, the trust derivation, and the rule that a body
 never yields. It also settles the one thing this paragraph left open — a
 skill is never deselected, and a third load fails rather than evicting.
+
+## Milestone 26 tool presentation
+
+Context builder identity advances to `context-builder@8` when ToolSpec gains the
+presentation-only `model_visible` field. The planner excludes false-valued tools
+before catalog pinning and prompt-budget selection; all existing model-visible
+rosters retain their cap guarantees. Application-only Gmail sync capabilities
+remain registered and callable by governed deterministic tasks. Hiding a tool
+never adds scope or action authority and cannot override tool policy. The new
+cache identity prevents reuse of prefixes built with the old visibility contract.

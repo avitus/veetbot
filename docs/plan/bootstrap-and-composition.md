@@ -304,7 +304,7 @@ ceiling, plus the six ranking-weight coefficients the post-Milestone-16 tuning
 pass moved out of the ranker's literals into `memory/profiles.yaml`, plus
 Milestone 24's three device knobs: the invocation timeout, the per-device
 daily ingest cap, and the poll-back interval, plus ADR-0089's terminal schedule
-retention days, purge cadence, and purge batch; ADR-0091 adds memory model selection. The plan names **three
+retention days, purge cadence, and purge batch; ADR-0093 adds memory model selection. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -374,7 +374,7 @@ hatch is exactly the thing that makes a `policy_version` unfalsifiable.
 
 ### Where the files live
 
-ADR-0091 sets the production chat default to `astra`, retaining fake defaults
+ADR-0093 sets the production chat default to `astra`, retaining fake defaults
 for development. The existing content-addressed production agent version changes
 with the model policy, so an upgrade does not overwrite an immutable earlier
 agent version. Existing sessions retain their recorded agent. Maintenance
@@ -1380,3 +1380,14 @@ the plan's text stands with an annotation rather than a replacement.
     enumerated.** Which groups exist — durability, isolation, concurrency,
     recovery — should be fixed when the first contract suite is written,
     against a real port rather than in the abstract.
+
+
+## Email semantic activation evidence
+
+Milestone 26 adds `Settings.email_semantic_evidence`, read from
+`AGENT_EMAIL_SEMANTIC_EVIDENCE`. It is an optional path to a reviewed semantic
+email evaluation artifact. The composition selects evidence for the resolved
+provider/model and exact release identity using the mechanism in
+[email-experience.md](email-experience.md). Missing evidence leaves semantic
+formation disabled; stale or mismatched evidence cannot enable it. This is
+independent of the Email UX flag and the existing Chat memory policy selection.

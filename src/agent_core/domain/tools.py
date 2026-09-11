@@ -57,6 +57,7 @@ class ToolSpec(BaseModel):
     server_id: str | None = None
     device_id: str | None = None
     deprecated: bool = False
+    model_visible: bool = True
 
 
 class ToolFailureKind(StrEnum):

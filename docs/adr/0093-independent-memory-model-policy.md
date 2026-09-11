@@ -1,4 +1,4 @@
-# ADR-0091: Keep an independently selected, evidenced memory model
+# ADR-0093: Keep an independently selected, evidenced memory model
 
 - Status: Accepted
 - Date: 2026-09-11

@@ -133,6 +133,7 @@ def map_discovered_tools(
                     output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
                     source=ToolSource.MCP,
                     server_id=config.server_id,
+                    model_visible=not remote.application_only,
                 )
             )
         except (ToolValidationError, ValueError):

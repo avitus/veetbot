@@ -13,7 +13,7 @@ title: Changelog
   272,000-token standard-price boundary; Fable retains a one-million-token
   window. No provider adapter or reasoning settings change.
 - Memory formation independently retains `balanced` on GPT-5.6 Sol under
-  ADR-0091, preserving its exact activation evidence. The initial Astra
+  ADR-0093, preserving its exact activation evidence. The initial Astra
   evaluations failed existing gates; wording mismatches, omissions, duplicate
   memories, and classification differences need further work. Selection
   audits distinguish chat and memory policies. Existing sessions retain their

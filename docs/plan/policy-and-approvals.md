@@ -352,7 +352,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1236` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1237` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -1308,3 +1308,15 @@ say which of the three configuration layers holds it. A settings field keeps
 the count of configuration files at six; a file makes the second principal a
 data change rather than a deploy. The question becomes answerable when there
 is a second principal to hold.
+
+## Milestone 26 email application authority
+
+The approved [email experience](email-experience.md) adds exact `email.read`
+and `email.write` scopes for application resources under ADR-0092. They do not
+replace account-specific MCP scopes, run scopes or approval authority. Every
+send still resolves through the ordinary exact-arguments approval lifecycle;
+internal autosave grants no Gmail write. Current authority and a fresh thread
+read precede an atomic local frozen-action claim. Observed source or content
+changes invalidate approval; an external change after the read remains a Gmail
+race, and possibly dispatched non-idempotent sends remain uncertain without
+automatic retry. Email content and inferred style never become trusted policy.

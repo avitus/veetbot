@@ -9,13 +9,15 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 25 are independently authorized parallel
+  # Milestones 16 through 26 are independently authorized parallel
   # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
-  # 0080, 0081, and 0082; their gates do not advance the verified
+  # 0080, 0081, 0082, and 0092; their gates do not advance the verified
   # ceiling past the sequential work through 15.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
   # retention, and conditional native time-zone presentation.
+  # ADR-0091 records the owner's non-milestone notification extension:
+  # the pinned schedule title and nominal occurrence time may appear in alerts.
   authorized_milestones:
     - 0
     - 1
@@ -43,6 +45,7 @@ project:
     - 23
     - 24
     - 25
+    - 26
 
 milestones:
   "0":
@@ -646,7 +649,7 @@ milestones:
         2026-09-10, ADR-0090)
       - independent maintenance model selection retaining evaluated GPT-5.6 Sol
         while chat defaults migrate to Astra and Fable (owner-authorized
-        2026-09-11, ADR-0091)
+        2026-09-11, ADR-0093)
     deferred_scope:
       - reinforcement learning, fine-tuning, or a learned memory policy
       - embeddings, pgvector, an external memory provider, or new retrieval arms
@@ -658,11 +661,25 @@ milestones:
       - >-
         Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
       - >-
-        Memory formation temporarily remains on GPT-5.6 Sol under ADR-0091;
+        Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093;
         audit scorer semantics and compare Sol/Astra under controlled reasoning
         settings before changing the memory tuple with new activation evidence.
     evidence:
-      - check: Independent memory model selection (2026-09-11, ADR-0091)
+      - check: Astra/Fable integration with dev e8d3fb1 (2026-09-11)
+        outcome: passed_locally
+        detail: >-
+          The combined tree preserves the newer notification and Milestone 26
+          email work. The independent memory decision is renumbered ADR-0093
+          to retain the upstream ADR-0091 and ADR-0092 identities. make check
+          passes formatting, lint, strict mypy over 655 files, 2,215 static
+          tests, 487 contract tests, deployment scripts, strict documentation,
+          and website tests/lint. Twenty-three selected PostgreSQL checks pass
+          after migrating through a8e6c3f9d127, covering the model-default
+          upgrade, adapter loops, memory persistence, email persistence and
+          selective source erasure. The Astra chat default and evidenced Sol
+          formation selection remain intact. The integration changes no
+          formation semantics, evidence artifact or activation threshold.
+      - check: Independent memory model selection (2026-09-11, ADR-0093)
         outcome: passed_locally
         detail: >-
           New production sessions select astra, flagship and fable select
@@ -1220,6 +1237,166 @@ milestones:
           and default-off configuration all pass locally. The production Meta
           ceremony and live-number smoke remain owner-controlled gates.
 
+  "26":
+    title: Client modes and adaptive email experience
+    status: in_progress
+    authorized_on: 2026-09-11
+    design: docs/plan/email-experience.md
+    adr: docs/adr/0092-client-modes-and-email-experience.md
+    gates_registered: 32
+    authorized_scope:
+      - shared Chat and Email presentation on iPhone, iPad and Mac
+      - foreground-request-driven Gmail synchronization and resumable complete eligible history
+      - shared reversible sender, content and writing-style personalization
+      - internal versioned drafts and exact-action approval for every send
+      - evaluated attributed semantic email memory shared with Chat and both accounts
+      - scoped source erasure, retention and bounded automatic email accounting
+      - USD 20 per UTC day and USD 200 per rolling thirty days for aggregate automatic email work
+    deferred_scope:
+      - unattended monitoring, Gmail push, scheduled digests and interval scheduling
+      - autonomous sending, automatic Gmail writes and Gmail draft synchronization
+      - another provider, self-service OAuth, attachments and calendar operations
+      - offline-authoritative editing, separate email persona and model routing
+      - general learned memory policy, reinforcement learning and a temporal entity graph
+    open_items:
+      - Calibrate aggregate cost and performance with authorized representative mailbox work
+      - Execute frozen private importance, reply relevance and writing-style evaluations with the owner
+      - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
+      - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
+      - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
+    evidence:
+      - check: Milestone 26 registry authorization red phase
+        outcome: observed_expected_failure
+        detail: >-
+          The focused registry-bound and email-experience registration tests
+          failed at their behavioral assertions: MAX_MILESTONE was 25 rather
+          than 26 and the registry held zero Milestone 26 entries rather than
+          thirty-two. Product gates remain pending until implemented and verified.
+      - check: Milestone 26 canonical registration verification
+        outcome: passed_locally
+        detail: >-
+          All thirty-four gate-registry tests pass, including admission of
+          Milestone 26 and refusal of Milestone 27. Citation repair completed
+          without unresolved text, and make docs-check reconciles 476 entries,
+          193 citations and the unchanged 247 active gates through Milestone 12.
+          This verifies documentation registration only, not product behavior.
+      - check: Milestone 26 email persistence foundation
+        outcome: passed_locally
+        detail: >-
+          The shared store contract first failed because the ordinary unit of
+          work exposed no email store; the schema regression first failed
+          because email_records was absent. The in-memory and PostgreSQL
+          stores now pass the same scoped revision, cursor and alias-isolation
+          contract. Twenty-three focused checks pass against an isolated
+          PostgreSQL instance, covering concurrent compare-and-swap, advisory
+          locks through commit, rollback, non-superuser forced RLS, schema and
+          migration metadata/round trips. Strict mypy reports no issue in the
+          seven store, mapper, unit-of-work, protocol and contract files.
+          This foundation does not complete the broader API, send or erasure gates.
+      - check: Milestone 26 semantic admission and retained-source lifecycle
+        outcome: passed_locally
+        detail: >-
+          The focused memory, store and session-deletion partition passes 104
+          tests. Source registration and formation validate exact first-party
+          event, account, message, author, date and bounded passage provenance;
+          source age controls current and historical recall, and re-reading
+          cannot renew evidence. Valid regressions first observed invented
+          source acceptance, repeated-evidence reinforcement, superseded newer
+          facts, missing retained-copy erasure and missing exclusion fencing.
+          The evidence loader rejects unsupported precision/recall, missing
+          baseline utility or a changed policy/model/build/implementation tuple.
+          These synthetic checks do not satisfy private semantic quality.
+      - check: Milestone 26 selective erasure shared adapter contract
+        outcome: passed_locally
+        detail: >-
+          Seven shared and real PostgreSQL persistence checks pass, including
+          selective source removal from tool events, invocation results,
+          checkpoints, recalled beliefs and derived artifacts. Chat context and
+          independent writing examples preserve different accounts and other
+          messages. Owner-authored messages and immutable audit identities
+          survive. Active dependent runs block erasure before mutation; artifact
+          expiration remains pending until existing byte-deletion machinery
+          acknowledges cleanup. The Chat-copy regression first observed only
+          one erased event/invocation where two were required. Application,
+          private quality and production acceptance remain separate gates.
+      - check: Milestone 26 bounded Gmail continuation and producer fencing
+        outcome: passed_locally
+        detail: >-
+          The Gmail and existing roster/context partition passes 103 tests.
+          The overflow regression first returned four normalized changes for a
+          requested maximum of two. The stateless account/start/page/offset
+          continuation now preserves every change within the requested bound,
+          retains ordinary provider continuations, and requests resync on page
+          drift. All five PostgreSQL source-erasure checks pass, including four
+          first-result producer races that initially allowed erasure before a
+          bound refresh, authorized Chat or pending context call had settled.
+          Strict typing and lint pass for both slices. No live mailbox was used.
+      - check: Milestone 26 native package and processing disclosure
+        outcome: passed_locally
+        detail: >-
+          The native package passes 227 tests, including explicit style-example
+          endorsement, and the iPhone simulator target builds. Five website
+          tests plus lint pass for processing and retention disclosures. These
+          results do not replace complete cross-platform journeys, owner
+          quality judgments, cost calibration or real-mailbox acceptance.
+      - check: Milestone 26 complete Email HTTP command matrix
+        outcome: passed_locally
+        detail: >-
+          Sixty-one application, learning and endorsement checks pass, including
+          the twenty-command HTTP matrix for authorization, current account
+          authority, validation, cross-principal identifiers, optimistic
+          conflicts and lost-response retries. Seventy-seven existing API,
+          runtime, Chat and registry checks also pass. Valid regressions first
+          observed draft/send admission before a denied response, learning
+          mutations followed by denied responses, discard retries extending
+          retention, and missing private-cache headers on unhandled errors.
+          All applicable boundaries execute through the registered matrix node;
+          scoped persistence and forced PostgreSQL RLS retain their shared
+          adapter contracts.
+      - check: Milestone 26 native state, foreground and adaptive layout acceptance
+        outcome: passed_locally
+        detail: >-
+          The three registered native gates execute actual Swift and XCTest
+          checks and pass locally. The full Apple core package passes 229 tests
+          across twenty-six suites. Fresh result bundles contain one passing
+          Mac Email journey, four iPhone journeys and four iPad journeys,
+          including explicit compact-trait navigation, with zero failures,
+          skips or expected failures. The compact-iPad check first failed
+          because the regular side-by-side layout remained active; the
+          DEBUG-only test launch trait override now exercises the compact path.
+          State and foreground tests cover preserved live Chat/composer state,
+          shared connection and thread handoff, hidden/background admission,
+          foreground return and repeating visible refresh. The native gate
+          bridge never treats an unavailable Apple toolchain as a pass. The
+          existing Apple CI recipe includes the Mac Email journey.
+      - check: Milestone 26 adversarial privacy and normalized failures
+        outcome: passed_locally
+        detail: >-
+          Eight privacy scenarios and a 177-check runtime, tool, API, Gmail,
+          registry and secret-scanning partition pass. Three valid regressions
+          first reproduced private mail or model content in API, tool and run
+          exception tracebacks. These normalization boundaries now log error
+          class and opaque request/run/tool identity without exception text or
+          traceback. Hostile mail cannot confer action authority or change
+          persona; cached context and style preserve tenant/principal isolation;
+          notifications omit mail content; evaluation reports contain only
+          aggregate results and synthetic evidence remains pending.
+      - check: Milestone 26 local repository verification
+        outcome: passed_locally
+        detail: >-
+          make check passes with 2,164 static checks, 478 shared/adapter
+          contract checks, strict typing across 651 Python source files,
+          formatting/lint, deployment-script fixtures, strict documentation
+          builds and five website tests plus lint. The isolated PostgreSQL
+          integration lane passes 183 checks; the subsequent five source-erasure
+          race checks also pass. The final native bridge passes all three gates
+          with the 229-test Apple core and nine fresh platform UI journeys.
+          Twenty-seven of the thirty-two M26 gates now bind implemented checks.
+          Four private quality gates and integrated release evidence remain
+          pending; no live mailbox, live model spend, test send, hosted review,
+          pull request or production deployment was performed. Both Email mode
+          activation and evaluated semantic formation remain default-off.
+
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
 # evidence will stay here until it completes.
@@ -1314,5 +1491,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-11T23:29:14Z
+last_updated: 2026-09-11T23:35:33Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

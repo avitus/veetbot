@@ -21,7 +21,7 @@
   milestone: 12
   kind: corpus
   spec: docs/plan/notifications-and-devices.md#hard-gates
-  statement: "**Payloads are content-free.** A corpus of approvals, questions, failures, and schedule instructions carrying secrets, arguments, message text, and reasoning yields payloads with only the closed key set and a templated title."
+  statement: "**Payloads are content-free except for authorized schedule identity.** A corpus of approvals, questions, failures, and schedule instructions carrying secrets, arguments, message text, and reasoning yields closed payloads; only the two schedule kinds may also carry ADR-0091's bounded, credential-filtered pinned title and nominal time, with an unchanged APNs tap dictionary."
   check: tests/gates/test_notifications_m12.py::test_notification_payload_is_content_free
   corpus: tests/corpora/notification_content
   minimum_members: 12
