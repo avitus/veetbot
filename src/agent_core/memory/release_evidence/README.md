@@ -42,7 +42,21 @@ cases (pets, diet, a project fact, and a goal) are the same shape of gap the
 frozen policy showed on an empty store, so the floor is met rather than
 exceeded, and that is stated here instead of rounded up.
 
-No `formation@9` artifact is bundled. The artifact produced on 2026-09-03 at
+`openai-balanced-gpt-5.6-sol-default-formation9.json` is the activation
+evidence for `formation@9` on the same tuple. It was produced on 2026-09-10
+by `agent eval memory-distillation --repeats 3` at commit
+`0e3ca2f8d6291baa2b81d39e12b7c265306da255` under `distillation-scorer@7`:
+three pooled repeats over the 78-case development corpus and the 51-case
+frozen holdout (1,134 calls, USD 6.53), measuring development direct
+must-form recall 0.988, hypothesis recall 0.889, precision 0.916, a
+76-point useful-recall lift, and disposition precision 0.996, and holdout
+direct recall 0.967, hypothesis recall 0.933, precision 0.796, and a
+68-point lift; per-run holdout precision was 0.786, 0.794, and 0.809, and
+the artifact records each run. With it bundled, automatic selection
+activates `formation@9` for the production tuple and `formation@10` is the
+evidenced fallback.
+
+An earlier `formation@9` artifact, produced on 2026-09-03 at
 commit `a904417ff95882cccc922095b02b1702849027f0` under `distillation-scorer@2`
 (97.7 percent direct and 100 percent hypothesis must-form recall, 94.8 percent
 benign precision, a 65.4 percentage-point useful-recall lift, 183 calls over 61
@@ -50,13 +64,43 @@ consolidations, USD 0.99) was withdrawn on 2026-09-04: an independent review
 showed its scorer credited reversed comparisons and mismatched large numbers,
 its represented-clause check ignored polarity, and its populated-store gate
 never required anticipation to attribute anything (ADR-0087). The scorer is now
-`distillation-scorer@5`, the evidence schema is version 4 with a required
+`distillation-scorer@7`, the evidence schema is version 7 with a required
 `represented_case_count` and the frozen holdout's digest and thresholds, the
-67-case development corpus carries a seeded case whose restated clause must be
-verifiably represented, and the 51-case holdout carries three. Automatic selection therefore
-activates `formation@10` for the production tuple until `agent eval
-memory-distillation` is re-run on the tree that deploys and its artifact is
-bundled here.
+78-case development corpus carries a seeded case whose restated clause must be
+verifiably represented, and the 51-case holdout carries three. The holdout
+was re-frozen once, on 2026-09-09 after the first run, to add a resource
+expectation the transcript settles (ADR-0087). The first run
+over both sets, on 2026-09-09 at commit `c4360e3` under `distillation-scorer@5`
+(345 calls, USD 1.86), failed: holdout hypothesis must-form recall 0.200,
+holdout precision 0.677, holdout direct recall 0.923, and development-corpus
+direct recall 0.864 and precision 0.864. The runtime and scorer defects it
+exposed are fixed (ADR-0087). A bounded prompt round on 2026-09-10 (three
+development-only runs, then one run over both sets at commit `77d4d23`,
+366 calls, USD 2.07) lifted holdout hypothesis recall to 0.800 and the
+development corpus to direct 1.000 and precision 0.939, but the holdout
+still failed on direct recall 0.900 and precision 0.739, so the round ended
+without an artifact. The owner then decided, on 2026-09-10, that a personal
+agent is scored recall-first: the scorer credits a correct claim stated with
+more detail (`distillation-scorer@7`) and the holdout's precision floor is
+0.80, the corpus's 0.90 unchanged (ADR-0087). Re-scored offline, the previous
+run measures holdout direct recall 0.975, hypothesis recall 0.800, and
+precision 0.812 under that bar; the run on the tree carrying it (commit
+`f7835e0`) measured 0.950, 0.800, and 0.768 and failed, showing that two
+runs of one unchanged policy differ by up to 0.11 per gate. The owner
+therefore decided that the gates are decided over repeated runs, pooled
+(`--repeats`), with the artifact recording the repeat count and each run's
+own numbers; the development corpus gained four more hypothesis cases so
+that gate spans twelve must-form cases. The first three-repeat run (commit
+`b03090a`, 1,134 calls, USD 6.54) pooled to development direct recall
+0.988, hypothesis 0.861, precision 0.920, and holdout direct recall 0.983,
+hypothesis 0.867, precision 0.799, one belief under the 0.80 floor, with
+the represented gate failing only under a weakest-run rule the aggregate
+had introduced. Of the forty-two holdout extras, about twenty-six were true
+beliefs the labels never listed and about twelve correct facts under
+another kind or wording; the owner set the holdout precision floor at 0.75
+and the represented gate to a majority of runs, consistent with the cores
+(ADR-0087). Between that withdrawal and the artifact above, automatic selection
+activated `formation@10` for the production tuple.
 
 An earlier `formation@9` artifact was evaluated at commit `9013d20`, before the
 Milestone 24 policy rules merged, so its compiled policy version no longer
@@ -70,7 +114,7 @@ scorer equated negations, counts, supersets, and sibling activities, its corpus
 had been edited toward the implementation, every case ran against an empty
 store, and its build reference was an operator-typed label. A `formation@9`
 artifact may be bundled only when it carries `scorer_version`
-`distillation-scorer@5`, a forty-character commit `build_ref` that is an
+`distillation-scorer@7`, a forty-character commit `build_ref` that is an
 ancestor of the bundling tree, the digest of the checked-in corpus, at least
 one seeded case, at least one verifiably represented seeded case, the
 evidence-disposition precision, and the measured provider cost under the

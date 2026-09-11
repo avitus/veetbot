@@ -27,6 +27,7 @@ from agent_core.bootstrap import (
     build,
     build_notification_worker,
     build_schedule_worker,
+    build_surface_worker,
     serve_execution_service,
 )
 from agent_core.config import ConfigurationError
@@ -67,6 +68,7 @@ class WorkerRole(StrEnum):
     MAINTENANCE = "maintenance"
     SCHEDULE = "schedule"
     NOTIFY = "notify"
+    SURFACE = "surface"
 
 
 class QueuedRunTimeoutError(TimeoutError):
@@ -95,12 +97,111 @@ eval_app = typer.Typer(name="eval", no_args_is_help=True)
 approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
 persona_app = typer.Typer(name="persona", no_args_is_help=True)
+surface_app = typer.Typer(name="surface", no_args_is_help=True)
 app.add_typer(run_app)
 app.add_typer(session_app)
 app.add_typer(eval_app)
 app.add_typer(approval_app)
 app.add_typer(memory_app)
 app.add_typer(persona_app)
+app.add_typer(surface_app)
+
+
+async def _surface_list() -> list[Any]:
+    async with build(storage="postgres") as composition:
+        return await composition.services.surfaces.list(composition.principal)
+
+
+@surface_app.command("list")
+def surface_list() -> None:
+    """List configured messaging surfaces."""
+
+    try:
+        rows = asyncio.run(_surface_list())
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    for row in rows:
+        typer.echo(row.model_dump_json())
+
+
+async def _surface_pair(
+    surface_id: UUID,
+    scopes: frozenset[str],
+    label: str | None,
+    idempotency_key: str | None,
+) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.surfaces.issue_code(
+            composition.principal,
+            surface_id,
+            granted_scopes=scopes,
+            label=label,
+            idempotency_key=idempotency_key or str(composition.ids.new_id()),
+        )
+
+
+@surface_app.command("pair")
+def surface_pair(
+    surface_id: UUID,
+    scope: Annotated[
+        list[str] | None,
+        typer.Option("--scope", help="Grant one current principal scope; repeat as needed."),
+    ] = None,
+    label: Annotated[str | None, typer.Option("--label")] = None,
+    idempotency_key: Annotated[str | None, typer.Option("--idempotency-key")] = None,
+) -> None:
+    """Mint and print a one-time pairing code for a surface."""
+
+    scopes = frozenset(scope or ["run.read", "run.write"])
+    try:
+        issued = asyncio.run(
+            _surface_pair(
+                surface_id,
+                scopes,
+                label,
+                idempotency_key,
+            )
+        )
+    except (ConfigurationError, ConflictError, NotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(issued.code.get_secret_value())
+
+
+async def _surface_pairings(surface_id: UUID) -> list[Any]:
+    async with build(storage="postgres") as composition:
+        return await composition.services.surfaces.list_pairings(composition.principal, surface_id)
+
+
+@surface_app.command("pairings")
+def surface_pairings(surface_id: UUID) -> None:
+    """List the audited pairing lifecycle for one surface."""
+
+    try:
+        rows = asyncio.run(_surface_pairings(surface_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    for row in rows:
+        typer.echo(row.model_dump_json())
+
+
+async def _surface_revoke(pairing_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.services.surfaces.revoke_pairing(composition.principal, pairing_id)
+
+
+@surface_app.command("revoke")
+def surface_revoke(pairing_id: UUID) -> None:
+    """Revoke one pairing and rotate its chat session mapping."""
+
+    try:
+        revoked = asyncio.run(_surface_revoke(pairing_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(revoked.model_dump_json())
 
 
 class _EvalRunnerModule(Protocol):
@@ -162,6 +263,8 @@ class _MemoryDistillationEvalModule(Protocol):
         policy_profile: str,
         build_ref: str,
         output: Path,
+        development_only: bool,
+        repeats: int,
     ) -> Any | None: ...
 
 
@@ -501,6 +604,44 @@ async def _serve_worker(role: WorkerRole) -> None:
         async with build_schedule_worker() as schedule_service:
             await _run_worker_service(schedule_service)
         return
+    if role is WorkerRole.SURFACE:
+        async with build_surface_worker() as surface:
+            server = (
+                None
+                if surface.webhook_app is None
+                else uvicorn.Server(
+                    uvicorn.Config(
+                        surface.webhook_app,
+                        host=surface.bind_host,
+                        port=surface.bind_port,
+                        log_config=None,
+                        access_log=False,
+                    )
+                )
+            )
+            loop = asyncio.get_running_loop()
+
+            def stop_surface() -> None:
+                surface.worker.stop()
+                if server is not None:
+                    server.should_exit = True
+
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(signum, stop_surface)
+            draining = asyncio.create_task(surface.worker.run_forever())
+            serving = None if server is None else asyncio.create_task(server.serve())
+            try:
+                tasks = {draining} if serving is None else {draining, serving}
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                stop_surface()
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                for task in done:
+                    await task
+            finally:
+                stop_surface()
+        return
     async with build(storage="postgres") as composition:
         worker_id = f"{socket.gethostname()}:{os.getpid()}"
         service: WorkerService
@@ -541,12 +682,13 @@ def worker_command(
         typer.Option(
             "--role",
             help=(
-                "Process role: interactive, async, maintenance, schedule, notify, or legacy worker."
+                "Process role: interactive, async, maintenance, schedule, notify, "
+                "surface, or legacy worker."
             ),
         ),
     ] = WorkerRole.WORKER,
 ) -> None:
-    """Execute an interactive, async, maintenance, schedule, notify, or legacy worker role."""
+    """Execute an interactive, async, maintenance, schedule, notify, surface, or legacy role."""
 
     try:
         asyncio.run(_serve_worker(role))
@@ -1091,6 +1233,21 @@ def eval_memory_distillation(
             help="Full commit sha; resolved from CI or git HEAD when omitted.",
         ),
     ] = None,
+    development_only: Annotated[
+        bool,
+        typer.Option(
+            "--development-only",
+            help="Score the development corpus only; reads no holdout, publishes nothing.",
+        ),
+    ] = False,
+    repeats: Annotated[
+        int,
+        typer.Option(
+            "--repeats",
+            min=1,
+            help="Run the whole evaluation this many times and gate on the pooled aggregate.",
+        ),
+    ] = 1,
 ) -> None:
     """Compare formation@7, formation@8, and formation@9 on corpus v3."""
 
@@ -1107,6 +1264,8 @@ def eval_memory_distillation(
                 policy_profile=policy_profile,
                 build_ref=capability.resolve_build_ref(Path.cwd(), build_ref),
                 output=output,
+                development_only=development_only,
+                repeats=repeats,
             )
         )
     except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
@@ -1119,6 +1278,8 @@ def eval_memory_distillation(
     if not result.passed:
         typer.echo(f"memory-distillation evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
+    if result.development_only:
+        typer.echo("development-only run passed its gates; nothing was published", err=True)
 
 
 @eval_app.command("memory-benchmark")

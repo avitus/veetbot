@@ -556,17 +556,57 @@ def _higher_sensitivity(left: Sensitivity, right: Sensitivity) -> Sensitivity:
     return left if SENSITIVITY_ORDER[left] >= SENSITIVITY_ORDER[right] else right
 
 
+# A placeholder object ("an unspecified activity", "an organization") says
+# nothing recallable, and a claim generalized that far from a known belief
+# would replace the specific one under its key.
 _VACUOUS_STATEMENT = re.compile(
     r"\b(?:an?\s+)?(?:unspecified|unnamed|unknown|unstated|certain|various|some)\s+"
     r"(?:activity|activities|thing|things|hobby|hobbies|task|tasks|pursuit|pursuits)\b"
-    r"|\bsomething\b|\ban activity\b",
+    r"|\bsomething\b|\ban activity\b"
+    r"|\b(?:unspecified|unnamed|unstated|undisclosed)\b"
+    r"|\b(?:at|for|in|with|as|of)\s+an?\s+(?:organi[sz]ation|company|employer|firm|business"
+    r"|team|place|city|town|country|job|role|position|project|area|field|topic|subject"
+    r"|domain)$",
     re.IGNORECASE,
 )
+# A single occasion: a day, a part of one, or a duration measured in hours.
+_SINGLE_OCCASION = (
+    r"(?:yesterday|today|tonight|tomorrow"
+    r"|this\s+(?:morning|afternoon|evening|week|weekend)"
+    r"|last\s+(?:night|week|weekend|month)"
+    r"|the\s+(?:whole\s+|entire\s+)?weekend"
+    r"|(?:for|in|within|took)\s+(?:about\s+|roughly\s+|around\s+|nearly\s+|almost\s+)?"
+    r"(?:an?|one|two|three|four|five|six|several|a\s+few|a\s+couple\s+of|\d+)\s+"
+    r"(?:hours?|minutes?|days?))"
+)
+# A verb that begins a lasting state: what was adopted, joined, or started on
+# a date is still true afterwards.
+_LASTING_CHANGE_VERB = (
+    r"(?:started|began|restarted|resumed|moved|relocated|adopted|joined|became|got|gotten"
+    r"|bought|acquired|switched|enrolled|signed|launched|opened|founded|married|graduated"
+    r"|retired|quit|stopped|left|returned|settled|took\s+up|picked\s+up)"
+)
+# A completed one-off: a past-tense verb that is not a lasting change, with
+# a single occasion somewhere after it. The verb is any regular past tense or
+# a common irregular one rather than a list of chores, because the provider's
+# verb is whatever the user did.
 _TRANSIENT_EVENT = re.compile(
-    r"^User\s+(?:did|had|went|made|spent|took|ate|drank|watched|attended|visited|called"
-    r"|met|cleaned|washed|cooked|fixed|finished|bought)\b.*\b(?:for\s+(?:an?|\d+|one|two"
-    r"|three|four|five|several|a\s+few)\s+(?:hours?|minutes?|days?)|yesterday|today|tonight"
-    r"|this\s+(?:morning|afternoon|evening)|last\s+(?:night|week|weekend|month))\b",
+    r"^(?:User|(?:The user's|User's)\s+\S+)\s+(?:(?:just|recently|finally|also|then)\s+)?"
+    rf"(?!{_LASTING_CHANGE_VERB}\b)"
+    r"(?:\w{2,}ed|did|had|went|made|spent|took|ate|drank|saw|met|ran|swam|sat|slept|spoke"
+    r"|told|wrote|read|paid|sent|built|cut|hit|put|drove|flew|rode|caught|taught|brought"
+    r"|thought|felt|held|kept|lost|found|gave|came|fell|broke|chose|forgot|woke|stood|led"
+    r"|fed|shot|hung|hurt|set|let|won|dealt|sold|fought|lit|dug|struck|swung|swept|threw"
+    r"|drew|knew|grew|blew|wore|tore|rose|froze)\b"
+    rf".*\b{_SINGLE_OCCASION}\b",
+    re.IGNORECASE,
+)
+# An appointment due today is the same kind of occasion in the present tense.
+_SCHEDULED_OCCASION = re.compile(
+    r"^(?:User|(?:The user's|User's)\s+[^.]{1,40}?)\s+(?:is|are|has|have)\s+"
+    r"(?:(?:coming|arriving|visiting|due|scheduled|booked|meeting|seeing|flying|leaving"
+    r"|attending)\b|an?\s+\w+\s+(?:appointment|meeting|call|interview|flight|visit)\b)"
+    r".*\b(?:today|tonight|tomorrow|this\s+(?:morning|afternoon|evening))\b",
     re.IGNORECASE,
 )
 
@@ -595,7 +635,10 @@ def _canonical_provider_statement(
     # about the user; both are counted as rejections, never stored.
     if _VACUOUS_STATEMENT.search(compact) is not None:
         raise ValueError("provider statement has no recallable content")
-    if derivation is MemoryDerivation.DIRECT and _TRANSIENT_EVENT.match(compact) is not None:
+    if derivation is MemoryDerivation.DIRECT and (
+        _TRANSIENT_EVENT.match(compact) is not None
+        or _SCHEDULED_OCCASION.match(compact) is not None
+    ):
         raise ValueError("provider statement records a transient event")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None
     if derivation is MemoryDerivation.DIRECT and hedged:
@@ -1565,11 +1608,24 @@ class NemoriAssistedCandidateExtractor:
             "include ongoing activities; do not require a timeless identity statement. When the "
             "evidence supports a useful inference without stating it, store it as a hypothesis "
             "whose statement uses uncertainty language such as likely or may; a direct statement "
-            "never hedges. Do not reject a claim merely because it is ambiguous, inferred, "
+            "never hedges. An activity that takes a skill the user has not stated is such an "
+            "inference: building an app implies software-development experience, rebuilding "
+            "an engine implies mechanical experience, keeping bees implies beekeeping "
+            "knowledge; add one hypothesis naming that experience beside the direct claim "
+            "about the activity. Name the underlying skill (translating letters from Polish: "
+            "User likely reads Polish), never the activity restated as experience; add no "
+            "hypothesis for an activity the user is only starting or learning, and none that "
+            "repeats what a direct claim already states (coordinating volunteers is the role "
+            "itself, not evidence of separate experience). "
+            "Do not reject a claim merely because it is ambiguous, inferred, "
             "ongoing, or sensitive. Facts embedded in a question are evidence, not merely a "
-            "one-turn request. Split enumerated activities into one claim each and preserve "
-            "stated frequency, schedule, duration, current status, history, and uncertainty "
-            "inside the statement. Create one candidate per distinct subject and claim, and "
+            "one-turn request. Split enumerated activities into one claim each, each carrying "
+            "the frequency the user gave as its own (I hike, climb, or paddle most weekends: "
+            "User hikes most weekends; User climbs most weekends; User paddles most weekends), "
+            "one claim per listed activity with none omitted and never a description of the "
+            "list, and preserve stated frequency, schedule, "
+            "duration, current status, history, and uncertainty inside the statement. Create "
+            "one candidate per distinct subject and claim, and "
             "name the subject as the specific thing the claim is about, never the user. Account "
             "for every supplied coverage_unit exactly once and in order. Use formed with "
             "zero-based candidate_indexes for units that support new candidates; use represented "
@@ -1585,7 +1641,15 @@ class NemoriAssistedCandidateExtractor:
             "user does, has, wants, or prefers (User swims most days; User prefers metric "
             "units; User has a daughter), never as a description of a routine, goal, "
             "preference, or resource (not: the user's routine includes swimming; the user's "
-            "goal is to; the user's preference is to). Name every activity: a claim with no "
+            "goal is to; the user's preference is to). State each claim in the fewest words "
+            "that keep it: leave out a detail that merely accompanies the claim (User has a "
+            "daughter, not User has a daughter who plays chess; User has a cat, not User "
+            "adopted a cat in March), while keeping a frequency, schedule, duration, status, "
+            "or history that is the claim itself; a thing the user owns or a person in their "
+            "life named in passing is its own claim (my old Land Rover: User has an old Land "
+            "Rover). Emit one candidate per claim, never two "
+            "wordings of one claim, and keep the several objects of one activity together "
+            "(collects stamps and coins is one claim). Name every activity: a claim with no "
             "object is not memory. Set proposed_scope to the supplied "
             "scope. When the user states that something previously true no longer holds "
             "(no longer, stopped, gave up, don't anymore), emit it with polarity retract, "

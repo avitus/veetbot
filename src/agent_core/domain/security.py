@@ -30,6 +30,15 @@ SECRET_RULES: dict[str, re.Pattern[str]] = {
         r"(?i)\b(?:[A-Z0-9_]*(?:secret|token|password|api_?key)[A-Z0-9_]*)\s*=\s*"
         r"[\"'][^\"'\n]{13,}[\"']"
     ),
+    "telegram_bot_token": re.compile(r"\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b"),
+    "whatsapp_access_token": re.compile(r"\bEA[A-Za-z0-9_-]{30,}\b"),
+    "whatsapp_app_secret": re.compile(
+        r"(?i)\b(?:whatsapp[_ -]?)?app[_ -]?secret\s*[:=]\s*[a-f0-9]{32,64}\b"
+    ),
+    "whatsapp_verify_token": re.compile(
+        r"(?i)\b(?:whatsapp[_ -]?)?verify[_ -]?token\s*[:=]\s*"
+        r"[A-Za-z0-9._~+/=-]{16,}\b"
+    ),
 }
 
 _LABELED_CREDENTIAL = re.compile(

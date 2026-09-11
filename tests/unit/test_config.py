@@ -324,6 +324,151 @@ def test_device_channel_flags_load_together() -> None:
     assert settings.device_sms_enabled is True
 
 
+def test_surface_roles_and_whatsapp_default_off() -> None:
+    settings = load_settings(base_environment())
+
+    assert settings.surface_api_enabled is False
+    assert settings.surface_worker_enabled is False
+    assert settings.surface_whatsapp_enabled is False
+    assert settings.surface_telegram_token is None
+    assert settings.surface_whatsapp_token is None
+    assert settings.surface_whatsapp_app_secret is None
+    assert settings.surface_whatsapp_verify_token is None
+
+
+@pytest.mark.parametrize(
+    ("enabled", "disabled"),
+    [
+        ("AGENT_SURFACE_API_ENABLED", "AGENT_SURFACE_WORKER_ENABLED"),
+        ("AGENT_SURFACE_WORKER_ENABLED", "AGENT_SURFACE_API_ENABLED"),
+    ],
+)
+def test_surface_roles_must_change_together(enabled: str, disabled: str) -> None:
+    with pytest.raises(ConfigurationError, match="surface API and worker"):
+        load_settings(
+            {
+                **base_environment(),
+                enabled: "1",
+                disabled: "0",
+            }
+        )
+
+
+def test_whatsapp_requires_both_surface_roles() -> None:
+    with pytest.raises(ConfigurationError, match="WhatsApp requires surface"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_SURFACE_WHATSAPP_ENABLED": "1",
+            }
+        )
+
+
+def test_surface_worker_loads_dedicated_private_secrets_without_api_credentials(
+    tmp_path: Path,
+) -> None:
+    telegram = tmp_path / "telegram-token"
+    whatsapp = tmp_path / "whatsapp-token"
+    app_secret = tmp_path / "whatsapp-app-secret"
+    verify_token = tmp_path / "whatsapp-verify-token"
+    for path, value in (
+        (telegram, "telegram-test-token-with-at-least-32-chars"),
+        (whatsapp, "whatsapp-test-token-with-at-least-32-chars"),
+        (app_secret, "whatsapp-test-secret-with-at-least-32-chars"),
+        (verify_token, "whatsapp-test-verify-with-at-least-32-chars"),
+    ):
+        path.write_text(value, encoding="ascii")
+        path.chmod(0o600)
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TENANT_ID": "tenant-a",
+        "AUTH_PRINCIPAL_ID": "surface-worker",
+        "AUTH_SCOPES": "surface.read,surface.write",
+        "AGENT_SURFACE_API_ENABLED": "1",
+        "AGENT_SURFACE_WORKER_ENABLED": "1",
+        "AGENT_SURFACE_WHATSAPP_ENABLED": "1",
+        "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(telegram),
+        "AGENT_SURFACE_WHATSAPP_TOKEN_FILE": str(whatsapp),
+        "AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE": str(app_secret),
+        "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE": str(verify_token),
+        "AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID": "15551234567",
+        "AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION": "v23.0",
+        "OPENAI_API_KEY": "must-not-enter-the-surface-worker",
+    }
+
+    settings = config_module.load_surface_worker_settings(values)
+
+    assert settings.auth_token is None
+    assert settings.credentials == {}
+    assert settings.surface_telegram_token is not None
+    assert settings.surface_whatsapp_token is not None
+    assert settings.surface_whatsapp_app_secret is not None
+    assert settings.surface_whatsapp_verify_token is not None
+    assert settings.surface_whatsapp_phone_number_id == "15551234567"
+    assert settings.surface_whatsapp_graph_api_version == "v23.0"
+    assert "whatsapp-test-token" not in repr(settings)
+
+
+def test_surface_worker_accepts_telegram_only_and_refuses_default_off(tmp_path: Path) -> None:
+    from agent_core.bootstrap import _validate_surface_role
+
+    telegram = tmp_path / "telegram-token"
+    telegram.write_text("123456789:" + "telegram-test-token-value", encoding="ascii")
+    telegram.chmod(0o600)
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TENANT_ID": "tenant-a",
+        "AUTH_PRINCIPAL_ID": "surface-worker",
+        "AUTH_SCOPES": "run.write,surface.read,surface.write",
+        "AGENT_SURFACE_API_ENABLED": "1",
+        "AGENT_SURFACE_WORKER_ENABLED": "1",
+        "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(telegram),
+    }
+
+    settings = config_module.load_surface_worker_settings(values)
+    principal = _validate_surface_role(settings)
+
+    assert principal.tenant_id == "tenant-a"
+    assert settings.surface_whatsapp_enabled is False
+    assert settings.surface_whatsapp_token is None
+    with pytest.raises(ConfigurationError, match="surface API and worker"):
+        _validate_surface_role(replace(settings, surface_api_enabled=False))
+
+
+@pytest.mark.parametrize("unsafe", ["relative", "symlink", "permissive"])
+def test_surface_worker_secret_files_must_be_absolute_regular_and_private(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe: str,
+) -> None:
+    token = tmp_path / "telegram-token"
+    token.write_text("telegram-test-token-with-at-least-32-chars", encoding="ascii")
+    token.chmod(0o600)
+    configured = token
+    if unsafe == "relative":
+        monkeypatch.chdir(tmp_path)
+        configured = Path(token.name)
+    elif unsafe == "symlink":
+        configured = tmp_path / "telegram-token-link"
+        configured.symlink_to(token)
+    else:
+        token.chmod(0o640)
+
+    with pytest.raises(ConfigurationError, match="AGENT_SURFACE_TELEGRAM_TOKEN_FILE"):
+        config_module.load_surface_worker_settings(
+            {
+                **base_environment(),
+                "AGENT_SURFACE_API_ENABLED": "1",
+                "AGENT_SURFACE_WORKER_ENABLED": "1",
+                "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(configured),
+            }
+        )
+
+
 def test_device_channel_limits_are_versioned_knobs() -> None:
     loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
 
@@ -332,6 +477,20 @@ def test_device_channel_limits_are_versioned_knobs() -> None:
         "ingest_daily_cap": 500,
         "invocation_poll_seconds": 2,
     }
+
+
+def test_terminal_schedule_retention_is_a_versioned_policy() -> None:
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert (
+        loaded["scheduling"]
+        | {
+            "terminal_retention_days": 30,
+            "terminal_purge_interval_seconds": 3600,
+            "terminal_purge_batch": 100,
+        }
+        == loaded["scheduling"]
+    )
 
 
 def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
@@ -951,13 +1110,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_164_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_167_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 164
+    assert len(qualified_paths) == 167
+    assert {
+        "runtime/limits.yaml:scheduling.terminal_retention_days",
+        "runtime/limits.yaml:scheduling.terminal_purge_interval_seconds",
+        "runtime/limits.yaml:scheduling.terminal_purge_batch",
+    } <= qualified_paths
     assert {
         "runtime/limits.yaml:device.invocation_timeout_seconds",
         "runtime/limits.yaml:device.ingest_daily_cap",

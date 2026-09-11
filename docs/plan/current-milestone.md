@@ -37,7 +37,8 @@ title: Current Milestone
   [adaptive-memory-distillation.md](adaptive-memory-distillation.md) with
   thirty-one gates and is a sixth parallel workstream, adding integrated
   episodes, high-recall direct and hypothesis formation, and evidence-based
-  forgetting. Milestone 22 — the persona surface and curated belief
+  forgetting; ADR-0090 widens its existing source-grounding gate to attributed
+  communication without changing the gate count. Milestone 22 — the persona surface and curated belief
   promotion — is specified by [persona-surface.md](persona-surface.md) with
   fourteen gates and is a seventh parallel workstream, adding an owner-edited
   trusted prefix row that a formed belief reaches only through explicit
@@ -45,7 +46,9 @@ title: Current Milestone
   specified by [scheduling.md](scheduling.md) with twelve gates and is an eighth
   parallel workstream, adding summary-only discovery and approval-gated update,
   pause, resume, and terminal cancellation through the existing schedule
-  service.
+  service. ADR-0089 separately authorizes current/recent-history native
+  browsing and thirty-day maintenance retention for terminal schedule-owned
+  state without adding a milestone or conversational deletion tool.
   Milestone 24 — SMS through the owner's iPhone — is specified by
   [device-channel-and-sms.md](device-channel-and-sms.md) with twelve gates
   and is a ninth parallel workstream on the same terms and is in progress,
@@ -76,6 +79,8 @@ title: Current Milestone
   the verified ceiling. Milestone 23, conversational schedule lifecycle, was
   authorized on 2026-09-02 as an eighth (ADR-0080) on the same terms and
   expanded to conversational definition update on 2026-09-04 (ADR-0088).
+  The owner authorized ADR-0089's non-milestone schedule history and retention
+  extension on 2026-09-10.
   Milestone 24, SMS through the owner's iPhone, was authorized on
   2026-08-26 as a ninth (ADR-0081), and Milestone 25, the WhatsApp
   business surface, on 2026-08-26 as a tenth (ADR-0082), on the same
@@ -234,7 +239,8 @@ gates for calendar recurrence and recurring conversational creation.
 Milestone 21's
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and ADR-0077
 add thirty-one `gate.memory.*` entries for integrated episodes, high-recall
-formation, evidence-based forgetting, comparative evidence, and activation.
+formation, evidence-based forgetting, comparative evidence, activation, and
+the attributed-communication widening of their source-grounding gate.
 Milestone 22's [persona-surface.md](persona-surface.md) and ADR-0079 landed
 with that milestone's authorization on 2026-09-01, adding fourteen
 `gate.persona.*` entries in a new area of their own for the trusted persona
@@ -333,7 +339,8 @@ contract is its six new `gate.schedule.*` entries plus the plan's acceptance
 criteria and the same scheduling design.
 Milestone 21's contract is its thirty-one new `gate.memory.*` entries plus the
 plan's acceptance criteria and the
-[adaptive-memory-distillation design](adaptive-memory-distillation.md).
+[adaptive-memory-distillation design](adaptive-memory-distillation.md), including
+ADR-0090's attributed-communication amendment to source grounding.
 Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
 plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 

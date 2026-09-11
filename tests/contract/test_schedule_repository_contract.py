@@ -15,6 +15,8 @@ from agent_core.domain.runs import RunLimits
 from agent_core.domain.schedules import (
     DailyCadence,
     Schedule,
+    ScheduleCursor,
+    SchedulePauseReason,
     ScheduleRevision,
     ScheduleState,
 )
@@ -29,15 +31,17 @@ def schedule(
     schedule_id: UUID = SCHEDULE_ID,
     next_fire_at: datetime | None = NOW,
     updated_at: datetime = NOW,
+    state: ScheduleState = ScheduleState.ACTIVE,
 ) -> Schedule:
     return Schedule(
         id=schedule_id,
         tenant_id=TENANT,
         principal_id=PRINCIPAL_ID,
-        state=ScheduleState.ACTIVE,
+        state=state,
+        pause_reason=(SchedulePauseReason.USER if state is ScheduleState.PAUSED else None),
         current_revision=1,
         next_fire_at=next_fire_at,
-        created_at=NOW,
+        created_at=min(NOW, updated_at),
         updated_at=updated_at,
     )
 
@@ -114,6 +118,87 @@ async def assert_schedule_repository_lists_and_finds_due_definitions_determinist
     assert await repository.due(NOW, 10) == [SCHEDULE_ID, later_id]
     assert await repository.next_fire_at() == NOW
     assert await repository.due(NOW - timedelta(microseconds=1), 10) == []
+
+
+async def assert_schedule_repository_filters_lifecycle_states_before_paginating(
+    repository: ScheduleRepository,
+) -> None:
+    active_id = SCHEDULE_ID
+    paused_id = UUID(int=SCHEDULE_ID.int + 1)
+    completed_id = UUID(int=SCHEDULE_ID.int + 2)
+    cancelled_id = UUID(int=SCHEDULE_ID.int + 3)
+    for index, (schedule_id, state) in enumerate(
+        (
+            (active_id, ScheduleState.ACTIVE),
+            (paused_id, ScheduleState.PAUSED),
+            (completed_id, ScheduleState.COMPLETED),
+            (cancelled_id, ScheduleState.CANCELLED),
+        )
+    ):
+        await repository.create(
+            schedule(
+                schedule_id=schedule_id,
+                next_fire_at=NOW if state is ScheduleState.ACTIVE else None,
+                updated_at=NOW + timedelta(seconds=index),
+                state=state,
+            ),
+            revision(schedule_id),
+        )
+
+    current = await repository.list(
+        principal(),
+        limit=1,
+        states=frozenset({ScheduleState.ACTIVE, ScheduleState.PAUSED}),
+    )
+    assert [item.id for item in current] == [paused_id]
+    current_tail = await repository.list(
+        principal(),
+        limit=1,
+        cursor=ScheduleCursor(updated_at=current[0].updated_at, id=current[0].id),
+        states=frozenset({ScheduleState.ACTIVE, ScheduleState.PAUSED}),
+    )
+    assert [item.id for item in current_tail] == [active_id]
+
+    history = await repository.list(
+        principal(),
+        limit=10,
+        states=frozenset({ScheduleState.COMPLETED, ScheduleState.CANCELLED}),
+    )
+    assert [item.id for item in history] == [cancelled_id, completed_id]
+
+
+async def assert_schedule_repository_purges_only_expired_terminal_records(
+    repository: ScheduleRepository,
+) -> None:
+    expired_completed_id = SCHEDULE_ID
+    expired_cancelled_id = UUID(int=SCHEDULE_ID.int + 1)
+    recent_cancelled_id = UUID(int=SCHEDULE_ID.int + 2)
+    old_active_id = UUID(int=SCHEDULE_ID.int + 3)
+    cutoff = NOW
+    for schedule_id, state, updated_at in (
+        (expired_completed_id, ScheduleState.COMPLETED, NOW - timedelta(days=2)),
+        (expired_cancelled_id, ScheduleState.CANCELLED, NOW - timedelta(days=1)),
+        (recent_cancelled_id, ScheduleState.CANCELLED, NOW + timedelta(microseconds=1)),
+        (old_active_id, ScheduleState.ACTIVE, NOW - timedelta(days=3)),
+    ):
+        await repository.create(
+            schedule(
+                schedule_id=schedule_id,
+                next_fire_at=NOW if state is ScheduleState.ACTIVE else None,
+                updated_at=updated_at,
+                state=state,
+            ),
+            revision(schedule_id),
+        )
+    assert await repository.purge_terminal(TENANT, before=cutoff, limit=1) == 1
+    with pytest.raises(NotFoundError):
+        await repository.get(expired_completed_id, principal())
+    assert await repository.purge_terminal(TENANT, before=cutoff, limit=10) == 1
+    with pytest.raises(NotFoundError):
+        await repository.get(expired_cancelled_id, principal())
+    assert await repository.get(recent_cancelled_id, principal())
+    assert await repository.get(old_active_id, principal())
+    assert await repository.purge_terminal(TENANT, before=cutoff, limit=10) == 0
 
 
 async def assert_schedule_repository_locks_and_advances_one_due_definition(
@@ -200,3 +285,35 @@ async def test_schedule_repository_mutates_state_and_revisions_with_cas() -> Non
 
 async def test_schedule_repository_batches_owned_revisions() -> None:
     await assert_schedule_repository_batches_owned_revisions(InMemoryScheduleRepository())
+
+
+async def test_schedule_repository_filters_lifecycle_states_before_paginating() -> None:
+    await assert_schedule_repository_filters_lifecycle_states_before_paginating(
+        InMemoryScheduleRepository()
+    )
+
+
+async def test_schedule_repository_purges_only_expired_terminal_records() -> None:
+    await assert_schedule_repository_purges_only_expired_terminal_records(
+        InMemoryScheduleRepository()
+    )
+
+
+async def test_in_memory_terminal_purge_is_tenant_scoped() -> None:
+    repository = InMemoryScheduleRepository()
+    foreign_terminal_id = UUID(int=SCHEDULE_ID.int + 4)
+    foreign_principal = principal().model_copy(
+        update={"tenant_id": "tenant-b", "principal_id": "principal-b"}
+    )
+    await repository.create(
+        schedule(
+            schedule_id=foreign_terminal_id,
+            next_fire_at=None,
+            updated_at=NOW - timedelta(days=4),
+            state=ScheduleState.COMPLETED,
+        ).model_copy(update={"tenant_id": "tenant-b", "principal_id": "principal-b"}),
+        revision(foreign_terminal_id).model_copy(update={"created_by_principal_id": "principal-b"}),
+    )
+
+    assert await repository.purge_terminal(TENANT, before=NOW, limit=10) == 0
+    assert await repository.get(foreign_terminal_id, foreign_principal)

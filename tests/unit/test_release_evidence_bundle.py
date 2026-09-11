@@ -244,8 +244,8 @@ def test_bundled_build_refs_are_commits_this_tree_descends_from() -> None:
         )
 
 
-def test_no_formation9_artifact_ships_until_the_scorer_change_is_re_evaluated() -> None:
-    """The scorer moved to distillation-scorer@5; the @2 artifact was withdrawn."""
+def test_bundled_formation9_evidence_carries_the_scorer_this_tree_ships() -> None:
+    """An artifact scored by an older scorer cannot certify this tree's numbers."""
 
     for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
         evidence = load_memory_release_evidence(path)

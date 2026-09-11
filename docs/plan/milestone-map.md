@@ -1382,9 +1382,10 @@ precedence.
 31  gate.memory.provider_policy_precedence          case         21
 ```
 
-Gates 4, 12, and 24 are properties because causal blinding, source ownership,
-and exact tuple activation quantify over generated prefixes, event identities,
-and tuple differences. Gates 1, 3, 10, 21, 22, and 26 are structural because
+Gates 4, 12, and 24 are properties because causal blinding, typed source
+admission and attribution, and exact tuple activation quantify over generated
+prefixes, event identities, event shapes, and tuple differences. Gates 1, 3,
+10, 21, 22, and 26 are structural because
 they inspect frozen controls, both repositories against one contract, closed
 schemas, migrations, and the checked-in corpus and its seed pool. The remaining
 twenty-two are boundary cases over provider orchestration, formation, lifecycle,
@@ -1586,7 +1587,8 @@ milestone  new gates  cumulative  the earliest of them
                                   evidence-based forgetting and activation,
                                   honest scoring, seeded evaluation, fallback
                                   restraint, verified coverage, segmentation,
-                                  the repaired provider control
+                                  the repaired provider control, attributed
+                                  communication sources
 22                14         408  the persona row, its cap and pinning,
                                   human-only promotion, durable decline,
                                   snapshot de-duplication, exact scopes

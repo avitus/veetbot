@@ -1048,6 +1048,14 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert productbuild_index < package_command.index("pkgutil --check-signature")
     assert '--file "$pkg_path"' in upload_command
     assert "--type macos" in upload_command
+    # altool retries a rejected upload part without limit, so the step bounds
+    # the upload itself; CircleCI's no-output timeout never fires while the
+    # retry loop keeps logging.
+    assert "upload_timeout_secs=900" in upload_command
+    assert 'kill -0 "$altool_pid"' in upload_command
+    assert 'kill -TERM "$altool_pid"' in upload_command
+    assert "exit 124" in upload_command
+    assert 'wait "$altool_pid"' in upload_command
     assert '--apiKey "$APP_STORE_CONNECT_API_KEY_ID"' in upload_command
     assert '--apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"' in upload_command
     assert '--p8-file-path "$asc_auth_file"' in upload_command
@@ -1796,19 +1804,38 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     scheduled_units = ["veetbot-schedule", *units]
     notification_units = ["veetbot-notify", *units]
     scheduled_notification_units = ["veetbot-notify", *scheduled_units]
-    for argv in (units, scheduled_units, notification_units, scheduled_notification_units):
+    surface_units = ["veetbot-surface", *units]
+    scheduled_surface_units = ["veetbot-surface", *scheduled_units]
+    notification_surface_units = ["veetbot-surface", *notification_units]
+    all_optional_units = ["veetbot-surface", *scheduled_notification_units]
+    for argv in (
+        units,
+        scheduled_units,
+        notification_units,
+        scheduled_notification_units,
+        surface_units,
+        scheduled_surface_units,
+        notification_surface_units,
+        all_optional_units,
+    ):
         assert f"/usr/bin/systemctl enable --now {' '.join(argv)}" in specs
         assert f"/usr/bin/systemctl restart {' '.join(argv)}" in specs
-    for unit in [*scheduled_units, "veetbot-notify"]:
+    for unit in [*scheduled_units, "veetbot-notify", "veetbot-surface"]:
         assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
         assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
     assert "/usr/bin/systemctl daemon-reload" in specs
     assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
     assert "/usr/bin/systemctl disable --now veetbot-notify" in specs
+    assert "/usr/bin/systemctl disable --now veetbot-surface" in specs
     assert (
         "/usr/bin/install -m 0644 "
         "/opt/veetbot/releases/*/.veetbot-notify.service "
         "/etc/systemd/system/veetbot-notify.service"
+    ) in specs
+    assert (
+        "/usr/bin/install -m 0644 "
+        "/opt/veetbot/releases/*/.veetbot-surface.service "
+        "/etc/systemd/system/veetbot-surface.service"
     ) in specs
 
     used = set()

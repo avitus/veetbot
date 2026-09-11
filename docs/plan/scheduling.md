@@ -16,7 +16,9 @@ conversational bridge, ADR-0073 records the calendar-recurrence extension,
 ADR-0075 records the transport-only Apple inspection surface, and ADR-0080
 records the conversational lifecycle extension. ADR-0088 records the owner's
 2026-09-04 expansion of that extension to conversational content and cadence
-updates.
+updates. ADR-0089 records the owner's 2026-09-10 authorization of a
+current/history split, thirty-day terminal retention, and conditional
+time-zone presentation.
 
 The scheduling entry condition is satisfied: PostgreSQL-backed on-demand runs,
 leases, fencing, checkpoints, recovery, cancellation, and the public run API
@@ -59,12 +61,14 @@ service operations into the governed model-tool pipeline. The owner expanded
 Milestone 23 on 2026-09-04 through ADR-0088: `schedule.update` adds a closed,
 approval-gated title, instruction, and cadence patch while the application
 service preserves hidden authority and execution fields. Occurrence and run
-listing and hard deletion remain outside that extension.
+listing and user- or model-initiated hard deletion remain outside that
+extension. ADR-0089 separately authorizes maintenance deletion of terminal
+schedule-owned state after its retention window.
 
 The owner authorized a native Apple schedule browser on 2026-08-29. It reuses
-the existing Milestone 11 list and point-read routes and therefore adds no
-milestone, gate, API route, scope, feature flag, or persistence behavior. Its
-client contract is specified below.
+the existing Milestone 11 list and point-read routes. On 2026-09-10 the owner
+authorized its current/history split and the corresponding terminal-retention
+policy under ADR-0089. The client contract is specified below.
 
 ## The boundary: a scheduler creates runs; it does not execute them
 
@@ -510,6 +514,10 @@ again.
 
 `PATCH`, pause, resume, and delete require `expected_revision` and apply the
 state rules above. List routes use opaque stable cursors and bounded limits.
+`GET /v1/schedules` also accepts an optional repeated `state` parameter drawn
+from the closed schedule-state enum. Omission lists every retained state for
+backward compatibility; supplied states are applied in the principal-scoped
+repository query before cursor comparison and limiting.
 Cross-tenant or cross-principal access returns the same not-found envelope as
 the existing API. Every route declares its required schedule scope in OpenAPI.
 
@@ -528,12 +536,13 @@ beside Memory in the native sidebar opens a list/detail sheet. Presentation
 reloads page one from the server; the client holds only a discardable view
 cache and never computes a schedule's next occurrence locally.
 
-The list calls `GET /v1/schedules` with a bounded limit and the server's opaque
-cursor. It displays every returned lifecycle state rather than hiding terminal
-records: ACTIVE, PAUSED, COMPLETED, CANCELLED, or a future unknown value. Each
-row contains the title, a text-labeled state, a human-readable cadence summary,
-`next_fire_at` when present, and the server-provided `instruction_preview`.
-The preview remains bounded and is never promoted to the complete instruction.
+The default Current section calls `GET /v1/schedules` with repeated ACTIVE and
+PAUSED state filters, a bounded limit, and the server's opaque cursor. The
+user-selected Recent History section uses the same route with COMPLETED and
+CANCELLED filters. Each row contains the title, a text-labeled state, a
+human-readable cadence summary, `next_fire_at` when present, and the
+server-provided `instruction_preview`. The preview remains bounded and is
+never promoted to the complete instruction.
 
 Following a row calls `GET /v1/schedules/{schedule_id}`. Only that authorized
 point read supplies the complete instruction. Detail displays the server's
@@ -545,14 +554,20 @@ list and point reads, the detail shows the ordinary not-found failure and a
 retry affordance; it does not reinterpret the result as version skew.
 
 The client models state and cadence kind as raw strings with typed known-case
-accessors. Unknown values render by replacing separators with spaces and
-capitalizing the result. Known cadence summaries are:
+accessors. Any unknown value returned by a compatible server renders by
+replacing separators with spaces and capitalizing the result. Known cadence
+summaries are:
 
 - ONCE: the absolute `at` instant;
-- DAILY: the local time and IANA zone;
-- WEEKLY: ISO weekday names, local time, and zone;
-- MONTHLY: numbered days and explicit last day, local time, and zone;
-- YEARLY: month/day selectors, local time, and zone.
+- DAILY: the local time;
+- WEEKLY: ISO weekday names and local time;
+- MONTHLY: numbered days, explicit last day, and local time;
+- YEARLY: month/day selectors and local time.
+
+For every recurring cadence, the summary appends the stored IANA zone only
+when it differs from the device's current zone. This is presentation only: the
+wire model retains the zone and the server remains authoritative for
+recurrence and daylight-saving-time behavior.
 
 List pagination shares the native client's established safeguards: duplicate
 schedule IDs are ignored, a repeated cursor terminates paging, stale page
@@ -565,9 +580,8 @@ The surface is read-only. It has no create, update, pause, resume, cancel,
 delete, occurrence, or run-history control and therefore needs only the
 existing `schedule.read` scope. Swift transport, model, view-model, structure,
 and in-process iOS navigation tests are the acceptance evidence under
-ADR-0049's native verification contract. This client-only extension adds no
-registered Python gate and does not alter the historical Milestone 11 or
-Milestone 20 gate counts.
+ADR-0049's native verification contract. The current/history extension adds no
+route or scope and does not alter the historical milestone gate counts.
 
 ## Events and audit
 
@@ -609,7 +623,15 @@ The application layer owns these provider-neutral ports:
 class ScheduleRepository(Protocol):
     async def create(self, schedule: Schedule, revision: ScheduleRevision) -> Schedule: ...
     async def get(self, schedule_id: UUID, principal: Principal) -> Schedule: ...
-    async def list(self, principal: Principal, page: Page) -> Page[Schedule]: ...
+    async def list(
+        self,
+        principal: Principal,
+        page: Page,
+        states: frozenset[ScheduleState] | None = None,
+    ) -> Page[Schedule]: ...
+    async def purge_terminal(
+        self, tenant_id: str, before: datetime, limit: int
+    ) -> int: ...
     async def mutate(self, command: ScheduleCommand) -> Schedule: ...
     async def due(self, now: datetime, limit: int) -> list[UUID]: ...
     async def next_fire_at(self) -> datetime | None: ...
@@ -729,9 +751,10 @@ schedule_idempotency_keys
 
 Indexes support `(state, next_fire_at)` for active due scans,
 `(tenant_id, principal_id, updated_at, id)` for listing, and
-`(schedule_id, nominal_fire_at DESC)` for occurrence history. A partial unique
-index on non-null `run_id` makes one durable run link belong to at most one
-occurrence. Revision
+`(schedule_id, nominal_fire_at DESC)` for occurrence history. A partial
+`(tenant_id, updated_at, id)` index over COMPLETED and CANCELLED rows supports retention
+sweeps. A partial unique index on non-null `run_id` makes one durable run link
+belong to at most one occurrence. Revision
 definitions use the same canonical JSON rules as versioned agent and policy
 records. Database constraints enforce state/pause-reason consistency and the
 occurrence disposition's nullable-field rules.
@@ -753,6 +776,15 @@ events remain for the configured operational retention period; erased session
 or run content does not. The links never cascade from a session into schedule
 history.
 
+The maintenance role periodically selects at most
+`scheduling.terminal_purge_batch` schedules in COMPLETED or CANCELLED state
+whose terminal `updated_at` is at least
+`scheduling.terminal_retention_days` old. A transaction-scoped advisory lock
+and `FOR UPDATE SKIP LOCKED` make the hourly sweep safe across a fleet. The
+transaction deletes schedule idempotency rows, occurrences, revisions, and the
+schedule in dependency order. It never deletes the linked sessions or runs;
+content-free process events remain under the event-log retention contract.
+
 ## Configuration and deployment
 
 Scheduling is default-off through `AGENT_SCHEDULE_API_ENABLED=0` and
@@ -765,7 +797,9 @@ Scheduling is default-off through `AGENT_SCHEDULE_API_ENABLED=0` and
 - at least one async worker slot and one interactive reserved slot;
 - finite tenant ceilings for timeout, per-run cost, active runs, rate, daily
   cost, and monthly cost;
-- a positive scan batch, fallback poll interval, and admission backoff.
+- a positive scan batch, fallback poll interval, and admission backoff;
+- positive terminal-retention days, purge interval, and purge batch. The
+  shipped values are 30 days, 3,600 seconds, and 100 records.
 
 The API, interactive worker, async worker, and schedule worker are separate
 roles in production. Interactive and async workers claim disjoint configured
@@ -941,10 +975,11 @@ with no future instant returns a stable non-retryable argument/not-found
 failure and never changes another schedule.
 
 Conversational “delete” is deliberately implemented by `schedule.cancel`.
-Cancellation is terminal, preserves the schedule and occurrence ledger for
-audit, stops future occurrences, and does not cancel an occurrence's already
-materialized run. Resume preserves the existing no-backfill rule: it chooses
-the first occurrence strictly after the current instant.
+Cancellation is terminal, preserves the schedule and occurrence ledger during
+the configured retention window, stops future occurrences, and does not cancel
+an occurrence's already materialized run. Resume preserves the existing
+no-backfill rule: it chooses the first occurrence strictly after the current
+instant.
 
 `schedule.update` accepts the same stable identity fields plus a closed patch:
 

@@ -45,6 +45,29 @@ import Testing
 
         #expect(identity.displayName == "Version 0.1.1 (2)")
     }
+
+    @Test
+    func testConnectionActionIsScopedToConnectionCard() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Veetbot/Views/ConnectionSettingsView.swift"
+            ),
+            encoding: .utf8
+        )
+        let connectionStart = try #require(source.range(of: "case .connection:"))
+        let websiteAccessStart = try #require(source.range(of: "case .websiteAccess:"))
+        let actionBarStart = try #require(source.range(of: "private var actionBar:"))
+        let closeStart = try #require(source.range(of: "private func close()"))
+        let connectionSection = source[connectionStart.lowerBound..<websiteAccessStart.lowerBound]
+        let actionBar = source[actionBarStart.lowerBound..<closeStart.lowerBound]
+
+        #expect(connectionSection.contains("connectionAction"))
+        #expect(!actionBar.contains("saveConnection()"))
+    }
 }
 
 #if os(macOS)

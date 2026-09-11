@@ -39,6 +39,7 @@ from agent_core.application.services import (
     RunService,
     ScheduleService,
     SessionService,
+    SurfaceService,
 )
 from agent_core.config import Settings
 from agent_core.domain.agents import Principal
@@ -74,6 +75,7 @@ from agent_core.domain.schedules import (
     ScheduleRecord,
     ScheduleState,
 )
+from agent_core.domain.surfaces import Pairing
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -165,6 +167,9 @@ class ApplicationServices(Protocol):
 
     @property
     def notifications(self) -> NotificationService: ...
+
+    @property
+    def surfaces(self) -> SurfaceService: ...
 
     @property
     def memory(self) -> MemoryReadService: ...
@@ -271,6 +276,13 @@ class ExpectedScheduleRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_revision: int = Field(ge=1)
+
+
+class CreatePairingCodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    granted_scopes: frozenset[str] = Field(min_length=1)
+    label: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class DeviceRegistrationRequest(BaseModel):
@@ -1051,9 +1063,15 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.read")],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
+        state: Annotated[list[ScheduleState] | None, Query()] = None,
     ) -> Page[ScheduleListItem]:
         try:
-            page = await services.schedules.list(authenticated, limit, cursor)
+            page = await services.schedules.list(
+                authenticated,
+                limit,
+                cursor,
+                states=None if state is None else frozenset(state),
+            )
         except ValueError as exc:
             raise MalformedRequestError("schedule cursor is malformed") from exc
         return Page(
@@ -1142,6 +1160,102 @@ def create_app(
 
     if settings.schedule_api_enabled:
         app.include_router(schedule_router)
+
+    surface_router = APIRouter()
+
+    @surface_router.get(
+        "/v1/surfaces",
+        openapi_extra={"required_scope": "surface.read"},
+    )
+    async def list_surfaces(
+        authenticated: Annotated[Principal, secured("surface.read")],
+    ) -> list[DeviceView]:
+        return await services.surfaces.list(authenticated)
+
+    @surface_router.get(
+        "/v1/surfaces/{surface_id}",
+        openapi_extra={"required_scope": "surface.read"},
+    )
+    async def get_surface(
+        surface_id: UUID,
+        authenticated: Annotated[Principal, secured("surface.read")],
+    ) -> DeviceView:
+        return await services.surfaces.get(authenticated, surface_id)
+
+    @surface_router.post(
+        "/v1/surfaces/{surface_id}/pairing-codes",
+        status_code=201,
+        openapi_extra={"required_scope": "surface.write"},
+    )
+    async def issue_surface_pairing_code(
+        surface_id: UUID,
+        body: CreatePairingCodeRequest,
+        authenticated: Annotated[Principal, secured("surface.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+            ),
+        ],
+    ) -> Response:
+        issued = await services.surfaces.issue_code(
+            authenticated,
+            surface_id,
+            granted_scopes=body.granted_scopes,
+            label=body.label,
+            idempotency_key=idempotency_key,
+        )
+        record = issued.record
+        return JSONResponse(
+            status_code=201,
+            content={
+                "id": str(record.id),
+                "surface_id": str(record.surface_id),
+                "granted_scopes": sorted(record.granted_scopes),
+                "label": record.label,
+                "expires_at": record.expires_at.isoformat(),
+                "max_attempts": record.max_attempts,
+                "code": issued.code.get_secret_value(),
+            },
+            headers={"Cache-Control": PRIVATE_NO_STORE},
+        )
+
+    @surface_router.get(
+        "/v1/surfaces/{surface_id}/pairings",
+        openapi_extra={"required_scope": "surface.read"},
+    )
+    async def list_surface_pairings(
+        surface_id: UUID,
+        authenticated: Annotated[Principal, secured("surface.read")],
+    ) -> list[Pairing]:
+        return await services.surfaces.list_pairings(authenticated, surface_id)
+
+    @surface_router.post(
+        "/v1/surfaces/pairings/{pairing_id}/revoke",
+        openapi_extra={"required_scope": "surface.write"},
+    )
+    async def revoke_surface_pairing(
+        pairing_id: UUID,
+        authenticated: Annotated[Principal, secured("surface.write")],
+    ) -> Pairing:
+        return await services.surfaces.revoke_pairing(authenticated, pairing_id)
+
+    @surface_router.delete(
+        "/v1/surfaces/pairings/{pairing_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "surface.write"},
+    )
+    async def delete_surface_pairing(
+        pairing_id: UUID,
+        authenticated: Annotated[Principal, secured("surface.write")],
+    ) -> Response:
+        await services.surfaces.delete_pairing(authenticated, pairing_id)
+        return Response(status_code=204)
+
+    if settings.surface_api_enabled:
+        app.include_router(surface_router)
 
     notification_router = APIRouter()
 

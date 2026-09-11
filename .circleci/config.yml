@@ -209,6 +209,10 @@ jobs:
               | base64 --decode > "$asc_auth_file"
             test -s "$asc_auth_file"
 
+            # A healthy upload finishes in about a minute. altool retries a
+            # rejected part without limit while still logging, so CircleCI's
+            # no-output timeout never fires; bound the upload here instead.
+            upload_timeout_secs=900
             xcrun altool --upload-app \
               --file "$pkg_path" \
               --type macos \
@@ -216,7 +220,23 @@ jobs:
               --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
               --p8-file-path "$asc_auth_file" \
               --show-progress \
-              --verbose
+              --verbose &
+            altool_pid=$!
+            upload_deadline=$((SECONDS + upload_timeout_secs))
+            while kill -0 "$altool_pid" 2>/dev/null; do
+              if (( SECONDS >= upload_deadline )); then
+                printf 'TestFlight upload exceeded %ss; terminating altool.\n' \
+                  "$upload_timeout_secs" >&2
+                printf 'Rerun the job; a build number Apple already accepted is rejected as a duplicate.\n' >&2
+                kill -TERM "$altool_pid" 2>/dev/null || true
+                sleep 10
+                kill -KILL "$altool_pid" 2>/dev/null || true
+                wait "$altool_pid" 2>/dev/null || true
+                exit 124
+              fi
+              sleep 5
+            done
+            wait "$altool_pid"
 
   apple-signing-smoke:
     macos:

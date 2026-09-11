@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@5"]] = "distillation-scorer@5"
+DISTILLATION_SCORER_VERSION: Final[Literal["distillation-scorer@7"]] = "distillation-scorer@7"
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)*")
 _STOPWORDS = frozenset(
@@ -441,9 +441,34 @@ def lemma(term: str) -> str:
         if base[-1] == base[-2] and base[-1] not in "aeiou":
             base = base[:-1]
         return base
+    if term.endswith("oes") and len(term) > 4 and term not in _OE_STEMS:
+        return term[:-2]
     if term.endswith("s") and not term.endswith("ss") and len(term) > 3:
         return term[:-1]
     return term
+
+
+# Plurals in "-oes" whose singular keeps the "e": a shoe, a canoe, a toe.
+_OE_STEMS = frozenset(
+    {"shoes", "canoes", "toes", "oboes", "aloes", "woes", "foes", "hoes", "roes", "floes", "throes"}
+)
+# A stem this long names its own inflections and compounds: "weight" names
+# "weightlifting" and "prefer" names "preference", while "run" is too short
+# to claim "runway".
+_COMPOUND_STEM_MIN = 5
+
+
+def _stems_related(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    shorter, longer = sorted((left, right), key=len)
+    return len(shorter) >= _COMPOUND_STEM_MIN and longer.startswith(shorter)
+
+
+def _terms_related(left: set[str], right: set[str]) -> bool:
+    """Whether a lemma on one side names one on the other, or its extension."""
+
+    return any(_stems_related(a, b) for a in left for b in right)
 
 
 def lemmatized_terms(value: str) -> set[str]:
@@ -617,7 +642,7 @@ def directional_terms(value: str) -> dict[str, tuple[str, ...]]:
                 marker = "than"
         following = next(
             (
-                _stem(later)
+                lemma(later)
                 for later in tokens[index + 1 :]
                 if _is_content(later) and later not in _DIRECTION_CLASSES
             ),
@@ -693,6 +718,63 @@ def statements_equivalent(candidate: str, reference: str) -> bool:
     return len(candidate_terms - reference_terms) <= 1
 
 
+# Bare qualifiers that place a claim in time without changing it.
+_QUALIFIER_TERMS = frozenset(
+    {
+        "currently",
+        "now",
+        "always",
+        "lately",
+        "recently",
+        "still",
+        "already",
+        "presently",
+        "nowadays",
+    }
+)
+
+
+def _claim_terms(value: str) -> set[str]:
+    return {
+        lemma(term) for term in _tokens(value) if _is_content(term) and term not in _QUALIFIER_TERMS
+    }
+
+
+def statement_matches_claim(candidate: str, reference: str) -> bool:
+    """Whether a formed belief states a gold claim, possibly with more detail.
+
+    The scorer's rule since distillation-scorer@7. Equal normalized text
+    matches. Otherwise the two must be compatible (polarity, absence
+    conditions, counts, numbers, directions) and keep their shared terms in
+    order; then a belief carrying every content lemma of the gold matches
+    however many words it adds, and one that does not must share three
+    quarters of the combined lemmas and add at most one. Inflections agree
+    and bare qualifiers such as "currently" are not content, so "has written
+    firmware for eight years" states "eight years of experience writing
+    firmware", while a different count, a reversed comparison, a negation,
+    an added absence, a dropped conjunct, or a sibling activity never does.
+    The runtime combiner keeps the stricter `statements_equivalent`, because
+    merging is irreversible and scoring is not.
+    """
+
+    if normalized_statement(candidate) == normalized_statement(reference):
+        return True
+    candidate_terms = _claim_terms(candidate)
+    reference_terms = _claim_terms(reference)
+    if not candidate_terms or not reference_terms:
+        return False
+    if not statements_compatible(candidate, reference):
+        return False
+    if not shared_terms_in_order(candidate, reference):
+        return False
+    if reference_terms <= candidate_terms:
+        return True
+    union = candidate_terms | reference_terms
+    if len(candidate_terms & reference_terms) / len(union) < 0.75:
+        return False
+    return len(candidate_terms - reference_terms) <= 1
+
+
 def is_generic_subject(subject: str) -> bool:
     """Whether a subject names the user bucket rather than a conflict key."""
 
@@ -709,22 +791,26 @@ def subject_matches(
     A generic bucket such as "User" never matches: subjects are conflict keys,
     and a belief filed under the user rather than the thing it is about cannot
     be corrected or superseded in isolation. Naming conventions differ, so a
-    subject also matches when it shares a content term with the gold statement
-    itself.
+    subject also matches when a lemma of it names a lemma of the gold subjects
+    or of the gold statement itself, or an inflection or compound of one:
+    "weightlifting" names "lifting weights" and "tomato growing" names
+    "tomatoes".
     """
 
     normalized = normalized_statement(subject)
     if is_generic_subject(subject):
         return False
-    terms = content_terms(subject)
+    terms = lemmatized_terms(subject)
     if not terms:
         return False
     for expected in expected_subjects:
         if normalized == normalized_statement(expected):
             return True
-        if terms & content_terms(expected):
+        if _terms_related(terms, lemmatized_terms(expected)):
             return True
-    return any(terms & content_terms(statement) for statement in expected_statements)
+    return any(
+        _terms_related(terms, lemmatized_terms(statement)) for statement in expected_statements
+    )
 
 
 def statements_compatible(left: str, right: str) -> bool:

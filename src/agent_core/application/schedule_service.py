@@ -135,14 +135,24 @@ class ScheduleService:
             return await self._record(uow, principal, schedule_id)
 
     async def list(
-        self, principal: Principal, limit: int, cursor: str | None
+        self,
+        principal: Principal,
+        limit: int,
+        cursor: str | None,
+        *,
+        states: frozenset[ScheduleState] | None = None,
     ) -> Page[ScheduleRecord]:
         require_scope(principal, "schedule.read")
         if limit <= 0:
             raise ValueError("schedule list limit must be positive")
         parsed = _decode_schedule_cursor(cursor)
         async with self._uow_factory() as uow:
-            schedules = await uow.schedules.list(principal, limit=limit + 1, cursor=parsed)
+            schedules = await uow.schedules.list(
+                principal,
+                limit=limit + 1,
+                cursor=parsed,
+                states=states,
+            )
             visible = schedules[:limit]
             revisions = await uow.schedules.get_revisions(
                 tuple((schedule.id, schedule.current_revision) for schedule in visible),

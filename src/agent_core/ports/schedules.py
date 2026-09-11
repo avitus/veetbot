@@ -18,6 +18,7 @@ from agent_core.domain.schedules import (
     ScheduleIdempotencyRecord,
     ScheduleOccurrence,
     ScheduleRevision,
+    ScheduleState,
 )
 
 
@@ -54,7 +55,10 @@ class ScheduleRepository(Protocol):
         *,
         limit: int,
         cursor: ScheduleCursor | None = None,
+        states: frozenset[ScheduleState] | None = None,
     ) -> builtins.list[Schedule]: ...
+
+    async def purge_terminal(self, tenant_id: str, *, before: datetime, limit: int) -> int: ...
 
     async def due(self, now: datetime, limit: int) -> builtins.list[UUID]: ...
 

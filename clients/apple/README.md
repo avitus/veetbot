@@ -35,11 +35,12 @@ Keychain protection and implements no non-exempt encryption. Reassess that
 declaration before adding a custom or third-party cryptographic implementation.
 
 The settings surface groups Connection, Website Access, Appearance, and Data &
-Privacy in a scrolling layout with connection actions pinned below it. On macOS,
-configured clients use a separate settings window that resizes in both
-dimensions and remembers its frame. The main and settings windows persist their
-sizes and positions independently. Device-local text-size and font-style controls
-apply immediately throughout the client; system text sizing remains the default.
+Privacy in a scrolling layout. The Connect or Update Connection action sits in
+the Connection card, while device-local text-size and font-style controls save
+automatically and apply immediately throughout the client. On macOS, configured
+clients use a separate settings window that resizes in both dimensions and
+remembers its frame. The main and settings windows persist their sizes and
+positions independently; system text sizing remains the default.
 On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.

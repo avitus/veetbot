@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 from uuid import UUID
@@ -20,6 +21,7 @@ from agent_core.application.errors import (
     SessionMetadataValidationError,
 )
 from agent_core.application.session_service import bootstrap_session
+from agent_core.application.surfaces import PreparedSurfaceSubmission
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
     ApprovalCursor,
@@ -83,6 +85,7 @@ from agent_core.domain.sessions import (
     SessionStatus,
     conversation_title,
 )
+from agent_core.domain.surfaces import InboundDisposition
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.domain.views import (
@@ -643,6 +646,16 @@ class _ExistingRunError(Exception):
         self.run = run
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedRunSubmission:
+    run: Run
+    disposition: Literal[
+        InboundDisposition.SUBMITTED,
+        InboundDisposition.INPUT_DELIVERED,
+    ]
+    dispatch_kind: Literal["dispatch", "resume"]
+
+
 class PublicRunService:
     def __init__(
         self,
@@ -682,11 +695,9 @@ class PublicRunService:
         require_scope(principal, "run.write")
         if idempotency_key is not None and len(idempotency_key) > 255:
             raise ValueError("idempotency key exceeds 255 characters")
-        parts = _domain_content(content)
         wire_body = {"content": _wire_content(content)}
         request_hash = hashlib.sha256(canonical_json(wire_body).encode("utf-8")).hexdigest()
         now = self._clock.now()
-        dispatch = False
         try:
             async with self._uow_factory() as uow:
                 session = await uow.sessions.get(session_id, principal)
@@ -712,135 +723,211 @@ class PublicRunService:
                                 reason="idempotency_key_reused",
                             )
                         raise _ExistingRunError(original)
-                active = await uow.runs.active_for_session(session_id, principal)
-                if active is not None:
-                    if active.status is RunStatus.WAITING_FOR_USER:
-                        result = await self._deliver_input_in(uow, principal, active, content, None)
-                        if idempotency_key is not None:
-                            await uow.idempotency.create(
-                                IdempotencyRecord(
-                                    key=idempotency_key,
-                                    tenant_id=principal.tenant_id,
-                                    principal_id=principal.principal_id,
-                                    request_hash=request_hash,
-                                    run_id=active.id,
-                                    created_at=now,
-                                    expires_at=now + timedelta(hours=24),
-                                )
-                            )
-                        dispatch = True
-                        run = active.model_copy(update={"status": result.status})
-                    else:
-                        raise ConflictError(
-                            "The session already has an active run.",
-                            reason="active_run_exists",
-                            details={
-                                "run_id": str(active.id),
-                                "run_status": active.status.value,
-                            },
-                        )
-                else:
-                    if session.title is None and (
-                        await uow.runs.latest_for_session(session.id, principal) is None
-                    ):
-                        title = next(
-                            (
-                                candidate
-                                for block in content
-                                if isinstance(block, TextContentBlock)
-                                if (candidate := conversation_title(block.text)) is not None
-                            ),
-                            None,
-                        )
-                        if title is not None:
-                            session = await uow.sessions.set_title_if_missing(
-                                session.id, principal, title
-                            )
-                    agent = await uow.agents.get_version(session.agent_id, session.agent_version)
-                    consent = await uow.export_consent.get(
-                        principal.tenant_id, principal.principal_id
-                    )
-                    run = Run(
-                        id=self._ids.new_id(),
-                        session_id=session.id,
-                        tenant_id=session.tenant_id,
-                        principal_scopes=set(principal.scopes),
-                        agent_id=session.agent_id,
-                        agent_version=session.agent_version,
-                        status=RunStatus.QUEUED,
-                        limits=agent.limits.model_copy(deep=True),
-                        priority=0,
-                        scheduled_for=now,
-                        deadline_at=agent.limits.deadline_at,
-                        export_consent=(
-                            self._trajectory_export_enabled
-                            and consent is not None
-                            and consent.active
-                        ),
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    if uow.queue is None:
-                        await uow.runs.create(run)
-                    else:
-                        await uow.queue.enqueue(run, priority=run.priority, scheduled_for=now)
-                    user_event = await uow.events.append(
-                        NewEvent(
-                            session_id=session.id,
-                            run_id=run.id,
-                            event_type="user.message.created",
-                            actor_type="principal",
-                            actor_id=principal.principal_id,
-                            payload={"content": [part.model_dump(mode="json") for part in parts]},
-                            trace_id=trace_id,
+                prepared = await self._submit_in(
+                    uow,
+                    principal,
+                    session,
+                    content,
+                    trace_id=trace_id,
+                )
+                if idempotency_key is not None:
+                    record = await uow.idempotency.create(
+                        IdempotencyRecord(
+                            key=idempotency_key,
+                            tenant_id=principal.tenant_id,
+                            principal_id=principal.principal_id,
+                            request_hash=request_hash,
+                            run_id=prepared.run.id,
+                            created_at=now,
+                            expires_at=now + timedelta(hours=24),
                         )
                     )
-                    await uow.runs.set_seed_event_sequence(run.id, user_event.sequence)
-                    await uow.events.append(
-                        NewEvent(
-                            session_id=session.id,
-                            run_id=run.id,
-                            event_type="run.queued",
-                            actor_type="application",
-                            payload={"run_id": str(run.id), "priority": run.priority},
-                            trace_id=trace_id,
-                        )
-                    )
-                    await self._seed_checkpoint(
-                        uow,
-                        run,
-                        user_event.sequence,
-                        None,
-                        principal,
-                    )
-                    if idempotency_key is not None:
-                        record = await uow.idempotency.create(
-                            IdempotencyRecord(
-                                key=idempotency_key,
-                                tenant_id=principal.tenant_id,
-                                principal_id=principal.principal_id,
-                                request_hash=request_hash,
-                                run_id=run.id,
-                                created_at=now,
-                                expires_at=now + timedelta(hours=24),
-                            )
-                        )
-                        if record.run_id != run.id:
-                            original = await uow.runs.get(record.run_id, principal)
-                            raise _ExistingRunError(original)
-                    dispatch = True
+                    if record.run_id != prepared.run.id:
+                        original = await uow.runs.get(record.run_id, principal)
+                        raise _ExistingRunError(original)
         except _ExistingRunError as duplicate:
             return SubmitResult(
                 run_id=duplicate.run.id,
                 status=duplicate.run.status,
                 replayed=True,
             )
-        if dispatch:
-            if active is None:
-                await self._dispatcher.dispatch(run.id)
-            else:
-                await self._dispatcher.resume(run.id)
-        return SubmitResult(run_id=run.id, status=run.status)
+        await self._dispatch_prepared(prepared)
+        return SubmitResult(run_id=prepared.run.id, status=prepared.run.status)
+
+    async def _submit_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        session: Session,
+        content: list[ContentBlock],
+        *,
+        trace_id: str | None,
+        actor_type: str = "principal",
+        payload_extra: dict[str, object] | None = None,
+        derivation_namespace: str | None = None,
+        derivation_suffix: str | None = None,
+    ) -> _PreparedRunSubmission:
+        """Select new-run versus waiting-input behavior inside the caller's UoW."""
+
+        if session.status is SessionStatus.CLOSED:
+            raise InvalidStateTransition("closed sessions cannot accept messages")
+        active = await uow.runs.active_for_session(session.id, principal)
+        if active is not None:
+            if active.status is not RunStatus.WAITING_FOR_USER:
+                raise ConflictError(
+                    "The session already has an active run.",
+                    reason="active_run_exists",
+                    details={
+                        "run_id": str(active.id),
+                        "run_status": active.status.value,
+                    },
+                )
+            delivered = await self._deliver_input_in(
+                uow,
+                principal,
+                active,
+                content,
+                None,
+                actor_type=actor_type,
+                payload_extra=payload_extra,
+                derivation_namespace=derivation_namespace or "run.input",
+                derivation_suffix=derivation_suffix,
+            )
+            return _PreparedRunSubmission(
+                run=active.model_copy(update={"status": delivered.status}),
+                disposition=InboundDisposition.INPUT_DELIVERED,
+                dispatch_kind="resume",
+            )
+        parts = _domain_content(content)
+        if session.title is None and (
+            await uow.runs.latest_for_session(session.id, principal) is None
+        ):
+            title = next(
+                (
+                    candidate
+                    for block in content
+                    if isinstance(block, TextContentBlock)
+                    if (candidate := conversation_title(block.text)) is not None
+                ),
+                None,
+            )
+            if title is not None:
+                session = await uow.sessions.set_title_if_missing(session.id, principal, title)
+        agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+        consent = await uow.export_consent.get(principal.tenant_id, principal.principal_id)
+        now = self._clock.now()
+        run = Run(
+            id=self._ids.new_id(),
+            session_id=session.id,
+            tenant_id=session.tenant_id,
+            principal_scopes=set(principal.scopes),
+            agent_id=session.agent_id,
+            agent_version=session.agent_version,
+            status=RunStatus.QUEUED,
+            limits=agent.limits.model_copy(deep=True),
+            priority=0,
+            scheduled_for=now,
+            deadline_at=agent.limits.deadline_at,
+            export_consent=(
+                self._trajectory_export_enabled and consent is not None and consent.active
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+        if uow.queue is None:
+            await uow.runs.create(run)
+        else:
+            await uow.queue.enqueue(run, priority=run.priority, scheduled_for=now)
+        derivation_key = (
+            None
+            if derivation_namespace is None or derivation_suffix is None
+            else f"{derivation_namespace}:{derivation_suffix}"
+        )
+        user_event = await uow.events.append(
+            NewEvent(
+                session_id=session.id,
+                run_id=run.id,
+                event_type="user.message.created",
+                actor_type=actor_type,
+                actor_id=principal.principal_id,
+                payload={
+                    "content": [part.model_dump(mode="json") for part in parts],
+                    **(payload_extra or {}),
+                },
+                trace_id=trace_id,
+                derivation_key=derivation_key,
+            )
+        )
+        await uow.runs.set_seed_event_sequence(run.id, user_event.sequence)
+        await uow.events.append(
+            NewEvent(
+                session_id=session.id,
+                run_id=run.id,
+                event_type="run.queued",
+                actor_type="application",
+                payload={
+                    "run_id": str(run.id),
+                    "priority": run.priority,
+                    **(payload_extra or {}),
+                },
+                trace_id=trace_id,
+                derivation_key=(None if derivation_key is None else f"{derivation_key}:queued"),
+            )
+        )
+        await self._seed_checkpoint(uow, run, user_event.sequence, None, principal)
+        return _PreparedRunSubmission(
+            run=run,
+            disposition=InboundDisposition.SUBMITTED,
+            dispatch_kind="dispatch",
+        )
+
+    async def submit_surface_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        session: Session,
+        text: str,
+        origin: dict[str, object],
+        authority_version: str,
+    ) -> PreparedSurfaceSubmission:
+        """Use the HTTP submission state machine for one paired surface message."""
+
+        require_scope(principal, "run.write")
+        external_update_id = origin.get("external_update_id")
+        if not isinstance(external_update_id, str) or not external_update_id:
+            raise ValueError("surface origin requires an external update identifier")
+        payload_extra: dict[str, object] = {
+            "origin": origin,
+            "authority_version": authority_version,
+        }
+        prepared = await self._submit_in(
+            uow,
+            principal,
+            session,
+            [TextContentBlock(text=text)],
+            trace_id=None,
+            actor_type="surface",
+            payload_extra=payload_extra,
+            derivation_namespace="surface.inbound",
+            derivation_suffix=external_update_id,
+        )
+        return PreparedSurfaceSubmission(
+            run_id=prepared.run.id,
+            disposition=prepared.disposition,
+            dispatch_kind=prepared.dispatch_kind,
+        )
+
+    async def dispatch_surface_submission(self, prepared: PreparedSurfaceSubmission) -> None:
+        if prepared.dispatch_kind == "dispatch":
+            await self._dispatcher.dispatch(prepared.run_id)
+        else:
+            await self._dispatcher.resume(prepared.run_id)
+
+    async def _dispatch_prepared(self, prepared: _PreparedRunSubmission) -> None:
+        if prepared.dispatch_kind == "dispatch":
+            await self._dispatcher.dispatch(prepared.run.id)
+        else:
+            await self._dispatcher.resume(prepared.run.id)
 
     async def get(self, principal: Principal, run_id: UUID) -> RunView:
         require_scope(principal, "run.read")

@@ -1679,3 +1679,34 @@ async def test_high_recall_extractor_scans_a_hundred_kilobyte_turn_quickly() -> 
     started = time.perf_counter()
     await HighRecallCandidateExtractor().extract([event], principal=principal(), scope="general")
     assert time.perf_counter() - started < 10.0
+
+
+async def test_present_perfect_is_not_ownership() -> None:
+    """ "I have switched to a split keyboard" owns nothing.
+
+    The first holdout run rendered it as "User has a switched to a split
+    keyboard" beside the provider's resource claim. "I have" followed by a
+    past participle is the present perfect; only "I have" followed by a thing
+    proposes a possession.
+    """
+
+    event = _envelope(
+        "user.message.created",
+        {"content": "I have switched to a split keyboard. I have taken up rowing."},
+    )
+    candidates = await DeterministicCandidateExtractor().extract(
+        [event], principal=principal(), scope="general"
+    )
+
+    assert not [
+        candidate.statement
+        for candidate in candidates
+        if candidate.statement.startswith(("User has a switched", "User has a taken"))
+    ]
+
+    owned = _envelope("user.message.created", {"content": "I have a split keyboard."})
+    candidates = await DeterministicCandidateExtractor().extract(
+        [owned], principal=principal(), scope="general"
+    )
+
+    assert "User has a split keyboard." in [candidate.statement for candidate in candidates]

@@ -26,6 +26,7 @@ from agent_core.config import (
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
+    DistillationRunMetrics,
     MemoryCandidate,
     MemoryDistillationEvidence,
     MemoryExtractionResult,
@@ -2377,7 +2378,7 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         model="scripted",
         policy_profile="default",
         policy_version=_runtime_policy_version(),
-        scorer_version="distillation-scorer@5",
+        scorer_version="distillation-scorer@7",
         build_ref=_DISTILLATION_BUILD_REF,
         corpus_sha256=_DISTILLATION_CORPUS_SHA256,
         sample_count=61,
@@ -2393,6 +2394,18 @@ def _distillation_evidence() -> MemoryDistillationEvidence:
         holdout_useful_recall_lift_percentage_points=40,
         holdout_evidence_disposition_precision=0.9,
         holdout_represented_case_count=2,
+        repeats=1,
+        run_metrics=[
+            DistillationRunMetrics(
+                direct_must_form_recall=0.96,
+                hypothesis_must_form_recall=0.82,
+                benign_precision=0.92,
+                holdout_direct_must_form_recall=0.96,
+                holdout_hypothesis_must_form_recall=0.8,
+                holdout_benign_precision=0.81,
+                provider_cost_usd="1.25",
+            )
+        ],
         direct_must_form_recall=1,
         hypothesis_must_form_recall=1,
         benign_precision=0.96,

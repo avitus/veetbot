@@ -55,6 +55,7 @@ from agent_core.ports.schedules import (
     ScheduleRepository,
 )
 from agent_core.ports.skills import SkillRepository
+from agent_core.ports.surfaces import SurfaceRepositories
 
 _UNIT_OF_WORK_DEPTH: ContextVar[int] = ContextVar("unit_of_work_depth", default=0)
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ class UnitOfWorkRepositories:
     device_ingest: DeviceIngestStore
     notification_outbox: NotificationOutbox
     delegations: DelegationRepository
+    surfaces: SurfaceRepositories
     queue: RunQueue | None
 
 
@@ -172,6 +174,7 @@ class MemoryUnitOfWork:
         self.device_ingest = repositories.device_ingest
         self.notification_outbox = repositories.notification_outbox
         self.delegations = repositories.delegations
+        self.surfaces = repositories.surfaces
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -287,6 +290,7 @@ class PostgresUnitOfWork:
         self.device_ingest = repositories.device_ingest
         self.notification_outbox = repositories.notification_outbox
         self.delegations = repositories.delegations
+        self.surfaces = repositories.surfaces
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self

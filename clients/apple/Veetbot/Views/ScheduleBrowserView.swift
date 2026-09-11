@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 #if os(macOS)
@@ -8,6 +9,7 @@ import AppKit
 public struct ScheduleBrowserView: View {
     @ObservedObject var model: ScheduleViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var section = ScheduleBrowserSection.current
 
     public init(model: ScheduleViewModel) {
         self.model = model
@@ -15,7 +17,16 @@ public struct ScheduleBrowserView: View {
 
     public var body: some View {
         NavigationView {
-            content
+            VStack(spacing: 0) {
+                Picker("Schedule view", selection: $section) {
+                    Text("Current").tag(ScheduleBrowserSection.current)
+                    Text("Recent History").tag(ScheduleBrowserSection.recentHistory)
+                }
+                .pickerStyle(.segmented)
+                .padding()
+                .accessibilityIdentifier("schedule.section")
+                content
+            }
                 .navigationTitle("Schedules")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -24,7 +35,7 @@ public struct ScheduleBrowserView: View {
                 }
         }
         .accessibilityIdentifier("schedule.browser")
-        .task { await model.reload() }
+        .task(id: section) { await model.reload(section) }
         #if os(macOS)
         .frame(
             minWidth: 560,
@@ -150,7 +161,11 @@ public struct ScheduleBrowserView: View {
             Image(systemName: "calendar")
                 .font(.largeTitle)
                 .foregroundColor(.secondary)
-            Text("No schedules found.")
+            Text(
+                section == .current
+                    ? "No current schedules."
+                    : "No completed or cancelled schedules in the last 30 days."
+            )
                 .foregroundColor(.secondary)
         }
         .padding()
@@ -187,26 +202,56 @@ func scheduleDisplayText(_ raw: String) -> String {
     raw.replacingOccurrences(of: "_", with: " ").capitalized
 }
 
-func scheduleCadenceSummary(_ cadence: ScheduleCadenceView) -> String {
+func scheduleCadenceSummary(
+    _ cadence: ScheduleCadenceView,
+    deviceTimeZoneIdentifier: String = TimeZone.current.identifier
+) -> String {
+    let exceptionalTimeZone = scheduleExceptionalTimeZone(
+        cadence.timezone,
+        deviceTimeZoneIdentifier: deviceTimeZoneIdentifier
+    )
     switch cadence.kindKind {
     case .once:
         return cadence.at.map { "Once · \($0.formatted())" } ?? "Once"
     case .daily:
-        return joinedScheduleParts(["Daily", cadence.localTime, cadence.timezone])
+        return joinedScheduleParts(["Daily", cadence.localTime, exceptionalTimeZone])
     case .weekly:
         let days = cadence.weekdays?.map(scheduleWeekdayName).joined(separator: ", ")
-        return joinedScheduleParts([days.map { "Weekly · \($0)" } ?? "Weekly", cadence.localTime, cadence.timezone])
+        return joinedScheduleParts([
+            days.map { "Weekly · \($0)" } ?? "Weekly",
+            cadence.localTime,
+            exceptionalTimeZone,
+        ])
     case .monthly:
         var selectors = (cadence.daysOfMonth ?? []).map(String.init)
         if cadence.lastDay == true { selectors.append("last day") }
         let rule = selectors.isEmpty ? "Monthly" : "Monthly · \(selectors.joined(separator: ", "))"
-        return joinedScheduleParts([rule, cadence.localTime, cadence.timezone])
+        return joinedScheduleParts([rule, cadence.localTime, exceptionalTimeZone])
     case .yearly:
         let dates = cadence.dates?.map { "\($0.month)/\($0.day)" }.joined(separator: ", ")
-        return joinedScheduleParts([dates.map { "Yearly · \($0)" } ?? "Yearly", cadence.localTime, cadence.timezone])
+        return joinedScheduleParts([
+            dates.map { "Yearly · \($0)" } ?? "Yearly",
+            cadence.localTime,
+            exceptionalTimeZone,
+        ])
     case nil:
         return scheduleDisplayText(cadence.kind)
     }
+}
+
+private func scheduleExceptionalTimeZone(
+    _ identifier: String?,
+    deviceTimeZoneIdentifier: String
+) -> String? {
+    guard let identifier else { return nil }
+    if identifier == deviceTimeZoneIdentifier { return nil }
+    if let scheduleZone = TimeZone(identifier: identifier),
+        let deviceZone = TimeZone(identifier: deviceTimeZoneIdentifier),
+        scheduleZone == deviceZone
+    {
+        return nil
+    }
+    return identifier
 }
 
 private func joinedScheduleParts(_ parts: [String?]) -> String {

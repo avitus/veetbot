@@ -43,6 +43,7 @@ from agent_core.domain.runs import (
     RunStatus,
     Step,
 )
+from agent_core.domain.surfaces import SurfaceReply
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.ports.context import (
@@ -78,6 +79,179 @@ type RunCompleteCallback = Callable[[UUID, int | None], Awaitable[None]]
 type ChildSuspensionCallback = Callable[[UUID, UUID], Awaitable[None]]
 type FinalizationWriteProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
+
+
+class SurfaceRunStateWriter:
+    """Minimal run-state writer for the credential-isolated surface process."""
+
+    def __init__(self, clock: Clock, ids: IdFactory) -> None:
+        self._clock = clock
+        self._ids = ids
+
+    async def stop(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+        principal_id: str,
+    ) -> Run:
+        if run.status is RunStatus.RUNNING:
+            return await uow.runs.request_cancellation(run.id, RunStatus.RUNNING)
+        if run.status is RunStatus.WAITING_FOR_APPROVAL:
+            await uow.approvals.cancel_for_run(run.id)
+            await self._cancel_delegated_children(uow, run, principal_id)
+        if run.status is RunStatus.WAITING_FOR_USER:
+            owner = Principal(tenant_id=run.tenant_id, principal_id=principal_id)
+            for invocation in await uow.invocations.list_for_run(run.id, owner):
+                if (
+                    invocation.status is not ToolInvocationStatus.RUNNING
+                    or invocation.suspended_kind != "user_input"
+                ):
+                    continue
+                outcome = ToolOutcome(
+                    status=ToolOutcomeStatus.FAILED,
+                    action=invocation.tool_name,
+                    reason_code="tool.run_cancelled",
+                    message="The run was cancelled while waiting for user input.",
+                    retryable=False,
+                    remediation="none",
+                )
+                await uow.invocations.transition(
+                    invocation.id,
+                    ToolInvocationStatus.RUNNING,
+                    invocation.model_copy(
+                        update={
+                            "status": ToolInvocationStatus.FAILED,
+                            "suspended_kind": None,
+                            "suspended_ref": None,
+                            "outcome": outcome,
+                            "result_item": ToolResultItem(
+                                call_id=invocation.call_id,
+                                content=[TextPart(text=outcome.message)],
+                                is_error=True,
+                                trust=TrustLevel.PLATFORM,
+                            ),
+                            "updated_at": self._clock.now(),
+                        },
+                        deep=True,
+                    ),
+                )
+        cancelled = await uow.runs.transition(run.id, run.status, RunStatus.CANCELLED)
+        await uow.events.append(
+            NewEvent(
+                session_id=run.session_id,
+                run_id=run.id,
+                event_type="run.cancelled",
+                actor_type="surface",
+                actor_id=principal_id,
+                payload={"reason": "requested"},
+            )
+        )
+        return cancelled
+
+    async def _cancel_delegated_children(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+        principal_id: str,
+    ) -> None:
+        owner = Principal(tenant_id=run.tenant_id, principal_id=principal_id)
+        invocations = await uow.invocations.list_for_run(run.id, owner)
+        suspended = [
+            invocation
+            for invocation in invocations
+            if invocation.status is ToolInvocationStatus.RUNNING
+            and invocation.suspended_kind == "child_run"
+        ]
+        if not suspended:
+            return
+        for delegation in await uow.delegations.get_for_parent_run(run.id):
+            if delegation.status not in {DelegationStatus.PENDING, DelegationStatus.RUNNING}:
+                continue
+            for child in delegation.children:
+                if child.child_run_id is None:
+                    continue
+                child_run = await uow.runs.get(child.child_run_id, owner)
+                if child_run.status in TERMINAL_RUN_STATUSES:
+                    continue
+                await self.stop(uow, child_run, principal_id)
+            try:
+                await uow.delegations.transition(
+                    delegation.id,
+                    delegation.status,
+                    delegation.model_copy(update={"status": DelegationStatus.CANCELLED}),
+                )
+            except ConflictError:
+                continue
+            now = self._clock.now()
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=self._ids.new_id(),
+                    event_type="delegation.cancelled",
+                    actor_type="surface",
+                    actor_id=principal_id,
+                    payload={
+                        "delegation_id": str(delegation.id),
+                        "tenant_id": run.tenant_id,
+                        "parent_run_id": str(run.id),
+                        "invocation_id": str(delegation.invocation_id),
+                        "event_time": now.isoformat(),
+                    },
+                    derivation_key=f"delegation.cancelled:{delegation.id}",
+                    created_at=now,
+                )
+            )
+        now = self._clock.now()
+        for invocation in suspended:
+            outcome = ToolOutcome(
+                status=ToolOutcomeStatus.FAILED,
+                action=invocation.tool_name,
+                reason_code="tool.run_cancelled",
+                message="The run was cancelled while waiting for delegated children.",
+                retryable=False,
+                remediation="none",
+            )
+            await uow.invocations.transition(
+                invocation.id,
+                ToolInvocationStatus.RUNNING,
+                invocation.model_copy(
+                    update={
+                        "status": ToolInvocationStatus.FAILED,
+                        "suspended_kind": None,
+                        "suspended_ref": None,
+                        "outcome": outcome,
+                        "result_item": ToolResultItem(
+                            call_id=invocation.call_id,
+                            content=[TextPart(text=outcome.message)],
+                            is_error=True,
+                            trust=TrustLevel.PLATFORM,
+                        ),
+                        "updated_at": now,
+                    },
+                    deep=True,
+                ),
+            )
+
+    async def requeue_after_approval(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+    ) -> Run:
+        return await uow.runs.transition(
+            run.id,
+            RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.QUEUED,
+        )
+
+    async def requeue_after_input(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+    ) -> Run:
+        return await uow.runs.transition(
+            run.id,
+            RunStatus.WAITING_FOR_USER,
+            RunStatus.QUEUED,
+        )
 
 
 @dataclass(slots=True)
@@ -932,6 +1106,39 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
         )
         if context.finalization_write_probe is not None:
             context.finalization_write_probe("run")
+        if status in TERMINAL_RUN_STATUSES:
+            seed = await uow.events.latest_before(
+                context.run.session_id,
+                context.run.seed_event_sequence + 1,
+                "user.message.created",
+                context.principal,
+            )
+            origin = None if seed is None else seed.payload.get("origin")
+            surface_id = origin.get("surface_id") if isinstance(origin, dict) else None
+            origin_kind = origin.get("kind") if isinstance(origin, dict) else None
+            if (
+                seed is not None
+                and seed.run_id == context.run.id
+                and origin_kind in {"telegram", "whatsapp"}
+                and isinstance(surface_id, str)
+            ):
+                mapping = await uow.surfaces.sessions.for_session(context.run.session_id)
+                if mapping is None or str(mapping.surface_id) != surface_id:
+                    raise RuntimeError("surface-origin run has no session mapping")
+                await uow.surfaces.replies.enqueue(
+                    SurfaceReply(
+                        id=context.ids.new_id(),
+                        surface_id=mapping.surface_id,
+                        tenant_id=context.principal.tenant_id,
+                        principal_id=context.principal.principal_id,
+                        run_id=context.run.id,
+                        chat_ref=mapping.external_key.removeprefix("dm:"),
+                        next_attempt_at=context.clock.now(),
+                        created_at=context.clock.now(),
+                    )
+                )
+                if context.finalization_write_probe is not None:
+                    context.finalization_write_probe("surface_reply")
         if context.lease is not None:
             if uow.queue is None:
                 raise RuntimeError("durable lease has no queue repository")

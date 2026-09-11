@@ -136,6 +136,25 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
     }
 
+    func testScheduleBrowserMakesRecentTerminalHistoryAccessible() {
+        openSidebarDestination(identifier: "sidebar.schedules")
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["schedule.browser"].waitForExistence(timeout: 5)
+        )
+        let history = app.buttons["Recent History"]
+        XCTAssertTrue(history.waitForExistence(timeout: 5))
+        history.tap()
+
+        let historyRow = app.descendants(matching: .any)[
+            "schedule.row.00000000-0000-0000-0000-000000000656"
+        ]
+        XCTAssertTrue(historyRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Finished review"].exists)
+        XCTAssertTrue(app.staticTexts["Recent completed schedule."].exists)
+        XCTAssertFalse(app.staticTexts["Daily review"].exists)
+    }
+
     func testOverflowMenuOpensPersonaEditor() {
         openSidebarDestination(identifier: "sidebar.persona")
 

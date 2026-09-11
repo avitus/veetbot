@@ -56,6 +56,12 @@ from agent_core.domain.persona import (
     PersonaNominationState,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.memory.communication_sources import (
+    MAX_COMMUNICATION_CANDIDATES,
+    FormationSourceKind,
+    communication_candidate_fingerprints,
+    formation_sources,
+)
 from agent_core.memory.equivalence import content_terms, lemmatized_terms, main_verb, negated
 from agent_core.memory.profiles import (
     DEFAULT_FORMATION_PROFILE,
@@ -317,15 +323,15 @@ def _select_nemori_candidates(
 ) -> list[tuple[MemoryCandidate, MemoryAuthority]]:
     """Choose a broad, useful formation@9 batch without silent truncation."""
 
+    # Ties within one source event break by the order the proposals were
+    # made, which follows the order the user stated them; the subject's
+    # spelling used to decide, so the same activity lost every time.
     ranked = sorted(
         enumerate(proposals),
         key=lambda indexed: (
             indexed[1][0].derivation is MemoryDerivation.HYPOTHESIS,
             -_FUTURE_USEFULNESS[indexed[1][0].claim_kind],
             min(indexed[1][0].source_event_ids),
-            indexed[1][0].subject.casefold(),
-            indexed[1][0].claim_kind.value,
-            indexed[1][0].statement.casefold(),
             indexed[0],
         ),
     )
@@ -658,6 +664,14 @@ class DeterministicCandidateExtractor:
                 continue
 
             ownership = re.fullmatch(r"i\s+(have|own|use|wear|drive)\s+(.+)", clause, re.I)
+            if (
+                ownership is not None
+                and ownership.group(1).casefold() == "have"
+                and _PRESENT_PERFECT_OBJECT.match(ownership.group(2)) is not None
+            ):
+                # "I have switched to a split keyboard" owns nothing: "have"
+                # before a participle is the present perfect.
+                ownership = None
             if ownership is not None:
                 rendered_verb = _OWNERSHIP_VERBS[ownership.group(1).casefold()]
                 for raw_item in _ITEM_BOUNDARY.split(ownership.group(2)):
@@ -963,6 +977,16 @@ _PAST_ACTIVITY_DURATION = re.compile(
 )
 _UNCERTAINTY_CUE = re.compile(
     r"\b(?:forget|forgot|not\s+sure|unsure|don't\s+remember|do\s+not\s+remember|roughly)\b",
+    re.IGNORECASE,
+)
+# What follows "I have" in the present perfect: a participle, or an adverb
+# before one. Two letters before "ed" keep "red hair" and "bed bugs" owned.
+_PRESENT_PERFECT_OBJECT = re.compile(
+    r"^(?:\w{2,}ed|been|done|gone|got|gotten|made|had|begun|become|come|taken|given|seen"
+    r"|written|spoken|driven|eaten|grown|known|shown|thrown|worn|chosen|broken|fallen"
+    r"|found|kept|lost|met|paid|sent|sold|stood|taught|told|thought|understood|quit|built"
+    r"|bought|brought|caught|dealt|felt|held|led|lent|meant|swum|run|never|not|already"
+    r"|just|recently|always|since)\b",
     re.IGNORECASE,
 )
 _FALSE_POSSESSION_PRESENT_PERFECT = re.compile(
@@ -2425,10 +2449,26 @@ class GovernedMemoryService:
         derivation: MemoryDerivation = MemoryDerivation.DIRECT,
         longevity: MemoryLongevity = MemoryLongevity.DURABLE,
         evidence_at: datetime | None = None,
+        attributed_external: bool = False,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
     ) -> tuple[MemoryRecord, str]:
-        if origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY} or (
+        attributed_shape = (
+            origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
+            and not explicit
+            and authority is MemoryAuthority.INFERRED
+            and polarity is Polarity.ASSERT
+            and derivation is MemoryDerivation.HYPOTHESIS
+            and longevity is MemoryLongevity.TENTATIVE
+            and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+            and portability is Portability.LOCAL
+        )
+        if attributed_external:
+            if not attributed_shape:
+                raise ToolTrustRejectedError(
+                    "attributed communication memory exceeds its authority ceiling"
+                )
+        elif origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY} or (
             origin_trust is TrustLevel.MEMORY and not explicit
         ):
             raise ToolTrustRejectedError("external content cannot directly write persistent memory")
@@ -2871,13 +2911,17 @@ class GovernedMemoryService:
         provider_failure = (
             extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
         )
+        admitted_sources = formation_sources(events, self._principal)
         trusted_user_sources = {
-            event.sequence
-            for event in events
-            if event.event_type == "user.message.created"
-            and event.actor_type == "principal"
-            and event.actor_id == self._principal.principal_id
+            sequence
+            for sequence, source in admitted_sources.items()
+            if source.kind is FormationSourceKind.OWNER_ASSERTION
         }
+        communication_fingerprints = communication_candidate_fingerprints(
+            events,
+            principal=self._principal,
+            scope=scope,
+        )
         # Working state is formation's second input. Its facts are the agent's
         # own conclusions, so they enter ahead of the extractor's guesses and
         # may displace them; the displaced proposals are counted, not dropped.
@@ -2890,7 +2934,20 @@ class GovernedMemoryService:
             candidates = _select_nemori_candidates(proposals)
             displacement_counts = _nemori_displacement_counts(proposals, candidates)
         else:
-            candidates = proposals[:MAX_AUTOMATIC_CANDIDATES]
+            semantic = [
+                proposal
+                for proposal in proposals
+                if proposal[0].model_dump_json() not in communication_fingerprints
+            ]
+            communications = [
+                proposal
+                for proposal in proposals
+                if proposal[0].model_dump_json() in communication_fingerprints
+            ]
+            candidates = [
+                *semantic[:MAX_AUTOMATIC_CANDIDATES],
+                *communications[:MAX_COMMUNICATION_CANDIDATES],
+            ]
             displaced_count = len(proposals) - len(candidates)
             displacement_counts = (
                 Counter({"displaced_global": displaced_count}) if displaced_count else Counter()
@@ -2968,20 +3025,53 @@ class GovernedMemoryService:
                 superseded = 0
                 conflicted = 0
                 for candidate, authority in [] if should_retry else candidates:
-                    if (
-                        candidate.proposed_scope != scope
-                        or not set(candidate.source_event_ids) <= trusted_user_sources
+                    candidate_sources = [
+                        admitted_sources.get(sequence) for sequence in candidate.source_event_ids
+                    ]
+                    owner_assertion = bool(candidate_sources) and all(
+                        source is not None and source.kind is FormationSourceKind.OWNER_ASSERTION
+                        for source in candidate_sources
+                    )
+                    attributed_communication = bool(candidate_sources) and all(
+                        source is not None
+                        and source.kind is FormationSourceKind.ATTRIBUTED_COMMUNICATION
+                        for source in candidate_sources
+                    )
+                    locally_rendered_communication = (
+                        candidate.model_dump_json() in communication_fingerprints
+                    )
+                    if candidate.proposed_scope != scope or not (
+                        owner_assertion
+                        or (
+                            attributed_communication
+                            and locally_rendered_communication
+                            and authority is MemoryAuthority.INFERRED
+                        )
                     ):
                         rejected += 1
                         decisions["rejected_provenance"] += 1
                         continue
                     if (
-                        self._policy_version == NEMORI_FORMATION_POLICY_VERSION
-                        and authority is MemoryAuthority.INFERRED
-                        and any(
-                            span.text not in _event_text(by_sequence[span.source_event_id])
-                            for span in candidate.evidence_spans
+                        (
+                            self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                            and authority is MemoryAuthority.INFERRED
                         )
+                        or attributed_communication
+                    ) and any(
+                        (source := admitted_sources.get(span.source_event_id)) is None
+                        or span.text not in source.text
+                        for span in candidate.evidence_spans
+                    ):
+                        rejected += 1
+                        decisions["rejected_provenance"] += 1
+                        continue
+                    if attributed_communication and (
+                        candidate.polarity is not Polarity.ASSERT
+                        or candidate.derivation is not MemoryDerivation.HYPOTHESIS
+                        or candidate.longevity is not MemoryLongevity.TENTATIVE
+                        or candidate.proposed_portability is not Portability.LOCAL
+                        or SENSITIVITY_ORDER[candidate.sensitivity_guess]
+                        < SENSITIVITY_ORDER[Sensitivity.SENSITIVE]
                     ):
                         rejected += 1
                         decisions["rejected_provenance"] += 1
@@ -2994,8 +3084,7 @@ class GovernedMemoryService:
                         decisions["rejected_portability"] += 1
                         continue
                     source_text = "\n".join(
-                        _event_text(by_sequence[sequence])
-                        for sequence in candidate.source_event_ids
+                        admitted_sources[sequence].text for sequence in candidate.source_event_ids
                     )
                     if contains_automatic_memory_hazard(source_text):
                         rejected += 1
@@ -3047,7 +3136,11 @@ class GovernedMemoryService:
                                 ),
                                 sensitivity=candidate.sensitivity_guess,
                                 source_event_ids=candidate.source_event_ids,
-                                origin_trust=TrustLevel.USER,
+                                origin_trust=(
+                                    TrustLevel.EXTERNAL_UNTRUSTED
+                                    if attributed_communication
+                                    else TrustLevel.USER
+                                ),
                                 explicit=False,
                                 authority=authority,
                                 polarity=candidate.polarity,
@@ -3068,6 +3161,7 @@ class GovernedMemoryService:
                                     (event.created_at for event in source_events),
                                     default=None,
                                 ),
+                                attributed_external=attributed_communication,
                                 existing_uow=uow,
                                 audit_id=consolidation_id,
                             )

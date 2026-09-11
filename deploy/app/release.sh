@@ -7,6 +7,7 @@ DEPLOY_ROOT="${VEETBOT_ROOT:-/opt/veetbot}"
 ENV_FILE="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
 SCHEDULE_ENV_FILE="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
 NOTIFY_ENV_FILE="${VEETBOT_NOTIFY_ENV_FILE:-/etc/veetbot/veetbot-notify.env}"
+SURFACE_ENV_FILE="${VEETBOT_SURFACE_ENV_FILE:-/etc/veetbot/veetbot-surface.env}"
 BROWSER_CONTROL_CREDENTIAL_FILE="${VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE:-/etc/veetbot/secrets/browser-control-plane-credential}"
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
@@ -171,6 +172,7 @@ for required in \
   deploy/browser-profile-service.Dockerfile \
   deploy/veetbot-schedule.env.example \
   deploy/veetbot-notify.env.example \
+  deploy/veetbot-surface.env.example \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
   deploy/systemd/veetbot-async-worker.service \
@@ -178,6 +180,7 @@ for required in \
   deploy/systemd/veetbot-maintenance.service \
   deploy/systemd/veetbot-schedule.service \
   deploy/systemd/veetbot-notify.service \
+  deploy/systemd/veetbot-surface.service \
   execution/sandbox.Dockerfile \
   scripts/check_schedule_database_permissions.py \
   scripts/check_production_deployment.py; do
@@ -280,6 +283,58 @@ if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
     "notification worker environment must not be a symlink"
   UNITS=(veetbot-notify "${UNITS[@]}")
 fi
+[[ "${AGENT_SURFACE_API_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SURFACE_API_ENABLED must be 0 or 1"
+[[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SURFACE_WORKER_ENABLED must be 0 or 1"
+[[ "${AGENT_SURFACE_WHATSAPP_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SURFACE_WHATSAPP_ENABLED must be 0 or 1"
+printf 'AGENT_SURFACE_WHATSAPP_ENABLED=%s\n' \
+  "${AGENT_SURFACE_WHATSAPP_ENABLED:-0}" >>"$STAGE/.release.env"
+[[ "${AGENT_SURFACE_API_ENABLED:-0}" == "${AGENT_SURFACE_WORKER_ENABLED:-0}" ]] || fail \
+  "surface API and worker flags must be enabled or disabled together"
+if [[ "${AGENT_SURFACE_WHATSAPP_ENABLED:-0}" == "1" \
+  && "${AGENT_SURFACE_WORKER_ENABLED:-0}" != "1" ]]; then
+  fail "WhatsApp requires the surface API and worker"
+fi
+if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
+  [[ "$SURFACE_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \
+    "VEETBOT_SURFACE_ENV_FILE must be an absolute path without whitespace"
+  [[ -f "$SURFACE_ENV_FILE" ]] || fail \
+    "surface worker environment does not exist: $SURFACE_ENV_FILE"
+  [[ ! -L "$SURFACE_ENV_FILE" ]] || fail \
+    "surface worker environment must not be a symlink"
+  for flag in AGENT_SURFACE_API_ENABLED AGENT_SURFACE_WORKER_ENABLED \
+    AGENT_SURFACE_WHATSAPP_ENABLED; do
+    surface_flag="$(environment_flag "$SURFACE_ENV_FILE" "$flag")"
+    [[ "$surface_flag" == "$(environment_flag "$ENV_FILE" "$flag")" ]] || fail \
+      "surface worker $flag must match the application environment"
+  done
+  for credential_variable in AGENT_SURFACE_TELEGRAM_TOKEN_FILE; do
+    credential_file="$(environment_flag "$SURFACE_ENV_FILE" "$credential_variable")"
+    [[ "$credential_file" =~ ^/[^[:space:]]+$ ]] || fail \
+      "surface worker $credential_variable must be an absolute path"
+    [[ -f "$credential_file" && ! -L "$credential_file" ]] || fail \
+      "surface worker $credential_variable must name a non-symlink regular file"
+  done
+  if [[ "${AGENT_SURFACE_WHATSAPP_ENABLED:-0}" == "1" ]]; then
+    for credential_variable in AGENT_SURFACE_WHATSAPP_TOKEN_FILE \
+      AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE \
+      AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE; do
+      credential_file="$(environment_flag "$SURFACE_ENV_FILE" "$credential_variable")"
+      [[ "$credential_file" =~ ^/[^[:space:]]+$ ]] || fail \
+        "surface worker $credential_variable must be an absolute path"
+      [[ -f "$credential_file" && ! -L "$credential_file" ]] || fail \
+        "surface worker $credential_variable must name a non-symlink regular file"
+    done
+    for setting in AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID \
+      AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION; do
+      [[ -n "$(environment_flag "$SURFACE_ENV_FILE" "$setting")" ]] || fail \
+        "surface worker $setting must be configured"
+    done
+  fi
+  UNITS=(veetbot-surface "${UNITS[@]}")
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
@@ -323,12 +378,24 @@ if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
   sudo install -m 0644 "$STAGE/.veetbot-notify.service" \
     "$SYSTEMD_DIR/veetbot-notify.service"
 fi
+if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
+  awk -v environment_file="$SURFACE_ENV_FILE" '
+    /^EnvironmentFile=/ { print "EnvironmentFile=" environment_file; next }
+    { print }
+  ' "$STAGE/deploy/systemd/veetbot-surface.service" \
+    >"$STAGE/.veetbot-surface.service"
+  sudo install -m 0644 "$STAGE/.veetbot-surface.service" \
+    "$SYSTEMD_DIR/veetbot-surface.service"
+fi
 sudo systemctl daemon-reload
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-schedule >/dev/null 2>&1 || true
 fi
 if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-notify >/dev/null 2>&1 || true
+fi
+if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "0" ]]; then
+  sudo systemctl disable --now veetbot-surface >/dev/null 2>&1 || true
 fi
 
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"

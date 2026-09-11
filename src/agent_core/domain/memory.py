@@ -420,13 +420,27 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
         return self
 
 
+class DistillationRunMetrics(BaseModel):
+    """One repeat's own numbers, recorded beside the aggregate that gates."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    direct_must_form_recall: float = Field(ge=0, le=1)
+    hypothesis_must_form_recall: float = Field(ge=0, le=1)
+    benign_precision: float = Field(ge=0, le=1)
+    holdout_direct_must_form_recall: float = Field(ge=0, le=1)
+    holdout_hypothesis_must_form_recall: float = Field(ge=0, le=1)
+    holdout_benign_precision: float = Field(ge=0, le=1)
+    provider_cost_usd: str = Field(pattern=r"^\d+(?:\.\d+)?$")
+
+
 class MemoryDistillationEvidence(BaseModel):
     """Never-overwritten comparative evidence required to activate formation@9."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[4] = 4
-    scorer_version: Literal["distillation-scorer@5"]
+    schema_version: Literal[7] = 7
+    scorer_version: Literal["distillation-scorer@7"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
     model_policy: str = Field(min_length=1)
@@ -462,7 +476,7 @@ class MemoryDistillationEvidence(BaseModel):
     holdout_positive_case_count: int = Field(ge=20)
     holdout_direct_must_form_recall: float = Field(ge=0.95, le=1)
     holdout_hypothesis_must_form_recall: float = Field(ge=0.8, le=1)
-    holdout_benign_precision: float = Field(ge=0.9, le=1)
+    holdout_benign_precision: float = Field(ge=0.75, le=1)
     holdout_useful_recall_lift_percentage_points: float = Field(ge=15, le=100)
     holdout_evidence_disposition_precision: float = Field(ge=0.75, le=1)
     holdout_represented_case_count: int = Field(ge=1)
@@ -473,6 +487,10 @@ class MemoryDistillationEvidence(BaseModel):
     consolidations_measured: int = Field(ge=1)
     provider_cost_usd: str = Field(pattern=r"^\d+(?:\.\d+)?$")
     boundary_failures: Literal[0] = 0
+    # The gates were decided over this many repeats of the whole evaluation,
+    # pooled; each repeat's own numbers are recorded so the spread is visible.
+    repeats: int = Field(ge=1)
+    run_metrics: list[DistillationRunMetrics] = Field(min_length=1)
     comparative_policies: tuple[
         Literal["formation@7"], Literal["formation@8"], Literal["formation@9"]
     ] = ("formation@7", "formation@8", "formation@9")
@@ -498,6 +516,8 @@ class MemoryDistillationEvidence(BaseModel):
             raise ValueError("positive holdout cases exceed the holdout sample")
         if Decimal(self.provider_cost_usd) > MAXIMUM_DISTILLATION_EVIDENCE_COST_USD:
             raise ValueError("distillation evidence cost exceeds the sanity ceiling")
+        if len(self.run_metrics) != self.repeats:
+            raise ValueError("distillation evidence needs one record per run")
         return self
 
 

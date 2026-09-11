@@ -75,8 +75,10 @@ public struct ConnectionSettingsView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            Divider()
-            actionBar
+            if !embedded {
+                Divider()
+                actionBar
+            }
         }
         .background(Color.primary.opacity(0.025))
         #if os(macOS)
@@ -159,6 +161,11 @@ public struct ConnectionSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.red.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 9))
+                    }
+
+                    HStack {
+                        Spacer()
+                        connectionAction
                     }
                 }
             }
@@ -475,28 +482,29 @@ public struct ConnectionSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
-    private var actionBar: some View {
-        HStack(spacing: 12) {
-            if !embedded {
-                Button("Close") { close() }
-                    .keyboardShortcut(.cancelAction)
-            }
-            Spacer()
-            Button {
-                saveConnection()
-            } label: {
-                Label(
-                    isSaving ? "Saving…" : (model.isConfigured ? "Save Connection" : "Connect"),
-                    systemImage: isSaving ? "hourglass" : "checkmark.circle.fill"
-                )
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.turquoise)
-            .keyboardShortcut(.defaultAction)
-            .disabled(
-                isSaving
-                    || baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var connectionAction: some View {
+        Button {
+            saveConnection()
+        } label: {
+            Label(
+                isSaving ? "Saving…" : (model.isConfigured ? "Update Connection" : "Connect"),
+                systemImage: isSaving ? "hourglass" : "checkmark.circle.fill"
             )
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(AppTheme.turquoise)
+        .keyboardShortcut(.defaultAction)
+        .disabled(
+            isSaving
+                || baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+    }
+
+    private var actionBar: some View {
+        HStack {
+            Spacer()
+            Button("Close") { close() }
+                .keyboardShortcut(.cancelAction)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)

@@ -33,7 +33,9 @@ scope in Milestones 19 and 20.
    persistence path.
 3. **Conversational “delete” means terminal cancellation.** The model calls
    `schedule.cancel`; the schedule and occurrence ledger remain for audit, and
-   an already materialized run is not cancelled. Hard deletion is not added.
+   an already materialized run is not cancelled. Hard deletion is not added to
+   the conversational surface. ADR-0089 subsequently bounds terminal
+   schedule-owned retention without changing cancellation semantics.
 4. **Discovery precedes mutation.** Mutation arguments require a stable
    `schedule_id` and `expected_revision`. Titles are display and matching hints,
    never mutation keys. An ambiguous title requires clarification, and a stale

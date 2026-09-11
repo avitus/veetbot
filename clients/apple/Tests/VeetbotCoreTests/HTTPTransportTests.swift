@@ -1107,7 +1107,11 @@ import Testing
         }
         let client = try makeClient(token: "valid")
 
-        _ = try await client.listSchedules(limit: 500, cursor: "schedule cursor")
+        _ = try await client.listSchedules(
+            limit: 500,
+            cursor: "schedule cursor",
+            states: [.completed, .cancelled]
+        )
 
         let request = try #require(lock.withLock { requests.first })
         #expect(request.httpMethod == "GET")
@@ -1117,6 +1121,10 @@ import Testing
         )
         #expect(query.contains(URLQueryItem(name: "limit", value: "200")))
         #expect(query.contains(URLQueryItem(name: "cursor", value: "schedule cursor")))
+        #expect(
+            query.filter { $0.name == "state" }.map(\.value)
+                == [ScheduleStateKind.completed.rawValue, ScheduleStateKind.cancelled.rawValue]
+        )
     }
 
     @Test

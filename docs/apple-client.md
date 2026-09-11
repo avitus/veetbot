@@ -69,10 +69,11 @@ permission request.
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 
-Settings use a compact header, a scrolling body, and a persistent action bar, so
-connection actions remain visible as sections grow. Connection, Website Access,
-Appearance, and Data & Privacy cards group controls by user intent. Configured macOS clients open
-settings in a separate window that resizes horizontally and vertically and
+Settings use a compact header and a scrolling body. Connection, Website Access,
+Appearance, and Data & Privacy cards group controls by user intent. The Connect
+or Update Connection action sits inside the Connection card, while the footer is
+limited to closing the configured settings surface. Configured macOS clients
+open settings in a separate window that resizes horizontally and vertically and
 restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
 position are restored without interfering with the settings window. Appearance

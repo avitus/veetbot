@@ -55,6 +55,34 @@ gates pass locally. Remaining:
 - [ ] Hosted CI on the milestone's final head
 - [ ] CodeRabbit review loop on the dev to main pull request (build step 7)
 
+### Milestone 14 — Inbound surfaces and pairing
+
+The channel-neutral surface model, five durable persistence ports, one-time
+pairing and lockout ceremony, session-key routing, shared ordinary-run
+submission, Telegram long polling, replies, notifications, approval and input
+round-trips, API and CLI management surfaces, admission limits, and isolated
+surface role are implemented. All twenty-one `gate.surface.*` entries now
+resolve to live checks and pass locally, including the PostgreSQL migration,
+RLS, admission, and crash/re-delivery lane. Remaining:
+
+- [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
+### Milestone 25 — WhatsApp business surface
+
+The optional WhatsApp Cloud API adapter now runs on the Milestone 14 surface
+seam: its loopback webhook verifies the handshake and raw-body signature,
+normalizes Meta message IDs into shared receipts, confines outbound calls to
+the Meta Graph origin, and enforces template-only delivery outside the
+twenty-four-hour window. All twelve `gate.whatsapp.*` entries resolve to live
+checks and pass locally. The
+[WhatsApp integration runbook](../whatsapp-integration-runbook.md) owns the
+remaining operator ceremony. Remaining:
+
+- [ ] Complete the owner Meta ceremony and obtain approval for the content-free utility template
+- [ ] Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
+- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+
 ### Milestone 19 — Conversational schedule creation
 
 A parallel workstream, deliberately narrow: one-time schedule creation through
@@ -99,7 +127,10 @@ forgetting, persistence, comparative activation evidence, the honesty of
 that evidence: a scorer that cannot be fooled, a seeded evaluation store, a
 fallback that never fabricates, verified coverage dispositions, and bounded
 segmentation, and the repaired provider-assisted `formation@10` control with
-its explicit policy precedence (ADR-0086). The local implementation, static and contract suites, strict
+its explicit policy precedence (ADR-0086). ADR-0090 widens the existing
+source-grounding gate so authenticated communication channels can form bounded,
+attributed memories without upgrading correspondent content to owner speech.
+The local implementation, static and contract suites, strict
 documentation build, and Apple package tests pass locally; the fresh
 PostgreSQL 16 integration lane passed in hosted CI on pull request 90
 (CircleCI build 2668); and the 2026-09-03 three-arm live production-tuple
@@ -114,10 +145,18 @@ an independent review reproduced eight release-blocking defects; each is
 fixed with a regression test (ADR-0087), the scorer advanced to
 `distillation-scorer@5`, and the `formation@9` artifact evaluated under the
 old scorer is withdrawn, so `formation@10` serves the production tuple until
-`formation@9` is re-evaluated on the deploying tree. Remaining:
+`formation@9` is re-evaluated on the deploying tree. On 2026-09-09 the first
+run over the development corpus and the frozen holdout failed on hypothesis
+recall, precision, and paraphrase-bound direct recall; the defects it exposed
+are fixed and the scorer is `distillation-scorer@6`. A bounded prompt round
+on 2026-09-10 lifted holdout hypothesis recall to 0.800 and the development
+corpus to full direct recall, but the holdout still failed on direct recall
+and precision. The owner then set a recall-first bar (`distillation-scorer@7`,
+a 0.75 holdout precision floor) and gating over three pooled repeats; the run
+at `0e3ca2f` passed and its `formation@9` artifact is bundled. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Owner review of the frozen holdout, then the first scorer@5 run on the deploying tree over both case sets and the formation@9 rebundle; formation@10 serves the tuple until then
+- [ ] Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
 
 ### Milestone 22 — Persona surface and curated belief promotion
 
@@ -137,7 +176,10 @@ approval-gated update, pause, resume, and terminal cancellation through the
 existing schedule service. All twelve `gate.schedule.*` checks pass locally,
 covering immutable content/cadence edits with preserved execution authority,
 no-backfill resume, audit-preserving cancellation, exact-scope denial,
-fail-closed revision handling, and idempotent retry. Remaining:
+fail-closed revision handling, and idempotent retry. ADR-0089 separately adds a
+Current/Recent History native split and thirty-day maintenance retention for
+terminal schedule-owned state without adding a milestone gate or a
+conversational hard-delete capability. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
 
@@ -158,14 +200,9 @@ forwarding are built with the owner capture ceremony documented
 
 Specified, gated, and authorized, with implementation not yet begun.
 
-- **Milestone 14 — Inbound surfaces and pairing** — twenty-one gates; follows
-  Milestone 13 in the sequential order.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 25 — WhatsApp business surface** — twelve gates; a parallel
-  workstream whose documents, gates, and Meta ceremony proceed now and
-  whose implementation begins when Milestone 14's surface ports exist.
 
 
 ## Deferred

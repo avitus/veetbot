@@ -409,6 +409,8 @@ def test_distillation_cli_command_is_registered() -> None:
     assert "formation@7" in result.output
     assert "formation@8" in result.output
     assert "formation@9" in result.output
+    assert "--development-only" in result.output
+    assert "--repeats" in result.output
 
 
 def test_live_evaluation_refuses_a_non_commit_build_ref(
@@ -622,7 +624,7 @@ def test_main_clause_negation_survives_a_leading_subordinate_clause() -> None:
 def test_scorer_version_advanced_with_its_semantics() -> None:
     """A changed scorer cannot keep the version an old artifact was published under."""
 
-    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@5"
+    assert DISTILLATION_SCORER_VERSION == "distillation-scorer@7"
 
 
 def test_represented_text_requires_a_pool_and_exact_user_text() -> None:
@@ -936,4 +938,307 @@ def test_holdout_gates_mirror_the_thresholds_without_scenario_rules() -> None:
     assert (
         "no holdout seeded case demonstrated attributed representation"
         in evaluate_holdout_gates(unrepresented, summaries)
+    )
+
+
+@pytest.mark.parametrize(
+    ("subject", "expected_subjects", "expected_statements"),
+    [
+        (
+            "weightlifting",
+            ["lifting weights", "weights"],
+            ["User lifts weights three times a week."],
+        ),
+        (
+            "tomato growing",
+            ["balcony gardening"],
+            ["User grows tomatoes on the balcony every summer."],
+        ),
+        (
+            "commuting by bicycle",
+            ["cycling to the office", "commute"],
+            ["User usually cycles to the office."],
+        ),
+        ("response brevity preference", ["answer style"], ["User prefers concise answers."]),
+    ],
+)
+def test_subject_rule_accepts_an_inflected_or_compounded_key(
+    subject: str, expected_subjects: list[str], expected_statements: list[str]
+) -> None:
+    """A key spelt as a variant of the gold's words names the same thing.
+
+    The first holdout run lost four statement-equivalent beliefs to their
+    keys alone: "weightlifting" against "lifting weights", "tomato growing"
+    against "tomatoes", "commuting" against "commute", and "preference"
+    against "prefers". The rule that a subject must name the gold conflict
+    key stands; it now compares lemmas and treats a stem as naming its
+    inflections and compounds.
+    """
+
+    assert subject_matches(subject, expected_subjects, expected_statements)
+
+
+def test_subject_rule_still_rejects_an_unrelated_or_generic_key() -> None:
+    assert not subject_matches("verbosity", ["answer style"], ["User prefers concise answers."])
+    assert not subject_matches("User", ["answer style"], ["User prefers concise answers."])
+    assert not subject_matches("running", ["marathon"], ["User wants to finish the marathon."])
+
+
+def test_lemma_strips_an_oes_plural() -> None:
+    from agent_core.memory.equivalence import lemma
+
+    assert lemma("tomatoes") == "tomato"
+    assert lemma("heroes") == "hero"
+    assert lemma("shoes") == "shoe"
+    assert lemma("goes") == "go"
+
+
+def test_a_development_only_result_passes_without_evidence() -> None:
+    """Tuning runs score the development corpus alone and publish nothing."""
+
+    result = memory_eval.MemoryDistillationEvaluationResult(
+        passed=True, failure_summary=None, cases=[], policies={}, development_only=True
+    )
+
+    assert result.evidence is None
+    assert result.holdout_cases == []
+    with pytest.raises(ValidationError, match="development-only"):
+        memory_eval.MemoryDistillationEvaluationResult(
+            passed=True, failure_summary=None, cases=[], policies={}
+        )
+
+
+def test_a_development_only_run_never_touches_the_holdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The holdout is spent by every run against it, so tuning runs skip it.
+
+    A development-only run loads the corpus, scores the three arms on it,
+    reports the publication gates, and neither reads the holdout nor writes
+    evidence, whatever the gates say.
+    """
+
+    import asyncio
+    from datetime import UTC, datetime
+
+    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+    monkeypatch.setattr(memory_eval, "require_committed_tree", lambda root, ref: None)
+    monkeypatch.setattr(memory_eval, "load_settings", lambda: object())
+    monkeypatch.setattr(memory_eval, "_evaluation_settings", lambda settings, root: settings)
+
+    def refuse(_root: Path) -> tuple[Any, str]:
+        raise AssertionError("a development-only run must not load the holdout")
+
+    monkeypatch.setattr(memory_eval, "load_distillation_holdout", refuse)
+
+    async def silent_arm(
+        _settings: Any,
+        case: Any,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        policy_version: Any,
+        seeds: Any,
+    ) -> Any:
+        return memory_eval.DistillationArmResult(
+            policy_version=policy_version,
+            beliefs=[],
+            score=memory_eval.score_distillation_case(case, []),
+            identity=("openai", "gpt-5.6-sol", "default@1"),
+            provider_calls=0,
+            expected_provider_calls=0,
+            evaluated_at=datetime(2026, 9, 10, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(memory_eval, "_evaluate_case", silent_arm)
+    output = tmp_path / "evidence.json"
+
+    result = asyncio.run(
+        memory_eval.run_live_evaluation(
+            Path.cwd(),
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0" * 40,
+            output=output,
+            development_only=True,
+        )
+    )
+
+    assert result is not None
+    assert result.development_only
+    assert result.holdout_cases == []
+    assert result.holdout_policies == {}
+    assert not result.passed
+    assert "direct must-form recall" in (result.failure_summary or "")
+    assert result.evidence is None
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("candidate", "reference"),
+    [
+        (
+            "User has written firmware for insulin pumps for eight years.",
+            "User has eight years of experience writing firmware for insulin pumps.",
+        ),
+        ("User's database currently uses SQLite.", "The user's database is SQLite for now."),
+        (
+            "User always prefers metric measurements, never imperial.",
+            "User wants measurements in metric, never imperial.",
+        ),
+        ("User has a son named Robert who lives in Berlin.", "User has a son."),
+        (
+            "User is starting a podcast about local history.",
+            "User has started a local history podcast.",
+        ),
+    ],
+)
+def test_claim_match_accepts_an_elaboration_of_the_gold(candidate: str, reference: str) -> None:
+    """A correct claim stated with more detail is the claim, not a different one.
+
+    The owner decided on 2026-09-10 that a personal agent should be scored
+    recall-first: a belief that carries every content term of the gold, with
+    the same polarity, counts, numbers, directions, and term order, matches
+    however many words it adds. Inflections agree, and bare qualifiers such
+    as "currently" and "always" are not content. This is
+    distillation-scorer@7; the runtime combiner keeps the stricter rule.
+    """
+
+    from agent_core.memory.equivalence import statement_matches_claim
+
+    assert statement_matches_claim(candidate, reference)
+
+
+@pytest.mark.parametrize(
+    ("candidate", "reference"),
+    [
+        (
+            "User ran 200 miles in training last month.",
+            "User ran 100 miles in training last month.",
+        ),
+        ("User prefers coffee to tea.", "User prefers tea to coffee."),
+        ("User runs without music.", "User runs with music."),
+        ("User does not run outdoors.", "User runs outdoors."),
+        ("User grows tomatoes.", "User grows tomatoes and chillies on their balcony every summer."),
+        ("User bikes on the rest of the days.", "User swims on the rest of the days."),
+        ("User has a daughter.", "User has two daughters."),
+    ],
+)
+def test_claim_match_still_rejects_a_different_claim(candidate: str, reference: str) -> None:
+    from agent_core.memory.equivalence import statement_matches_claim
+
+    assert not statement_matches_claim(candidate, reference)
+
+
+def test_holdout_precision_floor_is_seventy_five_percent() -> None:
+    """The holdout's precision floor is 0.75; the development corpus keeps 0.90.
+
+    Of forty-two extra holdout beliefs across three pooled runs on
+    2026-09-10, about twenty-six were true things the labels never listed
+    and about twelve were correct facts under a different kind or wording;
+    four were poor. The floor exists to keep wrong memories out, and the
+    measurement was dominated by memories the labels missed, so the owner set
+    it at 0.75 and kept every other threshold.
+    """
+
+    from agent_core.evals.memory_distillation import evaluate_holdout_gates
+
+    root = Path(__file__).resolve().parents[2]
+    holdout, _digest = memory_eval.load_distillation_holdout(root)
+    corpus_like = MemoryDistillationCorpus.model_construct(
+        cases=holdout.cases, seed_pools=holdout.seed_pools
+    )
+    results = _results(corpus_like, represented_verified=True)
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, results) for policy in memory_eval._POLICIES
+    }
+    lenient = summaries["formation@9"].model_copy(update={"benign_precision": 0.76})
+    strict = summaries["formation@9"].model_copy(update={"benign_precision": 0.74})
+
+    assert evaluate_holdout_gates(results, {**summaries, "formation@9": lenient}) == []
+    assert "holdout benign precision 0.740 is below 0.75" in evaluate_holdout_gates(
+        results, {**summaries, "formation@9": strict}
+    )
+
+
+def _rerun(
+    results: list[memory_eval.DistillationCaseResult], run_index: int
+) -> list[memory_eval.DistillationCaseResult]:
+    return [result.model_copy(update={"run_index": run_index}) for result in results]
+
+
+def test_repeated_runs_gate_on_the_pooled_aggregate() -> None:
+    """Gates are decided over every repeat, not by the draw of one run.
+
+    Two runs of one unchanged policy differed by up to 0.11 per gate on
+    2026-09-10, so the owner decided to gate on an aggregate: recall,
+    precision, lift, and disposition pool every run; the personal-agent and
+    rich cores need each expected memory in a majority of runs rather than
+    all of them in one; the represented gate also needs a majority of runs; and
+    boundary failures and call counts still fail on any run.
+    """
+
+    corpus = MemoryDistillationCorpus.model_validate(_corpus_payload())
+    full = _results(corpus, represented_verified=True)
+    runs = [_rerun(full, 0), _rerun(full, 1)]
+    weaker = []
+    for result in _rerun(full, 2):
+        if result.case_id == "rich-conversation-900":
+            arm = result.arms["formation@9"]
+            case = next(case for case in corpus.cases if case.id == result.case_id)
+            beliefs = arm.beliefs[1:]
+            arm = arm.model_copy(
+                update={"beliefs": beliefs, "score": score_distillation_case(case, beliefs)}
+            )
+            result = result.model_copy(update={"arms": {**result.arms, "formation@9": arm}})
+        weaker.append(result)
+    runs.append(weaker)
+    pooled = [result for run in runs for result in run]
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
+    }
+
+    failures = memory_eval.evaluate_publication_gates(corpus, pooled, summaries, repeats=3)
+
+    assert not any("rich multi-turn" in failure for failure in failures), failures
+    assert not any("direct must-form recall" in failure for failure in failures), failures
+    single = {
+        policy: memory_eval._policy_metrics(policy, weaker) for policy in memory_eval._POLICIES
+    }
+    assert any(
+        "rich multi-turn" in failure
+        for failure in memory_eval.evaluate_publication_gates(corpus, weaker, single)
+    )
+
+    # The represented gate, like the cores, needs a majority of runs: one
+    # anticipation call's chance per run, so one dry run of three is not a
+    # failure and two of three is.
+    unrepresented = _results(corpus, represented_verified=False)
+    pooled = [*runs[0], *runs[1], *_rerun(unrepresented, 2)]
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
+    }
+    assert "no seeded case demonstrated attributed representation" not in (
+        memory_eval.evaluate_publication_gates(corpus, pooled, summaries, repeats=3)
+    )
+    pooled = [*runs[0], *_rerun(unrepresented, 1), *_rerun(unrepresented, 2)]
+    summaries = {
+        policy: memory_eval._policy_metrics(policy, pooled) for policy in memory_eval._POLICIES
+    }
+    assert "no seeded case demonstrated attributed representation" in (
+        memory_eval.evaluate_publication_gates(corpus, pooled, summaries, repeats=3)
+    )
+
+
+def test_a_result_records_its_repeat_count() -> None:
+    result = memory_eval.MemoryDistillationEvaluationResult(
+        passed=True, failure_summary=None, cases=[], policies={}, development_only=True, repeats=3
+    )
+
+    assert result.repeats == 3
+    assert (
+        memory_eval.MemoryDistillationEvaluationResult(
+            passed=True, failure_summary=None, cases=[], policies={}, development_only=True
+        ).repeats
+        == 1
     )

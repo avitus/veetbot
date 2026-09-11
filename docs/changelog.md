@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-10 — Current schedules and recent terminal history
+
+- The native schedule browser now defaults to ACTIVE and PAUSED records and
+  offers a separate Recent History section for COMPLETED and CANCELLED records.
+  Both sections use server-side lifecycle filters before cursor pagination.
+- Terminal schedule records, immutable revisions, occurrences, and schedule
+  idempotency rows are retained for thirty days and then removed by bounded,
+  fleet-safe maintenance. Linked durable runs, sessions, and content-free audit
+  events retain their independent lifecycles.
+- Recurring cadence summaries omit the time zone when it matches the device's
+  current zone and retain it for exceptional cross-zone schedules.
+
 ## 2026-09-06 — Full production tool roster fits the context guardrail
 
 - Removed the redundant prose copy of every provider tool name and compacted

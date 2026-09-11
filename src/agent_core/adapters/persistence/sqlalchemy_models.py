@@ -19,6 +19,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     Sequence,
@@ -1123,6 +1124,13 @@ class ScheduleRow(Base):
         ),
         Index("ix_schedules_due", "state", "next_fire_at"),
         Index(
+            "ix_schedules_terminal_retention",
+            "tenant_id",
+            "updated_at",
+            "id",
+            postgresql_where=text("state IN ('COMPLETED','CANCELLED')"),
+        ),
+        Index(
             "ix_schedules_tenant_principal_updated",
             "tenant_id",
             "principal_id",
@@ -1238,7 +1246,7 @@ class DeviceRow(Base):
             name="device_kind_closed",
         ),
         CheckConstraint(
-            "push_provider IS NULL OR push_provider IN ('apns','telegram')",
+            "push_provider IS NULL OR push_provider IN ('apns','telegram','whatsapp')",
             name="device_push_provider_closed",
         ),
         CheckConstraint(
@@ -1258,8 +1266,9 @@ class DeviceRow(Base):
         ),
         CheckConstraint(
             "(kind = 'surface' AND "
-            "(push_provider IS NULL OR push_provider = 'telegram')) OR "
-            "(kind <> 'surface' AND (push_provider IS NULL OR push_provider <> 'telegram'))",
+            "(push_provider IS NULL OR push_provider IN ('telegram','whatsapp'))) OR "
+            "(kind <> 'surface' AND "
+            "(push_provider IS NULL OR push_provider NOT IN ('telegram','whatsapp')))",
             name="device_surface_routing",
         ),
         CheckConstraint(
@@ -1323,6 +1332,210 @@ class DeviceRow(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SurfacePairingCodeRow(Base):
+    __tablename__ = "surface_pairing_codes"
+    __table_args__ = (
+        CheckConstraint("max_attempts > 0", name="surface_pairing_code_max_attempts_positive"),
+        CheckConstraint(
+            "attempts >= 0 AND attempts <= max_attempts",
+            name="surface_pairing_code_attempts_bounded",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(granted_scopes) = 'array'",
+            name="surface_pairing_code_scopes_array",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="surface_pairing_code_expiry_after_creation",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    surface_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    code_hash: Mapped[bytes] = mapped_column(LargeBinary)
+    code_salt: Mapped[bytes] = mapped_column(LargeBinary)
+    granted_scopes: Mapped[list[str]] = mapped_column(JSONB)
+    label: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    max_attempts: Mapped[int] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_principal_id: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SurfacePairingRow(Base):
+    __tablename__ = "surface_pairings"
+    __table_args__ = (
+        CheckConstraint(
+            "jsonb_typeof(granted_scopes) = 'array'",
+            name="surface_pairing_scopes_array",
+        ),
+        CheckConstraint(
+            "(revoked_at IS NULL AND revoked_by IS NULL) OR "
+            "(revoked_at IS NOT NULL AND revoked_by IS NOT NULL)",
+            name="surface_pairing_revocation_consistent",
+        ),
+        Index(
+            "uq_surface_pairings_live_sender",
+            "surface_id",
+            "sender_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    surface_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    sender_id: Mapped[str] = mapped_column(Text)
+    sender_label: Mapped[str | None] = mapped_column(Text)
+    granted_scopes: Mapped[list[str]] = mapped_column(JSONB)
+    paired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(Text)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SurfaceSenderLockoutRow(Base):
+    __tablename__ = "surface_sender_lockouts"
+    __table_args__ = (
+        CheckConstraint("failed_attempts >= 0", name="surface_lockout_attempts_nonnegative"),
+    )
+
+    surface_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("devices.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sender_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SurfaceSessionRow(Base):
+    __tablename__ = "surface_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "rotated_at IS NULL OR rotated_at >= created_at",
+            name="surface_session_rotation_consistent",
+        ),
+        CheckConstraint(
+            "last_inbound_at IS NULL OR last_inbound_at >= created_at",
+            name="surface_session_inbound_consistent",
+        ),
+        Index(
+            "uq_surface_sessions_live_key",
+            "surface_id",
+            "external_key",
+            unique=True,
+            postgresql_where=text("rotated_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    surface_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    external_key: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SurfaceInboundReceiptRow(Base):
+    __tablename__ = "surface_inbound_receipts"
+    __table_args__ = (
+        CheckConstraint(
+            "disposition IN ('submitted','input_delivered','command_handled',"
+            "'rejected_unpaired','rejected_locked','rejected_rate',"
+            "'rejected_active_run','rejected_admission','ignored_media',"
+            "'ignored_chat_kind')",
+            name="surface_receipt_disposition_closed",
+        ),
+    )
+
+    surface_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("devices.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    external_update_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    disposition: Mapped[str] = mapped_column(String(32))
+    session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL")
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL")
+    )
+    reason_code: Mapped[str | None] = mapped_column(Text)
+
+
+class SurfaceReplyRow(Base):
+    __tablename__ = "surface_replies"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_surface_replies_run_id"),
+        CheckConstraint(
+            "status IN ('pending','dispatched','failed')",
+            name="surface_reply_status_closed",
+        ),
+        CheckConstraint(
+            "chunks_total IS NULL OR chunks_total >= 0",
+            name="surface_reply_chunks_total_nonnegative",
+        ),
+        CheckConstraint(
+            "chunks_sent >= 0 AND (chunks_total IS NULL OR chunks_sent <= chunks_total)",
+            name="surface_reply_chunks_sent_bounded",
+        ),
+        CheckConstraint("attempts >= 0", name="surface_reply_attempts_nonnegative"),
+        CheckConstraint(
+            "(claimed_by IS NULL AND claimed_until IS NULL) OR "
+            "(claimed_by IS NOT NULL AND claimed_until IS NOT NULL)",
+            name="surface_reply_claim_consistent",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND settled_at IS NULL) OR "
+            "(status <> 'pending' AND settled_at IS NOT NULL)",
+            name="surface_reply_settlement_consistent",
+        ),
+        Index("ix_surface_replies_due", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    surface_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    chat_ref: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    chunks_total: Mapped[int | None] = mapped_column(Integer)
+    chunks_sent: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(Text)
+    claimed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DeviceRegistrationIdempotencyRow(Base):

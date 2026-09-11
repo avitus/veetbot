@@ -95,6 +95,44 @@ if [[ -n "$EXPECTED_RELEASE_ID" ]]; then
   fi
 fi
 
+CANDIDATE_CONFIG="$SOURCE_CONFIG"
+RENDERED_CONFIG=""
+cleanup_rendered_config() {
+  if [[ -n "$RENDERED_CONFIG" ]]; then
+    rm -f -- "$RENDERED_CONFIG"
+  fi
+}
+trap cleanup_rendered_config EXIT
+if grep -Fq '# VEETBOT_WHATSAPP_ROUTE_BEGIN' "$SOURCE_CONFIG"; then
+  ACTIVE_RELEASE_ENV="$DEPLOY_ROOT/current/.release.env"
+  [[ -f "$ACTIVE_RELEASE_ENV" ]] || fail \
+    "active release identity is missing: $ACTIVE_RELEASE_ENV"
+  WHATSAPP_ENABLED="$(
+    awk -F= '
+      $1 == "AGENT_SURFACE_WHATSAPP_ENABLED" { value = $2; found += 1 }
+      END { if (found == 1) print value; else exit 1 }
+    ' "$ACTIVE_RELEASE_ENV"
+  )" || fail "active release has no singular WhatsApp routing flag"
+  [[ "$WHATSAPP_ENABLED" =~ ^[01]$ ]] || fail \
+    "active release WhatsApp routing flag must be 0 or 1"
+  marker_counts="$(
+    awk '
+      /# VEETBOT_WHATSAPP_ROUTE_BEGIN/ { begin += 1 }
+      /# VEETBOT_WHATSAPP_ROUTE_END/ { end += 1 }
+      END { print begin + 0, end + 0 }
+    ' "$SOURCE_CONFIG"
+  )"
+  [[ "$marker_counts" == "1 1" ]] || fail \
+    "repository Nginx configuration must contain one WhatsApp route block"
+  RENDERED_CONFIG="$SOURCE_CONFIG.rendered.conf"
+  awk -v enabled="$WHATSAPP_ENABLED" '
+    /# VEETBOT_WHATSAPP_ROUTE_BEGIN/ { inside = 1; next }
+    /# VEETBOT_WHATSAPP_ROUTE_END/ { inside = 0; next }
+    enabled == 1 || !inside { print }
+  ' "$SOURCE_CONFIG" >"$RENDERED_CONFIG"
+  CANDIDATE_CONFIG="$RENDERED_CONFIG"
+fi
+
 sudo install -d -m 0755 "$(dirname "$AVAILABLE")" "$(dirname "$ENABLED")" "$BACKUP_DIR"
 BACKUP=""
 ENABLED_TARGET=""
@@ -176,6 +214,9 @@ rollback_on_exit() {
     fi
     if [[ -n "$NEXT_WEBSITE_CURRENT" ]]; then
       rm -f -- "$NEXT_WEBSITE_CURRENT"
+    fi
+    if [[ -n "$RENDERED_CONFIG" ]]; then
+      rm -f -- "$RENDERED_CONFIG"
     fi
     sudo nginx -t || true
     if (( RELOAD_ATTEMPTED == 1 )); then
@@ -310,7 +351,7 @@ if [[ -n "$WEBSITE_ARCHIVE" ]]; then
   WEBSITE_PROMOTED=1
 fi
 
-sudo install -m 0644 "$SOURCE_CONFIG" "$AVAILABLE"
+sudo install -m 0644 "$CANDIDATE_CONFIG" "$AVAILABLE"
 sudo ln -sfn "$AVAILABLE" "$ENABLED"
 
 if ! sudo nginx -t; then
@@ -323,6 +364,9 @@ if ! sudo systemctl reload "$NGINX_SERVICE"; then
 fi
 ROLLBACK_PENDING=0
 trap - EXIT
+if [[ -n "$RENDERED_CONFIG" ]]; then
+  rm -f -- "$RENDERED_CONFIG"
+fi
 
 if [[ -n "$DOCS_ARCHIVE" ]]; then
   retained=0

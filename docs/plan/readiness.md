@@ -234,7 +234,7 @@ specification, and recorded as
     and a repository constructed with a live session that never
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
-    `engineering-plan.md:1736` says *"Create Alembic migrations for at
+    `engineering-plan.md:1749` says *"Create Alembic migrations for at
     least these tables"* and `development-toolchain.md:183` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
@@ -258,7 +258,7 @@ ORM.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2621`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2634`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -278,7 +278,7 @@ Three items fell short, one of them completely.
 
 1.  **Provider response metadata is designed nowhere.**
     `provider_metadata` appears exactly once in the entire corpus, as
-    a `dict[str, Any]` field at `engineering-plan.md:1322`. No document
+    a `dict[str, Any]` field at `engineering-plan.md:1335`. No document
     states which keys go in it, whether the set is open or closed,
     whether it is persisted, or where. It is absent from the
     `model_calls` schema. A field of that shape with no key discipline
@@ -366,11 +366,11 @@ of thing that is written three different ways by three implementers,
 two of which are subtly wrong.
 
 **Principal scopes were half-designed.** The `Principal` model lived
-only at `engineering-plan.md:572`, the policy spec identified where
+only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:620` named `ApprovalService` as one of
+`bootstrap-and-composition.md:621` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -462,7 +462,7 @@ the fewest of any milestone that adds work — and that number was the
 finding.
 
 Section 16 of the engineering plan, at
-`engineering-plan.md:1910-2117`, designs the API more thoroughly than
+`engineering-plan.md:1923-2130`, designs the API more thoroughly than
 a summary of this milestone's coverage would suggest. At the time of the
 Milestone 5 review it specified nine endpoints with methods, paths, and where
 relevant headers; ADR-0050 later added the authoritative session list and
@@ -505,7 +505,7 @@ Six things were visibly unsettled inside it.
     to the trace identifier the observability section requires.
 3.  **`Idempotency-Key` handling is named in two places and specified
     in neither.** It appears as a header at
-    `engineering-plan.md:2002` and as an implement bullet, and the
+    `engineering-plan.md:2015` and as an implement bullet, and the
     idempotency port the map schedules at Milestone 1 is a tool-call
     concern rather than an HTTP one. Whether these are the same
     mechanism is undecided.
@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4277-4354`
+Section 28 of the plan is not empty — `engineering-plan.md:4324-4401`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -580,7 +580,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1392`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4356` requires a container-escape attempt as
+    `engineering-plan.md:4403` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -742,7 +742,7 @@ What was missing was everything underneath it: no package format, no
 manifest schema, no types, no storage, no reference grammar, no
 context accounting, and no gates. The acceptance criterion *"A
 selected skill is version-pinned in the run"* at
-`engineering-plan.md:2867` had no design behind it — and no document
+`engineering-plan.md:2880` had no design behind it — and no document
 outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
 and remains the sharper of the two observations.
 
@@ -985,7 +985,7 @@ rather than a full transcript — and two more were partial.
 That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
-Section 15 column at `engineering-plan.md:1791`, and the sibling join
+Section 15 column at `engineering-plan.md:1804`, and the sibling join
 at `runtime-loop.md:1150` reads it. Restricted context is
 `context-engine.md:313`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
@@ -1001,10 +1001,10 @@ plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:978`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
 `tool-system.md:936` and no input type for it exists anywhere, and
-the child budget is additive by `engineering-plan.md:666` while no
+the child budget is additive by `engineering-plan.md:679` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3252` and `engineering-plan.md:3253` and picked
+`engineering-plan.md:3277` and `engineering-plan.md:3278` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1409,12 +1409,16 @@ policy binding of every bundled artifact, is designed in the same document.
 The trust boundary is narrow rather than a general suppression rule. Invalid or
 foreign provenance, assistant-as-user attribution, credentials, PII beyond
 explicit policy, promoted untrusted instructions, isolation failures, and
-durable corrections still form nothing. Ambiguity, inference, ongoing state,
-and sensitivity permitted by policy instead affect derivation, confidence,
-longevity, expiry, and viewing ceilings. This is the specific distinction the
-prior designs did not make strongly enough.
+durable corrections still form nothing. ADR-0090 adds a typed communication
+exception after a production Gmail run formed zero memories: repository-owned,
+principal-scoped Gmail and SMS events may form only channel-attributed,
+tentative, local, sensitive hypotheses, while paired-surface owner messages use
+the existing owner-assertion lane and arbitrary external content remains barred.
+Ambiguity, inference, ongoing state, and sensitivity permitted by policy instead
+affect derivation, confidence, longevity, expiry, and viewing ceilings. This is
+the specific distinction the prior designs did not make strongly enough.
 
-The readiness verdict is **Authorized**: ADR-0077, thirty-one new
+The readiness verdict is **Authorized**: ADR-0077 and ADR-0090, thirty-one new
 `gate.memory.*` entries, the Milestone 21 census row, a nine-step build
 sequence, explicit migration and erasure rules, and a comparative corpus
 contract specify the whole workstream before production-code changes begin.
@@ -1540,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4356-4514` for links to other documents returned
+`engineering-plan.md:4403-4561` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1632,7 +1636,7 @@ sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
 criterion, and 30.6's constraints are each carried forward rather
 than reinterpreted. Two citation errors are corrected in the process.
 One is this review's: the version-pinning criterion is at
-`engineering-plan.md:2867`, and the line this review first named was
+`engineering-plan.md:2880`, and the line this review first named was
 an MCP configuration bullet a few lines above it. A line-number
 citation into the plan is correct only until the plan is next edited,
 which is why every citation in this corpus is now recorded in
@@ -1760,8 +1764,8 @@ under the conflict it settles.
     Milestone 5 was an off-by-one against a list in which 5 is the
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2621` against
-    `model-gateway.md:1810` and `milestone-map.md:1659`. The map
+    Milestone 3.** `engineering-plan.md:2634` against
+    `model-gateway.md:1810` and `milestone-map.md:1669`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1770,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4356` requires a test the harness's case set
+    `engineering-plan.md:4403` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

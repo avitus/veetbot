@@ -40,6 +40,32 @@ import FoundationNetworking
     }
 
     @Test
+    func testCurrentAndRecentHistoryUseDisjointServerSideStateFilters() async throws {
+        let lock = NSLock()
+        var requestedStates: [[String]] = []
+        let model = try makeModel { request in
+            let states = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .filter { $0.name == "state" }
+                .compactMap(\.value) ?? []
+            lock.withLock { requestedStates.append(states) }
+            return Self.response(request, body: #"{"items":[],"next_cursor":null}"#)
+        }
+
+        await model.reload(.current)
+        await model.reload(.recentHistory)
+
+        #expect(
+            lock.withLock { requestedStates }
+                == [
+                    [ScheduleStateKind.active.rawValue, ScheduleStateKind.paused.rawValue],
+                    [ScheduleStateKind.completed.rawValue, ScheduleStateKind.cancelled.rawValue],
+                ]
+        )
+        #expect(model.section == .recentHistory)
+    }
+
+    @Test
     func testLaterPageFailureRetainsRowsAndRetryContinuesThatPage() async throws {
         let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000731"))
         let secondID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000732"))

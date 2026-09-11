@@ -162,6 +162,19 @@ Version 3.2 (conversational schedule update pass, 2026-09-04):
   future active firing, and replays safely through the schedule idempotency
   ledger.
 
+Version 3.3 (recent schedule history and retention pass, 2026-09-10):
+
+- The native schedule browser defaults to actionable ACTIVE and PAUSED records
+  and gives the owner a separate Recent History section for COMPLETED and
+  CANCELLED records (ADR-0089).
+- The existing schedule index gains optional lifecycle-state filtering before
+  cursor pagination. Terminal schedule-owned state is retained for thirty days
+  and then removed by bounded, fleet-safe maintenance without deleting linked
+  durable runs or sessions.
+- Recurring schedules retain their IANA zone and daylight-saving semantics, but
+  the native cadence summary shows the zone only when it differs from the
+  device's current zone.
+
 ## 1. Mission
 
 Build a modern, general-purpose AI agent platform with a small, durable core and replaceable modules for:
@@ -2934,7 +2947,8 @@ Never automatically store:
 - Credentials
 - Authentication tokens
 - Untrusted external instructions
-- Raw tool output
+- Raw tool output; a bounded, attributed communication summary is not raw
+  output and may form under ADR-0090 without gaining owner authority
 - Private reasoning
 - Transient task details
 - Sensitive data without explicit policy
@@ -2944,7 +2958,10 @@ Never automatically store:
 - A user can inspect and delete stored memories.
 - Conflicting memories are represented rather than silently overwritten.
 - Every memory links to source events.
-- External content cannot directly write persistent memory.
+- External content cannot directly write persistent memory. A recognized
+  principal-scoped communication may contribute an attributed, tentative
+  memory through the governed formation service; it remains untrusted for
+  instructions, policy, credentials, and consequential actions (ADR-0090).
 - Retrieval respects tenant and scope.
 - Memory improves defined evaluation cases without increasing policy failures.
 
@@ -3007,18 +3024,25 @@ active session consolidates only after an idle boundary, in maintenance rather
 than on the interactive response path.
 
 The extractor may propose multiple structured candidates from one user event.
-Every proposal remains exactly linked to its user-authored source event, enters
-as inferred and provisional unless the explicit-memory path applies, and passes
+Every proposal remains exactly linked to an admitted source event, enters as
+inferred and provisional unless the explicit-memory path applies, and passes
 the existing eligibility, portability, conflict, correction, and sensitivity
-gates. Candidate volume is bounded before commit.
+gates. Owner assertions are principal-authored or authenticated paired-surface
+user events. ADR-0090 additionally admits recognized principal-scoped
+communication events as attributed evidence only: Gmail and SMS remain
+untrusted, local, sensitive, tentative, unable to retract owner memory, and
+distinct from arbitrary tool or web output. Candidate volume is bounded before
+commit.
 
 Acceptance criteria for this workstream:
 
 - One ordinary utterance naming two durable entities produces two separately
   inspectable beliefs rather than one compound belief or none.
-- Automatic formation accepts source ids only from the owning principal's user
-  events; assistant, tool, foreign-principal, and untrusted content cannot become
-  direct sources.
+- Automatic formation accepts source ids only from owning-principal assertions
+  and recognized principal-scoped communications. Assistant, model, arbitrary
+  tool or web, foreign-principal, and foreign-tenant content cannot become
+  sources. Correspondent content forms only an explicitly attributed,
+  short-lived hypothesis and never becomes owner speech.
 - Formation is never inline with the user-visible run: terminal runs enqueue one
   idempotent flag and maintenance performs full extraction only after the idle
   boundary. Session close remains an immediate boundary.
@@ -3135,9 +3159,10 @@ Acceptance criteria:
   reproducible from their immutable revision and exact run link.
 - Pausing never backfills paused time, cancellation never reopens, and cancelling
   a schedule never cancels an already materialized run.
-- A client that was offline for every firing can later enumerate successful,
-  failed, cancelled, missed, and overlap-skipped occurrences and reach the exact
-  durable run result where one exists.
+- During the configured terminal-retention window, a client that was offline
+  for every firing can later enumerate successful, failed, cancelled, missed,
+  and overlap-skipped occurrences and reach the exact durable run result where
+  one exists.
 - No raw token, cookie, key, or credential is persisted or logged as schedule,
   revision, occurrence, event, session, or run state.
 
@@ -3646,7 +3671,9 @@ formation remained dramatically too timid for a personal agent. It is a
 parallel workstream and does not advance the verified sequential ceiling past
 unfinished Milestones 13 through 15. The detailed design is
 [adaptive-memory-distillation.md](adaptive-memory-distillation.md) and
-ADR-0077; it declared twenty-four gates, thirty-one after ADR-0086 and ADR-0087.
+ADR-0077; it declared twenty-four gates, thirty-one after ADR-0086 and ADR-0087,
+with ADR-0090 widening the existing source-grounding gate rather than the gate
+census.
 
 Implement:
 
@@ -3676,6 +3703,10 @@ Implement:
 - An ordered source-coverage ledger on the final call so every user clause is
   explicitly formed, represented by an attributable prior memory, or assigned
   a bounded non-memory disposition; silent omission is invalid.
+- A separately versioned deterministic communication adapter over the
+  repository-owned Gmail, SMS, and paired-surface event contracts. It leaves the
+  evaluated provider policies frozen while admitting bounded, attributed,
+  tentative communication memories through the ordinary formation gates.
 
 Acceptance criteria:
 
@@ -3691,9 +3722,13 @@ Acceptance criteria:
   at least 80 percent, benign precision is at least 90 percent, and useful
   recall improves at least fifteen percentage points over `formation@8`.
 - Invalid provenance, assistant-as-user attribution, promoted injection,
-  credential storage, PII storage beyond explicit policy, and cross-principal
-  or cross-tenant formation remain at zero. Inference, ambiguity, ongoing
-  state, or sensitivity permitted by policy alone is not a rejection reason.
+  credential storage, PII storage beyond explicit policy, arbitrary-tool or web
+  formation, and cross-principal or cross-tenant formation remain at zero.
+  Recognized communications may form only with channel attribution, inferred
+  authority, tentative longevity, local portability, and a sensitive viewing
+  ceiling; they cannot retract or supersede owner-authority memory. Inference,
+  ambiguity, ongoing state, or sensitivity permitted by policy alone is not a
+  rejection reason.
 - Every eligible provider consolidation makes three batched calls per planned
   segment; a failed or structurally invalid stage falls back deterministically
   with content-free audit metadata, and a retryable failure also schedules a
@@ -3820,16 +3855,18 @@ Acceptance criteria:
   immutable revision, affects only future occurrences, and preserves pinned
   execution authority and bounds that were not exposed to the model.
 - Conversational delete invokes terminal schedule cancellation, preserves the
-  retained schedule and occurrence ledger, and never cancels an already
-  materialized run.
+  schedule and occurrence ledger during their configured retention window, and
+  never cancels an already materialized run.
 - Missing authority, malformed or unknown identifiers, stale revisions,
   ambiguous discovery, illegal terminal transitions, and identical retries
   fail closed without changing the wrong schedule or duplicating an effect.
 
-The milestone does not include occurrence or run history tools, hard deletion,
-delegated scheduled-run scopes, new cadence kinds, new notification payloads,
-native lifecycle controls, or model-callable mutation of execution authority,
-policy, limits, timeout, misfire grace, or failure policy.
+The milestone does not include occurrence or run history tools, user- or
+model-initiated hard deletion, delegated scheduled-run scopes, new cadence
+kinds, new notification payloads, native lifecycle controls, or model-callable
+mutation of execution authority, policy, limits, timeout, misfire grace, or
+failure policy. ADR-0089 separately authorizes maintenance retention of
+terminal schedule-owned state.
 
 ### Milestone 24: SMS through the owner's iPhone
 
@@ -3916,17 +3953,22 @@ inline-keyboard approvals (B3), or a second business number.
 
 The owner authorized the native schedule browser on 2026-08-29 (ADR-0075) as
 a transport-only Apple client extension over the completed Milestone 11
-control plane. It is not a new milestone and does not reopen Milestone 11 or
-broaden Milestone 20's gates. The detailed display and compatibility contract
-is in [scheduling.md](scheduling.md#native-apple-schedule-browser).
+control plane, then authorized recent terminal history and bounded retention
+on 2026-09-10 (ADR-0089). It is not a new milestone and does not reopen
+Milestone 11 or broaden Milestone 20's gates. The detailed display,
+compatibility, and retention contract is in
+[scheduling.md](scheduling.md#native-apple-schedule-browser).
 
 Implement:
 
 - A schedule entry beside Memory in the native sidebar, opening a resizable
   list/detail browser that reloads authoritative server state when presented.
-- Cursor-paginated summary rows for every schedule retained for the calling
-  principal, with title, text-labeled lifecycle state, cadence, next firing,
-  and bounded instruction preview.
+- A default Current section with cursor-paginated ACTIVE and PAUSED summaries,
+  plus a user-selected Recent History section with cursor-paginated COMPLETED
+  and CANCELLED summaries retained for thirty days.
+- Title, text-labeled lifecycle state, cadence, next firing, and bounded
+  instruction preview in each row; recurring cadence shows its stored zone only
+  when that zone differs from the device's current zone.
 - Point-read detail containing the full instruction, current revision,
   cadence, execution bounds, and lifecycle timestamps; the client never treats
   the list preview as full content.
@@ -3937,13 +3979,18 @@ Acceptance criteria:
 
 - The surface makes only the existing schedule GET requests and requests no
   schedule write or cancellation authority.
-- ACTIVE, PAUSED, COMPLETED, and CANCELLED records can all be inspected, while
-  an unknown future state or cadence still renders without failing the page.
+- ACTIVE and PAUSED records appear by default; the owner can switch to recent
+  COMPLETED and CANCELLED records, while an unknown future state or cadence
+  returned by a compatible server still renders without failing the page.
+- The state filter is applied before pagination. Terminal schedule revisions,
+  occurrences, and idempotency rows age out after thirty days without deleting
+  linked runs, sessions, or content-free audit events.
 - Pagination ignores duplicate IDs, stops on a repeated cursor, survives a
   later-page error without discarding loaded rows, and offers a retry for the
   failed operation.
-- The iOS in-process UI fixture opens the schedule browser, lists a schedule,
-  follows its point read, and renders the full instruction in detail.
+- The iOS in-process UI fixture opens the schedule browser, lists a current
+  schedule, switches to recent history, and follows a point read to render the
+  full instruction in detail.
 
 Native creation, update, pause, resume, cancellation, occurrence history, and
 run history remain outside this read-only extension.

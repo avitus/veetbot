@@ -13,12 +13,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import cast
+from uuid import UUID
+
+import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.messages import (
     FakeModelScript,
     ScriptedToolCall,
@@ -26,8 +30,10 @@ from agent_core.domain.messages import (
     StopReason,
 )
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.schedules import ScheduleState
 from agent_core.domain.tools import ToolInvocationStatus
 from agent_core.runtime.worker import MaintenanceWorker
+from tests.contract.test_schedule_repository_contract import revision, schedule
 
 _START = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
 
@@ -136,3 +142,69 @@ async def test_approval_sweep_failure_does_not_abort_the_maintenance_pass(
 
     assert approval_sweeps == 1
     assert export_sweeps == 1
+
+
+async def test_terminal_schedule_sweep_runs_immediately_then_on_its_own_interval(
+    tmp_path: Path,
+) -> None:
+    clock = FixedClock(_START)
+    schedule_sweeps = 0
+
+    async def sweep_terminal_schedules() -> int:
+        nonlocal schedule_sweeps
+        schedule_sweeps += 1
+        return 0
+
+    async with build(settings=_settings(tmp_path), script=_script(), clock=clock) as app:
+        worker = MaintenanceWorker(
+            uow_factory=app.uow_factory,
+            clock=clock,
+            sweep_terminal_schedules=sweep_terminal_schedules,
+            terminal_schedule_sweep_interval_seconds=60,
+        )
+        await worker.run_once()
+        await worker.run_once()
+        assert schedule_sweeps == 1
+        clock.advance(timedelta(seconds=61))
+        await worker.run_once()
+
+    assert schedule_sweeps == 2
+
+
+async def test_composed_maintenance_purges_terminal_schedules_after_thirty_days(
+    tmp_path: Path,
+) -> None:
+    clock = FixedClock(_START)
+    expired_id = UUID("00000000-0000-0000-0000-000000000811")
+    recent_id = UUID("00000000-0000-0000-0000-000000000812")
+    async with build(settings=_settings(tmp_path), script=_script(), clock=clock) as app:
+        async with app.uow_factory() as uow:
+            # ADR-0089: a terminal record at or beyond the thirty-day cutoff is
+            # purged, so the expired record sits exactly on the cutoff.
+            for schedule_id, updated_at in (
+                (expired_id, _START - timedelta(days=30)),
+                (recent_id, _START - timedelta(days=29)),
+            ):
+                await uow.schedules.create(
+                    schedule(
+                        schedule_id=schedule_id,
+                        state=ScheduleState.CANCELLED,
+                        next_fire_at=None,
+                        updated_at=updated_at,
+                    ).model_copy(
+                        update={
+                            "tenant_id": app.principal.tenant_id,
+                            "principal_id": app.principal.principal_id,
+                        }
+                    ),
+                    revision(schedule_id).model_copy(
+                        update={"created_by_principal_id": app.principal.principal_id}
+                    ),
+                )
+
+        await cast(MaintenanceWorker, app.maintenance_factory()).run_once()
+
+        async with app.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.schedules.get(expired_id, app.principal)
+            assert (await uow.schedules.get(recent_id, app.principal)).id == recent_id

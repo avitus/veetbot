@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
+from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.functions import func
@@ -179,6 +180,18 @@ from agent_core.adapters.persistence.session_deletions import (
     PostgresSessionDeletionRepository,
 )
 from agent_core.adapters.persistence.skills import PostgresSkillRepository
+from agent_core.adapters.persistence.surfaces import (
+    InMemorySurfacePairingRepository,
+    InMemorySurfaceReceiptRepository,
+    InMemorySurfaceReplyOutbox,
+    InMemorySurfaceRepositories,
+    InMemorySurfaceSessionRepository,
+    PostgresSurfacePairingRepository,
+    PostgresSurfaceReceiptRepository,
+    PostgresSurfaceReplyOutbox,
+    PostgresSurfaceRepositories,
+    PostgresSurfaceSessionRepository,
+)
 from agent_core.adapters.persistence.unit_of_work import (
     MemoryUnitOfWorkFactory,
     PostgresRepositoryFactory,
@@ -199,10 +212,24 @@ from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
     InMemorySkillPackageStore,
 )
+from agent_core.adapters.surface_admission import (
+    AllowSurfaceAdmissionController,
+    PostgresSurfaceAdmissionController,
+)
+from agent_core.adapters.telegram import (
+    PostgresTelegramPollLock,
+    TelegramBotTransport,
+    TelegramPoller,
+)
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.keenable import KeenableWebProvider
 from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
+from agent_core.adapters.whatsapp import (
+    WhatsAppCloudTransport,
+    WhatsAppDeliveryService,
+    create_whatsapp_webhook_app,
+)
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
@@ -269,8 +296,21 @@ from agent_core.application.services import (
 from agent_core.application.services import (
     SessionService as PublicSessionServiceContract,
 )
-from agent_core.application.session_service import SessionService
+from agent_core.application.services import SurfaceService as PublicSurfaceServiceContract
+from agent_core.application.session_service import SessionService, bootstrap_session
 from agent_core.application.skill_review import SkillBackgroundReview
+from agent_core.application.surface_worker import (
+    SurfaceDelivery,
+    SurfaceNotificationTransport,
+    SurfaceReplyDispatcher,
+    SurfaceTemplatePolicy,
+    SurfaceWorker,
+)
+from agent_core.application.surfaces import (
+    SurfaceIngressService,
+    SurfaceManagementService,
+    surface_notice_text,
+)
 from agent_core.application.trajectory_service import (
     TrajectoryExportService,
     TrajectoryRedactor,
@@ -296,6 +336,7 @@ from agent_core.config import (
     load_provider_extraction_evidence,
     load_schedule_worker_settings,
     load_settings,
+    load_surface_worker_settings,
     provider_extraction_evidence_paths,
     shipped_corpus_sha256,
     validate_runtime_identity,
@@ -309,7 +350,7 @@ from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
-from agent_core.domain.devices import PushProvider
+from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
@@ -338,9 +379,15 @@ from agent_core.domain.sessions import (
     DEFAULT_PROJECT_SCOPE,
     SESSION_BROWSER_PROFILE_METADATA_KEY,
     Session,
+    SessionStatus,
     project_scope,
 )
 from agent_core.domain.skills import SkillPackage, SkillSource
+from agent_core.domain.surfaces import (
+    SurfaceInboundMessage,
+    SurfaceLimits,
+    SurfaceTransportResult,
+)
 from agent_core.domain.tools import ToolExecutionContext, ToolSpec
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
@@ -352,6 +399,7 @@ from agent_core.mcp.configuration import (
     validate_mcp_config,
 )
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
     distillation_evidence_matches,
@@ -397,6 +445,7 @@ from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.notifications import PushTransport
 from agent_core.ports.persistence import (
+    RepositoryUnitOfWork,
     ScheduleUnitOfWork,
     TransactionCallback,
     TransactionCallbackRegistrar,
@@ -408,7 +457,7 @@ from agent_core.ports.web import WebProvider, WebProviderRouter
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
-from agent_core.runtime.executor import RunExecutor
+from agent_core.runtime.executor import RunExecutor, SurfaceRunStateWriter
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
 from agent_core.scheduling.materializer import ScheduleMaterializer
@@ -472,6 +521,7 @@ class ApplicationServices:
     devices: PublicDeviceServiceContract
     device_ingest: PublicDeviceIngestServiceContract
     notifications: PublicNotificationServiceContract
+    surfaces: PublicSurfaceServiceContract
     memory: PublicMemoryReadServiceContract
     persona: PublicPersonaServiceContract
 
@@ -497,6 +547,7 @@ class Composition:
     async_worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
     schedule_worker_factory: Callable[[], WorkerService]
+    surface_ingress: SurfaceIngressService
     sandbox: SandboxManager
     mcp: MCPRuntime
     skill_catalogs: SkillCatalogService
@@ -507,6 +558,14 @@ class Composition:
     memory_profiles: MemoryProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceWorkerComposition:
+    worker: SurfaceWorker
+    webhook_app: FastAPI | None
+    bind_host: str = "127.0.0.1"
+    bind_port: int = 8002
 
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
@@ -661,6 +720,13 @@ def _memory_uow_repositories(
     notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     delegations = InMemoryDelegationRepository()
+    surfaces = InMemorySurfaceRepositories(
+        admission=AllowSurfaceAdmissionController(),
+        pairings=InMemorySurfacePairingRepository(),
+        sessions=InMemorySurfaceSessionRepository(),
+        receipts=InMemorySurfaceReceiptRepository(),
+        replies=InMemorySurfaceReplyOutbox(),
+    )
     device_invocations = InMemoryDeviceInvocationStore()
     device_ingest = InMemoryDeviceIngestStore()
     checkpoints = InMemoryCheckpointRepository()
@@ -727,6 +793,7 @@ def _memory_uow_repositories(
         device_ingest=device_ingest,
         notification_outbox=notification_outbox,
         delegations=delegations,
+        surfaces=surfaces,
         queue=None,
     )
 
@@ -741,6 +808,7 @@ def _postgres_repository_factory(
     skill_validator: SkillPackageValidator,
     ids: IdFactory,
     schedule_admission_limits: ScheduleAdmissionLimits,
+    surface_admission_limits: SurfaceLimits,
     schedule_metrics: ScheduleMetrics,
 ) -> PostgresRepositoryFactory:
     def repositories(
@@ -812,6 +880,16 @@ def _postgres_repository_factory(
             device_ingest=PostgresDeviceIngestStore(session),
             notification_outbox=PostgresNotificationOutbox(session, clock),
             delegations=PostgresDelegationRepository(session),
+            surfaces=PostgresSurfaceRepositories(
+                admission=PostgresSurfaceAdmissionController(
+                    session,
+                    surface_admission_limits,
+                ),
+                pairings=PostgresSurfacePairingRepository(session),
+                sessions=PostgresSurfaceSessionRepository(session),
+                receipts=PostgresSurfaceReceiptRepository(session),
+                replies=PostgresSurfaceReplyOutbox(session),
+            ),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -1296,6 +1374,456 @@ async def build_notification_worker(
         await engine.dispose()
 
 
+def _validate_surface_role(settings: Settings) -> Principal:
+    validate_settings(
+        settings,
+        require_auth_token=False,
+        require_execution_environment=False,
+        require_email_credentials=False,
+        require_surface_credentials=True,
+    )
+    if not settings.surface_worker_enabled or not settings.surface_api_enabled:
+        raise ConfigurationError(
+            "surface worker and API must both be enabled before the role starts"
+        )
+    if settings.deployment_mode is not DeploymentMode.PRODUCTION:
+        raise ConfigurationError("surface worker requires the production process topology")
+    if settings.auth_mode is not AuthMode.TOKEN:
+        raise ConfigurationError("surface worker requires configured non-development identity")
+    if not settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://")):
+        raise ConfigurationError("surface worker requires PostgreSQL storage")
+    if settings.auth_token is not None:
+        raise ConfigurationError("surface worker environment must not contain an API bearer")
+    if settings.credentials:
+        raise ConfigurationError("surface worker environment must not contain provider keys")
+    unknown = set(settings.auth_scopes) - set(PLATFORM_SCOPES)
+    if unknown:
+        raise ConfigurationError(
+            "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
+        )
+    required = {"run.write", "surface.read", "surface.write"}
+    if not required <= settings.auth_scopes:
+        raise ConfigurationError(
+            "surface worker identity requires run.write, surface.read, and surface.write"
+        )
+    return Principal(
+        tenant_id=settings.auth_tenant_id,
+        principal_id=settings.auth_principal_id,
+        roles=set(settings.auth_roles),
+        scopes=set(settings.auth_scopes),
+    )
+
+
+@asynccontextmanager
+async def build_surface_worker(
+    *,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+    ids: IdFactory | None = None,
+) -> AsyncIterator[SurfaceWorkerComposition]:
+    """Build the credential-minimized Telegram and optional WhatsApp surface role."""
+
+    effective_settings = settings or load_surface_worker_settings()
+    principal = _validate_surface_role(effective_settings)
+    telegram_token = effective_settings.surface_telegram_token
+    assert telegram_token is not None
+
+    whatsapp_enabled = effective_settings.surface_whatsapp_enabled
+    access_token = effective_settings.surface_whatsapp_token
+    app_secret = effective_settings.surface_whatsapp_app_secret
+    hook_key = effective_settings.surface_whatsapp_verify_token
+    phone_number_id = effective_settings.surface_whatsapp_phone_number_id
+    graph_api_version = effective_settings.surface_whatsapp_graph_api_version
+    if whatsapp_enabled:
+        assert access_token is not None
+        assert app_secret is not None
+        assert hook_key is not None
+        assert phone_number_id is not None
+        assert graph_api_version is not None
+
+    runtime = load_config_document(effective_settings, "runtime/limits.yaml")
+    surface_ruleset = load_ruleset_documents(
+        load_config_document(effective_settings, "policy/default.yaml"),
+        load_config_document(effective_settings, "policy/hardline.yaml"),
+    )
+    queue_limits = runtime["queue"]
+    worker_limits = runtime["worker"]
+    notification_limits = runtime["notifications"]
+    scheduling = runtime["scheduling"]
+    limits = SurfaceLimits.model_validate(runtime["surfaces"])
+    schedule_limits = ScheduleAdmissionLimits.model_validate(
+        {
+            "max_active_runs_per_tenant": scheduling["max_active_runs_per_tenant"],
+            "max_materializations_per_minute": scheduling["max_materializations_per_minute"],
+            "daily_cost": scheduling["daily_cost"],
+            "monthly_cost": scheduling["monthly_cost"],
+        }
+    )
+    effective_clock = clock or SystemClock()
+    effective_ids = ids or RandomIdFactory()
+    engine = create_engine(effective_settings.database_url)
+    telegram_transport = TelegramBotTransport(token=telegram_token)
+    whatsapp_transport: WhatsAppCloudTransport | None = None
+    if whatsapp_enabled:
+        assert access_token is not None
+        assert phone_number_id is not None
+        assert graph_api_version is not None
+        whatsapp_transport = WhatsAppCloudTransport(
+            access_token=access_token,
+            phone_number_id=phone_number_id,
+            graph_api_version=graph_api_version,
+            template_name=effective_settings.surface_whatsapp_template_name,
+            template_language=effective_settings.surface_whatsapp_template_language,
+        )
+    live_events = InMemoryLiveEventBroadcaster()
+    telegram_poller: TelegramPoller | None = None
+    try:
+        await assert_schema_revision(engine)
+        skill_store = FilesystemSkillPackageStore(
+            effective_settings.artifact_root / "skill-packages"
+        )
+        factory = cast(
+            UnitOfWorkFactory,
+            PostgresUnitOfWorkFactory(
+                create_session_factory(engine),
+                _postgres_repository_factory(
+                    effective_clock,
+                    EventUpcasterRegistry(),
+                    lease_seconds=float(worker_limits["lease_seconds"]),
+                    max_attempts=int(queue_limits["max_attempts"]),
+                    skill_store=skill_store,
+                    skill_validator=SkillPackageValidator(ConservativeTokenEstimator()),
+                    ids=effective_ids,
+                    schedule_admission_limits=schedule_limits,
+                    surface_admission_limits=limits,
+                    schedule_metrics=ScheduleMetrics(
+                        tenant_hash_key=tenant_hash_key(effective_settings.database_url)
+                    ),
+                ),
+                principal.tenant_id,
+            ),
+        )
+        dispatcher = PostgresRunDispatcher()
+        surface_state_writer = SurfaceRunStateWriter(effective_clock, effective_ids)
+
+        public_runs = PublicRunService(
+            uow_factory=factory,
+            dispatcher=dispatcher,
+            clock=effective_clock,
+            ids=effective_ids,
+            seed_checkpoint=DurableCheckpointSeeder(effective_clock),
+            cancel_active=lambda _run_id: None,
+            cancel_parked_run=surface_state_writer.stop,
+            resume_waiting_run=surface_state_writer.requeue_after_input,
+            resolve_open_question=WorkingStateManager.resolve_question,
+            trajectory_export_enabled=False,
+            live_events=live_events,
+        )
+
+        async def create_surface_session(
+            uow: RepositoryUnitOfWork,
+            bound_principal: Principal,
+            update: SurfaceInboundMessage,
+        ) -> Session:
+            agent = await uow.agents.latest_version(DEFAULT_AGENT_ID)
+            now = effective_clock.now()
+            created = Session(
+                id=effective_ids.new_id(),
+                tenant_id=bound_principal.tenant_id,
+                principal_id=bound_principal.principal_id,
+                agent_id=agent.id,
+                agent_version=agent.version,
+                status=SessionStatus.ACTIVE,
+                metadata={
+                    "surface": update.provider.value,
+                    "surface_id": str(update.surface_id),
+                },
+                created_at=now,
+                updated_at=now,
+            )
+            await uow.sessions.create(created)
+            await uow.events.append(
+                NewEvent(
+                    session_id=created.id,
+                    run_id=None,
+                    event_type="session.created",
+                    payload_schema_version=2,
+                    actor_type="surface",
+                    actor_id=bound_principal.principal_id,
+                    payload={"agent_id": str(agent.id), "title": None, "skill_pins": []},
+                )
+            )
+            return created
+
+        now = effective_clock.now()
+        async with factory() as uow:
+            default_agent = await uow.agents.latest_version(DEFAULT_AGENT_ID)
+
+            async def register_surface(
+                *,
+                provider: PushProvider,
+                client_device_id: str,
+                name: str,
+            ) -> Device:
+                existing = await uow.devices.get_by_client_device_id(
+                    client_device_id,
+                    principal,
+                )
+                has_matching_route = (
+                    existing is not None
+                    and existing.push_provider is provider
+                    and existing.push_token is not None
+                )
+                stored_push_token = (
+                    existing.push_token if existing is not None and has_matching_route else None
+                )
+                stored_push_token_updated_at = (
+                    existing.push_token_updated_at
+                    if existing is not None and has_matching_route
+                    else None
+                )
+                surface = Device(
+                    id=(
+                        uuid5(
+                            NAMESPACE_URL,
+                            f"veetbot:surface:{principal.tenant_id}:{client_device_id}",
+                        )
+                        if existing is None
+                        else existing.id
+                    ),
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    client_device_id=client_device_id,
+                    name=name,
+                    kind=DeviceKind.SURFACE,
+                    platform=provider.value,
+                    push_provider=provider if has_matching_route else None,
+                    push_token=stored_push_token,
+                    push_token_updated_at=stored_push_token_updated_at,
+                    push_token_invalidated_at=(
+                        None if existing is None else existing.push_token_invalidated_at
+                    ),
+                    muted_kinds=frozenset(),
+                    capabilities=frozenset(),
+                    status=DeviceStatus.ACTIVE,
+                    last_seen_at=now,
+                    created_at=now if existing is None else existing.created_at,
+                    updated_at=now,
+                )
+                surface = await uow.devices.upsert(surface, principal)
+                if (
+                    await uow.process_events.get_by_derivation(f"surface.registered:{surface.id}")
+                    is None
+                ):
+                    await uow.process_events.append(
+                        ProcessEvent(
+                            id=effective_ids.new_id(),
+                            event_type="surface.registered",
+                            actor_type="surface",
+                            actor_id=principal.principal_id,
+                            payload={
+                                "tenant_id": principal.tenant_id,
+                                "principal_id": principal.principal_id,
+                                "surface_id": str(surface.id),
+                                "provider": provider.value,
+                            },
+                            derivation_key=f"surface.registered:{surface.id}",
+                            created_at=now,
+                        )
+                    )
+                return surface
+
+            telegram_surface = await register_surface(
+                provider=PushProvider.TELEGRAM,
+                client_device_id="telegram:configured",
+                name="Veetbot Telegram",
+            )
+            whatsapp_surface = (
+                None
+                if not whatsapp_enabled
+                else await register_surface(
+                    provider=PushProvider.WHATSAPP,
+                    client_device_id=f"whatsapp:{phone_number_id}",
+                    name="Veetbot WhatsApp",
+                )
+            )
+
+        async def send_telegram_notice(chat_ref: str, reason_code: str) -> None:
+            await telegram_transport.send_text(chat_ref, surface_notice_text(reason_code))
+
+        async def send_whatsapp_notice(chat_ref: str, reason_code: str) -> None:
+            assert whatsapp_transport is not None
+            await whatsapp_transport.send_text(chat_ref, surface_notice_text(reason_code))
+
+        principal_directory = ConfiguredSchedulePrincipalDirectory(principal)
+        ingress = SurfaceIngressService(
+            uow_factory=factory,
+            principals=principal_directory,
+            max_cost_reservation=default_agent.limits.max_cost,
+            clock=effective_clock,
+            ids=effective_ids,
+            create_session=create_surface_session,
+            submit=public_runs.submit_surface_in,
+            dispatch=public_runs.dispatch_surface_submission,
+            notice=send_telegram_notice,
+            stop_run=surface_state_writer.stop,
+            resume_after_approval=surface_state_writer.requeue_after_approval,
+            notices={
+                PushProvider.TELEGRAM: send_telegram_notice,
+                **(
+                    {}
+                    if whatsapp_transport is None
+                    else {PushProvider.WHATSAPP: send_whatsapp_notice}
+                ),
+            },
+            session_idle_seconds=limits.session_idle_seconds,
+            max_code_attempts=limits.code_max_attempts,
+            lockout_seconds=limits.lockout_seconds,
+            per_sender_messages_per_minute=limits.per_sender_messages_per_minute,
+            inbound_text_max_chars=limits.inbound_text_max_chars,
+            self_approval_enabled=surface_ruleset.self_approval_enabled,
+        )
+
+        async def deliver_telegram_reply(
+            chat_ref: str,
+            text: str,
+            *,
+            last_inbound_at: datetime | None,
+            now: datetime,
+        ) -> SurfaceTransportResult:
+            del last_inbound_at, now
+            return await telegram_transport.send_text(chat_ref, text)
+
+        deliveries: dict[PushProvider, SurfaceDelivery] = {
+            PushProvider.TELEGRAM: deliver_telegram_reply
+        }
+        template_policies: dict[PushProvider, SurfaceTemplatePolicy] = {}
+        whatsapp_delivery: WhatsAppDeliveryService | None = None
+        if whatsapp_transport is not None:
+            whatsapp_delivery = WhatsAppDeliveryService(transport=whatsapp_transport)
+            deliveries[PushProvider.WHATSAPP] = whatsapp_delivery.deliver
+            template_policies[PushProvider.WHATSAPP] = whatsapp_delivery
+        replies = SurfaceReplyDispatcher(
+            uow_factory=factory,
+            deliveries=deliveries,
+            template_policies=template_policies,
+            clock=effective_clock,
+            redactor=TrajectoryRedactor(),
+            worker_id=f"surface:{socket.gethostname()}:{os.getpid()}",
+            batch_size=limits.claim_batch,
+            lease_seconds=limits.lease_seconds,
+            retry_delays=limits.retry_delays_seconds,
+            chunk_size=limits.chunk_size,
+        )
+        notification_transport = SurfaceNotificationTransport(
+            uow_factory=factory,
+            principals=principal_directory,
+            deliveries=deliveries,
+            template_policies=template_policies,
+            clock=effective_clock,
+            redactor=TrajectoryRedactor(),
+            chunk_size=limits.chunk_size,
+        )
+        notification_dispatcher = NotificationDispatcher(
+            uow_factory=cast(NotificationDispatchUnitOfWorkFactory, factory),
+            transport=notification_transport,
+            providers=frozenset(deliveries),
+            clock=effective_clock,
+            ids=effective_ids,
+            claimant=f"surface-notify:{socket.gethostname()}:{os.getpid()}",
+            batch_size=int(notification_limits["claim_batch"]),
+            lease_seconds=float(notification_limits["lease_seconds"]),
+            retry_delays=tuple(
+                float(value) for value in notification_limits["retry_delays_seconds"]
+            ),
+        )
+
+        async def dispatch_surface_outbound() -> int:
+            replies_processed = await replies.run_once()
+            notifications_processed = await notification_dispatcher.run_once()
+            return replies_processed + notifications_processed
+
+        async def latest_telegram_update_id() -> int | None:
+            async with factory() as uow:
+                return await uow.surfaces.receipts.latest_numeric_update_id(telegram_surface.id)
+
+        poll_resumed_recorded = False
+
+        async def telegram_poll_succeeded(offset: int) -> None:
+            nonlocal poll_resumed_recorded
+            async with factory() as uow:
+                surface = await uow.devices.get(telegram_surface.id, principal)
+                poll_now = effective_clock.now()
+                await uow.devices.upsert(
+                    surface.model_copy(update={"last_seen_at": poll_now, "updated_at": poll_now}),
+                    principal,
+                )
+                if not poll_resumed_recorded:
+                    await uow.process_events.append(
+                        ProcessEvent(
+                            id=effective_ids.new_id(),
+                            event_type="surface.poll.resumed",
+                            actor_type="surface",
+                            actor_id=principal.principal_id,
+                            payload={
+                                "tenant_id": principal.tenant_id,
+                                "principal_id": principal.principal_id,
+                                "surface_id": str(telegram_surface.id),
+                                "offset": offset,
+                            },
+                            derivation_key=(
+                                f"surface.poll.resumed:{telegram_surface.id}:{poll_now.isoformat()}"
+                            ),
+                            created_at=poll_now,
+                        )
+                    )
+                    poll_resumed_recorded = True
+
+        telegram_poller = TelegramPoller(
+            surface_id=telegram_surface.id,
+            transport=telegram_transport,
+            latest_committed_update_id=latest_telegram_update_id,
+            ingest=ingress.ingest,
+            poll_lock=PostgresTelegramPollLock(
+                engine,
+                tenant_id=principal.tenant_id,
+                surface_id=telegram_surface.id,
+            ),
+            timeout_seconds=limits.poll_timeout_seconds,
+            fallback_poll_seconds=limits.fallback_poll_seconds,
+            poll_succeeded=telegram_poll_succeeded,
+        )
+        webhook: FastAPI | None = None
+        if whatsapp_surface is not None:
+            assert phone_number_id is not None
+            assert app_secret is not None
+            assert hook_key is not None
+            webhook = create_whatsapp_webhook_app(
+                surface_id=whatsapp_surface.id,
+                phone_number_id=phone_number_id,
+                app_secret=app_secret,
+                verify_token=hook_key,
+                ingest=ingress.ingest,
+            )
+        yield SurfaceWorkerComposition(
+            worker=SurfaceWorker(
+                dispatch_once=dispatch_surface_outbound,
+                clock=effective_clock,
+                fallback_poll_seconds=limits.fallback_poll_seconds,
+                additional_services=(telegram_poller,),
+            ),
+            webhook_app=webhook,
+        )
+    finally:
+        if telegram_poller is not None:
+            await telegram_poller.aclose()
+        await live_events.close()
+        await telegram_transport.aclose()
+        if whatsapp_transport is not None:
+            await whatsapp_transport.aclose()
+        await engine.dispose()
+
+
 async def _compose(
     *,
     storage: Literal["memory", "postgres"],
@@ -1324,6 +1852,9 @@ async def _compose(
     schedule_scan_batch: int,
     schedule_fallback_poll_seconds: float,
     schedule_admission_backoff_seconds: float,
+    schedule_terminal_retention_days: int,
+    schedule_terminal_purge_interval_seconds: float,
+    schedule_terminal_purge_batch: int,
     schedule_definition_limits: ScheduleDefinitionLimits,
     delegation_defaults: DelegationDefaults,
     delegation_caps: DelegationCaps,
@@ -1354,6 +1885,7 @@ async def _compose(
     device_invocation_timeout_seconds: int,
     device_invocation_poll_seconds: float,
     device_ingest_daily_cap: int,
+    surface_limits: SurfaceLimits,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -1878,6 +2410,10 @@ async def _compose(
                 created_at=clock.now(),
             )
         )
+    if not memory_provider_evaluation_mode and not memory_distillation_evaluation_mode:
+        memory_extractor = AttributedCommunicationCandidateExtractor(
+            memory_extractor or DeterministicCandidateExtractor()
+        )
     memory_service = GovernedMemoryService(
         uow_factory,
         clock,
@@ -2330,6 +2866,14 @@ async def _compose(
         async def sweep_session_deletions() -> int:
             return await public_session_service.purge_pending_artifacts(principal)
 
+        async def sweep_terminal_schedules() -> int:
+            async with uow_factory() as uow:
+                return await uow.schedules.purge_terminal(
+                    principal.tenant_id,
+                    before=clock.now() - timedelta(days=schedule_terminal_retention_days),
+                    limit=schedule_terminal_purge_batch,
+                )
+
         async def sweep_device_invocations() -> int:
             async with uow_factory() as uow:
                 return await uow.device_invocations.expire_overdue(
@@ -2361,6 +2905,13 @@ async def _compose(
             invocation_timeout_seconds=device_invocation_timeout_seconds,
         )
         notification_inbox = NotificationInboxService(uow_factory=uow_factory)
+        surface_management = SurfaceManagementService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            code_expiry_seconds=surface_limits.code_expiry_seconds,
+            max_code_attempts=surface_limits.code_max_attempts,
+        )
         public_run_service = PublicRunService(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
@@ -2373,6 +2924,78 @@ async def _compose(
             resolve_open_question=working_state.resolve_question,
             trajectory_export_enabled=trajectory_export_enabled,
             live_events=live_events,
+        )
+
+        async def create_surface_session(
+            uow: RepositoryUnitOfWork,
+            bound_principal: Principal,
+            update: SurfaceInboundMessage,
+        ) -> Session:
+            session_id, catalog = await bootstrap_session(
+                uow,
+                ids,
+                skill_catalogs,
+                close_session,
+                agent,
+                bound_principal,
+            )
+            created = Session(
+                id=session_id,
+                tenant_id=bound_principal.tenant_id,
+                principal_id=bound_principal.principal_id,
+                agent_id=agent.id,
+                agent_version=agent.version,
+                status=SessionStatus.ACTIVE,
+                metadata={
+                    "surface": update.provider.value,
+                    "surface_id": str(update.surface_id),
+                },
+                created_at=clock.now(),
+                updated_at=clock.now(),
+            )
+            await uow.sessions.create(created)
+            await uow.events.append(
+                NewEvent(
+                    session_id=created.id,
+                    run_id=None,
+                    event_type="session.created",
+                    payload_schema_version=2,
+                    actor_type="surface",
+                    actor_id=bound_principal.principal_id,
+                    payload={
+                        "agent_id": str(agent.id),
+                        "title": None,
+                        "skill_pins": (
+                            []
+                            if catalog is None
+                            else [pin.model_dump(mode="json") for pin in catalog.pins]
+                        ),
+                        "dropped_skills": ([] if catalog is None else list(catalog.dropped_names)),
+                    },
+                )
+            )
+            return created
+
+        async def ignore_surface_notice(chat_ref: str, reason_code: str) -> None:
+            del chat_ref, reason_code
+
+        surface_ingress = SurfaceIngressService(
+            uow_factory=uow_factory,
+            principals=ConfiguredSchedulePrincipalDirectory(principal),
+            max_cost_reservation=agent.limits.max_cost,
+            clock=clock,
+            ids=ids,
+            create_session=create_surface_session,
+            submit=public_run_service.submit_surface_in,
+            dispatch=public_run_service.dispatch_surface_submission,
+            notice=ignore_surface_notice,
+            stop_run=executor.cancel_parked_run,
+            resume_after_approval=executor.requeue_after_approval,
+            session_idle_seconds=surface_limits.session_idle_seconds,
+            max_code_attempts=surface_limits.code_max_attempts,
+            lockout_seconds=surface_limits.lockout_seconds,
+            per_sender_messages_per_minute=surface_limits.per_sender_messages_per_minute,
+            inbound_text_max_chars=surface_limits.inbound_text_max_chars,
         )
         device_ingest_service = DeviceMessageIngestService(
             uow_factory=uow_factory,
@@ -2406,6 +3029,7 @@ async def _compose(
             devices=device_service,
             device_ingest=device_ingest_service,
             notifications=notification_inbox,
+            surfaces=surface_management,
             memory=PublicMemoryService(uow_factory=uow_factory),
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
         )
@@ -2506,14 +3130,19 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
                     ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
                     ),
+                    terminal_schedule_sweep_interval_seconds=(
+                        schedule_terminal_purge_interval_seconds
+                    ),
                 ),
                 schedule_worker_factory=schedule_worker_factory,
+                surface_ingress=surface_ingress,
                 sandbox=sandbox_manager,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
@@ -2837,6 +3466,7 @@ async def build(
     worker_config = runtime_config["worker"]
     scheduling_config = runtime_config["scheduling"]
     notification_config = runtime_config["notifications"]
+    surface_limits = SurfaceLimits.model_validate(runtime_config["surfaces"])
     schedule_admission_limits = ScheduleAdmissionLimits.model_validate(
         {
             "max_active_runs_per_tenant": scheduling_config["max_active_runs_per_tenant"],
@@ -3049,6 +3679,7 @@ async def build(
                         skill_validator=skill_validator,
                         ids=effective_ids,
                         schedule_admission_limits=schedule_admission_limits,
+                        surface_admission_limits=surface_limits,
                         schedule_metrics=schedule_metrics,
                     ),
                     effective_principal.tenant_id,
@@ -3173,6 +3804,11 @@ async def build(
             schedule_admission_backoff_seconds=float(
                 scheduling_config["admission_backoff_seconds"]
             ),
+            schedule_terminal_retention_days=int(scheduling_config["terminal_retention_days"]),
+            schedule_terminal_purge_interval_seconds=float(
+                scheduling_config["terminal_purge_interval_seconds"]
+            ),
+            schedule_terminal_purge_batch=int(scheduling_config["terminal_purge_batch"]),
             schedule_definition_limits=schedule_definition_limits,
             delegation_defaults=delegation_defaults,
             delegation_caps=delegation_caps,
@@ -3203,6 +3839,7 @@ async def build(
             device_invocation_timeout_seconds=int(device_config["invocation_timeout_seconds"]),
             device_invocation_poll_seconds=float(device_config["invocation_poll_seconds"]),
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
+            surface_limits=surface_limits,
         )
         yield composition
     finally:

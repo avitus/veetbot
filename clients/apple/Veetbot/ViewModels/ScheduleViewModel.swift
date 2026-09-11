@@ -1,6 +1,20 @@
 import Combine
 import Foundation
 
+public enum ScheduleBrowserSection: String, CaseIterable, Identifiable, Sendable {
+    case current
+    case recentHistory
+
+    public var id: String { rawValue }
+
+    var states: [ScheduleStateKind] {
+        switch self {
+        case .current: return [.active, .paused]
+        case .recentHistory: return [.completed, .cancelled]
+        }
+    }
+}
+
 /// Read-only presentation state for the existing schedule control plane
 /// (scheduling.md#native-apple-schedule-browser). Server records remain
 /// authoritative; every presentation reloads and every detail opening performs
@@ -12,6 +26,7 @@ public final class ScheduleViewModel: ObservableObject {
     @Published public private(set) var isLoadingMore = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var unavailable = false
+    @Published public private(set) var section = ScheduleBrowserSection.current
     @Published public private(set) var detailRecords: [UUID: ScheduleRecordView] = [:]
     @Published private var detailErrors: [UUID: String] = [:]
     @Published private var detailLoadingIDs: Set<UUID> = []
@@ -54,8 +69,9 @@ public final class ScheduleViewModel: ObservableObject {
         return VeetbotAPIClient(transport: transport)
     }
 
-    public func reload() async {
+    public func reload(_ section: ScheduleBrowserSection = .current) async {
         let requestID = UUID()
+        self.section = section
         reloadRequestID = requestID
         seenCursors = []
         nextCursor = nil
@@ -74,7 +90,7 @@ public final class ScheduleViewModel: ObservableObject {
         }
 
         do {
-            let page = try await api.listSchedules()
+            let page = try await api.listSchedules(states: section.states)
             guard reloadRequestID == requestID else { return }
             unavailable = false
             lastFailedListOperation = nil
@@ -105,7 +121,7 @@ public final class ScheduleViewModel: ObservableObject {
         guard let api = await makeAPIClient() else { return }
 
         do {
-            let page = try await api.listSchedules(cursor: cursor)
+            let page = try await api.listSchedules(cursor: cursor, states: section.states)
             guard reloadRequestID == requestID else { return }
             unavailable = false
             lastFailedListOperation = nil
@@ -129,7 +145,7 @@ public final class ScheduleViewModel: ObservableObject {
         case .loadMore:
             await loadMore()
         case .reload, nil:
-            await reload()
+            await reload(section)
         }
     }
 

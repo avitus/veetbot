@@ -1,6 +1,6 @@
 # ADR-0075: Native schedule browser over the existing control plane
 
-- Status: Proposed
+- Status: Proposed; decision 3 superseded by ADR-0089
 - Date: 2026-08-29
 - Related: Sections 16, 21, and 29 of the engineering plan; ADR-0049,
   ADR-0050, ADR-0059, ADR-0070, ADR-0073
@@ -41,6 +41,8 @@ does not decide.
    records remain visible and carry text-labeled state. Filtering terminal
    records out by default would make an executed one-time schedule disappear
    precisely when the owner may need to inspect it.
+   **Superseded by ADR-0089:** Current now means ACTIVE and PAUSED; the owner
+   can inspect retained COMPLETED and CANCELLED records in Recent History.
 4. **The browser is read-only.** It exposes no create, update, pause, resume,
    cancel, delete, occurrence, or run mutation. Those operations retain their
    existing authority and application-service paths; viewing never requests
