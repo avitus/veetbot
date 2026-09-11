@@ -22,7 +22,7 @@ limits:
   max_tool_count: 128
 models:
   - id: claude-opus-5
-    aliases: [opus, anthropic-default]
+    aliases: [opus]
     limits:
       context_window_tokens: 1000000
       max_output_tokens: 128000
@@ -35,3 +35,18 @@ models:
       reasoning_priced_separately: false
       source: docs_snapshot
       effective_at: "2026-08-03T00:00:00Z"
+  - id: claude-fable-5-1
+    aliases: [fable, anthropic-default]
+    limits:
+      context_window_tokens: 1000000
+      max_output_tokens: 128000
+    pricing:
+      input_per_mtok: "10.00"
+      cached_input_per_mtok: "0.25"
+      # The adapter uses ephemeral caching with the default five-minute TTL.
+      cache_write_per_mtok: "12.50"
+      output_per_mtok: "50.00"
+      reasoning_per_mtok: null
+      reasoning_priced_separately: false
+      source: docs_snapshot
+      effective_at: "2026-09-11T00:00:00Z"

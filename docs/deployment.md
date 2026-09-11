@@ -252,6 +252,26 @@ Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`, replace every
 model-policy overlay may instead retarget `balanced` to another configured
 provider.
 
+The shipped `balanced` policy selects OpenAI `gpt-6-astra`; `flagship`
+selects Anthropic `claude-fable-5-1`. The explicit `astra` and `fable`
+policies select the same models. The older `gpt-5.6-sol` (`gpt-5.6` alias)
+and `claude-opus-5` (`opus` alias) remain registered for operator overlays.
+The new profiles use the standard prices verified on 2026-09-11 in the
+[OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra)
+and [Anthropic model documentation](https://platform.claude.com/docs/en/models/fable-5-1/overview):
+USD 10 input and USD 50 output per million tokens; cached input is USD 1
+for Astra and USD 0.25 for Fable. Cache writes are USD 12.50 with the
+Anthropic adapter's default five-minute TTL. Astra retains the 272,000-token
+window required by ADR-0039's single-tier pricing rule; Fable uses 1,000,000
+tokens, and both allow up to 128,000 output tokens.
+
+Changing these profiles changes the registry version. Drain active and
+suspended runs before deploying: existing provider pins fail closed when
+their registry version is unavailable. Provider-assisted memory also requires
+evaluation evidence for the exact selected model and model-policy name;
+the GPT-5.6 Sol artifacts do not authorize Astra or Fable. Without matching
+evidence, `auto` uses deterministic formation and `required` refuses startup.
+
 To enable the initial Keenable comparison, add all three provider credentials
 and route half of each capability to Keenable in that same root-owned file:
 

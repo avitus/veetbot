@@ -7,6 +7,12 @@ model_policies:
   flagship:
     provider: anthropic
     model: anthropic-default
+  astra:
+    provider: openai
+    model: gpt-6-astra
+  fable:
+    provider: anthropic
+    model: claude-fable-5-1
   local:
     provider: ollama
     model: local-small
