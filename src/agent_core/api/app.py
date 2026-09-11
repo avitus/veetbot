@@ -22,6 +22,7 @@ from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
+    BrowserLoginURLValidationError,
     MemoryCursorError,
     SessionMessageCursorError,
     SessionMetadataValidationError,
@@ -908,11 +909,14 @@ def create_app(
         body: BeginBrowserAuthenticationRequest,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserAuthenticationView:
-        return await services.browser_profiles.begin_authentication(
-            authenticated,
-            profile_id,
-            login_url=body.login_url,
-        )
+        try:
+            return await services.browser_profiles.begin_authentication(
+                authenticated,
+                profile_id,
+                login_url=body.login_url,
+            )
+        except BrowserLoginURLValidationError as exc:
+            raise MalformedRequestError(str(exc)) from exc
 
     @app.get(
         "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
