@@ -1214,6 +1214,7 @@ async def test_email_is_default_off_and_grants_nothing(tmp_path: Path) -> None:
 
 
 async def test_production_tool_roster_stays_within_the_context_cap() -> None:
+    """One Gmail account coexists with web and schedule tools under both caps."""
     settings = replace(
         _email_settings(),
         schedule_api_enabled=True,
@@ -1272,7 +1273,79 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
     assert tool_tokens <= 6_000
 
 
+async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
+    tmp_path: Path,
+) -> None:
+    """Two Gmail catalogs retain explicit capabilities within both context caps."""
+    settings = replace(
+        load_settings(
+            {
+                **_base_environment(),
+                "AGENT_EMAIL_ENABLED": "1",
+                "GMAIL_ACCOUNTS_FILE": str(_accounts_manifest(tmp_path)),
+            }
+        ),
+        schedule_api_enabled=True,
+        schedule_worker_enabled=True,
+    )
+    scripts = {
+        row.server_id: ScriptedMCPServer(
+            name=row.server_id,
+            discovery=await _generated_gmail_discovery(row.server_id.rsplit("_", 1)[-1]),
+        )
+        for row in email_server_configs("local", account_ids=settings.email_account_ids)
+    }
+    provider = FakeWebProvider()
+    async with build(
+        settings=settings,
+        script=FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="web.fetch", arguments={"url": "https://example.org/ada"}
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                ),
+                ScriptedTurn(text="Retrieved the page."),
+            ]
+        ),
+        mcp_client_factory=ScriptedMCPClientFactory(scripts),
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        run_id = await composition.runs.submit("Retrieve https://example.org/ada", session_id)
+        terminal = await composition.runs.wait_terminal(run_id)
+        plan = await composition.executor._context_planner.current(session_id)
+        agent = composition.sessions._default_agent
+
+    assert terminal.status is RunStatus.COMPLETED
+    assert plan is not None
+    assert provider.fetches == ["https://example.org/ada"]
+    assert {
+        "web.fetch",
+        "web.search",
+        "system.current_time",
+        "workspace.read_text",
+        "workspace.write_text",
+        "workspace.list_files",
+        "schedule.update",
+    }.issubset(plan.tool_names)
+    assert len(plan.tool_specs) == 30
+    assert plan.tool_names == tuple(sorted(plan.tool_names))
+    assert "mcp.gmail_read.search_threads" in plan.tool_names
+    estimator = ConservativeTokenEstimator()
+    prefix = build_prefix(agent, plan.tool_specs)
+    assert (
+        estimator.estimate(prefix[2:], plan.model_id)
+        + estimator.estimate_tools(plan.tool_specs, plan.model_id)
+    ) <= 6_000
+
+
 def test_email_scope_confinement_rejects_any_nonexact_scope() -> None:
+    """An email server accepts only its exact declared use scope."""
     config = email_server_configs("tenant-email")[0]
     validate_mcp_config(config, destination_allowed=lambda _url: True)
     with pytest.raises(ValueError, match="exactly its use scope"):
