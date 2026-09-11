@@ -202,8 +202,11 @@ recovery remains the server's `/v1/notifications` authority.
 
 Notification alerts explain the next action, include the tool name for approvals
 and device actions when available, and distinguish schedule outcomes and skip
-reasons. They retain the content-free boundary: task titles, conversation text,
-recipients, message bodies, and failure details are fetched after opening the app.
+reasons. Schedule alerts also identify the title from the revision that ran and
+its scheduled occurrence time, even if the schedule was renamed afterward
+(ADR-0091). Conversation text, instructions, recipients, message bodies, run
+results, and failure details are fetched after opening the app. Existing clients
+can open the enriched alerts because their version-1 tap dictionary is unchanged.
 
 On macOS, **System Settings → Notifications → Veetbot → Allow Notifications**
 controls permission. On iOS, use **Settings → Notifications → Veetbot**.

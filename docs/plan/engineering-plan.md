@@ -3201,6 +3201,10 @@ Implement:
 - Content-free payloads: kind, identifiers, a closed-enum status, the tool name,
   and a templated title; never message text, arguments, approval summaries,
   question text, schedule instructions, reasoning, or tracebacks.
+  ADR-0091 records the owner's subsequent schedule-only exception: a bounded,
+  credential-filtered title from the occurrence's pinned revision and its
+  nominal firing time may identify the schedule in the alert. No instruction
+  or result preview is authorized, and the version-1 tap dictionary is unchanged.
 - Device and notification routes with exact scopes, an offline notification
   inbox, default-off activation flags, and registration, token upload,
   revocation, and deep-link handling in the native Apple client, which remains
@@ -3603,13 +3607,14 @@ Acceptance criteria:
 - The tool is absent unless both schedule flags are on; existing sessions keep
   their pinned catalogs.
 - Notification production remains the Milestone 12 schedule-outcome trigger:
-  generic, content-free, and emitted after the run is accounted rather than at
-  the nominal instant.
+  emitted after the run is accounted rather than at the nominal instant.
+  ADR-0091 subsequently permits the pinned schedule title and nominal time
+  while leaving instructions and results out of the push.
 
 Daily and weekly conversational creation; model-callable list, update, pause,
 resume, and cancel; arbitrary cron and monthly recurrence; delegated scopes;
-direct reminder payloads; and any content-bearing push remain outside this
-milestone.
+direct reminder payloads; and content-bearing push beyond ADR-0091's schedule
+identity exception remain outside this milestone.
 
 ### Milestone 20: Calendar recurrence and conversational schedules
 
@@ -3659,7 +3664,8 @@ Acceptance criteria:
 
 Arbitrary cron or RFC 5545 input; interval multipliers; continuous-session
 recurrence; dependency graphs; workflow DAGs; delegated scopes; and
-content-bearing notifications remain later extensions.
+content-bearing notifications beyond ADR-0091's schedule identity exception
+remain later extensions.
 Model-callable list, pause, resume, and cancel entered Milestone 23 on
 2026-09-02; owner-authorized content and cadence update followed under
 ADR-0088.

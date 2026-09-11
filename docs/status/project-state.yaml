@@ -16,6 +16,8 @@ project:
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
   # retention, and conditional native time-zone presentation.
+  # ADR-0091 records the owner's non-milestone notification extension:
+  # the pinned schedule title and nominal occurrence time may appear in alerts.
   authorized_milestones:
     - 0
     - 1

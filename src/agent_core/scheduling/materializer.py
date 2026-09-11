@@ -45,6 +45,7 @@ class _NotificationProducer(Protocol):
         *,
         schedule: Schedule,
         occurrence: ScheduleOccurrence,
+        revision: ScheduleRevision,
     ) -> bool: ...
 
 
@@ -365,6 +366,7 @@ class ScheduleMaterializer:
                 uow,
                 schedule=schedule,
                 occurrence=occurrence,
+                revision=revision,
             )
             if produced:
                 self._write_probe("notification")

@@ -97,4 +97,12 @@ def apns_alert(payload: NotificationPayload) -> dict[str, str]:
                 body = f"Open Veetbot on the requested device to review {payload.tool_name}."
             else:
                 body = "Open Veetbot on the requested device to review and complete the action."
-    return {"title": title, "body": body}
+    alert = {"title": title, "body": body}
+    if payload.schedule_context is not None:
+        context = payload.schedule_context
+        offset = context.scheduled_for.strftime("%z")
+        zone = "UTC" if offset == "+0000" else f"UTC{offset[:3]}:{offset[3:]}"
+        scheduled_for = context.scheduled_for.strftime("%b %d, %Y at %H:%M")
+        alert["subtitle"] = context.title
+        alert["body"] = f"Scheduled for {scheduled_for} {zone}. {body}"
+    return alert

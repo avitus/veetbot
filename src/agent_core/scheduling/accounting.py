@@ -11,6 +11,7 @@ from agent_core.domain.schedules import (
     Schedule,
     ScheduleOccurrence,
     SchedulePauseReason,
+    ScheduleRevision,
     ScheduleState,
 )
 from agent_core.observability.schedules import ScheduleMetrics
@@ -27,6 +28,7 @@ class _NotificationProducer(Protocol):
         *,
         schedule: Schedule,
         occurrence: ScheduleOccurrence,
+        revision: ScheduleRevision,
         run: Run,
     ) -> bool: ...
 
@@ -123,6 +125,7 @@ class ScheduleOutcomeAccountant:
                     uow,
                     schedule=updated,
                     occurrence=occurrence,
+                    revision=revision,
                     run=run,
                 )
                 if produced:

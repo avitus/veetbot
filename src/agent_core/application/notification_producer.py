@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from agent_core.domain.devices import Device, DeviceInvocation, DeviceInvocationStatus
 from agent_core.domain.events import ProcessEvent
@@ -15,6 +16,7 @@ from agent_core.domain.notifications import (
     NewNotification,
     NotificationKind,
     NotificationPayload,
+    ScheduleNotificationContext,
     approval_requested_key,
     device_invocation_key,
     question_asked_key,
@@ -23,7 +25,12 @@ from agent_core.domain.notifications import (
     schedule_run_finished_key,
 )
 from agent_core.domain.runs import Run, RunStatus
-from agent_core.domain.schedules import OccurrenceDisposition, Schedule, ScheduleOccurrence
+from agent_core.domain.schedules import (
+    OccurrenceDisposition,
+    Schedule,
+    ScheduleOccurrence,
+    ScheduleRevision,
+)
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.events import ProcessEventRepository
 from agent_core.ports.notifications import NotificationOutbox
@@ -37,7 +44,7 @@ class NotificationProductionUnitOfWork(Protocol):
 
 
 class NotificationProducer:
-    """Create content-free outbox rows for the closed transition catalog."""
+    """Create bounded outbox rows for the closed transition catalog."""
 
     def __init__(self, *, clock: Clock, ids: IdFactory) -> None:
         self._clock = clock
@@ -127,6 +134,7 @@ class NotificationProducer:
         *,
         schedule: Schedule,
         occurrence: ScheduleOccurrence,
+        revision: ScheduleRevision,
         run: Run,
     ) -> bool:
         if (
@@ -166,6 +174,7 @@ class NotificationProducer:
                     run_id=run.id,
                     schedule_id=schedule.id,
                     occurrence_id=occurrence.id,
+                    schedule_context=_schedule_context(schedule, occurrence, revision),
                     notification_id=notification_id,
                 ),
                 priority=5,
@@ -191,6 +200,7 @@ class NotificationProducer:
         *,
         schedule: Schedule,
         occurrence: ScheduleOccurrence,
+        revision: ScheduleRevision,
     ) -> bool:
         if occurrence.disposition is OccurrenceDisposition.MATERIALIZED:
             return False
@@ -220,6 +230,7 @@ class NotificationProducer:
                     status=occurrence.disposition,
                     schedule_id=schedule.id,
                     occurrence_id=occurrence.id,
+                    schedule_context=_schedule_context(schedule, occurrence, revision),
                     notification_id=notification_id,
                 ),
                 priority=5,
@@ -315,3 +326,18 @@ class NotificationProducer:
             )
             return False
         return stored is not None
+
+
+def _schedule_context(
+    schedule: Schedule, occurrence: ScheduleOccurrence, revision: ScheduleRevision
+) -> ScheduleNotificationContext:
+    if (
+        schedule.id != occurrence.schedule_id
+        or schedule.id != revision.schedule_id
+        or occurrence.schedule_revision != revision.revision
+    ):
+        raise ValueError("schedule notification requires the occurrence's own revision")
+    return ScheduleNotificationContext(
+        title=revision.title,
+        scheduled_for=occurrence.nominal_fire_at.astimezone(ZoneInfo(revision.timezone or "UTC")),
+    )

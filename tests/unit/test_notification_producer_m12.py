@@ -103,7 +103,7 @@ def _revision() -> ScheduleRevision:
     return ScheduleRevision(
         schedule_id=SCHEDULE_ID,
         revision=1,
-        title="Sensitive title never copied",
+        title="Daily briefing",
         instruction="Sensitive instruction never copied",
         agent_id=AGENT_ID,
         agent_version="1.0.0",
@@ -188,6 +188,7 @@ async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() 
             uow,
             schedule=scheduled,
             occurrence=accounted,
+            revision=_revision(),
             run=running.model_copy(update={"status": RunStatus.COMPLETED}),
         )
         for offset, disposition in enumerate(
@@ -206,11 +207,13 @@ async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() 
                 uow,
                 schedule=scheduled,
                 occurrence=occurrence,
+                revision=_revision(),
             )
         assert not await producer.for_schedule_occurrence(
             uow,
             schedule=scheduled,
             occurrence=accounted,
+            revision=_revision(),
         )
 
         rows = await uow.notification_outbox.list(principal(), limit=20)
