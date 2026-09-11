@@ -1214,6 +1214,7 @@ async def test_email_is_default_off_and_grants_nothing(tmp_path: Path) -> None:
 
 
 async def test_production_tool_roster_stays_within_the_context_cap() -> None:
+    """One Gmail account coexists with web and schedule tools under both caps."""
     settings = replace(
         _email_settings(),
         schedule_api_enabled=True,
@@ -1344,6 +1345,7 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
 
 
 def test_email_scope_confinement_rejects_any_nonexact_scope() -> None:
+    """An email server accepts only its exact declared use scope."""
     config = email_server_configs("tenant-email")[0]
     validate_mcp_config(config, destination_allowed=lambda _url: True)
     with pytest.raises(ValueError, match="exactly its use scope"):

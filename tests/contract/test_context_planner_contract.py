@@ -30,6 +30,7 @@ from tests.unit.test_web_tools import FakeWebProvider
 
 
 async def test_context_planner_persists_and_rotates_a_session_plan() -> None:
+    """Plans survive reconstruction and advance epochs when prefix identity changes."""
     clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(
         _memory_uow_repositories(
@@ -170,6 +171,7 @@ async def test_context_planner_rotates_a_plan_from_the_previous_builder(
 
 
 async def test_context_planner_does_not_require_snapshot_config_without_memory() -> None:
+    """A deployment without memory can plan without a memory-snapshot budget."""
     clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(
         _memory_uow_repositories(
@@ -288,6 +290,7 @@ async def test_context_planner_preserves_first_occurrence_priority_at_the_tool_c
 
 
 async def test_context_planner_sizes_snapshot_from_final_model_visible_bytes() -> None:
+    """Snapshot selection respects the token budget of its rendered prefix content."""
     clock, factory, _service, retriever = await formation_stack()
     config = yaml.safe_load(
         (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
