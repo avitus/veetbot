@@ -38,7 +38,7 @@ all written down, and none of them runs.
 Milestone 16 closes both halves, in that order: the yardstick first and the
 lifecycle second, so that every lifecycle change is a measured change and the
 plan's standing rule that a capability enters on evaluation evidence rather
-than on argument (engineering-plan.md:2929) has something to read.
+than on argument (engineering-plan.md:2937) has something to read.
 
 Milestone 16 is authorized as a parallel workstream alongside Milestones 12
 through 15. Its gates may become green independently, but the verified gate
@@ -855,7 +855,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:241): the delta is issued for what the
+context engine caps (context-engine.md:257): the delta is issued for what the
 base block left of that budget and is not issued at all when the base block
 spent it, so a session with a frozen snapshot cannot carry twice the recall a
 session without one may. Only the base and delta blocks are droppable under

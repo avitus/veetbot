@@ -47,6 +47,13 @@ type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
 type DeviceToolAttach = Callable[[UUID, Principal], Awaitable[None]]
 
 
+def _authority_scope_hashes(principal: Principal) -> tuple[str, ...]:
+    """Identify scope grants without copying scope names into plan events."""
+    return tuple(
+        sorted(hashlib.sha256(scope.encode("utf-8")).hexdigest() for scope in principal.scopes)
+    )
+
+
 class EventContextPlanner:
     def __init__(
         self,
@@ -135,6 +142,8 @@ class EventContextPlanner:
         agent: AgentSpec,
         principal: Principal,
         model: ResolvedModel,
+        *,
+        refresh_authorization: bool = False,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
             (
@@ -146,6 +155,12 @@ class EventContextPlanner:
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
+                authority_changed = refresh_authorization and (
+                    current.authority_scope_hashes is None
+                    or not set(_authority_scope_hashes(principal)).issubset(
+                        current.authority_scope_hashes
+                    )
+                )
                 if self._attach_device_tools is not None:
                     await self._attach_device_tools(session.id, principal)
                 if self._skill_catalogs is not None:
@@ -167,6 +182,7 @@ class EventContextPlanner:
                     and current.prefix_sha256 == current_prefix_sha256
                     and current.persona_text == persona_text
                     and current.persona_version == persona_version
+                    and not authority_changed
                 ):
                     return current
                 return await self._create(
@@ -177,7 +193,9 @@ class EventContextPlanner:
                     epoch=current.epoch + 1,
                     event_type="context.epoch.rotated",
                     reason=(
-                        "model_changed"
+                        "run_authority_changed"
+                        if authority_changed
+                        else "model_changed"
                         if current.model_id != model_id
                         else "policy_version_changed"
                         if current.policy_version != self._policy_version
@@ -444,6 +462,7 @@ class EventContextPlanner:
             tool_names=tuple(tool.name for tool in tools),
             tool_specs=tuple(tool.model_copy(deep=True) for tool in tools),
             tool_schema_sha256=hashlib.sha256(schema_bytes).hexdigest(),
+            authority_scope_hashes=_authority_scope_hashes(principal),
             snapshot_id=None if snapshot is None else snapshot.trace_id,
             snapshot_watermark=0 if snapshot is None else snapshot.watermark,
             memory_snapshot=memory_snapshot,
@@ -508,6 +527,7 @@ class EventContextPlanner:
                 candidate.builder_version,
                 candidate.prefix_sha256,
                 candidate.tool_schema_sha256,
+                candidate.authority_scope_hashes,
             )
             persisted_identity = (
                 persisted.model_id,
@@ -515,6 +535,7 @@ class EventContextPlanner:
                 persisted.builder_version,
                 persisted.prefix_sha256,
                 persisted.tool_schema_sha256,
+                persisted.authority_scope_hashes,
             )
             if persisted_identity == requested_identity:
                 self._remember(persisted)

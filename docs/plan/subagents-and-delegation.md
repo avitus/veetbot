@@ -19,7 +19,7 @@ The plan designed subagents under Milestone 10 and deferred them behind a gate:
 "add subagents only when evaluation evidence shows that a single agent fails"
 for one of five reasons — independent parallel work, context isolation,
 specialized permissions, specialized tools, or independent verification
-(engineering-plan.md:3098-3106). This document honours that gate as written.
+(engineering-plan.md:3106-3114). This document honours that gate as written.
 Construction is authorized now; tenant activation requires the evidence the
 gate names, and the evidence is part of the milestone rather than a
 precondition for starting it, because the platform has to be able to delegate
@@ -35,12 +35,12 @@ post-terminal hook that is genuinely part of the run lifecycle
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:974-980); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
-(context-engine.md:323-326, memory-retrieval-and-ranking.md:90); and the
+(context-engine.md:339-342, memory-retrieval-and-ranking.md:90); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
 The readiness review measured what was left (readiness.md:1002-1005 and
-readiness.md:1005-1008): the objective had a carrier and no schema, the child
+readiness.md:1006-1008): the objective had a carrier and no schema, the child
 budget was additive with no rule deriving a child's own limits, the separate
 trace and the artifact references were picked up by no specification, and a
 child run could not be inserted into its parent's session. This document
@@ -71,8 +71,8 @@ materializes bounded child runs. It includes:
   failures.
 
 The milestone does not include handoffs (the parent retains the user
-interaction and the final response, engineering-plan.md:3096); role-named
-agents for planning, writing, or criticism (engineering-plan.md:3108);
+interaction and the final response, engineering-plan.md:3104); role-named
+agents for planning, writing, or criticism (engineering-plan.md:3116);
 delegation deeper than one level; cross-tenant or cross-principal delegation;
 any change to model routing; a new `WAITING_FOR_CHILD` run status; a child that
 may itself call `delegate.run` or `skill.manage`; or push notification of child
@@ -125,7 +125,7 @@ The plan's "explicit objective" requirement had a carrier and no schema. One
 because independent parallel work — the first of the gate's five reasons — is
 exactly fan-out from one invocation, and a parent that suspends on the call
 cannot fan out any other way. Each brief is structured, because the child
-seeds from its brief and from nothing else (context-engine.md:323-326), so
+seeds from its brief and from nothing else (context-engine.md:339-342), so
 everything the child needs to stop correctly has to be in it:
 
 ```python

@@ -92,8 +92,10 @@ class _PlanStore:
         agent: AgentSpec,
         principal: Principal,
         model: object,
+        *,
+        refresh_authorization: bool = False,
     ) -> ContextPlan:
-        del session, agent, principal, model
+        del session, agent, principal, model, refresh_authorization
         return self.value.model_copy(deep=True)
 
     async def rotate(self, session_id: UUID, reason: str) -> ContextPlan:

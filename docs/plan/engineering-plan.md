@@ -1478,6 +1478,14 @@ The first context builder should assemble:
 
 The builder enforces the prompt-stability invariant (Section 10.1): platform policy, agent instructions, and tool definitions form a byte-stable prefix built once per session; volatile items - the current date, retrieved memory, and tool results - are placed in the user turn so the cached prefix never changes mid-session.
 
+The owner-authorized [ADR-0094](../adr/0094-context-authority-at-run-boundaries.md)
+refines session prefix stability at a run boundary: before a run pins its tools,
+new effective scope grants start a logged context epoch using the filters
+below. Tool definitions remain byte-stable during that run, including retries
+and approval resumes. A restricted scheduled briefing and an authenticated
+owner reply can therefore share history without sharing the briefing's
+restricted tool advertisement or widening the briefing's execution authority.
+
 Do not load every registered tool. Filter tools by:
 
 - Agent configuration

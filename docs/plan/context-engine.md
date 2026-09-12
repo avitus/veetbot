@@ -173,6 +173,22 @@ authorization changes into the cache timing of an unrelated session.
 
 ### Prefix epochs
 
+[ADR-0094](../adr/0094-context-authority-at-run-boundaries.md) adds a narrow
+exception to session-long authorization pinning: before a new run initializes
+its tool pins, newly granted effective run scopes rebuild the plan and emit
+`context.epoch.rotated` with reason `run_authority_changed`. This lets an
+authenticated owner reply to a restricted scheduled briefing in the same
+conversation. Rebuilding applies the new run's permissions and the pinned
+agent's configuration; it never grants the scheduled run additional scopes.
+The plan stores `authority_scope_hashes`, a sorted tuple of SHA-256 scope hashes
+outside the prompt. A legacy plan without that field
+rebuilds once at the next unpinned run. An initialized empty tool set is pinned,
+as are legacy nonempty pins and pending calls: retries and approval resumes
+must not refresh authority or rewrite their advertised tools. A scheduler's
+seed checkpoint with no pins or pending calls can still build its first plan.
+Scope reduction alone preserves the prefix even across runs; revocation
+continues to be enforced at call time without rewriting its prefix.
+
 Some changes genuinely cannot be absorbed. Routing the session to a different model
 or provider invalidates the prefix by construction: tokenizers differ, tool
 serialization differs, and Section 10.1 notes that changing tool definitions or
@@ -687,6 +703,7 @@ class ContextPlan(BaseModel):
     model_id: str
     tool_names: list[str]           # pinned at session open
     tool_schema_sha256: str
+    authority_scope_hashes: tuple[str, ...] | None = None  # legacy plans omit it
     snapshot_id: UUID | None
     snapshot_watermark: int         # retrieval spec: the recall delta
     skill_pins: tuple[SkillPin, ...]  # skills spec: pinned at open
@@ -757,6 +774,8 @@ class ContextPlanner(Protocol):
         agent: AgentSpec,
         principal: Principal,
         model: ModelCapabilities,
+        *,
+        refresh_authorization: bool = False,  # only before this run pins tools
     ) -> ContextPlan: ...
 
     async def current(self, session_id: UUID) -> ContextPlan | None: ...

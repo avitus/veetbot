@@ -589,7 +589,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:871-873`). The gateway translates those hints into
+(`context-engine.md:890-892`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -627,7 +627,7 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:849-851` and the
+The cached-prefix ratio is defined in `context-engine.md:868-870` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -646,7 +646,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:245`
+native tool calling, how much output to reserve. `context-engine.md:261`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -705,7 +705,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:212's second half
+    default_output_reserve: int  # context-engine.md:228's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```
@@ -734,7 +734,7 @@ call sites.
 ### Pinning, and the contradiction with availability routing
 
 Section 10 (`engineering-plan.md:1402`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:3061-3068`) wants routing to move work
+provider. Milestone 10 (`engineering-plan.md:3069-3076`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -1089,7 +1089,7 @@ sentence.
 ## Usage, cost, and where the numbers live
 
 Section 6.5 fixes the precedence order for cost figures and Section 15 has no
-table to put them in. `runs.usage JSONB` at `engineering-plan.md:1810` is the
+table to put them in. `runs.usage JSONB` at `engineering-plan.md:1818` is the
 only persistence the plan gives usage, and a JSONB blob on the run cannot
 answer the questions the budget enforcement in Section 6.5 needs to ask: what
 did this step cost, which attempt burned the tokens, and what were we charged
@@ -1340,7 +1340,7 @@ evaluate.
 ## Retries, and who owns them
 
 `engineering-plan.md:1383` puts retries in the adapter.
-`engineering-plan.md:1710` says "Keep retry decisions in application code, not
+`engineering-plan.md:1718` says "Keep retry decisions in application code, not
 in provider adapters alone." The word "alone" is doing the work, and the split
 it implies is the right one.
 
@@ -1501,7 +1501,7 @@ Neither half is both readable and privileged.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:433-437` requires that a
+be answerable by a tool result; `context-engine.md:449-453` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
@@ -1544,7 +1544,7 @@ class ModelRequestStarted(BaseModel):
     model_policy: str
     registry_version: str
     prefix_sha256: str | None    # context-engine.md:138-146
-    prefix_epoch: int            # context-engine.md:168-182
+    prefix_epoch: int            # context-engine.md:199-204
     input_token_estimate: int    # the plan's estimate, pre-call
     cache_breakpoints_sent: int
     cache_breakpoints_dropped: int
@@ -1567,7 +1567,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2260-2278`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2268-2286`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1669,8 +1669,8 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:277-281` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2684`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2428`
+(`engineering-plan.md:2692`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2436`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the
