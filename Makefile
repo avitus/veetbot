@@ -1,4 +1,15 @@
 PYTHON ?= python
+CHECK_JOBS ?= 2
+STATIC_TEST_WORKERS ?= 2
+
+# Keep one Make graph so repeated goals share prerequisites. Independent lanes
+# overlap; static and contract tests retain their specified sequence.
+ifneq ($(filter check,$(MAKECMDGOALS)),)
+MAKEFLAGS += -j$(CHECK_JOBS)
+endif
+ifneq ($(filter check test-fast,$(MAKECMDGOALS)),)
+test-contract: | test-static
+endif
 
 .PHONY: install format lint typecheck test check db-up migrate client-build \
 	test-static test-contract test-fast test-integration test-live \
@@ -27,7 +38,7 @@ test:
 	uv run pytest -m "not live"
 
 test-static:
-	uv run pytest -m static
+	uv run pytest -n $(STATIC_TEST_WORKERS) --dist loadscope -m static
 
 test-contract:
 	@uv run pytest -m "not static and not integration and not live"; \
@@ -132,9 +143,10 @@ test-deploy:
 	deploy/nginx/deploy.test.sh
 
 website-install:
-	npm --prefix website ci --no-audit --no-fund
+	node scripts/install_website.mjs
 
 test-website: website-install
+	node --test website/tests/install-dependencies.test.mjs
 	npm --prefix website test
 	npm --prefix website run lint
 
@@ -153,7 +165,7 @@ docs-check:
 citations-fix:
 	uv run $(PYTHON) scripts/check_citations.py --update
 
-check: lint typecheck test-fast test-deploy docs-check test-website
+check: test-fast test-website lint typecheck test-deploy docs-check
 
 db-up:
 	docker compose up -d postgres

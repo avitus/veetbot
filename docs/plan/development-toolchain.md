@@ -189,14 +189,14 @@ and rule 3 above says CI may not invent commands:
 ```text
 target            runs
 ----------------  -------------------------------------------
-test-static       pytest -m static
+test-static       pytest -n 2 --dist loadscope -m static
 test-contract     pytest -m "not static and not integration
                   and not live"
 test-fast         test-static then test-contract
 test-integration  pytest -m integration
 test-live         RUN_LIVE_MODEL_TESTS=1 pytest -m live
 docs              mkdocs build --strict
-website-install   npm --prefix website ci
+website-install   validated local reuse or npm ci; always npm ci in CI
 test-website      website-install, static export tests, and lint
 ```
 
@@ -209,6 +209,26 @@ the reconciliation the governing rule demands. A developer with no Docker
 daemon running can still satisfy the criterion in Section 24 that says
 "`make check` succeeds"; a developer with one runs `make db-up migrate
 test-integration` and has run the third job as well.
+
+Locally, `make check` schedules two independent Make jobs by default, starting
+the Python and website lanes first. Static tests use two load-scope workers;
+contract tests follow static tests and stay serial. `CHECK_JOBS=1` and
+`STATIC_TEST_WORKERS=0` provide a serial diagnostic run. All targets remain in
+one Make dependency graph, so explicitly naming `docs-check` or `test-static`
+beside `check` does not execute them twice. Run the aggregate once on final
+inputs; repeat a passed check only after its inputs change. No test-result
+cache or reduced test selection replaces a required check.
+
+`website-install` reuses a successful local install only when SHA-256 hashes
+match the package manifest, lockfile, Node version/platform/architecture/path,
+npm version, and effective npm configuration, and `npm ls --all --json` reports
+a healthy dependency tree. The ignored success stamp lives in `node_modules`,
+is removed before reinstalling, and is written only after `npm ci` succeeds.
+Only the digest of npm configuration is persisted. Missing or unhealthy
+dependencies trigger reinstall; `CI` or `WEBSITE_INSTALL_FORCE=1` forces a clean
+install. Export builds, rendered-route tests, installer regressions, and lint
+still run every time. Dependency reuse assumes local package contents have not
+been manually modified; force an install when repairing such modifications.
 
 `make test` and `make test-fast` differ, and the difference is
 deliberate. `test` is what a developer runs when they want the whole
@@ -314,8 +334,8 @@ does not assume. No check appears in more than one lane, and a developer who
 runs `make check` locally has run all three jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
 Job 1 uses a two-vCPU CircleCI executor and runs only `test-static` with two
-processes and load-scope scheduling; the local Makefile target remains serial,
-so the optimization does not change the developer contract. Its Makefile
+processes and load-scope scheduling, matching the local target's default.
+The selected tests and required checks are unchanged. Its Makefile
 targets are separate CircleCI steps so timing data identifies the remaining
 bottleneck. Jobs 1 through 3 and job 5 publish their pytest JUnit XML through
 CircleCI's test-results collector so failed and slow tests are visible without
