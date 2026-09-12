@@ -978,6 +978,7 @@ class PublicRunService:
     ) -> AsyncIterator[StreamFrame]:
         require_scope(principal, "run.read")
         watermark = max(0, after_sequence or 0)
+        answer_delivered = False
         run = await self.get(principal, run_id)
         async with self._live_events.subscribe(run.session_id) as subscription:
             while True:
@@ -986,6 +987,8 @@ class PublicRunService:
                     watermark = max(watermark, event.sequence)
                     if is_schedule_instruction_event(event):
                         continue
+                    if event.event_type == "assistant.message.completed":
+                        answer_delivered = True
                     yield PersistedStreamFrame(
                         sequence=event.sequence,
                         event=event.event_type,
@@ -1005,7 +1008,8 @@ class PublicRunService:
                     )
                     return
                 if (
-                    notification is not None
+                    not answer_delivered
+                    and notification is not None
                     and notification.kind == "transient"
                     and notification.run_id == run_id
                     and notification.event is not None

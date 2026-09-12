@@ -13,6 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import httpx
@@ -21,6 +22,7 @@ from fastapi.routing import APIRoute
 from pydantic import SecretStr
 
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
+from agent_core.adapters.live_events import InMemoryLiveEventBroadcaster
 from agent_core.api import create_app
 from agent_core.api.errors import (
     API_ERROR_STATUS,
@@ -718,6 +720,59 @@ async def test_persisted_replay_is_gapless_duplicate_free_with_session_gaps(
         assert received == expected
         assert len(received) == len(set(received))
         assert any(right - left > 1 for left, right in itertools.pairwise(received))
+
+
+@pytest.mark.parametrize("event_name", ["message.delta", "reasoning.delta", "usage.provisional"])
+@pytest.mark.parametrize("answer_already_saved", [False, True])
+async def test_saved_answer_supersedes_buffered_model_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_name: str,
+    answer_already_saved: bool,
+) -> None:
+    async with _composition(tmp_path) as composition:
+        principal = composition.principal
+        session = await composition.services.sessions.create(principal, "general", {})
+        service = composition.services.runs
+        result = await service.submit(
+            principal, session.id, [TextContentBlock(text="answer once")], None, None
+        )
+        async with composition.uow_factory() as uow:
+            completed = await uow.runs.get(result.run_id, principal)
+            events = [
+                event
+                for event in await uow.events.list_after(session.id, 0, principal)
+                if event.run_id == result.run_id
+            ]
+        answer_index = next(
+            index
+            for index, event in enumerate(events)
+            if event.event_type == "assistant.message.completed"
+        )
+        split = answer_index + int(answer_already_saved)
+        # Reproduce the read between saving the answer and finalizing the run.
+        # A previously published model fragment is still in the live queue.
+        read_events = AsyncMock(
+            side_effect=[
+                (completed.model_copy(update={"status": RunStatus.RUNNING}), events[:split]),
+                (completed, events[split:]),
+            ]
+        )
+        broadcaster = InMemoryLiveEventBroadcaster()
+        monkeypatch.setattr(service, "_events_after", read_events)
+        monkeypatch.setattr(service, "_live_events", broadcaster)
+        stream = service.stream(principal, result.run_id, None)
+        first = await anext(stream)
+        await broadcaster.publish(session.id, result.run_id, event_name, {"text": "old"})
+        frames = [first, *[frame async for frame in stream]]
+
+        assert [frame.event for frame in frames if isinstance(frame, TransientStreamFrame)] == (
+            [] if answer_already_saved else [event_name]
+        )
+        assert [frame.sequence for frame in frames if isinstance(frame, PersistedStreamFrame)] == [
+            event.sequence for event in events
+        ]
+        assert sum(frame.event == "run.completed" for frame in frames) == 1
 
 
 async def test_submission_is_idempotent_and_reuse_conflicts(tmp_path: Path) -> None:

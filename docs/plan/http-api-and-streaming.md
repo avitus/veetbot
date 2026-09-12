@@ -1274,6 +1274,12 @@ deltas and never reconciles against the completed message will show a
 truncated answer after a reconnect, and the fix is to reconcile, not
 to persist deltas.
 
+Once a stream has delivered `assistant.message.completed`, the saved answer
+supersedes buffered transient output for that run. The server discards those
+remaining fragments while continuing durable delivery through `run.completed`.
+The two events commit separately; draining an older text fragment between them
+can otherwise open a second message that completion fills with the same answer.
+
 ### Heartbeats
 
 The server writes an SSE comment every fifteen seconds when nothing
