@@ -21,8 +21,8 @@ presence and a capability set, unified under one session-key resolver (DM per
 user, group per participant, thread shared)", and requires that "an unknown
 sender on a Surface is default-denied and must complete an explicit pairing
 step (one-time code, expiry, rate-limit, lockout) before any run is created on
-their behalf" (engineering-plan.md:4519-4520). Section 22 repeats the
-default-deny as a security-baseline item (engineering-plan.md:4137), ADR-0017
+their behalf" (engineering-plan.md:4520-4521). Section 22 repeats the
+default-deny as a security-baseline item (engineering-plan.md:4138), ADR-0017
 decided the pairing shape, and the seam audit found the rest: "Surfaces are
 Devices with an empty capability set", the session-key resolver is "the one
 genuinely new mechanism in Section 29", pairing "needs a home and an endpoint
@@ -396,7 +396,7 @@ resolution entry point.
 
 ## Security
 
-- Default-deny and pairing before any run (engineering-plan.md:4137, ADR-0017
+- Default-deny and pairing before any run (engineering-plan.md:4138, ADR-0017
   decision 5). An unpaired sender stores no content.
 - Pairing codes: at least forty bits, salted hash, constant-time comparison,
   ten-minute expiry, five attempts, one-hour per-sender lockout, returned

@@ -4035,8 +4035,9 @@ Implement:
   complete source erasure and retention. Gmail network and OAuth implementation
   remains isolated in the existing first-party MCP package.
 - Atomic aggregate automatic-email reservations across all accounts, clients and
-  ingestion, ranking, style, drafting and formation stages: USD 20 per UTC day
-  and USD 200 per rolling thirty days. Lower applicable limits prevail; retries
+  ingestion, ranking, style, drafting and formation stages: configurable
+  owner-authorized ceilings, defaulting to USD 20 per UTC day and USD 200 per
+  rolling thirty days. Lower applicable limits prevail; retries
   count and no new slice renews an exhausted aggregate allowance.
 
 Acceptance criteria:

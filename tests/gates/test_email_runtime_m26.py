@@ -606,6 +606,38 @@ async def _current_mail_factory() -> MailboxFactory:
     return factory
 
 
+async def test_email_schema_rejection_releases_automatic_reservation() -> None:
+    from dataclasses import replace
+    from decimal import Decimal
+    from uuid import UUID
+
+    from agent_core.domain.messages import FakeModelScript, ModelPermanentError
+    from tests.gates.test_email_m18 import _email_settings
+
+    rejected = ModelPermanentError(
+        provider="fake",
+        model="scripted",
+        attempt_id=UUID(int=0),
+        message="The model provider rejected the request.",
+        http_status=400,
+        provider_code="invalid_json_schema",
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[ScriptedTurn(fail_with=rejected)]),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.FAILED
+        assert run.usage.model_calls == 1
+        assert run.usage.cost == Decimal("0")
+        task = await app.services.email.get_task(app.principal, run.id)
+        assert task is not None
+        assert task.settled_cost == Decimal("0")
+        assert task.stage == "failed"
+
+
 def _assessment_turn(
     *, needs_reply: bool = False, evidence: str = "Please approve the board materials."
 ) -> ScriptedTurn:

@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:630` named `ApprovalService` as one of
+`bootstrap-and-composition.md:631` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4393-4470`
+Section 28 of the plan is not empty — `engineering-plan.md:4394-4471`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -580,7 +580,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1393`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4468` requires a container-escape attempt as
+    `engineering-plan.md:4469` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -1544,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4472-4629` for links to other documents returned
+`engineering-plan.md:4473-4630` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1774,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4468` requires a test the harness's case set
+    `engineering-plan.md:4469` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -23,7 +24,9 @@ from agent_core.domain.email import (
 )
 from agent_core.domain.errors import AuthorizationError
 from agent_core.domain.events import NewEvent
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.messages import ModelUsage
+from agent_core.domain.persistence import ModelCallRecord
+from agent_core.domain.runs import RunStatus, RunUsage
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.runtime.worker import MaintenanceWorker
 from tests.integration.m2_support import memory_settings
@@ -356,6 +359,198 @@ async def test_crashed_model_attempt_keeps_automatic_budget_reserved() -> None:
         assert task is not None
         assert task.settled_cost is None
         assert task.reservation == 1
+
+
+async def _terminal_email_attempts(
+    composition: Composition,
+    outcomes: list[tuple[str, dict[str, object], Decimal | None]],
+) -> UUID:
+    service = composition.services.email
+    service.account_ids = ("work",)
+    service.account_servers = {"work": {"read": "gmail_read", "send": "gmail_send"}}
+
+    async def leave_queued(run_id: UUID) -> None:
+        pass
+
+    service.dispatch = leave_queued
+    operation = await service.submit_task(composition.principal, kind="refresh")
+    async with composition.uow_factory() as uow:
+        run = await uow.runs.get(operation.run_id, composition.principal)
+        recorded = 0
+        cost = Decimal("0")
+        for step, (event_type, details, recorded_cost) in enumerate(outcomes, 1):
+            attempt_id = uuid4()
+            for kind, payload in (
+                ("model.request.started", {}),
+                (event_type, details),
+            ):
+                await uow.events.append(
+                    NewEvent(
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        event_type=kind,
+                        actor_type="runtime",
+                        payload={"attempt_id": str(attempt_id), **payload},
+                    )
+                )
+            if recorded_cost is not None:
+                usage = ModelUsage(cost=recorded_cost)
+                await uow.usage.record_attempt(
+                    ModelCallRecord(
+                        attempt_id=attempt_id,
+                        run_id=run.id,
+                        session_id=run.session_id,
+                        tenant_id=run.tenant_id,
+                        step_number=step,
+                        attempt_number=1,
+                        provider="fake",
+                        model="scripted",
+                        model_policy="balanced",
+                        registry_version="fixture@1",
+                        prefix_sha256="0" * 64,
+                        usage=usage,
+                        cost=recorded_cost,
+                        cost_source=usage.cost_source,
+                        started_at=run.created_at,
+                        finished_at=run.created_at,
+                    )
+                )
+                recorded += 1
+                cost += recorded_cost
+        run.usage = RunUsage(model_calls=recorded, cost=cost)
+        run.model_call_count = recorded
+        await uow.runs.update_counters(run)
+        await uow.runs.transition(run.id, RunStatus.QUEUED, RunStatus.RUNNING)
+        await uow.runs.transition(run.id, RunStatus.RUNNING, RunStatus.FAILED)
+    return run.id
+
+
+def _schema_rejection(**overrides: object) -> dict[str, object]:
+    return {
+        "error_class": "ModelPermanentError",
+        "http_status": 400,
+        "provider_code": "invalid_json_schema",
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize(
+    ("event_type", "details", "recorded_cost", "settles"),
+    [
+        ("model.response.failed", _schema_rejection(), Decimal("0"), True),
+        ("model.response.failed", _schema_rejection(), None, False),
+        ("model.response.completed", {}, None, False),
+        (
+            "model.response.failed",
+            _schema_rejection(http_status=503),
+            Decimal("0"),
+            False,
+        ),
+        (
+            "model.response.failed",
+            _schema_rejection(provider_code="transport_error", http_status=None),
+            Decimal("0"),
+            False,
+        ),
+        (
+            "model.response.failed",
+            _schema_rejection(provider_code="invalid_request_error"),
+            Decimal("0"),
+            False,
+        ),
+        (
+            "model.response.failed",
+            _schema_rejection(error_class="ModelProtocolError"),
+            Decimal("0"),
+            False,
+        ),
+    ],
+)
+async def test_email_settlement_requires_proven_outcome_and_durable_usage(
+    event_type: str,
+    details: dict[str, object],
+    recorded_cost: Decimal | None,
+    settles: bool,
+) -> None:
+    async with email_client() as (composition, _):
+        run_id = await _terminal_email_attempts(composition, [(event_type, details, recorded_cost)])
+        await composition.services.email.settle(composition.principal, run_id)
+        task = await composition.services.email.get_task(composition.principal, run_id)
+        assert task is not None
+        assert task.settled_cost == (Decimal("0") if settles else None)
+        assert task.stage == ("failed" if settles else "cost_reconciliation_required")
+
+
+async def test_email_schema_rejection_settles_prior_cost_once() -> None:
+    async with email_client() as (composition, _):
+        service = composition.services.email
+        run_id = await _terminal_email_attempts(
+            composition,
+            [
+                ("model.response.completed", {}, Decimal("0.125")),
+                ("model.response.failed", _schema_rejection(), Decimal("0")),
+            ],
+        )
+        await service.settle(composition.principal, run_id)
+        async with composition.uow_factory() as uow:
+            before = await uow.email.get(composition.principal, "task", str(run_id))
+        assert before is not None
+        assert before.payload["settled_cost"] == "0.125"
+        await service.settle(composition.principal, run_id)
+        async with composition.uow_factory() as uow:
+            after = await uow.email.get(composition.principal, "task", str(run_id))
+        assert after == before
+
+
+async def test_email_admission_reconciles_old_terminal_schema_rejections() -> None:
+    async with email_client() as (composition, _):
+        service = composition.services.email
+        run_id = await _terminal_email_attempts(
+            composition, [("model.response.failed", _schema_rejection(), Decimal("0"))]
+        )
+        await service.submit_task(composition.principal, kind="refresh")
+        task = await service.get_task(composition.principal, run_id)
+        assert task is not None
+        assert task.settled_cost == Decimal("0")
+        assert task.stage == "failed"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        ("model.request.started", {}),
+        ("model.request.started", {"attempt_id": "not-a-uuid"}),
+        ("model.response.completed", {"attempt_id": None}),
+        ("model.response.failed", {"attempt_id": 42}),
+        ("model.response.completed", {"attempt_id": str(uuid4())}),
+    ],
+)
+async def test_email_admission_retains_malformed_attempt_reservation_without_blocking(
+    event_type: str, payload: dict[str, object]
+) -> None:
+    async with email_client() as (composition, _):
+        service = composition.services.email
+        run_id = await _terminal_email_attempts(
+            composition, [("model.response.failed", _schema_rejection(), Decimal("0"))]
+        )
+        async with composition.uow_factory() as uow:
+            run = await uow.runs.get(run_id, composition.principal)
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type=event_type,
+                    actor_type="runtime",
+                    payload=payload,
+                )
+            )
+        operation = await service.submit_task(composition.principal, kind="refresh")
+        assert operation.run_id != run_id
+        task = await service.get_task(composition.principal, run_id)
+        assert task is not None
+        assert task.settled_cost is None
+        assert task.reservation == Decimal("1")
+        assert task.stage == "cost_reconciliation_required"
 
 
 async def test_maintenance_expires_body_cache_and_sent_drafts_but_keeps_unsent_edits() -> None:

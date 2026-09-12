@@ -1110,13 +1110,17 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_168_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_170_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 168
+    assert len(qualified_paths) == 170
+    assert {
+        "runtime/limits.yaml:email.daily_cost",
+        "runtime/limits.yaml:email.monthly_cost",
+    } <= qualified_paths
     assert {
         "runtime/limits.yaml:scheduling.terminal_retention_days",
         "runtime/limits.yaml:scheduling.terminal_purge_interval_seconds",

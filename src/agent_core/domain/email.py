@@ -14,13 +14,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_core.domain.email_semantics import EmailSemanticFact
 
 EMAIL_POLICY_VERSION = "email-experience@1"
-EMAIL_DAILY_CEILING = Decimal("20")
-EMAIL_MONTHLY_CEILING = Decimal("200")
 EMAIL_SLICE_RESERVATION = Decimal("1")
 
 
 class EmailValue(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class EmailBudgetLimits(EmailValue):
+    """Finite operator-configured aggregate allowances for automatic email work."""
+
+    daily_cost: Decimal = Field(gt=0, allow_inf_nan=False)
+    monthly_cost: Decimal = Field(gt=0, allow_inf_nan=False)
 
 
 class EmailRecord(EmailValue):
