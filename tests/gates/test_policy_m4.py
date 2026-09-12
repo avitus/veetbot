@@ -36,6 +36,7 @@ from agent_core.domain.messages import (
     StopReason,
     TextPart,
     ToolCallItem,
+    ToolResultItem,
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
@@ -689,6 +690,99 @@ async def test_standing_authorization_shares_the_execution_deadline(
     else:
         assert tool.observed_timeout is not None
         assert 0 < tool.observed_timeout <= tool.spec.timeout_seconds - 0.05
+
+
+@pytest.mark.parametrize(
+    "idempotency", [IdempotencyClass.IDEMPOTENT, IdempotencyClass.CONDITIONALLY_IDEMPOTENT]
+)
+@pytest.mark.parametrize("reject_recovery", [False, True])
+async def test_pre_watermarked_recovery_revalidates_before_each_execution(
+    tmp_path: Path, idempotency: IdempotencyClass, reject_recovery: bool
+) -> None:
+    """A recovery watermark is not evidence of current authorization."""
+
+    class RecoveryTool(_SchedulingTool):
+        async def execute(
+            self, arguments: dict[str, object], context: ToolExecutionContext
+        ) -> ToolResult:
+            self.started += 1
+            await context.mark_effect_sent()
+            if self.started == 1:
+                raise asyncio.CancelledError
+            return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
+
+    tool = RecoveryTool(
+        name="demo.recovery_write", side_effect=SideEffectClass.EXTERNAL_WRITE, parallel=False
+    )
+    tool.spec = tool.spec.model_copy(update={"idempotency": idempotency})
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    guard_calls = 0
+
+    async def before_effect(
+        run: Run, principal: Principal, invocation: ToolInvocation, lease: WorkerLease | None
+    ) -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls > 1 and reject_recovery:
+            raise ConflictError("the original authorization is no longer valid")
+
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("prepare a pre-watermarked recovery test")
+        active_run = await app.runs.get(run_id)
+        actor = app.principal.model_copy(update={"scopes": {*app.principal.scopes, "demo.write"}})
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        active_agent = active_agent.model_copy(update={"enabled_tools": [tool.spec.name]})
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=_AllowPolicy(),
+            before_effect=before_effect,
+        )
+
+        async def dispatch() -> list[ToolResultItem]:
+            return await pipeline.dispatch(
+                run=active_run,
+                checkpoint=checkpoint,
+                tool_calls=[
+                    ToolCallItem(
+                        call_id="recovery-call",
+                        item_index=0,
+                        name=tool.spec.name,
+                        arguments={},
+                        raw_arguments="{}",
+                    )
+                ],
+                principal=actor,
+                step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+                agent=active_agent,
+                token=RunCancellationToken(app.clock, None),
+            )
+
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch()
+        async with app.uow_factory() as uow:
+            [interrupted] = await uow.invocations.list_for_run(run_id, actor)
+        assert interrupted.status is ToolInvocationStatus.RUNNING
+        assert interrupted.effect_sent_at is not None
+        assert guard_calls == tool.started == 1
+
+        result = await dispatch()
+        async with app.uow_factory() as uow:
+            [recovered] = await uow.invocations.list_for_run(run_id, actor)
+
+    assert guard_calls == 2
+    assert tool.started == (1 if reject_recovery else 2)
+    assert result[0].is_error is reject_recovery
+    assert recovered.effect_sent_at == interrupted.effect_sent_at
 
 
 async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(

@@ -998,14 +998,17 @@ class ToolPipeline:
             )
 
         effect_guard = asyncio.Lock()
+        effect_authorized = False
 
         async def mark_effect_sent() -> None:
-            nonlocal invocation
+            nonlocal invocation, effect_authorized
             async with effect_guard:
+                if not effect_authorized:
+                    if self._before_effect is not None:
+                        await self._before_effect(run, principal, invocation, lease)
+                    effect_authorized = True
                 if invocation.effect_sent_at is not None:
                     return
-                if self._before_effect is not None:
-                    await self._before_effect(run, principal, invocation, lease)
                 marked_at = self._clock.now()
                 pending = invocation.model_copy(
                     update={"effect_sent_at": marked_at, "updated_at": marked_at},

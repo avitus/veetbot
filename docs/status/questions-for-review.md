@@ -664,6 +664,10 @@ Per-session is more flexible than per-tenant and marginally more work.
 
 ### `mark_effect_sent` is a tool-author obligation, not a type-checked one
 
+**Superseded:** [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md)
+adopted executor-owned conservative watermarking before invoking any tool with
+a non-`NONE` side effect. The original proposal below is retained as history.
+
 **Decided:** a `NON_IDEMPOTENT` or `CONDITIONALLY_IDEMPOTENT` tool must call
 `ctx.mark_effect_sent()` immediately before its first outbound operation. The
 contract suite asserts it for every registered tool against a fake target, and

@@ -96,11 +96,12 @@ async def test_durable_workers_carry_a_delegation_from_submit_to_completion() ->
             ),
         ]
     )
+    # Heartbeats run concurrently with database I/O; their waits must not jump
+    # simulated time past a tool deadline before that tool can execute.
     async with build(
         settings=_delegation_settings(),
         storage="postgres",
         script=script,
-        fixed_clock_at=NOW,
     ) as composition:
         run_id = await composition.runs.submit("delegate a sum to a durable child")
         assert (await composition.runs.get(run_id)).status is RunStatus.QUEUED

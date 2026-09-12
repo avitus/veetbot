@@ -685,12 +685,12 @@ The honest limits of this, stated rather than buried:
 - A crash between the watermark commit and the outbound request produces an
   `UNCERTAIN` for a call that did nothing. This is a false positive that costs
   a human review, and it is the direction to be wrong in.
-- A tool that forgets to call it is unsafe in exactly the way the current
-  design already is. So a `NON_IDEMPOTENT` or `CONDITIONALLY_IDEMPOTENT` tool
-  that returns `ok` without having called `mark_effect_sent` is a **contract
-  violation**, the contract suite asserts it for every registered tool, and the
-  executor records `tool.contract.no_watermark` on the invocation so the gap is
-  visible in production rather than only in tests.
+- The executor establishes the watermark before invoking a non-`NONE` tool.
+  A rejected pre-effect check or failed watermark transaction prevents the
+  implementation from starting; the executor settles the applicable failure.
+  Recovery re-runs the pre-effect authorization check once per execution
+  attempt even when a previous attempt already committed the watermark.
+  The existing timestamp is retained; it never substitutes for current authority.
 
 ### Deduplication on the way in
 
@@ -1760,11 +1760,11 @@ smuggled a pipeline inside step 10.
 
 The ones worth naming, each with the thing that catches it.
 
-**A tool forgets `mark_effect_sent`.** Then a crash mid-call produces a
-re-execution that duplicates an external write. Caught by the contract suite,
-which asserts that every `NON_IDEMPOTENT` and `CONDITIONALLY_IDEMPOTENT`
-registered tool sets the watermark on its success path against a fake target,
-and by the `tool.contract.no_watermark` flag in production.
+**A pre-effect check or watermark transaction fails.** The executor establishes
+both before invoking a non-`NONE` tool, so the implementation never starts
+when either fails. Recovery tests cover existing watermarks with invalidated
+authorization; timeout tests cover stalled guards and watermark persistence.
+Neither failure permits an external effect to bypass its dispatch boundary.
 
 **Two workers execute one call.** Caught by `UNIQUE(idempotency_key)` at step
 8, which turns the race into a `ConcurrencyConflict` rather than a duplicate
