@@ -1,8 +1,10 @@
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
 
 from agent_core.domain.events import NewEvent
+from agent_core.ports.events import EventRepository
 from tests.contract.support import SESSION_ID, memory_stack, principal
 
 
@@ -150,3 +152,27 @@ async def test_event_repository_omits_scheduled_seed_before_applying_the_page_li
         (2, "assistant.message.completed"),
         (3, "user.message.created"),
     ]
+
+
+async def assert_event_query_filters_run_before_limit(repository: EventRepository) -> None:
+    for index, rid in enumerate((UUID(int=701), UUID(int=702), UUID(int=701), UUID(int=702))):
+        await repository.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=rid,
+                event_type="contract.run-filter",
+                actor_type="contract",
+                payload={"index": index},
+            )
+        )
+    events = await repository.list_after(SESSION_ID, 0, principal(), run_id=UUID(int=702), limit=1)
+    assert [event.payload["index"] for event in events] == [1]
+    continued = await repository.list_after(
+        SESSION_ID, events[0].sequence, principal(), run_id=UUID(int=702)
+    )
+    assert [event.payload["index"] for event in continued] == [3]
+
+
+async def test_event_query_filters_run_before_limit() -> None:
+    _clock, _sessions, _runs, repository = await memory_stack()
+    await assert_event_query_filters_run_before_limit(repository)

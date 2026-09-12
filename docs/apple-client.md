@@ -88,8 +88,10 @@ interface palette uses the app icon's turquoise, orange, and navy while retainin
 semantic colors for errors, approvals, and tool risk.
 
 Website Access lists the authenticated principal's browser profiles and lets the
-user choose one `READY` profile for new conversations. Adding access sends only
-the exact public-HTTPS origin and login-page URL to Veetbot, then presents a
+user choose one `READY` profile for new conversations. Adding access sends
+the exact public-HTTPS primary origin, optional `additionalOrigins` included
+in `allowedOrigins`, and the login-page URL to Veetbot. Each additional value
+must also be an exact public HTTPS origin. The client then presents a
 separate Continue in web browser action for the server's five-minute, single-use
 browser ceremony. A rejected system-browser handoff cancels the ceremony and
 removes its unused profile; a ceremony-creation failure also rolls its partial

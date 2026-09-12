@@ -216,7 +216,7 @@ def render_email_context(
             UserMessage(
                 principal_id=None,
                 trust=TrustLevel.EXTERNAL_UNTRUSTED,
-                content=[TextPart(text=json.dumps(data, ensure_ascii=False))],
+                content=[TextPart(text=canonical_json_bytes(data).decode("utf-8"))],
             )
         ]
     )

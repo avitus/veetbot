@@ -16,16 +16,16 @@ from pathlib import Path
 import pytest
 
 from tests.gates.test_email_chat_m26 import (
-    test_chat_context_uses_shared_owner_style_with_independent_source_binding as shared_style_check,
+    assert_chat_feedback_requires_current_owner_source_and_replays_shared_rule as profile_check,
 )
 from tests.gates.test_email_chat_m26 import (
-    test_chat_feedback_requires_current_owner_source_and_replays_shared_rule as profile_check,
+    assert_chat_shared_style as shared_style_check,
 )
 from tests.gates.test_email_chat_m26 import (
-    test_selected_email_context_is_source_attributed_untrusted_and_bounded as shared_context_check,
+    assert_selected_email_context as shared_context_check,
 )
 from tests.gates.test_email_experience_m26 import (
-    test_refresh_admits_one_durable_typed_task_without_owner_message as admission_check,
+    assert_refresh_admits_one_durable_typed_task_without_owner_message as admission_check,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -149,6 +149,7 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
                 "DEVELOPMENT_TEAM=",
             ],
             apple_environment,
+            timeout=900,
         )
         summary = json.loads(
             native_command(

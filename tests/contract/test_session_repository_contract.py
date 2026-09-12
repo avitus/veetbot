@@ -1,8 +1,12 @@
+from uuid import UUID
+
 import pytest
 
 from agent_core.adapters.persistence.memory import InMemorySessionRepository
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
+from agent_core.domain.sessions import SessionCursor
+from agent_core.ports.repositories import SessionRepository
 from tests.contract.support import NOW, SESSION_ID, principal, session
 
 
@@ -56,3 +60,38 @@ async def test_session_title_is_normalized_and_bounded() -> None:
     assert titled.title is not None
     assert titled.title.startswith("A title ")
     assert len(titled.title) == 64
+
+
+async def assert_session_index_filters_before_pagination(repository: SessionRepository) -> None:
+    for value, metadata in (
+        (701, {}),
+        (702, {"email_operational": True}),
+        (703, {"email_operational": False}),
+        (704, {"email_operational": True}),
+    ):
+        await repository.create(
+            session().model_copy(update={"id": UUID(int=value), "metadata": metadata})
+        )
+    first = await repository.list(principal(), limit=1, exclude_operational=True)
+    assert [row.id for row in first] == [UUID(int=703)]
+    second = await repository.list(
+        principal(),
+        limit=1,
+        cursor=SessionCursor(updated_at=first[0].updated_at, id=first[0].id),
+        exclude_operational=True,
+    )
+    assert [row.id for row in second] == [UUID(int=701)]
+    all_rows = await repository.list(principal(), limit=4)
+    assert len(all_rows) == 4
+    assert (
+        await repository.list(
+            principal().model_copy(update={"principal_id": "foreign"}),
+            limit=4,
+            exclude_operational=True,
+        )
+        == []
+    )
+
+
+async def test_session_index_filters_before_pagination() -> None:
+    await assert_session_index_filters_before_pagination(InMemorySessionRepository())

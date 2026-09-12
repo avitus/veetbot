@@ -119,7 +119,13 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session, SessionCursor, SessionStatus, conversation_title
+from agent_core.domain.sessions import (
+    SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
+    Session,
+    SessionCursor,
+    SessionStatus,
+    conversation_title,
+)
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -327,11 +333,18 @@ class PostgresSessionRepository:
         *,
         limit: int,
         cursor: SessionCursor | None = None,
+        exclude_operational: bool = False,
     ) -> list[Session]:
         predicates: list[Any] = [
             SessionRow.tenant_id == principal.tenant_id,
             SessionRow.principal_id == principal.principal_id,
         ]
+        if exclude_operational:
+            predicates.append(
+                SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]
+                .as_boolean()
+                .is_not(True)
+            )
         if cursor is not None:
             predicates.append(
                 (SessionRow.updated_at < cursor.updated_at)
@@ -672,6 +685,7 @@ class PostgresEventRepository:
         sequence: int,
         principal: Principal,
         *,
+        run_id: UUID | None = None,
         created_at_or_after: datetime | None = None,
         created_before: datetime | None = None,
         limit: int | None = None,
@@ -690,6 +704,8 @@ class PostgresEventRepository:
         statement = select(EventRow).where(
             EventRow.session_id == session_id, EventRow.sequence > sequence
         )
+        if run_id is not None:
+            statement = statement.where(EventRow.run_id == run_id)
         if created_at_or_after is not None:
             statement = statement.where(EventRow.created_at >= created_at_or_after)
         if created_before is not None:

@@ -304,7 +304,7 @@ async def test_email_application_http_boundaries(command: Command) -> None:
         await _retry_durable_operation_after_dispatch_failure(command.name)
 
 
-@pytest.mark.parametrize("command", ["draft", "send", "pause", "reset"])
+@pytest.mark.parametrize("command", ["generate", "send", "pause", "reset"])
 async def test_write_commands_never_mutate_then_fail_response_authorization(command: str) -> None:
     async with email_client() as (app, client):
         thread, draft = await seed_mail(app)
@@ -315,14 +315,14 @@ async def test_write_commands_never_mutate_then_fail_response_authorization(comm
 
         app.services.email.dispatch = dispatch
         app.principal.scopes.remove("email.read")
-        if command in {"draft", "send"}:
+        if command in {"generate", "send"}:
             path = (
                 f"/v1/email/threads/{thread.id}/drafts"
-                if command == "draft"
+                if command == "generate"
                 else f"/v1/email/drafts/{draft.id}/send-proposal"
             )
             response = await client.post(
-                path, json={} if command == "draft" else {"expected_revision": 1}
+                path, json={} if command == "generate" else {"expected_revision": 1}
             )
             assert response.status_code == 403
             assert dispatched == []

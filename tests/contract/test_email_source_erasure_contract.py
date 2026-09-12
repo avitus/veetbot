@@ -393,6 +393,13 @@ async def assert_erasure_waits_for_potential_producer(
                     updated_at=NOW,
                 )
             )
+    if kind == "unrelated":
+        async with factory() as uow:
+            counts = await uow.session_deletions.erase_email_source(
+                principal(), "work", "t1", frozenset({"m1"}), NOW
+            )
+            assert all(value == 0 for value in counts.values())
+        return
     with pytest.raises(ConflictError, match="settle"):
         async with factory() as uow:
             await uow.session_deletions.erase_email_source(
@@ -406,7 +413,7 @@ async def assert_erasure_waits_for_potential_producer(
         assert all(value == 0 for value in counts.values())
 
 
-@pytest.mark.parametrize("kind", ["bound", "chat_scope", "gmail_scope", "invocation"])
+@pytest.mark.parametrize("kind", ["bound", "chat_scope", "gmail_scope", "invocation", "unrelated"])
 async def test_memory_erasure_waits_for_inflight_source_producer(kind: str) -> None:
     async with build(
         settings=memory_settings(), storage="memory", principal=principal()

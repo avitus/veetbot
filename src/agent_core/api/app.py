@@ -450,7 +450,7 @@ def _error_response(
 ) -> JSONResponse:
     if request.url.path.startswith("/v1/email/"):
         # Unhandled errors are rendered outside the ordinary request middleware.
-        headers = {**(headers or {}), "Cache-Control": "private, no-store"}
+        headers = {**(headers or {}), "Cache-Control": PRIVATE_NO_STORE}
     return JSONResponse(
         status_code=status,
         content={

@@ -1,6 +1,7 @@
 """Shared deterministic values for memory and knowledge port contracts."""
 
 import hashlib
+import json
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -34,9 +35,17 @@ from agent_core.domain.memory import (
     RecallTrace,
     Sensitivity,
 )
+from agent_core.domain.messages import TextPart, ToolResultItem
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.chunking import DeterministicChunker
+from agent_core.memory.email_semantics import (
+    EmailSemanticEvaluationEvidence,
+    EmailSemanticFact,
+    EmailSemanticFormationService,
+    EmailSemanticSource,
+    semantic_implementation_sha256,
+)
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION, HybridMemoryRetriever
 from tests.contract.support import (
@@ -47,6 +56,7 @@ from tests.contract.support import (
     TENANT,
     memory_stack,
     principal,
+    session,
 )
 
 
@@ -296,3 +306,109 @@ def prepared_knowledge() -> KnowledgeIngestPrepared:
         version=1,
     )
     return KnowledgeIngestPrepared(document=document, chunks=chunks)
+
+
+async def semantic_stack(
+    *, enabled: bool = True, age: int = 0, **message_updates: object
+) -> tuple[
+    MemoryUnitOfWorkFactory,
+    EmailSemanticFormationService,
+    EmailSemanticSource,
+    EmailSemanticFact,
+    HybridMemoryRetriever,
+]:
+    clock, factory, _baseline, retriever = await formation_stack()
+    sid = UUID(int=410)
+    sent_at = (NOW - timedelta(days=age)).replace(microsecond=0)
+    body = "The Atlas board vote moved to Friday. The diligence package is due Monday."
+    message = {
+        "id": "m1",
+        "thread_id": "t1",
+        "from": "Alex <alex@example.test>",
+        "body": body,
+        "body_complete": True,
+        "headers_complete": True,
+        "internal_date": str(int(sent_at.timestamp() * 1000)),
+        **message_updates,
+    }
+    async with factory() as uow:
+        await uow.sessions.create(
+            session().model_copy(
+                update={
+                    "id": sid,
+                    "metadata": {
+                        "email_operational": True,
+                        "email_account_servers": {"work": {"read": "gmail_work_read"}},
+                    },
+                }
+            )
+        )
+        event = await uow.events.append(
+            NewEvent(
+                session_id=sid,
+                run_id=None,
+                event_type="tool.call.completed",
+                actor_type="runtime",
+                payload={
+                    "name": "mcp.gmail_work_read.get_thread_page",
+                    "result_item": ToolResultItem(
+                        call_id="c1",
+                        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                        content=[
+                            TextPart(text=json.dumps({"thread_id": "t1", "messages": [message]}))
+                        ],
+                    ).model_dump(mode="json"),
+                },
+            )
+        )
+    evidence = (
+        EmailSemanticEvaluationEvidence(
+            provider="test",
+            model="bounded-test",
+            build_ref="fixture-not-production",
+            corpus_sha256="a" * 64,
+            implementation_sha256=semantic_implementation_sha256(),
+            sample_count=20,
+            supported_count=20,
+            labeled_useful_count=20,
+            comparison_case_count=1,
+            improvement_count=1,
+            existing_memory_benchmarks_passed=True,
+            attribution_case_count=1,
+            cross_project_case_count=1,
+            historical_case_count=1,
+            evaluated_at=NOW,
+        )
+        if enabled
+        else None
+    )
+    service = EmailSemanticFormationService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=n) for n in range(5000, 6000)),
+        principal(),
+        provider="test",
+        model="bounded-test",
+        evidence=evidence,
+    )
+    source = EmailSemanticSource(
+        account_id="work",
+        provider_thread_id="t1",
+        message_id="m1",
+        session_id=sid,
+        source_event_sequence=event.sequence,
+        tool_name="mcp.gmail_work_read.get_thread_page",
+        sender="Alex <alex@example.test>",
+        body=body,
+        sent_at=sent_at,
+    )
+    fact = EmailSemanticFact(
+        message_id="m1",
+        quote="The Atlas board vote moved to Friday.",
+        belief_type=BeliefType.FACT,
+        subject="Atlas board vote",
+        predicate="scheduled date",
+        value="Friday",
+        confidence=0.9,
+    )
+    return factory, service, source, fact, retriever

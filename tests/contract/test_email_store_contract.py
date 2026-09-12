@@ -115,3 +115,40 @@ async def test_memory_email_lock_serializes_and_releases_after_error() -> None:
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def assert_task_admission_query_preserves_unsettled_reservations(store: EmailStore) -> None:
+    for key, age, settled in (("old", 31, "1"), ("pending", 40, None), ("recent", 1, "1")):
+        await store.put(
+            record(key).model_copy(
+                update={
+                    "kind": "task",
+                    "payload": {
+                        "created_at": (NOW - timedelta(days=age)).isoformat(),
+                        "settled_cost": settled,
+                    },
+                }
+            ),
+            expected_revision=0,
+        )
+    rows = await store.list_tasks(principal(), created_since=NOW - timedelta(days=30), limit=1)
+    assert [row.key for row in rows] == ["pending"]
+    rows = await store.list_tasks(
+        principal(), created_since=NOW - timedelta(days=30), after="pending"
+    )
+    assert [row.key for row in rows] == ["recent"]
+    assert [row.key for row in await store.list_tasks(principal())] == ["pending"]
+    assert (
+        await store.list_tasks(
+            principal().model_copy(update={"principal_id": "foreign"}),
+            created_since=NOW - timedelta(days=30),
+        )
+        == []
+    )
+    assert await store.get(principal(), "task", "old") is not None
+
+
+async def test_task_admission_query_preserves_unsettled_reservations() -> None:
+    from agent_core.adapters.persistence.email import InMemoryEmailStore
+
+    await assert_task_admission_query_preserves_unsettled_reservations(InMemoryEmailStore())

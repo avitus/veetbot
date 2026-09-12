@@ -259,7 +259,14 @@ def feedback_matches(feedback: EmailFeedback, thread: EmailThread) -> bool:
         return False
     if feedback.target == "thread":
         return feedback.thread_id == thread.id
-    candidates = addresses(thread.senders) if feedback.target == "person" else thread.topics
+    candidates = thread.topics
+    if feedback.target == "person":
+        candidates = []
+        for sender in thread.senders:
+            try:
+                candidates.extend(addresses([sender]))
+            except ValueError:
+                continue
     return bool(set(feedback.target_values) & set(candidates))
 
 

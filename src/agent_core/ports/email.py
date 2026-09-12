@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -35,6 +37,17 @@ class EmailStore(Protocol):
     async def list(
         self, principal: Principal, kind: str, *, after: str | None = None, limit: int = 1000
     ) -> list[EmailRecord]: ...
+
+    async def list_tasks(
+        self,
+        principal: Principal,
+        *,
+        created_since: datetime | None = None,
+        after: str | None = None,
+        limit: int = 1000,
+    ) -> builtins.list[EmailRecord]:
+        """Unsettled tasks, plus tasks created since the optional accounting cutoff."""
+        ...
 
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord: ...
 

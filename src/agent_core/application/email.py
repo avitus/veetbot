@@ -70,6 +70,17 @@ async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIt
         after = page[-1].key
 
 
+async def task_records(
+    store: EmailStore, principal: Principal, *, created_since: datetime | None = None
+) -> AsyncIterator[EmailRecord]:
+    """Read only unsettled tasks and the optional current accounting window."""
+    after: str | None = None
+    while page := await store.list_tasks(principal, created_since=created_since, after=after):
+        for row in page:
+            yield row
+        after = page[-1].key
+
+
 async def read_value[Value: EmailValue](
     store: EmailStore, principal: Principal, kind: str, key: str, model: type[Value]
 ) -> Value | None:
@@ -191,6 +202,12 @@ class EmailExperienceService:
             EmailFeedback.model_validate(row.payload)
             async for row in records(store, principal, "feedback")
         ]
+
+    async def thread_record(
+        self, store: EmailStore, principal: Principal, thread_id: UUID
+    ) -> EmailThread:
+        """Read an account-authorized thread through the caller's unit of work."""
+        return await self._thread(store, principal, thread_id)
 
     async def _thread(
         self, store: EmailStore, principal: Principal, thread_id: UUID
@@ -691,7 +708,7 @@ class EmailExperienceService:
         now = self.clock.now().astimezone(UTC)
         daily = Decimal("0")
         monthly = Decimal("0")
-        async for record in records(store, principal, "task"):
+        async for record in task_records(store, principal, created_since=now - timedelta(days=30)):
             task = EmailTask.model_validate(record.payload)
             cost = task.reservation if task.settled_cost is None else task.settled_cost
             if task.settled_cost is None or task.created_at.astimezone(UTC).date() == now.date():
@@ -774,7 +791,7 @@ class EmailExperienceService:
                     status=run.status.value,
                     replayed=True,
                 )
-            async for row in records(uow.email, principal, "task"):
+            async for row in task_records(uow.email, principal):
                 old = EmailTask.model_validate(row.payload)
                 if old.kind != kind or (
                     kind != "refresh" and (old.thread_id != thread_id or old.draft_id != draft_id)
@@ -1010,21 +1027,26 @@ class EmailExperienceService:
     async def _learning_summary(self, principal: Principal) -> EmailLearningState:
         async with self.uow_factory() as uow:
             state = await self._learning_state(uow.email, principal)
-            examples = [row async for row in records(uow.email, principal, "style")]
-            accounts = [
-                EmailAccount.model_validate(row.payload)
-                async for row in records(uow.email, principal, "account")
-            ]
-            excluded = [row async for row in records(uow.email, principal, "excluded_source")]
-            return state.model_copy(
-                update={
-                    "style_examples": len(examples),
-                    "excluded_sources": len(excluded),
-                    "history_processed": sum(account.history_processed for account in accounts),
-                    "history_complete": bool(accounts)
-                    and all(account.history_complete for account in accounts),
-                }
-            )
+            return await self._summarize_learning(uow.email, principal, state)
+
+    async def _summarize_learning(
+        self, store: EmailStore, principal: Principal, state: EmailLearningState
+    ) -> EmailLearningState:
+        examples = [row async for row in records(store, principal, "style")]
+        accounts = [
+            EmailAccount.model_validate(row.payload)
+            async for row in records(store, principal, "account")
+        ]
+        excluded = [row async for row in records(store, principal, "excluded_source")]
+        return state.model_copy(
+            update={
+                "style_examples": len(examples),
+                "excluded_sources": len(excluded),
+                "history_processed": sum(account.history_processed for account in accounts),
+                "history_complete": bool(accounts)
+                and all(account.history_complete for account in accounts),
+            }
+        )
 
     async def pause_learning(self, principal: Principal, paused: bool) -> EmailLearningState:
         require_scope(principal, "email.write")
@@ -1931,18 +1953,4 @@ class EmailExperienceService:
                 await self._prune_styles(uow.email, principal)
                 await self._bump_profile(uow.email, principal)
             state = await self._learning_state(uow.email, principal)
-            examples = [row async for row in records(uow.email, principal, "style")]
-            accounts = [
-                EmailAccount.model_validate(row.payload)
-                async for row in records(uow.email, principal, "account")
-            ]
-            excluded = [row async for row in records(uow.email, principal, "excluded_source")]
-            return state.model_copy(
-                update={
-                    "style_examples": len(examples),
-                    "excluded_sources": len(excluded),
-                    "history_processed": sum(account.history_processed for account in accounts),
-                    "history_complete": bool(accounts)
-                    and all(account.history_complete for account in accounts),
-                }
-            )
+            return await self._summarize_learning(uow.email, principal, state)

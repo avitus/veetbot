@@ -18,7 +18,7 @@ async def test_postgres_source_erasure_contract() -> None:
         await assert_email_source_erasure(composition.uow_factory)
 
 
-@pytest.mark.parametrize("kind", ["bound", "chat_scope", "gmail_scope", "invocation"])
+@pytest.mark.parametrize("kind", ["bound", "chat_scope", "gmail_scope", "invocation", "unrelated"])
 async def test_postgres_erasure_waits_for_inflight_source_producer(kind: str) -> None:
     async with build(
         settings=database_settings(), storage="postgres", principal=principal()

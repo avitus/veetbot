@@ -77,7 +77,7 @@ class EmailContextTool:
                     for row in rows if isinstance(rows, list) else []:
                         if not isinstance(row, dict):
                             continue
-                        cached = await self.service._thread(
+                        cached = await self.service.thread_record(
                             uow.email, context.principal, UUID(row["id"])
                         )
                         row["source"] = {
@@ -179,7 +179,7 @@ class EmailContextTool:
             selected = (
                 None
                 if thread_id is None
-                else await self.service._thread(uow.email, context.principal, thread_id)
+                else await self.service.thread_record(uow.email, context.principal, thread_id)
             )
         profile = await self.service.learning_context(context.principal, selected)
         examples: list[dict[str, Any]] = []
@@ -189,7 +189,7 @@ class EmailContextTool:
                 if not isinstance(example, dict):
                     continue
                 try:
-                    source = await self.service._thread(
+                    source = await self.service.thread_record(
                         uow.email, context.principal, UUID(str(example["thread_id"]))
                     )
                 except (NotFoundError, AuthorizationError):
@@ -268,7 +268,9 @@ class EmailFeedbackTool:
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         quote = str(arguments.get("owner_quote", "")).strip()
         async with self.service.uow_factory() as uow:
-            events = await uow.events.list_after(context.session_id, 0, context.principal)
+            events = await uow.events.list_after(
+                context.session_id, 0, context.principal, run_id=context.run_id
+            )
         owner_texts = [
             part.text
             for event in events

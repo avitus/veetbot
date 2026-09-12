@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
+
+import pytest
 
 from agent_core.adapters.mcp.scripted import ScriptedMCPClient, ScriptedMCPClientFactory
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -256,7 +258,10 @@ async def _seed_draft(app: Composition) -> tuple[EmailThread, EmailDraft]:
     return thread, draft
 
 
-async def test_send_freezes_exact_value_and_rechecks_source_after_approval() -> None:
+@pytest.mark.parametrize("profile_address", ["owner@example.test", "OWNER@EXAMPLE.TEST"])
+async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
+    profile_address: str,
+) -> None:
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -264,9 +269,9 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval() -> 
 
     factory = await _mailbox_factory(
         [
-            ("get_profile", _profile()),
+            ("get_profile", {**_profile(), "email_address": profile_address}),
             ("get_thread_page", _page()),
-            ("get_profile", _profile()),
+            ("get_profile", {**_profile(), "email_address": profile_address}),
             ("get_thread_page", _page()),
         ]
     )
@@ -1300,3 +1305,77 @@ async def test_partial_large_thread_does_not_block_other_current_mail() -> None:
         async with app.uow_factory() as uow:
             threads = await uow.email.list(app.principal, "thread")
         assert {row.payload["provider_thread_id"] for row in threads} == {"thread-1", "important-2"}
+
+
+@pytest.mark.parametrize("kind", ["refresh", "send"])
+async def test_invalid_json_mailbox_result_preserves_account_and_draft(
+    kind: Literal["refresh", "send"],
+) -> None:
+    from dataclasses import replace
+
+    from tests.gates.test_email_m18 import _email_settings
+
+    base_factory = await _mailbox_factory([])
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base_factory(config, credential, environment)
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            return MCPCallResult(content=("{malformed private mailbox response",))
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        draft = (await _seed_draft(app))[1] if kind == "send" else None
+        operation = await app.services.email.submit_task(
+            app.principal,
+            kind=kind,
+            draft_id=draft.id if draft is not None else None,
+            expected_revision=1 if kind == "send" else None,
+        )
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED, (
+            await app.runs.get(operation.run_id)
+        ).model_dump()
+        if draft is not None:
+            current = await app.services.email.draft(app.principal, draft.id)
+            assert current.status.value == "ready" and current.body == draft.body
+        if kind == "refresh":
+            account = _items(await app.services.email.accounts(app.principal))[0]
+            assert account["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("missing", ["id", "from", "internal_date"])
+async def test_invalid_memory_source_fields_do_not_interrupt_mailbox_viewing(missing: str) -> None:
+    from types import SimpleNamespace
+    from typing import cast
+    from unittest.mock import AsyncMock
+    from uuid import UUID
+
+    from agent_core.runtime.email_tasks import _TaskIO
+
+    message = dict(_page()["messages"][0])
+    del message[missing]
+    semantics = SimpleNamespace(register_source=AsyncMock())
+    io = cast(
+        _TaskIO,
+        SimpleNamespace(
+            context=SimpleNamespace(run=SimpleNamespace(session_id=UUID(int=1)), lease=None),
+            semantics=semantics,
+        ),
+    )
+    await _TaskIO._register_sources(
+        io,
+        "work",
+        {
+            "thread_id": "t1",
+            "source_event_sequence": 1,
+            "source_tool_name": "mcp.gmail_read.get_thread_page",
+            "messages": [message],
+        },
+    )
+    semantics.register_source.assert_not_awaited()

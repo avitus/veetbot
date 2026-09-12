@@ -26,7 +26,7 @@ def context(composition: Composition, session_id: UUID) -> ToolExecutionContext:
     )
 
 
-async def test_selected_email_context_is_source_attributed_untrusted_and_bounded() -> None:
+async def assert_selected_email_context() -> None:
     async with email_client() as (composition, _):
         thread, _ = await seed_mail(composition)
         service = composition.services.email
@@ -47,7 +47,7 @@ async def test_selected_email_context_is_source_attributed_untrusted_and_bounded
         assert not any(e.event_type == "user.message.created" for e in events)
 
 
-async def test_chat_feedback_requires_current_owner_source_and_replays_shared_rule() -> None:
+async def assert_chat_feedback_requires_current_owner_source_and_replays_shared_rule() -> None:
     async with email_client() as (composition, _):
         thread, _ = await seed_mail(composition)
         service = composition.services.email
@@ -95,7 +95,7 @@ async def test_chat_feedback_requires_current_owner_source_and_replays_shared_ru
         assert (await service.threads(composition.principal, view="priority"))["items"] == []
 
 
-async def test_chat_context_uses_shared_owner_style_with_independent_source_binding() -> None:
+async def assert_chat_shared_style() -> None:
     from agent_core.domain.email import EmailDraftEdit
 
     async with email_client() as (composition, _):
@@ -124,3 +124,15 @@ async def test_chat_context_uses_shared_owner_style_with_independent_source_bind
             == "Let's sharpen the agenda together before we meet."
         )
         assert examples[0]["authorship"] == "owner_edit_delta"
+
+
+async def test_selected_email_context_is_source_attributed_untrusted_and_bounded() -> None:
+    await assert_selected_email_context()
+
+
+async def test_chat_feedback_requires_current_owner_source_and_replays_shared_rule() -> None:
+    await assert_chat_feedback_requires_current_owner_source_and_replays_shared_rule()
+
+
+async def test_chat_context_uses_shared_owner_style_with_independent_source_binding() -> None:
+    await assert_chat_shared_style()

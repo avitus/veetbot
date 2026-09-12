@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import DateTime, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.functions import func
@@ -59,6 +61,36 @@ class InMemoryEmailStore:
                 and record.principal_id == principal.principal_id
                 and record.kind == kind
                 and (after is None or record.key > after)
+            ),
+            key=lambda record: record.key,
+        )
+        return [record.model_copy(deep=True) for record in selected[:limit]]
+
+    async def list_tasks(
+        self,
+        principal: Principal,
+        *,
+        created_since: datetime | None = None,
+        after: str | None = None,
+        limit: int = 1000,
+    ) -> builtins.list[EmailRecord]:
+        _validate_limit(limit)
+        selected = sorted(
+            (
+                record
+                for record in self._records.values()
+                if record.tenant_id == principal.tenant_id
+                and record.principal_id == principal.principal_id
+                and record.kind == "task"
+                and (after is None or record.key > after)
+                and (
+                    record.payload.get("settled_cost") is None
+                    or (
+                        created_since is not None
+                        and datetime.fromisoformat(str(record.payload["created_at"]))
+                        >= created_since
+                    )
+                )
             ),
             key=lambda record: record.key,
         )
@@ -133,6 +165,39 @@ class PostgresEmailStore:
             .scalars()
             .all()
         )
+        return [email_record_to_domain(row) for row in rows]
+
+    async def list_tasks(
+        self,
+        principal: Principal,
+        *,
+        created_since: datetime | None = None,
+        after: str | None = None,
+        limit: int = 1000,
+    ) -> builtins.list[EmailRecord]:
+        _validate_limit(limit)
+        eligible = EmailRecordRow.payload["settled_cost"].astext.is_(None)
+        if created_since is not None:
+            eligible = or_(
+                eligible,
+                EmailRecordRow.payload["created_at"].astext.cast(DateTime(timezone=True))
+                >= created_since,
+            )
+        query = select(EmailRecordRow).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "task",
+            eligible,
+        )
+        if after is not None:
+            query = query.where(EmailRecordRow.key > after)
+        rows = (
+            await self._session.scalars(
+                query.order_by(EmailRecordRow.key)
+                .limit(limit)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
         return [email_record_to_domain(row) for row in rows]
 
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord:

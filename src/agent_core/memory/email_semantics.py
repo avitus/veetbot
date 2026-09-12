@@ -124,6 +124,7 @@ class EmailSemanticFormationService:
         self._provider = provider
         self._model = model
         self._evidence = evidence
+        self._implementation_sha256 = semantic_implementation_sha256()
         self._governed = GovernedMemoryService(
             uow_factory,
             clock,
@@ -138,7 +139,7 @@ class EmailSemanticFormationService:
             self._evidence.provider == self._provider
             and self._evidence.model == self._model
             and self._evidence.policy_version == EMAIL_SEMANTIC_POLICY_VERSION
-            and self._evidence.implementation_sha256 == semantic_implementation_sha256()
+            and self._evidence.implementation_sha256 == self._implementation_sha256
         )
 
     async def register_source(
@@ -209,7 +210,7 @@ class EmailSemanticFormationService:
                     f"message {source.message_id}) reports {fact.subject} "
                     f'{fact.predicate}: "{fact.value}".'
                 )
-                memory, _action = await self._governed._remember(
+                memory, _action = await self._governed.remember_formation(
                     session_id=source.session_id,
                     run_id=run_id,
                     statement=statement,

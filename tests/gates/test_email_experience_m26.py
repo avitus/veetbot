@@ -251,7 +251,7 @@ async def test_cross_owner_email_id_is_indistinguishable_from_absence() -> None:
         assert (await client.get("/v1/email/threads")).json()["items"] == []
 
 
-async def test_refresh_admits_one_durable_typed_task_without_owner_message() -> None:
+async def assert_refresh_admits_one_durable_typed_task_without_owner_message() -> None:
     async with email_client() as (composition, client):
         calls = []
 
@@ -544,3 +544,7 @@ async def test_account_capability_rebinding_preserves_old_evidence_and_new_opera
         assert old.metadata["email_account_servers"]["work"]["read"] == "gmail_read"
         assert new.metadata["email_account_servers"]["work"]["read"] == "gmail_work_read"
         assert (await service.thread(updated_principal, thread.id))["id"] == str(thread.id)
+
+
+async def test_refresh_admits_one_durable_typed_task_without_owner_message() -> None:
+    await assert_refresh_admits_one_durable_typed_task_without_owner_message()

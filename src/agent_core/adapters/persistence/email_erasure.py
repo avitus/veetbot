@@ -29,6 +29,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
+from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
 
 _ERASED = "[email source erased]"
 _IDENTITY_FIELDS = frozenset({"id", "message_id", "thread_id", "history_id", "internal_date"})
@@ -222,7 +223,7 @@ def contains_belief(value: Any, belief_ids: set[str]) -> bool:
 
 
 def read_server(metadata: dict[str, Any], account_id: str) -> str | None:
-    bindings = metadata.get("email_account_servers")
+    bindings = metadata.get(SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY)
     binding = bindings.get(account_id) if isinstance(bindings, dict) else None
     return binding.get("read") if isinstance(binding, dict) else None
 

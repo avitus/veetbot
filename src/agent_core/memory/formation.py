@@ -2399,7 +2399,7 @@ class GovernedMemoryService:
         derivation: MemoryDerivation = MemoryDerivation.DIRECT,
         longevity: MemoryLongevity = MemoryLongevity.DURABLE,
     ) -> MemoryRecord:
-        record, _action = await self._remember(
+        record, _action = await self.remember_formation(
             session_id=session_id,
             run_id=run_id,
             statement=statement,
@@ -2424,7 +2424,7 @@ class GovernedMemoryService:
         )
         return record
 
-    async def _remember(
+    async def remember_formation(
         self,
         *,
         session_id: UUID,
@@ -2455,6 +2455,7 @@ class GovernedMemoryService:
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
     ) -> tuple[MemoryRecord, str]:
+        """Apply validated formation evidence within an optional caller-owned transaction."""
         attributed_shape = (
             origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
             and not explicit
@@ -3147,7 +3148,7 @@ class GovernedMemoryService:
                         # several beliefs is counted once and supersedes each.
                         counted = key_index == 0
                         try:
-                            belief, action = await self._remember(
+                            belief, action = await self.remember_formation(
                                 session_id=session_id,
                                 run_id=source_event.run_id,
                                 statement=candidate.statement,

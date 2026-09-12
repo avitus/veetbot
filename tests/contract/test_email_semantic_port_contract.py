@@ -8,7 +8,7 @@ from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSo
 from agent_core.domain.errors import ToolTrustRejectedError, ToolValidationError
 from agent_core.domain.memory import MemoryAuthority, Portability, Sensitivity
 from agent_core.ports.email import EmailSemanticPort
-from tests.unit.test_email_semantics_m26 import semantic_stack
+from tests.contract.memory_fixtures import semantic_stack
 
 
 async def assert_email_semantic_port(

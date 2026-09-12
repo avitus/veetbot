@@ -79,9 +79,7 @@ async def test_style_example_rejects_missing_draft_invalid_revision_and_conflict
             assert not await uow.email.list(app.principal, "style")
 
 
-async def test_explicit_style_example_with_only_write_scope_does_not_mutate_then_fail_read() -> (
-    None
-):
+async def test_explicit_style_example_succeeds_with_write_scope_and_no_read_scope() -> None:
     async with email_client() as (app, client):
         _, draft = await seed_mail(app)
         app.principal.scopes.remove("email.read")

@@ -160,3 +160,34 @@ async def test_email_records_force_tenant_rls_for_non_superuser() -> None:
                 await admin.execute(text(f"DROP OWNED BY {role}"))
                 await admin.execute(text(f"DROP ROLE {role}"))
                 await admin.commit()
+
+
+async def test_postgres_email_session_and_event_query_filters() -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import session as contract_session
+    from tests.contract.test_event_repository_contract import (
+        assert_event_query_filters_run_before_limit,
+    )
+    from tests.contract.test_session_repository_contract import (
+        assert_session_index_filters_before_pagination,
+    )
+
+    async with (
+        build(settings=database_settings(), principal=principal()) as app,
+        app.uow_factory() as uow,
+    ):
+        await assert_session_index_filters_before_pagination(uow.sessions)
+        await uow.sessions.create(contract_session())
+        await assert_event_query_filters_run_before_limit(uow.events)
+
+
+async def test_postgres_task_admission_query_preserves_unsettled_reservations() -> None:
+    from tests.contract.test_email_store_contract import (
+        assert_task_admission_query_preserves_unsettled_reservations,
+    )
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        await assert_task_admission_query_preserves_unsettled_reservations(
+            PostgresEmailStore(session)
+        )

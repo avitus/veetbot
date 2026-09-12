@@ -467,3 +467,12 @@ def test_email_records_encode_scoped_revisioned_state() -> None:
         "revision > 0" in str(getattr(constraint, "sqltext", ""))
         for constraint in table.constraints
     )
+
+    from sqlalchemy import Text
+
+    assert isinstance(table.c.key.type, Text)
+    assert table.c.key.type.collation == "C"
+    assert any(
+        "jsonb_typeof(payload) = 'object'" in str(getattr(constraint, "sqltext", ""))
+        for constraint in table.constraints
+    )

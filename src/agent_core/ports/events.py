@@ -24,6 +24,7 @@ class EventRepository(Protocol):
         sequence: int,
         principal: Principal,
         *,
+        run_id: UUID | None = None,
         created_at_or_after: datetime | None = None,
         created_before: datetime | None = None,
         limit: int | None = None,

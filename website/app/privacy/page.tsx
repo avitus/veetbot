@@ -224,11 +224,11 @@ export default function PrivacyPolicy() {
                   revoke Veetbot&apos;s Google access through your Google Account&apos;s
                   third-party connection settings;
                 </li>
-                <li>disable the Gmail integration and remove its credential files; and</li>
+                <li>disable the Gmail integration and remove its credential files;</li>
                 <li>
                   pause email learning, reset importance preferences or writing
                   style, and exclude an email thread from retained sources and
-                  derived learning;
+                  derived learning; and
                 </li>
                 <li>
                   delete available sessions or ask the deployment operator to

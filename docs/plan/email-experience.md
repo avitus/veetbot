@@ -210,7 +210,10 @@ defaults are **USD 20 per UTC day and USD 200 per rolling thirty days**, across
 both accounts/devices and all automatic classification, history, style,
 drafting, and formation work. Reserve each slice's maximum cost transactionally
 before admission, settle actual usage afterward, and retain unresolved
-reservations through crash recovery. Dependent extraction calls cannot escape
+reservations through crash recovery. Admission queries select unsettled tasks
+and, for budget calculation, settled tasks created within the rolling thirty-day
+window before pagination. Older settled task records remain available for audit
+and idempotent command replay. Dependent extraction calls cannot escape
 the originating reservation. A finite reservation is not renewed by retry.
 
 Meter every model stage through the existing gateway. Lower applicable runtime
@@ -471,6 +474,11 @@ index must not fill with polling sessions. User interaction or draft generation
 for a thread lazily creates/reuses its ordinary conversation session; Discuss
 in Chat selects it. This introduces task associations and an index filter, not
 a new session trust class or separate agent loop.
+
+The conversation index excludes the server-owned operational marker within each
+repository query before cursor limits apply. Feedback evidence queries are
+scoped to the current run before fetching events, retaining the same principal
+and owner-authorship checks.
 
 ### State ownership
 

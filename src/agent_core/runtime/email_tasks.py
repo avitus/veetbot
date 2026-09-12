@@ -302,7 +302,10 @@ class _TaskIO:
         value = invocation.structured_result
         if value is None:
             text = "\n".join(part.text for part in result.content if isinstance(part, TextPart))
-            value = json.loads(text)
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise EmailToolError("The email tool returned an invalid result.") from exc
         if not isinstance(value, dict):
             raise EmailToolError("The email tool returned an invalid result.")
         # Original tool-event provenance is resolved independently of model output.
@@ -345,7 +348,7 @@ class _TaskIO:
                 await self.semantics.register_source(
                     source, run=self.context.run, lease=self.context.lease
                 )
-            except (ValueError, ToolTrustRejectedError, ConflictError):
+            except (KeyError, ValueError, ToolTrustRejectedError, ConflictError):
                 # Invalid/excluded memory evidence never blocks ordinary mailbox viewing.
                 continue
 
@@ -1341,7 +1344,11 @@ class _TaskIO:
                 account = await read_value(
                     uow.email, c.principal, "account", draft.account_id, EmailAccount
                 )
-            if account is None or account.email_address != profile["email_address"]:
+            if (
+                account is None
+                or account.email_address is None
+                or account.email_address.casefold() != str(profile["email_address"]).casefold()
+            ):
                 raise EmailToolError("The mailbox identity cannot be verified.")
             observed, pending = await self.read_thread(
                 draft.account_id, thread.provider_thread_id, fresh=True

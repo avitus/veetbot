@@ -72,6 +72,7 @@ class SessionRepository(Protocol):
         *,
         limit: int,
         cursor: SessionCursor | None = None,
+        exclude_operational: bool = False,
     ) -> list[Session]: ...
 
     async def close(

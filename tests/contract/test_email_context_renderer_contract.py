@@ -79,3 +79,6 @@ def test_canonical_email_renderer_satisfies_shared_port_contract() -> None:
     )
     renderer: EmailContextRenderer = render_email_context
     assert_email_context_renderer(renderer, context)
+    _first_prefix, first = renderer(agent(), context, "Assess", {"z": "é", "a": 1})
+    _second_prefix, second = renderer(agent(), context, "Assess", {"a": 1, "z": "é"})
+    assert first == second
