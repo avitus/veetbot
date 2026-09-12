@@ -173,9 +173,9 @@ Four fields need their justification.
 run deadline. A tool never sees `ToolSpec.timeout_seconds` and never computes
 its own budget; the executor does that once, in one place, where it can also
 refuse to start a call that cannot finish.
-The pre-effect authorization callback and effect-watermark transaction share
-that timeout with tool execution. A timeout before the watermark is committed
-settles as `tool.timeout` without dispatching an external effect.
+Standing authorization, pre-effect checks, watermark persistence, and execution
+share one absolute deadline. Unavailable standing authority falls back to
+interactive approval; an authorized call exhausting its budget returns `tool.timeout`.
 
 `credentials` is a resolver, not a dictionary. It takes a `credential_ref` from
 configuration and returns a short-lived value; the reference is what appears in
@@ -653,11 +653,11 @@ tool_invocations
   + effect_sent_at   TIMESTAMPTZ NULL
 ```
 
-A tool declared `NON_IDEMPOTENT` or `CONDITIONALLY_IDEMPOTENT` must call
-`await ctx.mark_effect_sent()` immediately before the operation that can leave
-a mark — the HTTP request, the file write, the message send — and must not call
-it before. The call writes `effect_sent_at = now()` in its own short
-transaction and returns. It is idempotent itself; a second call is a no-op.
+Per [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md), the executor calls
+`await ctx.mark_effect_sent()` before invoking any tool whose declared side
+effect is not `NONE`, even when that invocation may only read. The call writes
+`effect_sent_at = now()` in its own short transaction and returns. Tools may
+also call it at their effect boundary; subsequent calls are no-ops.
 
 Recovery then reads a fact rather than making an inference:
 
@@ -672,9 +672,9 @@ Recovery then reads a fact rather than making an inference:
 
 The last two rows are the point. Section 8.4's rule — "do not automatically
 retry a non-idempotent tool left in `RUNNING`" — is preserved exactly for calls
-that may have escaped, and the far more common case of a worker that died
-during argument marshalling, during connection setup, or while waiting on a
-lock is now retried safely instead of being escalated to a person.
+that may have escaped. A worker that dies before the executor commits the
+watermark can be retried safely. A crash during the implementation, including
+connection setup before any effect, conservatively requires human review.
 
 The honest limits of this, stated rather than buried:
 

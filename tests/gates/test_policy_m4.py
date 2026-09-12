@@ -23,6 +23,7 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.errors import (
+    ApprovalRequiredError,
     AuthorizationError,
     ConflictError,
     NotFoundError,
@@ -47,6 +48,7 @@ from agent_core.domain.policies import (
     ProposedAction,
     RiskLevel,
     SideEffectClass,
+    StandingAuthorization,
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunStatus, Step
@@ -574,6 +576,119 @@ async def test_tool_timeout_includes_pre_effect_work(
     assert invocation.effect_sent_at is None
     assert invocation.outcome is not None
     assert invocation.outcome.reason_code == "tool.timeout"
+
+
+@pytest.mark.parametrize("authorization_work", ["stalled", "elapsed_clock", "elapsed_monotonic"])
+async def test_standing_authorization_shares_the_execution_deadline(
+    tmp_path: Path, authorization_work: str
+) -> None:
+    """Standing authority is bounded and cannot renew the action budget."""
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _RecordingTool()
+    registry = StaticToolRegistry()
+    registry.register(tool)
+
+    class ApprovalPolicy:
+        async def evaluate(
+            self, proposed: ProposedAction, actor: Principal, active_run: Run
+        ) -> PolicyDecision:
+            return PolicyDecision(
+                decision=PolicyDecisionType.REQUIRE_APPROVAL,
+                reason_code="policy.test.approval",
+                explanation="Require exact standing authority or interactive approval.",
+                policy_version="test@approval+h00000000",
+            )
+
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("prepare a standing authorization timeout test")
+        active_run = (await app.runs.get(run_id)).model_copy(update={"deadline_at": None})
+        if authorization_work == "stalled":
+            active_run = active_run.model_copy(
+                update={"deadline_at": app.clock.now() + timedelta(milliseconds=50)}
+            )
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        active_agent = active_agent.model_copy(update={"enabled_tools": [tool.spec.name]})
+
+        class StandingAuthorizer:
+            async def authorize(
+                self,
+                *,
+                action: ProposedAction,
+                decision: PolicyDecision,
+                principal: Principal,
+                run: Run,
+                agent_version: str,
+                action_deadline: datetime,
+            ) -> StandingAuthorization:
+                expected_deadline = NOW + timedelta(seconds=tool.spec.timeout_seconds)
+                if run.deadline_at is not None:
+                    expected_deadline = min(expected_deadline, run.deadline_at)
+                assert action_deadline == expected_deadline
+                if authorization_work == "stalled":
+                    await asyncio.sleep(1)
+                elif authorization_work == "elapsed_clock":
+                    assert isinstance(app.clock, FixedClock)
+                    app.clock.advance(timedelta(seconds=2))
+                else:
+                    await asyncio.sleep(0.05)
+                return StandingAuthorization(
+                    allowed=True,
+                    reason_code="browser.grant.authorized",
+                    authorization_kind="standing_browser_grant",
+                    authorization_ref="test-grant",
+                )
+
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=ApprovalPolicy(),
+            standing_authorizer=StandingAuthorizer(),
+        )
+        dispatch = pipeline.dispatch(
+            run=active_run,
+            checkpoint=checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="standing-deadline-call",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={"value": "candidate"},
+                    raw_arguments='{"value":"candidate"}',
+                )
+            ],
+            principal=app.principal,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+        if authorization_work == "stalled":
+            with pytest.raises(ApprovalRequiredError):
+                await dispatch
+        else:
+            result = await dispatch
+            assert result[0].is_error is (authorization_work == "elapsed_clock")
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, app.principal))[0]
+
+    if authorization_work == "stalled":
+        assert invocation.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
+        assert invocation.effect_sent_at is None
+        assert tool.observed is None
+    elif authorization_work == "elapsed_clock":
+        assert invocation.outcome is not None
+        assert invocation.outcome.reason_code == "tool.timeout"
+        assert invocation.effect_sent_at is None
+        assert tool.observed is None
+    else:
+        assert tool.observed_timeout is not None
+        assert 0 < tool.observed_timeout <= tool.spec.timeout_seconds - 0.05
 
 
 async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(

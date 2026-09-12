@@ -372,7 +372,7 @@ request has been dispatched, and the corpus already owns the machinery that
 says so. The executor watermarks every call whose side effect is not `NONE`
 before the tool implementation runs — the conservative rule
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
-`mark_effect_sent` implements (tool-system.md:656-660) — so `effect_sent_at`
+`mark_effect_sent` implements (tool-system.md:656-659) — so `effect_sent_at`
 is set on every write and send before its request leaves the worker, and the
 recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
 `UNCERTAIN` (tool-system.md:671). A rate limit, a 5xx, or a lost response
