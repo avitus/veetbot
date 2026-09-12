@@ -1056,6 +1056,7 @@ class EmailExperienceService:
         await save_value(uow.email, principal, "task", str(run.id), updated, self.clock.now())
 
     async def _release_refresh_session(self, session_id: UUID) -> None:
+        """Release ephemeral refresh resources while preserving durable evidence."""
         try:
             if self.close_session is not None:
                 await self.close_session(session_id)
