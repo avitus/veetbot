@@ -32,6 +32,10 @@ class RevisionRequest(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class DismissRequest(RevisionRequest):
+    dismissed: bool = Field(default=True, strict=True)
+
+
 class LearningRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paused: bool
@@ -54,6 +58,7 @@ def private_response(response: Response) -> None:
 
 
 def email_router(service: EmailService, secured: Callable[[str], object]) -> APIRouter:
+    """Expose scope-checked email operations with private, non-cacheable responses."""
     router = APIRouter(dependencies=[Depends(private_response)])
 
     @router.get("/v1/email/accounts", openapi_extra={"required_scope": "email.read"})
@@ -246,10 +251,13 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
     )
     async def dismiss(
         thread_id: UUID,
-        body: RevisionRequest,
+        body: DismissRequest,
         authenticated: Annotated[Principal, secured("email.write")],
     ) -> dict[str, object]:
-        return await service.dismiss(authenticated, thread_id, body.expected_revision)
+        """Set or clear handled state for the exact thread revision the client saw."""
+        return await service.dismiss(
+            authenticated, thread_id, body.expected_revision, dismissed=body.dismissed
+        )
 
     @router.delete("/v1/email/drafts/{draft_id}", openapi_extra={"required_scope": "email.write"})
     async def discard_draft(

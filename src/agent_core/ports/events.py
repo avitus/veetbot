@@ -36,7 +36,11 @@ class EventRepository(Protocol):
         sequence: int,
         event_type: str,
         principal: Principal,
-    ) -> EventEnvelope | None: ...
+        *,
+        run_id: UUID | None = None,
+    ) -> EventEnvelope | None:
+        """Return the newest matching event below the cursor, optionally within one run."""
+        ...
 
     async def list_conversation_after(
         self,

@@ -722,20 +722,26 @@ class PostgresEventRepository:
         sequence: int,
         event_type: str,
         principal: Principal,
+        *,
+        run_id: UUID | None = None,
     ) -> EventEnvelope | None:
+        """Apply owner, cursor, type and optional run filters before selecting one row."""
+        statement = (
+            select(EventRow)
+            .join(SessionRow, SessionRow.id == EventRow.session_id)
+            .where(
+                EventRow.session_id == session_id,
+                EventRow.sequence < sequence,
+                EventRow.event_type == event_type,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+        )
+        if run_id is not None:
+            statement = statement.where(EventRow.run_id == run_id)
         row = (
             await self._session.scalars(
-                select(EventRow)
-                .join(SessionRow, SessionRow.id == EventRow.session_id)
-                .where(
-                    EventRow.session_id == session_id,
-                    EventRow.sequence < sequence,
-                    EventRow.event_type == event_type,
-                    SessionRow.tenant_id == principal.tenant_id,
-                    SessionRow.principal_id == principal.principal_id,
-                )
-                .order_by(EventRow.sequence.desc(), EventRow.id.desc())
-                .limit(1)
+                statement.order_by(EventRow.sequence.desc(), EventRow.id.desc()).limit(1)
             )
         ).one_or_none()
         if row is None:

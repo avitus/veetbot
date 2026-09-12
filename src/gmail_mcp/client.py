@@ -195,6 +195,7 @@ class GmailClient:
         mutating: bool = False,
         allow_reauthentication: bool = True,
     ) -> dict[str, Any]:
+        """Bound response reads and normalize failures according to dispatch safety."""
         token = await self._token()
         request = self._http_client.build_request(
             method,
@@ -205,11 +206,11 @@ class GmailClient:
         )
         try:
             response = await self._http_client.send(request, stream=True)
+            raw = await self._read_body(response, mutating=mutating)
         except httpx.HTTPError as exc:
             code = "gmail.outcome_unknown" if mutating else "gmail.provider_unavailable"
             raise GmailError(code) from exc
         status = response.status_code
-        raw = await self._read_body(response, mutating=mutating)
         if status == 401:
             if mutating:
                 raise GmailError("gmail.outcome_unknown")

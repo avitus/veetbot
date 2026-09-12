@@ -285,6 +285,14 @@ per-account freshness and historical coverage. Background updates preserve row
 order and announce newly qualifying mail. Opening Email or returning it to the
 foreground starts refresh; the client admits a new refresh every sixty seconds
 while Email remains visible, and stops admission when hidden or backgrounded.
+Transient operation-status failures retry the same operation with bounded
+backoff, stopping after three consecutive failures until the next active
+refresh. Cancellation and responses from an old connection do not become
+visible connection errors. Refresh failures survive successful cached reads
+until a refresh completes; a recovered thread read clears its own error while
+preserving errors from editing, feedback or send actions.
+Accounts awaiting their first update show a pending message; the client shows
+an account failure only when the server has recorded a refresh error.
 
 Thread detail renders text and attachment metadata without remote content.
 Feedback distinguishes people, topics, thread importance and reply need, reports

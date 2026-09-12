@@ -16,6 +16,58 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    /// Verifies both confirmed attention transitions without leaving the open thread.
+    private func checkHandledActionInDetail() {
+        let action = app.buttons["email.handled.detail"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        XCTAssertEqual(action.label, "Mark handled")
+        #if os(macOS)
+        action.click()
+        #else
+        action.tap()
+        #endif
+        let handled = NSPredicate(format: "label == %@ AND enabled == true", "Mark unhandled")
+        expectation(for: handled, evaluatedWith: action)
+        waitForExpectations(timeout: 5)
+        #if os(macOS)
+        action.click()
+        #else
+        action.tap()
+        #endif
+        let unhandled = NSPredicate(format: "label == %@ AND enabled == true", "Mark handled")
+        expectation(for: unhandled, evaluatedWith: action)
+        waitForExpectations(timeout: 5)
+    }
+
+    /// Checks off a row directly, then finds its reversible handled state in Other mail.
+    func testEmailCanBeCheckedOffFromInboxWithoutOpeningThread() {
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        mode.click()
+        #else
+        mode.tap()
+        #endif
+        let check = app.buttons["email.handled.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(check.waitForExistence(timeout: 10))
+        #if os(macOS)
+        check.click()
+        #else
+        check.tap()
+        #endif
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: check)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(app.buttons["email.handled.detail"].exists)
+        let other = app.buttons["Review other mail"]
+        #if os(macOS)
+        other.click()
+        #else
+        other.tap()
+        #endif
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        XCTAssertEqual(check.label, "Mark unhandled")
+    }
+
     #if os(iOS)
     func testEmailCompactTraitNavigationReturnsToSelectedInbox() {
         app.terminate()
@@ -49,6 +101,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Resume learning"].waitForExistence(timeout: 5))
     }
 
+    /// Exercises handled state, feedback, editing and exact-send approval on the native thread screen.
     func testEmailThreadFeedbackEditingAndExplicitSend() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
@@ -57,6 +110,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        checkHandledActionInDetail()
         app.buttons["Important"].tap()
         XCTAssertTrue(app.staticTexts["Marked this thread as important."].waitForExistence(timeout: 5))
         let editor = app.textViews["email.draft-body"]
@@ -283,6 +337,7 @@ final class ConversationNavigationUITests: XCTestCase {
     #endif
 
     #if os(macOS)
+    /// Exercises Mac thread attention and approval controls through actual native interactions.
     func testEmailModeAndExactDraftApprovalOnMac() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
@@ -291,6 +346,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.click()
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5), app.debugDescription)
+        checkHandledActionInDetail()
         let review = app.buttons["email.review-send"]
         for _ in 0..<8 where !review.isHittable {
             app.scrollViews["email.detail"].scroll(byDeltaX: 0, deltaY: -350)

@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import webbrowser
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -1383,6 +1384,7 @@ class _FailingGmail:
         self.requests: list[httpx.Request] = []
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
+        """Authenticate normally and return a controlled Gmail failure with raw diagnostics."""
         self.requests.append(request)
         if str(request.url) == GOOGLE_TOKEN_ENDPOINT:
             return httpx.Response(
@@ -1398,11 +1400,82 @@ class _FailingGmail:
         )
 
 
+@pytest.mark.parametrize("boundary", ["client", "mcp"])
+@pytest.mark.parametrize(
+    ("mode", "tool", "expected_code"),
+    [
+        ("read", "list_labels", "gmail.provider_unavailable"),
+        ("write", "create_draft", "gmail.outcome_unknown"),
+        ("send", "send_message", "gmail.outcome_unknown"),
+    ],
+)
+async def test_streamed_response_timeout_is_bounded_and_dispatch_aware(
+    boundary: str,
+    mode: str,
+    tool: str,
+    expected_code: str,
+) -> None:
+    """A body lost after headers is stable for reads and never retried for writes."""
+
+    class InterruptedBody(httpx.AsyncByteStream):
+        """Fail after real HTTPX streaming has yielded an incomplete response body."""
+
+        closed = False
+        yielded = False
+
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            """Expose the timeout only while consuming an already dispatched response."""
+            self.yielded = True
+            yield b'{"private-provider-response":'
+            raise httpx.ReadTimeout("private streamed provider detail")
+
+        async def aclose(self) -> None:
+            """Record disposal even when the body read fails."""
+            self.closed = True
+
+    stream = InterruptedBody()
+    requests: list[httpx.Request] = []
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        """Authenticate normally, then lose the Gmail response after its headers."""
+        if str(request.url) == GOOGLE_TOKEN_ENDPOINT:
+            return httpx.Response(200, json={"access_token": "fixture-access-token"})
+        requests.append(request)
+        return httpx.Response(200, stream=stream)
+
+    arguments = (
+        {}
+        if mode == "read"
+        else {
+            "to": "recipient@example.test",
+            "subject": "fixture subject",
+            "body": "fixture body",
+        }
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        client = GmailClient(_credential(mode), http_client=http_client)
+        if boundary == "client":
+            with pytest.raises(GmailError) as failure:
+                await getattr(client, tool)(**arguments)
+            assert str(failure.value) == expected_code
+        else:
+            result = await create_server(mode, client).call_tool(tool, arguments)
+            assert isinstance(result, CallToolResult)
+            assert result.is_error is True
+            rendered = " ".join(str(item) for item in result.content)
+            assert expected_code in rendered
+            assert "private" not in rendered
+    assert len(requests) == 1
+    assert stream.yielded
+    assert stream.closed
+
+
 async def _assert_provider_failure_is_stable_and_classification_aware(
     status: int,
     read_code: str,
     write_code: str,
 ) -> None:
+    """Check stable read/write failure codes and a single dispatched write request."""
     read_fake = _FailingGmail(status=status)
     read = await _client("read", read_fake)  # type: ignore[arg-type]
     with pytest.raises(Exception) as read_failure:

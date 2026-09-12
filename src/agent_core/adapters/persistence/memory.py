@@ -513,15 +513,22 @@ class InMemoryEventRepository:
         sequence: int,
         event_type: str,
         principal: Principal,
+        *,
+        run_id: UUID | None = None,
     ) -> EventEnvelope | None:
+        """Select the newest eligible event without letting another run obscure it."""
         await self._sessions.get(session_id, principal)
         async with self._lock:
-            matching = [
-                event
-                for event in self._events[session_id]
-                if event.sequence < sequence and event.event_type == event_type
-            ]
-            return None if not matching else matching[-1].model_copy(deep=True)
+            return next(
+                (
+                    event.model_copy(deep=True)
+                    for event in reversed(self._events[session_id])
+                    if event.sequence < sequence
+                    and event.event_type == event_type
+                    and (run_id is None or event.run_id == run_id)
+                ),
+                None,
+            )
 
     async def list_conversation_after(
         self,

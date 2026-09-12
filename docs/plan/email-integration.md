@@ -364,6 +364,8 @@ For `gmail_read`, whose every tool is `READ_ONLY`, the ordinary rule holds:
 rate limits and 5xx are retryable, auth failures, other 4xx, and
 schema-invalid arguments are not, and the tool pipeline retains ownership of
 any retry inside the run deadline.
+Transport loss while reading a bounded response body follows the same mapping
+as loss before response headers; successful headers do not prove completion.
 
 For `gmail_write` and `gmail_send` no failure is retryable once the mutating
 request has been dispatched, and the corpus already owns the machinery that
@@ -380,7 +382,7 @@ undetermined-outcome code, resolves to the platform's `uncertain` outcome with
 blocked from being proposed again in the run by the unified breaker's
 threshold-of-one row (tool-system.md:850). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:1788-1790) and the one
+after the watermark (tool-system.md:1796-1798) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:549-553), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an

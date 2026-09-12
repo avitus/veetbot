@@ -313,6 +313,54 @@ import Testing
         #expect(await client.transport.authorizationState() == .authenticated)
     }
 
+    /// Cancellation before or during token lookup must never invalidate a valid session.
+    @Test(arguments: [false, true])
+    func testCancelledTokenLookupPreservesAuthorization(cancelBeforeLookup: Bool) async throws {
+        let store = SuspendedEmptyTokenStore(suspended: !cancelBeforeLookup)
+        let transport = HTTPTransport(
+            configuration: try ConnectionConfiguration(baseURLString: "https://veetbot.test"),
+            tokenStore: store
+        )
+        let request = Task {
+            if cancelBeforeLookup { withUnsafeCurrentTask { $0?.cancel() } }
+            return try await transport.sendData(TransportRequest(method: .get, path: "/v1/email/accounts"))
+        }
+        defer { request.cancel() }
+        if !cancelBeforeLookup {
+            for _ in 0..<1000 {
+                if await store.readCount == 1 { break }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            #expect(await store.readCount == 1)
+            request.cancel()
+            await store.finishRead()
+        }
+        do {
+            _ = try await request.value
+            Issue.record("Expected cancellation")
+        } catch is CancellationError {} catch {
+            Issue.record("Expected cancellation without a login failure: \(error)")
+        }
+        #expect(await transport.authorizationState() == .authenticated)
+        if cancelBeforeLookup { #expect(await store.readCount == 0) }
+    }
+
+    /// URLSession cancellation remains control flow rather than a displayed network error.
+    @Test
+    func testURLSessionCancellationRemainsCancellationInsteadOfAConnectionFailure() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        let client = try makeClient(token: "valid")
+        do {
+            _ = try await client.emailAccounts()
+            Issue.record("Expected request cancellation")
+        } catch is CancellationError {
+            #expect(await client.transport.authorizationState() == .authenticated)
+        } catch {
+            Issue.record("Expected cancellation, not a visible connection failure: \(error)")
+        }
+    }
+
     @Test(arguments: [
         "Sun, 06 Nov 1994 08:49:37 GMT",
         "Sunday, 06-Nov-94 08:49:37 GMT",
@@ -1236,6 +1284,32 @@ import Testing
         )
         return VeetbotAPIClient(transport: transport)
     }
+}
+
+/// Holds a missing-token response until the test cancels the requesting task.
+private actor SuspendedEmptyTokenStore: TokenStore {
+    private let suspended: Bool
+    private var continuation: CheckedContinuation<String?, Never>?
+    private(set) var readCount = 0
+
+    /// Allows the same fixture to cover cancellation before and during lookup.
+    init(suspended: Bool) { self.suspended = suspended }
+
+    /// Intentionally returns nil after cancellation to exercise the transport's guard.
+    func readToken() async -> String? {
+        readCount += 1
+        if !suspended { return nil }
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    /// Releases the token read without throwing a cancellation error itself.
+    func finishRead() { continuation?.resume(returning: nil); continuation = nil }
+
+    /// This lookup-only fixture does not persist credentials.
+    func saveToken(_ token: String) {}
+
+    /// This lookup-only fixture has no persistent credentials to delete.
+    func deleteToken() {}
 }
 
 private actor OneSuccessfulReadTokenStore: TokenStore {

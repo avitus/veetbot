@@ -745,6 +745,104 @@ async def test_queued_refresh_releases_admission_connections_before_worker_dispa
         assert operation.status == "QUEUED"
 
 
+async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_account(
+    tmp_path: Path,
+) -> None:
+    """Real mailbox parsing retains priority mail while one account reconnects later."""
+    import asyncio
+    import shlex
+    import sys
+    from collections import Counter
+    from uuid import UUID
+
+    from agent_core.adapters.mcp.sdk import SDKMCPClient
+    from agent_core.config import load_settings
+    from agent_core.domain.messages import FakeModelScript
+    from tests.gates.test_email_m18 import _accounts_manifest, _base_environment
+
+    settings = load_settings(
+        {
+            **_base_environment(),
+            "AGENT_EMAIL_ENABLED": "1",
+            "AGENT_EMAIL_MODE_ENABLED": "1",
+            "GMAIL_ACCOUNTS_FILE": str(_accounts_manifest(tmp_path)),
+        }
+    )
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "email_stdio_server.py"
+    creations: Counter[str] = Counter()
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> SDKMCPClient:
+        """Only the first worker's work-account read process fails discovery."""
+        creations[config.server_id] += 1
+        mode = config.server_id.rsplit("_", 1)[-1]
+        account = "work" if config.server_id.startswith("gmail_work_") else "personal"
+        command = [sys.executable, str(fixture), mode, account]
+        if config.server_id == "gmail_work_read" and creations[config.server_id] == 2:
+            command.append("--unavailable")
+        return SDKMCPClient(
+            config.model_copy(update={"endpoint": shlex.join(command)}), credential, environment
+        )
+
+    async with (
+        asyncio.timeout(60),
+        build(
+            settings=settings,
+            mcp_client_factory=factory,
+            script=FakeModelScript(turns=[_assessment_turn(), _assessment_turn()]),
+        ) as app,
+    ):
+        first = await app.services.email.submit_task(app.principal, kind="refresh")
+        first_run = await app.runs.get(first.run_id)
+        assert first_run.status is RunStatus.COMPLETED
+        accounts = {
+            item["id"]: item for item in _items(await app.services.email.accounts(app.principal))
+        }
+        assert accounts["personal"]["status"] == "ready"
+        assert accounts["work"]["status"] == "unavailable"
+        [personal] = _items(await app.services.email.threads(app.principal))
+        assert personal["account_id"] == "personal"
+        assert personal["subject"] == "Personal board materials"
+        assert personal["summary"] == "Board request"
+        assert first_run.model_call_count == 1
+        async with app.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(first.run_id, app.principal)
+            events = await uow.events.list_after(first_run.session_id, 0, app.principal)
+        assert invocations and all(item.status.value == "SUCCEEDED" for item in invocations)
+        assert not any(item.tool_name.startswith("mcp.gmail_work_read.") for item in invocations)
+        assert any(
+            event.event_type == "mcp.server.disconnected"
+            and event.payload.get("server_id") == "gmail_work_read"
+            and event.payload.get("reason_code") == "tool.server_unreachable"
+            for event in events
+        )
+        assert len(creations) == 6 and set(creations.values()) == {2}
+
+        second = await app.services.email.submit_task(app.principal, kind="refresh")
+        second_run = await app.runs.get(second.run_id)
+        assert second_run.status is RunStatus.COMPLETED
+        assert second_run.model_call_count == 1
+        recovered_accounts = _items(await app.services.email.accounts(app.principal))
+        assert len(recovered_accounts) == 2 and all(
+            item["status"] == "ready" for item in recovered_accounts
+        )
+        threads = _items(await app.services.email.threads(app.principal))
+        assert len(threads) == 2
+        assert {item["account_id"] for item in threads} == {"personal", "work"}
+        assert len({item["id"] for item in threads}) == 2
+        assert next(item for item in threads if item["account_id"] == "personal") == personal
+        for item in threads:
+            detail = await app.services.email.thread(app.principal, UUID(str(item["id"])))
+            assert detail["provider_thread_id"] == "shared-thread"
+            assert detail["complete"] is True
+            assert detail["draft"] is None
+            messages = detail["messages"]
+            assert isinstance(messages, list) and len(messages) == 1
+            assert messages[0]["body"] == "Please approve the board materials."
+        assert set(creations.values()) == {4}
+
+
 async def test_no_reply_feedback_prevents_automatic_draft_after_reassessment() -> None:
     from dataclasses import replace
     from uuid import UUID

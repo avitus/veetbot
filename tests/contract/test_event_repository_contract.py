@@ -3,6 +3,7 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.ports.events import EventRepository
 from tests.contract.support import SESSION_ID, memory_stack, principal
@@ -176,3 +177,61 @@ async def assert_event_query_filters_run_before_limit(repository: EventRepositor
 async def test_event_query_filters_run_before_limit() -> None:
     _clock, _sessions, _runs, repository = await memory_stack()
     await assert_event_query_filters_run_before_limit(repository)
+
+
+async def assert_latest_event_filters_run_before_selection(repository: EventRepository) -> None:
+    """Scope completion lookup before choosing the newest event below an exclusive cursor."""
+    requested, later = UUID(int=701), UUID(int=702)
+    events = []
+    for run_id, event_type in (
+        (requested, "assistant.message.completed"),
+        (later, "assistant.message.completed"),
+        (requested, "other"),
+        (requested, "assistant.message.completed"),
+        (later, "assistant.message.completed"),
+        (None, "assistant.message.completed"),
+        (requested, "assistant.message.completed"),
+    ):
+        events.append(
+            await repository.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=run_id,
+                    event_type=event_type,
+                    actor_type="contract",
+                )
+            )
+        )
+    for run_id, boundary, expected in (
+        (requested, events[6].sequence, events[3]),
+        (requested, events[3].sequence, events[0]),
+        (requested, events[0].sequence, None),
+        (later, events[6].sequence, events[4]),
+        (UUID(int=703), events[6].sequence, None),
+        (None, events[6].sequence, events[5]),
+    ):
+        assert (
+            await repository.latest_before(
+                SESSION_ID,
+                boundary,
+                "assistant.message.completed",
+                principal(),
+                run_id=run_id,
+            )
+            == expected
+        )
+    for replacement in ({"tenant_id": "foreign"}, {"principal_id": "foreign"}):
+        with pytest.raises(NotFoundError):
+            await repository.latest_before(
+                SESSION_ID,
+                events[6].sequence,
+                "assistant.message.completed",
+                principal().model_copy(update=replacement),
+                run_id=requested,
+            )
+
+
+async def test_latest_event_filters_run_before_selection() -> None:
+    """The in-memory adapter implements the same run-scoped completion query as PostgreSQL."""
+    _clock, _sessions, _runs, repository = await memory_stack()
+    await assert_latest_event_filters_run_before_selection(repository)

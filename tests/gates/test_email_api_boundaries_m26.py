@@ -65,6 +65,13 @@ COMMANDS = (
     Command(
         "dismiss", "POST", "/v1/email/threads/{t}/dismiss", "email.write", {"expected_revision": 1}
     ),
+    Command(
+        "unhandle",
+        "POST",
+        "/v1/email/threads/{t}/dismiss",
+        "email.write",
+        {"expected_revision": 1, "dismissed": False},
+    ),
     Command("discard", "DELETE", "/v1/email/drafts/{d}?expected_revision=1", "email.write"),
     Command(
         "exclude", "POST", "/v1/email/threads/{t}/exclude", "email.write", {"expected_revision": 1}
@@ -82,13 +89,20 @@ COMMANDS = (
 async def _request(
     app: Composition, client: httpx.AsyncClient, command: Command
 ) -> tuple[str, dict[str, object] | None]:
+    """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
 
     async def dispatch(run_id: UUID) -> None:
+        """Keep boundary tests from executing admitted email work."""
         return None
 
     app.services.email.dispatch = dispatch
     identities = {"t": thread.id, "d": draft.id, "f": uuid4(), "o": uuid4()}
+    if command.name == "unhandle":
+        response = await client.post(
+            f"/v1/email/threads/{thread.id}/dismiss", json={"expected_revision": 1}
+        )
+        assert response.status_code == 200
     if command.name == "undo":
         response = await client.post(
             "/v1/email/feedback",
@@ -296,7 +310,16 @@ async def test_email_application_http_boundaries(command: Command) -> None:
         await _isolate_principal_identifiers(command)
     if "{" in command.path:
         await _validate_path_identifiers(command)
-    if command.name in {"feedback", "edit", "send", "dismiss", "discard", "exclude", "endorse"}:
+    if command.name in {
+        "feedback",
+        "edit",
+        "send",
+        "dismiss",
+        "unhandle",
+        "discard",
+        "exclude",
+        "endorse",
+    }:
         await _preserve_current_mail_on_revision_conflict(command)
     if command.name in {"feedback", "edit", "generate", "send"}:
         await _reject_reused_idempotency_key(command.name)

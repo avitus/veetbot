@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
 from typing import Any, cast
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -70,15 +71,21 @@ def _settings() -> Settings:
 def _server(
     server_id: str,
     *,
+    transport: MCPTransport = MCPTransport.STDIO,
     side_effect: SideEffectClass = SideEffectClass.NONE,
     idempotency: IdempotencyClass = IdempotencyClass.IDEMPOTENT,
     credential_ref: str | None = None,
 ) -> MCPServerConfig:
+    """Build an operator-approved fixture server with explicit transport and effects."""
     return MCPServerConfig(
         tenant_id="local",
         server_id=server_id,
-        transport=MCPTransport.STDIO,
-        endpoint=f"/fixture/{server_id}",
+        transport=transport,
+        endpoint=(
+            f"/fixture/{server_id}"
+            if transport is MCPTransport.STDIO
+            else f"https://allowed.test/{server_id}"
+        ),
         operator_configured=True,
         auth_scheme=MCPAuthScheme.ENV if credential_ref else MCPAuthScheme.NONE,
         auth_name="MCP_TOKEN" if credential_ref else None,
@@ -498,23 +505,38 @@ async def test_expected_disconnect_cleanup_is_bounded(
     }
 
 
-async def test_prepare_discovers_independent_servers_concurrently() -> None:
+def _preparation_settings(directory: Path) -> Settings:
+    """Allow the synthetic HTTP endpoint without making any network request."""
+    sandbox = directory / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "limits.yaml").write_text(
+        "schema_version: 1\negress:\n  mode: allowlist\n  destinations:\n"
+        "    - host: allowed.test\n      ports: [443]\n"
+    )
+    return replace(_settings(), config_dir=directory)
+
+
+async def test_prepare_discovers_independent_servers_concurrently(tmp_path: Path) -> None:
+    """Independent HTTP handshakes progress together rather than serially."""
     factory = _BarrierFactory(expected=3)
     async with build(
-        settings=_settings(),
+        settings=_preparation_settings(tmp_path),
         sequential_ids=True,
-        mcp_servers=(_server("first"), _server("second"), _server("third")),
+        mcp_servers=tuple(
+            _server(name, transport=MCPTransport.HTTP) for name in ("first", "second", "third")
+        ),
         mcp_client_factory=factory,
     ) as composition:
         await composition.sessions.create()
     assert factory.barrier.maximum_in_flight == 3
 
 
-async def test_prepare_bounds_server_discovery_fan_out() -> None:
+async def test_prepare_bounds_server_discovery_fan_out(tmp_path: Path) -> None:
+    """A ninth HTTP handshake waits until one of the eight shared slots is free."""
     factory = _BarrierFactory(expected=8, hold_until_released=True)
-    configs = tuple(_server(f"server_{index}") for index in range(9))
+    configs = tuple(_server(f"server_{index}", transport=MCPTransport.HTTP) for index in range(9))
     async with build(
-        settings=_settings(),
+        settings=_preparation_settings(tmp_path),
         sequential_ids=True,
         mcp_servers=configs,
         mcp_client_factory=factory,
@@ -527,6 +549,37 @@ async def test_prepare_bounds_server_discovery_fan_out() -> None:
             factory.barrier.release.set()
             await startup
     assert factory.barrier.maximum_in_flight == 8
+
+
+@pytest.mark.parametrize(
+    ("transport", "capacity"),
+    [(MCPTransport.STDIO, 2), (MCPTransport.HTTP, 8)],
+)
+async def test_prepare_capacity_is_shared_across_sessions(
+    tmp_path: Path, transport: MCPTransport, capacity: int
+) -> None:
+    """Concurrent sessions cannot multiply local process or network startup load."""
+    factory = _BarrierFactory(expected=capacity, hold_until_released=True)
+    configs = tuple(_server(f"server_{index}", transport=transport) for index in range(6))
+    async with build(
+        settings=_preparation_settings(tmp_path),
+        sequential_ids=True,
+        mcp_servers=configs,
+        mcp_client_factory=factory,
+    ) as composition:
+        startups = [
+            asyncio.create_task(composition.mcp.prepare(uuid4(), composition.principal))
+            for _ in range(2)
+        ]
+        try:
+            await asyncio.wait_for(factory.barrier.all_started.wait(), timeout=1)
+            await asyncio.sleep(0.01)
+            assert factory.barrier.started == capacity
+        finally:
+            factory.barrier.release.set()
+            await asyncio.gather(*startups)
+        assert factory.barrier.started == 12
+    assert factory.barrier.maximum_in_flight == capacity
 
 
 async def test_dynamic_registrations_are_owned_by_live_sessions() -> None:

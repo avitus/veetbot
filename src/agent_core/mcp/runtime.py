@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
@@ -53,6 +53,7 @@ _SKILL_HYPHENS = re.compile(r"-+")
 type _RegistrationKey = tuple[str, str, str]
 logger = logging.getLogger(__name__)
 _MAXIMUM_PARALLEL_PREPARATIONS = 8
+_MAXIMUM_PARALLEL_STDIO_PREPARATIONS = 2
 
 _GMAIL_FAILURE_CODES = frozenset(
     {
@@ -133,6 +134,7 @@ class MCPRuntime:
         *,
         connect_timeout_seconds: float = 10,
     ) -> None:
+        """Share bounded preparation capacity across this runtime's sessions."""
         self._uow_factory = uow_factory
         self._registry = registry
         self._clients = clients
@@ -140,6 +142,8 @@ class MCPRuntime:
         self._clock = clock
         self._ids = ids
         self._connect_timeout_seconds = connect_timeout_seconds
+        self._preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
+        self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
         self._prepared: set[UUID] = set()
         self._locks: dict[UUID, asyncio.Lock] = {}
@@ -210,9 +214,12 @@ class MCPRuntime:
         self,
         session_id: UUID,
         config: MCPServerConfig,
-        semaphore: asyncio.Semaphore,
     ) -> _Connection | _DisconnectedServer:
-        async with semaphore:
+        """Admit bounded startup work before beginning the handshake deadline."""
+        async with AsyncExitStack() as capacity:
+            if config.transport is MCPTransport.STDIO:
+                await capacity.enter_async_context(self._stdio_preparation_slots)
+            await capacity.enter_async_context(self._preparation_slots)
             client: MCPClient | None = None
             entered: MCPClient | None = None
             try:
@@ -290,6 +297,7 @@ class MCPRuntime:
                 await self._close_preparation_client(result.client)
 
     async def prepare(self, session_id: UUID, principal: Principal) -> None:
+        """Discover servers concurrently, then register results in configured order."""
         if session_id in self._prepared:
             return
         async with self._lock(session_id):
@@ -301,10 +309,8 @@ class MCPRuntime:
                     await uow.sessions.get(session_id, principal)
                 except NotFoundError:
                     self._deferred_events.add(session_id)
-            semaphore = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
             tasks = [
-                asyncio.create_task(self._prepare_server(session_id, config, semaphore))
-                for config in configs
+                asyncio.create_task(self._prepare_server(session_id, config)) for config in configs
             ]
             try:
                 prepared = await asyncio.gather(*tasks)

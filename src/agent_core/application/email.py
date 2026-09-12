@@ -1772,14 +1772,23 @@ class EmailExperienceService:
         return result
 
     async def dismiss(
-        self, principal: Principal, thread_id: UUID, expected_revision: int
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        expected_revision: int,
+        *,
+        dismissed: bool = True,
     ) -> dict[str, object]:
+        """Update revision-scoped handled state without changing mail or learning."""
         require_scope(principal, "email.write")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)
             if thread.revision != expected_revision:
                 raise ConflictError("the thread changed; review its new content")
-            thread = thread.model_copy(update={"dismissed_revision": thread.revision})
+            dismissed_revision = thread.revision if dismissed else None
+            if thread.dismissed_revision == dismissed_revision:
+                return thread_summary(thread)
+            thread = thread.model_copy(update={"dismissed_revision": dismissed_revision})
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )

@@ -12,6 +12,8 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let label: String
     public let emailAddress: String?
     public let status: String
+    /// A recorded refresh failure; absence does not prove the account has completed its first update.
+    public let error: String?
     public let lastSyncedAt: Date?
     public let historyComplete: Bool
     public let historyProcessed: Int
@@ -19,13 +21,24 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let sendServerID: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, label, status
+        case id, label, status, error
         case emailAddress = "email_address"
         case lastSyncedAt = "last_synced_at"
         case historyComplete = "history_complete"
         case historyProcessed = "history_processed"
         case readServerID = "read_server_id"
         case sendServerID = "send_server_id"
+    }
+
+    /// Distinguishes a failed attempt from an account still waiting for its initial synchronization.
+    public var hasRefreshFailure: Bool { status == "unavailable" && error != nil }
+
+    /// Describes pending, incomplete or failed refreshes without claiming cached mail is current.
+    public var updateMessage: String? {
+        if hasRefreshFailure { return "Account could not be updated. Try refreshing again." }
+        if status == "unavailable" { return "Waiting for an email update." }
+        if status == "syncing" { return "Updating — results may be incomplete." }
+        return nil
     }
 }
 
@@ -64,6 +77,8 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let senders: [String]
     public let updatedAt: Date
     public let revision: Int
+    /// The source revision the owner handled; later source revisions reopen the thread.
+    public var dismissedRevision: Int?
     public let summary: String
     public let reason: String
     public let needsReply: Bool
@@ -74,11 +89,15 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let messages: [EmailMessageView]?
     public let draft: EmailDraftView?
 
+    /// Reflects confirmed attention state only while it still matches the displayed source revision.
+    public var isHandled: Bool { dismissedRevision == revision }
+
     enum CodingKeys: String, CodingKey {
         case id, subject, senders, revision, summary, reason, priority, complete, messages, draft
         case accountID = "account_id"
         case updatedAt = "updated_at"
         case needsReply = "needs_reply"
+        case dismissedRevision = "dismissed_revision"
         case draftID = "draft_id"
         case sessionID = "session_id"
     }
