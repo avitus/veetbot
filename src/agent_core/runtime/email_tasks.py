@@ -73,6 +73,29 @@ def _finished(text: str) -> RunOutcome:
     )
 
 
+def _response_schema(model: type[EmailValue]) -> dict[str, Any]:
+    """Require explicit nulls/empty lists in structured model responses.
+
+    Domain defaults remain available for stored values, but strict response
+    schemas require every property, including properties in referenced facts.
+    """
+    schema = model.model_json_schema()
+
+    def require_properties(value: Any) -> None:
+        if isinstance(value, dict):
+            value.pop("default", None)
+            if value.get("type") == "object":
+                value["required"] = list(value.get("properties", {}))
+            for child in value.values():
+                require_properties(child)
+        elif isinstance(value, list):
+            for child in value:
+                require_properties(child)
+
+    require_properties(schema)
+    return schema
+
+
 class EmailTaskRunner:
     def __init__(
         self,
@@ -1031,10 +1054,11 @@ class _TaskIO:
         c = self.context
         step = await self._step()
         prefix, conversation = self.render_context(c.agent, c.context_plan, instruction, data)
+        response_schema = _response_schema(schema)
         model_id = f"{c.resolved_model.provider}:{c.resolved_model.model}"
         estimate = c.token_estimator.estimate(
             conversation, model_id
-        ) + c.token_estimator.estimate_text(json.dumps(schema.model_json_schema()), model_id)
+        ) + c.token_estimator.estimate_text(json.dumps(response_schema), model_id)
         reserve = min(
             c.context_plan.budget.reserve_output_tokens, c.resolved_model.limits.max_output_tokens
         )
@@ -1050,7 +1074,7 @@ class _TaskIO:
             model_policy=c.agent.model_policy,
             conversation=conversation,
             tools=[],
-            response_schema=schema.model_json_schema(),
+            response_schema=response_schema,
             maximum_output_tokens=reserve,
             metadata={
                 "prefix_sha256": digest,

@@ -936,6 +936,11 @@ class EmailExperienceService:
             await self.seed_checkpoint(uow, run, event.sequence, None, principal)
         if self.activate_session is not None:
             await self.activate_session(session.id)
+        if kind == "refresh":
+            # Admission has pinned the ordinary catalog. The worker opens its
+            # own transports; keeping the API's copies leaks a process roster
+            # for every foreground poll.
+            await self._release_refresh_session(session.id)
         await self.dispatch(run.id)
         async with self.uow_factory() as uow:
             final_run = await uow.runs.get(run.id, principal)
@@ -963,6 +968,14 @@ class EmailExperienceService:
             await save_value(uow.email, principal, "task", str(task.run_id), task, self.clock.now())
 
     async def settle(self, principal: Principal, run_id: UUID) -> None:
+        task = await self.get_task(principal, run_id)
+        if task is not None and task.kind == "refresh":
+            async with self.uow_factory() as uow:
+                run = await uow.runs.get(run_id, principal)
+            if run.status in TERMINAL_RUN_STATUSES:
+                # Release even when provider usage still needs reconciliation.
+                # Durable session/events and all source receipts remain intact.
+                await self._release_refresh_session(task.session_id)
         async with self.uow_factory() as uow, uow.email.lock(principal):
             task = await read_value(uow.email, principal, "task", str(run_id), EmailTask)
             if task is None or task.settled_cost is not None:
@@ -1007,6 +1020,14 @@ class EmailExperienceService:
                     ),
                     self.clock.now(),
                 )
+
+    async def _release_refresh_session(self, session_id: UUID) -> None:
+        try:
+            if self.close_session is not None:
+                await self.close_session(session_id)
+        finally:
+            if self.catalogs is not None:
+                await self.catalogs.discard(session_id)
 
     async def _learning_state(self, store: EmailStore, principal: Principal) -> EmailLearningState:
         return (

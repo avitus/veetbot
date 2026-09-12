@@ -76,7 +76,7 @@ public struct EmailModeView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(account.label).appFont(.caption)
                         if account.status == "unavailable" {
-                            Text("Account unavailable. Other accounts remain available.").foregroundColor(.orange)
+                            Text("Account could not be updated. Try refreshing again.").foregroundColor(.orange)
                         } else if account.status == "syncing" {
                             Text("Updating — results may be incomplete.").foregroundColor(.secondary)
                         } else if let date = account.lastSyncedAt {
@@ -93,7 +93,7 @@ public struct EmailModeView: View {
             } else if let error = model.errorMessage {
                 VStack(alignment: .leading) {
                     Text(error).foregroundColor(.red)
-                    Button("Retry") { Task { await model.reload() } }
+                    Button("Retry") { Task { await model.reload(); await model.refresh() } }
                 }
             }
             if model.newImportantCount > 0 {
@@ -101,7 +101,10 @@ public struct EmailModeView: View {
             }
             if model.isLoading && model.items.isEmpty { ProgressView("Loading email…") }
             else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil {
-                Text(model.accounts.isEmpty ? "Your connected mail accounts appear here." : "No threads currently meet this view's criteria.")
+                Text(model.accounts.isEmpty ? "Your connected mail accounts appear here."
+                     : model.accounts.contains(where: { $0.status != "ready" })
+                     ? "Waiting for mail to be updated and assessed."
+                     : "No threads currently meet this view's criteria.")
                     .foregroundColor(.secondary)
             }
 

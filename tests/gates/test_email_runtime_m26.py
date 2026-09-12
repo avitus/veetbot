@@ -630,6 +630,88 @@ def _assessment_turn(
     )
 
 
+async def test_email_model_requests_require_every_nested_response_property() -> None:
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript
+    from tests.gates.test_email_m18 import _email_settings
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(
+            turns=[
+                _assessment_turn(needs_reply=True),
+                ScriptedTurn(text='{"body":"I will review it."}'),
+            ]
+        ),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        assert len(provider.requests) == 2
+        for request in provider.requests:
+            schema = request.response_schema
+            assert schema is not None
+            for definition in [schema, *schema.get("$defs", {}).values()]:
+                if definition.get("type") == "object":
+                    assert set(definition.get("required", [])) == set(definition["properties"])
+                    assert definition.get("additionalProperties") is False
+
+
+@pytest.mark.parametrize("model_fails", [False, True])
+async def test_refresh_releases_operational_connections_after_each_poll(model_fails: bool) -> None:
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript
+    from tests.gates.test_email_m18 import _email_settings
+
+    created: list[ScriptedMCPClient] = []
+    base = await _current_mail_factory()
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+        created.append(client)
+        return client
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[] if model_fails else [_assessment_turn()]),
+        mcp_client_factory=factory,
+    ) as app:
+        first = await app.services.email.submit_task(app.principal, kind="refresh")
+        first_run = await app.runs.get(first.run_id)
+        expected = RunStatus.FAILED if model_fails else RunStatus.COMPLETED
+        assert first_run.status is expected
+        assert created and not any(client.entered for client in created)
+        for _ in range(3):
+            operation = await app.services.email.submit_task(app.principal, kind="refresh")
+            run = await app.runs.get(operation.run_id)
+            assert run.status is expected
+            assert not any(client.entered for client in created)
+
+
+async def test_queued_refresh_releases_admission_connections_before_worker_dispatch() -> None:
+    from dataclasses import replace
+
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+
+        async def queued(run_id: Any) -> None:
+            assert factory.created and not any(client.entered for client in factory.created)
+
+        app.services.email.dispatch = queued
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert operation.status == "QUEUED"
+
+
 async def test_no_reply_feedback_prevents_automatic_draft_after_reassessment() -> None:
     from dataclasses import replace
     from uuid import UUID

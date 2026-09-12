@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Testing
 @testable import VeetbotCore
@@ -236,6 +237,43 @@ import Testing
         let originalOrder = model.items.map(\.id)
         await model.reload(preserveOrder: true)
         #expect(model.items.map(\.id) == originalOrder)
+    }
+
+    @Test func testEmptyInboxPollingDoesNotRestartTheLoadingIndicator() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, "{\"items\":[],\"next_cursor\":null}")
+        }
+        var loading: [Bool] = []
+        let subscription = model.$isLoading.removeDuplicates().sink { loading.append($0) }
+        defer { subscription.cancel() }
+        await model.reload()
+        #expect(loading == [false, true, false])
+        loading = []
+        for _ in 0..<3 { await model.reload(preserveOrder: true) }
+        #expect(loading.isEmpty, "an empty inbox must remain stable during status polling")
+        #expect(model.items.isEmpty)
+    }
+
+    @Test func testFailedRefreshRemainsVisibleAcrossSuccessfulProjectionReads() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                return (200, "{\"operation_id\":\"\(self.threadID)\",\"run_id\":\"\(self.runID)\",\"status\":\"FAILED\",\"replayed\":false}")
+            }
+            return (200, "{\"items\":[],\"next_cursor\":null}")
+        }
+        model.setActive(true)
+        for _ in 0..<100 {
+            if model.errorMessage != nil { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(model.errorMessage != nil)
+        await model.reload(preserveOrder: true)
+        #expect(model.errorMessage != nil)
+        model.setActive(false)
+        model.resetConnection()
+        #expect(model.errorMessage == nil)
     }
 
     @Test func testUnavailableFeatureDoesNotRequestMailboxWrites() async throws {
