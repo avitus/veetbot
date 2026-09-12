@@ -31,6 +31,7 @@ public struct ChatView: View {
         self.state = model.runState
     }
 
+    /// Renders the live conversation and composer while the active mode controls the window title.
     public var body: some View {
         VStack(spacing: 0) {
             header

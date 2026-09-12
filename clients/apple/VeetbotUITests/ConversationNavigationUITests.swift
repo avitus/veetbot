@@ -70,10 +70,12 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(check.label, "Mark unhandled")
     }
 
+    /// Verifies the reading and reply flow with normal platform appearance.
     func testEmailReadingKeepsFeedbackOptionalAndReplyReachable() {
         checkEmailReadingFlow()
     }
 
+    /// Exercises the same native controls with a deterministic dark appearance.
     func testEmailReadingInDarkAppearance() {
         app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_COLOR_SCHEME"] = "dark"
@@ -81,6 +83,7 @@ final class ConversationNavigationUITests: XCTestCase {
         checkEmailReadingFlow()
     }
 
+    /// Checks inbox discovery, optional feedback, direct reply access and toolbar isolation.
     private func checkEmailReadingFlow() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
@@ -119,6 +122,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    /// Activates a control using the platform's native input action.
     private func activate(_ element: XCUIElement) {
         #if os(macOS)
         element.click()
@@ -127,6 +131,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    /// Retains the synthetic mailbox rendering for visual verification even when the test passes.
     private func attachEmailScreenshot(_ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
@@ -404,6 +409,75 @@ final class ConversationNavigationUITests: XCTestCase {
     #endif
 
     #if os(macOS)
+    /// Prevents implicit person feedback and stale values from crossing feedback scopes.
+    func testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets() {
+        activate(app.buttons["mode.email"])
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        activate(row)
+        activate(app.buttons["email.feedback"])
+        let target = app.popUpButtons["email.feedback-target"]
+        let important = app.buttons["email.feedback-important"]
+        let lessImportant = app.buttons["email.feedback-less-important"]
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        target.click()
+        app.menuItems["This person"].click()
+        XCTAssertFalse(important.isEnabled, "Person feedback requires an explicit selection")
+        XCTAssertFalse(lessImportant.isEnabled)
+        app.popUpButtons["email.feedback-person"].click()
+        app.menuItems["alex@example.test"].click()
+        XCTAssertTrue(important.isEnabled)
+        XCTAssertTrue(lessImportant.isEnabled)
+        target.click()
+        app.menuItems["This kind of content"].click()
+        let topic = app.textFields["Content topic"]
+        XCTAssertEqual(topic.value as? String, "")
+        topic.click()
+        topic.typeText("Board planning")
+        target.click()
+        app.menuItems["This person"].click()
+        XCTAssertEqual(app.popUpButtons["email.feedback-person"].value as? String, "Choose a person")
+        XCTAssertFalse(important.isEnabled)
+        XCTAssertFalse(lessImportant.isEnabled)
+        target.click()
+        app.menuItems["This thread"].click()
+        XCTAssertTrue(important.isEnabled)
+        XCTAssertTrue(lessImportant.isEnabled)
+    }
+
+    /// Reproduces the default CI window and keeps mode, reply and Chat controls inside its bounds.
+    func testEmailReadingAtDefaultMacWindowSize() {
+        let initialWindow = app.windows.firstMatch
+        XCTAssertTrue(initialWindow.waitForExistence(timeout: 10))
+        let initialFrame = initialWindow.frame
+        defer {
+            app.terminate()
+            app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] =
+                "\(initialFrame.width),\(initialFrame.height)"
+            app.launch()
+            let restoredWindow = app.windows.firstMatch
+            _ = restoredWindow.waitForExistence(timeout: 10)
+            _ = waitForFrame(of: restoredWindow, timeout: 5) {
+                abs($0.width - initialFrame.width) <= 3 && abs($0.height - initialFrame.height) <= 3
+            }
+            app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME")
+        }
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "900,612"
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: window, timeout: 5) {
+            abs($0.width - 900) <= 3 && abs($0.height - 612) <= 3
+        })
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 5))
+        XCTAssertTrue(window.frame.contains(emailMode.frame), "Mode controls must stay inside the default Mac window")
+        checkEmailReadingFlow()
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(window.frame.contains(composer.frame), "The Chat composer must also fit after returning from Email")
+    }
+
     /// Exercises Mac thread attention and approval controls through actual native interactions.
     func testEmailModeAndExactDraftApprovalOnMac() {
         let emailMode = app.buttons["mode.email"]

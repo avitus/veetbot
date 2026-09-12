@@ -8,6 +8,7 @@ import SwiftUI
 
 public struct EmailModeView: View {
     @ObservedObject var model: EmailViewModel
+    var viewportHeight: CGFloat? = nil
     let discussInChat: () async -> Void
     @Environment(\.activeClientMode) private var activeMode
     @State private var showingLearning = false
@@ -28,14 +29,17 @@ public struct EmailModeView: View {
         Binding(get: { model.selectedThreadID != nil }, set: { if !$0 { model.clearSelection() } })
     }
 
+    /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
             if #available(iOS 16, macOS 13, *) {
                 if directSelection {
                     NavigationSplitView {
-                        inbox.navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
+                        inbox
+                            .frame(height: macColumnHeight)
+                            .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
                     } detail: {
-                        detail
+                        detail.frame(height: macColumnHeight)
                     }
                 } else {
                     NavigationStack(path: $navigationPath) {
@@ -46,7 +50,7 @@ public struct EmailModeView: View {
                 }
             } else {
                 NavigationView {
-                    inbox.background {
+                    inbox.frame(height: macColumnHeight).background {
                         if !directSelection {
                             NavigationLink(isActive: showingThread) {
                                 detail
@@ -55,7 +59,7 @@ public struct EmailModeView: View {
                             }.hidden()
                         }
                     }
-                    detail
+                    detail.frame(height: macColumnHeight)
                 }
             }
         }
@@ -79,10 +83,20 @@ public struct EmailModeView: View {
         EmailThreadScreen(model: model, discussInChat: discussInChat).id(model.selectedThreadID)
     }
 
+    /// Bounds AppKit split-view columns without imposing a fixed height on compact iOS navigation.
+    private var macColumnHeight: CGFloat? {
+        #if os(macOS)
+        viewportHeight
+        #else
+        nil
+        #endif
+    }
+
     private var visibleAccounts: [EmailAccountView] {
         model.accounts.filter { model.selectedAccountID == nil || $0.id == model.selectedAccountID }
     }
 
+    /// Groups triage controls above independently actionable rows and per-account freshness below them.
     private var inbox: some View {
         VStack(spacing: 0) {
             inboxHeader
@@ -112,7 +126,8 @@ public struct EmailModeView: View {
                         model.showNewItems()
                     } label: {
                         Label(
-                            "Show \(model.newImportantCount) new important threads", systemImage: "arrow.up.circle.fill"
+                            "Show \(model.newImportantCount) new important \(model.newImportantCount == 1 ? "thread" : "threads")",
+                            systemImage: "arrow.up.circle.fill"
                         )
                         .appFont(.callout, weight: .semibold)
                     }.emailHideSeparator()
@@ -144,6 +159,7 @@ public struct EmailModeView: View {
                 }
             }
             .listStyle(.plain)
+            .frame(minHeight: 0, maxHeight: .infinity)
             if !visibleAccounts.isEmpty {
                 Divider()
                 DisclosureGroup {
@@ -293,6 +309,7 @@ public struct EmailModeView: View {
         )
     }
 
+    /// Opens the selected thread directly in regular layouts or through compact navigation.
     @ViewBuilder private func threadRow(_ thread: EmailThreadView) -> some View {
         if directSelection {
             Button {
@@ -311,6 +328,7 @@ public struct EmailModeView: View {
         }
     }
 
+    /// Separates sender, account, subject and attention state so a thread can be scanned before opening.
     private func threadLabel(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 10) {
@@ -374,6 +392,7 @@ private struct EmailThreadScreen: View {
     @State private var showingEnvelope = false
     @FocusState private var focusedField: Field?
 
+    /// Keeps reading scrollable while reply and Chat actions remain reachable at the bottom edge.
     var body: some View {
         Group {
             if model.isLoadingThread {
@@ -454,6 +473,7 @@ private struct EmailThreadScreen: View {
         #endif
     }
 
+    /// Shows source identity and confirmed attention state alongside reversible handling controls.
     private func threadHeader(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -477,6 +497,7 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Presents the summary first and expands explanations and scoped feedback only when requested.
     private func attentionSummary(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("At a glance", systemImage: "text.alignleft").appFont(.caption, weight: .semibold)
@@ -509,6 +530,7 @@ private struct EmailThreadScreen: View {
         }.padding(18).emailCard()
     }
 
+    /// Renders source messages as selectable plain text with recipient and attachment metadata.
     private func conversation(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Conversation").appFont(.headline)
@@ -556,12 +578,14 @@ private struct EmailThreadScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Apply to", selection: $target) {
                 ForEach(EmailFeedbackTarget.allCases, id: \.self) { value in Text(value.title).tag(value) }
-            }.pickerStyle(.menu)
+            }.pickerStyle(.menu).accessibilityIdentifier("email.feedback-target")
+                .onChange(of: target) { _ in targetValue = "" }
             if target == .person {
                 Picker("Person", selection: $targetValue) {
                     Text("Choose a person").tag("")
                     ForEach(model.thread?.senders ?? [], id: \.self) { person in Text(person).tag(person) }
                 }
+                .accessibilityIdentifier("email.feedback-person")
             } else if target == .topic {
                 TextField("Content topic", text: $targetValue).focused($focusedField, equals: .topic)
             }
@@ -582,7 +606,9 @@ private struct EmailThreadScreen: View {
                             targetValue: targetValue)
                     }
                 }
+                .accessibilityIdentifier("email.feedback-less-important")
             }.buttonStyle(.bordered)
+                .disabled(target == .person && targetValue.isEmpty)
             Divider()
             Text("Does this thread need a reply?").appFont(.caption).foregroundColor(.secondary)
             HStack {
@@ -692,6 +718,7 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Distinguishes draft progress, confirmed sending, uncertainty and recoverable editing conflicts.
     @ViewBuilder private func draftNotices(_ draft: EmailDraftView) -> some View {
         if draft.stale {
             Text("New mail arrived. Review the updated thread before sending.").foregroundColor(.orange)
@@ -719,6 +746,7 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Connects an envelope field to the versioned edit buffer and keyboard focus.
     private func envelopeField(_ title: String, path: WritableKeyPath<EmailDraftEdit, String>, field: Field)
         -> some View
     {
@@ -730,9 +758,11 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Routes local text changes through the view model's autosave and conflict-preservation path.
     private func editBinding(_ path: WritableKeyPath<EmailDraftEdit, String>) -> Binding<String> {
         Binding(get: { model.currentEdit?[keyPath: path] ?? "" }, set: { model.changeEdit(path, to: $0) })
     }
+    /// Identifies the source account by its label and address, falling back to the server identifier.
     private func accountDescription(_ id: String) -> String {
         guard let account = model.accounts.first(where: { $0.id == id }) else { return id }
         return account.emailAddress.map { "\(account.label) · \($0)" } ?? account.label
@@ -775,10 +805,12 @@ private enum EmailSurface {
 }
 
 extension View {
+    /// Hides separators for inbox notices only on platforms that support the list modifier.
     @ViewBuilder fileprivate func emailHideSeparator() -> some View {
         if #available(iOS 15, macOS 13, *) { listRowSeparator(.hidden) } else { self }
     }
 
+    /// Gives reading sections an adaptive surface and optionally highlights the reply composer.
     fileprivate func emailCard(accent: Bool = false) -> some View {
         background(EmailSurface.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -790,6 +822,7 @@ extension View {
 
 private struct EmailAvatar: View {
     let sender: String
+    /// Adds a decorative sender initial without duplicating its accessible name.
     var body: some View {
         Text(String(sender.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased())
             .appFont(.callout, weight: .semibold).foregroundColor(EmailSurface.accent)
@@ -816,6 +849,7 @@ private struct EmailThreadStatus: View {
         }
     }
 
+    /// Summarizes server-confirmed attention and draft state in a compact badge.
     var body: some View {
         Label(
             title,
@@ -834,6 +868,7 @@ private struct EmailEmptyState: View {
     let symbol: String
     let title: String
     let message: String
+    /// Explains empty, unavailable or unselected mail states without implying a completed scan.
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: symbol).font(.system(size: 32, weight: .light)).foregroundColor(EmailSurface.accent)
@@ -850,6 +885,7 @@ private struct EmailLearningScreen: View {
     @State private var resetScope: String?
     @State private var isUpdating = false
 
+    /// Exposes learning consent, pause and reset controls together with historical retrieval progress.
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
@@ -867,7 +903,7 @@ private struct EmailLearningScreen: View {
                     if let learning = model.learning {
                         Text(learning.paused ? "Learning is paused." : "Learning continues while Email is active.")
                         Text(
-                            "\(learning.historyProcessed) threads retrieved · \(learning.styleExamples) style examples"
+                            "\(learning.historyProcessed) \(learning.historyProcessed == 1 ? "thread" : "threads") retrieved · \(learning.styleExamples) \(learning.styleExamples == 1 ? "style example" : "style examples")"
                         )
                         .appFont(.caption).foregroundColor(.secondary)
                         Text(
@@ -887,7 +923,8 @@ private struct EmailLearningScreen: View {
                         Text(
                             "You can correct a person or topic in a thread, undo feedback, or exclude that thread's sources."
                         )
-                        Text("\(learning.excludedSources) sources excluded").appFont(.caption)
+                        Text("\(learning.excludedSources) \(learning.excludedSources == 1 ? "source" : "sources") excluded")
+                            .appFont(.caption)
                         Button("Reset importance preferences", role: .destructive) { resetScope = "preferences" }
                         Button("Reset writing style", role: .destructive) { resetScope = "style" }
                         Button("Reset all email learning", role: .destructive) { resetScope = "all" }
@@ -896,7 +933,8 @@ private struct EmailLearningScreen: View {
                                 ForEach(model.accounts) { account in
                                     VStack(alignment: .leading, spacing: 5) {
                                         Text(account.label).appFont(.headline)
-                                        Text("\(account.historyProcessed) threads retrieved").appFont(.callout)
+                                        Text("\(account.historyProcessed) \(account.historyProcessed == 1 ? "thread" : "threads") retrieved")
+                                            .appFont(.callout)
                                         Text(
                                             account.historyComplete
                                                 ? "Accessible mail retrieved; analysis continues as needed."
@@ -945,6 +983,7 @@ private struct EmailLearningScreen: View {
 private struct EmailRevisionsScreen: View {
     @ObservedObject var model: EmailViewModel
     @Environment(\.dismiss) private var dismiss
+    /// Lists saved draft revisions and restores selected wording into the current edit buffer.
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -984,6 +1023,7 @@ private struct EmailRevisionsScreen: View {
 
 private struct EmailSendReview: View {
     @ObservedObject var model: EmailViewModel
+    /// Shows the frozen envelope and body before the owner explicitly approves or denies this send.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {

@@ -300,6 +300,8 @@ attention summary and reply state. A compact mailbox-status disclosure retains
 per-account freshness; incomplete scans and account failures remain visible in
 its collapsed label. Historical coverage lives in the scrollable Email learning
 pane. Only the active mode contributes toolbar actions.
+The mounted navigation panes fit the available window height so mode controls
+remain reachable in the default Mac window as well as larger windows.
 Mark handled remains available beside every inbox row and at the top of the
 reading column; its confirmed state can be reversed with Mark unhandled.
 
@@ -317,8 +319,10 @@ filled action buttons retain contrasting text.
 
 Thread detail renders text and attachment metadata without remote content.
 Feedback distinguishes people, topics, thread importance and reply need, reports
-the applied scope and judgment, and supports Undo. Learning controls expose
-pause/resume, scoped resets and explicit source exclusion. Draft edits autosave
+the applied scope and judgment, and supports Undo. Changing the target clears
+the previous person or topic value; person feedback requires an explicit choice.
+Learning controls expose pause/resume, scoped resets and explicit source
+exclusion. Draft edits autosave
 with optimistic revisions; conflicts preserve local and server versions, and
 draft history can restore earlier text into the editor. The Writing style menu
 can explicitly endorse the displayed wording as an example after saving any

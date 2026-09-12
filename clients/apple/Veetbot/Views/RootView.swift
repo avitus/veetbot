@@ -5,6 +5,7 @@ private struct ActiveClientModeKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    /// Identifies which mounted client mode owns visible titles and toolbar actions.
     var activeClientMode: ClientMode {
         get { self[ActiveClientModeKey.self] }
         set { self[ActiveClientModeKey.self] = newValue }
@@ -20,6 +21,7 @@ struct VeetbotSceneRoot: View {
     @ObservedObject var appearance: AppearancePreferences
     @ObservedObject var smsIntegration: SmsIntegrationPreferences
 
+    /// Applies shared appearance and platform bounds without changing the scene's autosave identity.
     var body: some View {
         RootView(model: model)
             .environmentObject(appearance)
@@ -146,6 +148,7 @@ public struct RootView: View {
         #endif
     }
 
+    /// Keeps both mode trees alive while constraining them to the space below the mode selector.
     @ViewBuilder
     private var configuredContent: some View {
         VStack(spacing: 0) {
@@ -177,17 +180,26 @@ public struct RootView: View {
             Divider()
             // Keeping each navigation tree mounted preserves compact navigation,
             // scroll position and live Chat rendering across a mode switch.
-            ZStack {
-                chatContent
-                    .opacity(coordinator.mode == .chat ? 1 : 0)
-                    .allowsHitTesting(coordinator.mode == .chat)
-                    .accessibilityHidden(coordinator.mode != .chat)
-                EmailModeView(model: coordinator.email) {
-                    await coordinator.discussSelectedThread()
+            GeometryReader { geometry in
+                ZStack {
+                    chatContent
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .opacity(coordinator.mode == .chat ? 1 : 0)
+                        .allowsHitTesting(coordinator.mode == .chat)
+                        .accessibilityHidden(coordinator.mode != .chat)
+                    EmailModeView(model: coordinator.email, viewportHeight: geometry.size.height) {
+                        await coordinator.discussSelectedThread()
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .opacity(coordinator.mode == .email ? 1 : 0)
+                    .allowsHitTesting(coordinator.mode == .email)
+                    .accessibilityHidden(coordinator.mode != .email)
                 }
-                .opacity(coordinator.mode == .email ? 1 : 0)
-                .allowsHitTesting(coordinator.mode == .email)
-                .accessibilityHidden(coordinator.mode != .email)
+                // Mounted navigation trees must fit the available window instead
+                // of moving the mode controls outside a smaller Mac window.
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
         .environment(\.activeClientMode, coordinator.mode)
@@ -333,6 +345,7 @@ private struct SessionSidebar: View {
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
 
+    /// Presents session navigation and contributes global toolbar actions only while Chat is active.
     var body: some View {
         Group {
             if #available(iOS 16.0, macOS 13.0, *) {
