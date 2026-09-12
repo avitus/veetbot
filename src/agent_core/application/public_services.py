@@ -985,9 +985,13 @@ class PublicRunService:
             if watermark:
                 async with self._uow_factory() as uow:
                     answer = await uow.events.latest_before(
-                        run.session_id, watermark + 1, "assistant.message.completed", principal
+                        run.session_id,
+                        watermark + 1,
+                        "assistant.message.completed",
+                        principal,
+                        run_id=run_id,
                     )
-                answer_delivered = answer is not None and answer.run_id == run_id
+                answer_delivered = answer is not None
             while True:
                 current, events = await self._events_after(principal, run_id, watermark)
                 for event in events:

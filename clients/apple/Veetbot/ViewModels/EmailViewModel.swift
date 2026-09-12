@@ -66,6 +66,7 @@ public final class EmailViewModel: ObservableObject {
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let refreshNanoseconds: UInt64
     private var active = false
+    private var activation = UUID()
     private var generation = UUID()
     private var listRequest = UUID()
     private var selectionRequest = UUID()
@@ -107,14 +108,18 @@ public final class EmailViewModel: ObservableObject {
     public func setActive(_ value: Bool) {
         guard active != value else { return }
         active = value
+        activation = UUID()
+        isRefreshing = false
         refreshTask?.cancel()
         operationTask?.cancel()
         guard value else { return }
+        let foreground = activation
+        let connection = generation
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            await self.reload()
-            while !Task.isCancelled && self.active {
-                await self.refresh()
+            await self.reload(activation: foreground)
+            while self.acceptsRead(connection: connection, activation: foreground) {
+                await self.refresh(activation: foreground)
                 do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) }
                 catch { return }
             }
@@ -124,6 +129,7 @@ public final class EmailViewModel: ObservableObject {
     /// Cancels obsolete work and removes all mail, local edits and errors from the old connection.
     public func resetConnection() {
         generation = UUID()
+        activation = UUID()
         listRequest = UUID()
         selectionRequest = UUID()
         refreshTask?.cancel()
@@ -169,30 +175,39 @@ public final class EmailViewModel: ObservableObject {
         guard id != selectedAccountID else { return }
         selectedAccountID = id
         clearSelection()
-        Task { await reload() }
+        let foreground = active ? activation : nil
+        Task { await reload(activation: foreground) }
     }
 
     public func setListView(_ value: String) {
         guard value != listView else { return }
         listView = value
-        Task { await reload() }
+        let foreground = active ? activation : nil
+        Task { await reload(activation: foreground) }
     }
 
     public func setSearchText(_ text: String) {
         searchText = text
         searchTask?.cancel()
         listRequest = UUID()
+        let foreground = active ? activation : nil
         searchTask = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: 300_000_000) } catch { return }
             guard let self, !Task.isCancelled else { return }
-            await self.reload()
+            await self.reload(activation: foreground)
         }
     }
 
+    /// Allows explicit inactive reads while binding visible inbox work to its current foreground visit.
     public func reload(preserveOrder: Bool = false) async {
-        guard let api = makeAPIClient() else { return }
-        let requestID = UUID()
+        await reload(preserveOrder: preserveOrder, activation: active ? activation : nil)
+    }
+
+    /// Retains the initiating visit through every asynchronous projection read and error path.
+    private func reload(preserveOrder: Bool = false, activation foreground: UUID?) async {
         let connection = generation
+        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
+        let requestID = UUID()
         listRequest = requestID
         let visibleCount = preserveOrder ? max(5, items.count) : 5
         isLoading = !preserveOrder
@@ -209,10 +224,10 @@ public final class EmailViewModel: ObservableObject {
             async let accountPage = api.emailAccounts()
             async let threadPage = readInbox(api: api,
                 accountID: selectedAccountID, view: searchText.isEmpty ? listView : "all",
-                text: searchText, count: visibleCount
+                text: searchText, count: visibleCount, connection: connection, activation: foreground
             )
             let (loadedAccounts, page) = try await (accountPage, threadPage)
-            guard generation == connection, listRequest == requestID else { return }
+            guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             accounts = loadedAccounts.items
             unavailable = false
             seenCursors = []
@@ -236,7 +251,7 @@ public final class EmailViewModel: ObservableObject {
                 newImportantCount = 0
             }
         } catch {
-            guard generation == connection, listRequest == requestID else { return }
+            guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             if isUnavailable(error) {
                 unavailable = true
                 items = []
@@ -245,15 +260,18 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
-    private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int) async throws -> Page<EmailThreadView> {
+    /// Stops paging when the original connection or foreground visit no longer owns the read.
+    private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int,
+                           connection: UUID, activation foreground: UUID?) async throws -> Page<EmailThreadView> {
         var rows: [EmailThreadView] = []
         var ids: Set<UUID> = []
         var cursor: String?
         var cursors: Set<String> = []
         repeat {
-            try Task.checkCancellation()
+            guard acceptsRead(connection: connection, activation: foreground) else { throw CancellationError() }
             let page = try await api.emailThreads(accountID: accountID, view: view, text: text,
                                                  limit: min(100, count - rows.count), cursor: cursor)
+            guard acceptsRead(connection: connection, activation: foreground) else { throw CancellationError() }
             rows.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
             cursor = try nextPageCursor(page.nextCursor, seen: &cursors)
         } while count > 100 && rows.count < count && cursor != nil
@@ -266,18 +284,21 @@ public final class EmailViewModel: ObservableObject {
         newImportantCount = 0
     }
 
+    /// Applies a page only while the requesting connection, list and foreground visit remain current.
     public func loadMore() async {
-        guard !isLoading, let cursor = nextCursor, let api = makeAPIClient() else { return }
+        let connection = generation
+        let foreground = active ? activation : nil
+        guard acceptsRead(connection: connection, activation: foreground), !isLoading,
+              let cursor = nextCursor, let api = makeAPIClient() else { return }
         isLoading = true
         let requestID = listRequest
-        let connection = generation
         defer { if listRequest == requestID { isLoading = false } }
         do {
             let page = try await api.emailThreads(
                 accountID: selectedAccountID, view: searchText.isEmpty ? listView : "all",
                 text: searchText, limit: 5, cursor: cursor
             )
-            guard generation == connection, listRequest == requestID else { return }
+            guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             var ids = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
             nextCursor = nil
@@ -285,64 +306,77 @@ public final class EmailViewModel: ObservableObject {
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             hasMore = nextCursor != nil
         } catch {
-            guard generation == connection, listRequest == requestID else { return }
+            guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             report(error, readAccess: true)
         }
     }
 
     /// Admits one foreground refresh and ignores results after its connection or visibility expires.
     public func refresh() async {
-        guard active, !unavailable, !isRefreshing, let api = makeAPIClient() else { return }
-        isRefreshing = true
+        await refresh(activation: activation)
+    }
+
+    /// Keeps admission ownership distinct from a later visit while retaining uncertain admission keys.
+    private func refresh(activation foreground: UUID) async {
         let connection = generation
+        guard acceptsRead(connection: connection, activation: foreground), !unavailable, !isRefreshing,
+              let api = makeAPIClient() else { return }
+        isRefreshing = true
         let key = refreshKey ?? UUID().uuidString
         refreshKey = key
-        defer { if generation == connection { isRefreshing = false } }
+        defer { if generation == connection, activation == foreground { isRefreshing = false } }
         do {
             let operation = try await api.refreshEmail(idempotencyKey: key)
-            guard generation == connection, active, !Task.isCancelled else { return }
+            guard acceptsRead(connection: connection, activation: foreground) else { return }
             refreshKey = nil
             recordRefreshStatus(operation.status)
-            await reload(preserveOrder: true)
-            guard generation == connection, active, !Task.isCancelled else { return }
-            if !operation.status.isTerminal { watchRefresh(operation.operationID) }
-            if let selectedThreadID { await openThread(selectedThreadID, refreshOnly: true) }
+            await reload(preserveOrder: true, activation: foreground)
+            guard acceptsRead(connection: connection, activation: foreground) else { return }
+            if !operation.status.isTerminal { watchRefresh(operation.operationID, activation: foreground) }
+            if let selectedThreadID { await openThread(selectedThreadID, refreshOnly: true, activation: foreground) }
         } catch {
-            guard generation == connection, active, !Task.isCancelled else { return }
+            guard acceptsRead(connection: connection, activation: foreground) else { return }
             if isUnavailable(error) { unavailable = true }
             else { recordRefreshFailure(error) }
         }
     }
 
     /// Retries status reads for the same admitted operation, bounded by failures and foreground visibility.
-    private func watchRefresh(_ id: UUID) {
-        operationTask?.cancel()
+    private func watchRefresh(_ id: UUID, activation foreground: UUID) {
         let connection = generation
+        guard acceptsRead(connection: connection, activation: foreground) else { return }
+        operationTask?.cancel()
         operationTask = Task { [weak self] in
             guard let self else { return }
             var consecutiveFailures = 0
-            while self.active && self.generation == connection && !Task.isCancelled {
+            while self.acceptsRead(connection: connection, activation: foreground) {
                 do {
                     let delay = UInt64(2 << consecutiveFailures) * 1_000_000_000
                     try await Task.sleep(nanoseconds: delay)
-                    guard self.active, let api = self.makeAPIClient(), !Task.isCancelled else { return }
+                    guard self.acceptsRead(connection: connection, activation: foreground), let api = self.makeAPIClient() else { return }
                     let operation = try await api.emailOperation(id)
-                    guard self.generation == connection, self.active, !Task.isCancelled else { return }
+                    guard self.acceptsRead(connection: connection, activation: foreground) else { return }
                     consecutiveFailures = 0
                     self.recordRefreshStatus(operation.status)
-                    await self.reload(preserveOrder: true)
-                    guard self.generation == connection, self.active, !Task.isCancelled else { return }
-                    if let selected = self.selectedThreadID { await self.openThread(selected, refreshOnly: true) }
+                    await self.reload(preserveOrder: true, activation: foreground)
+                    guard self.acceptsRead(connection: connection, activation: foreground) else { return }
+                    if let selected = self.selectedThreadID { await self.openThread(selected, refreshOnly: true, activation: foreground) }
                     if operation.status.isTerminal { return }
                 } catch is CancellationError { return }
                 catch {
-                    guard self.generation == connection, self.active, !Task.isCancelled else { return }
+                    guard self.acceptsRead(connection: connection, activation: foreground) else { return }
                     self.recordRefreshFailure(error, readAccess: true)
                     consecutiveFailures += 1
                     guard Self.isTransientReadFailure(error), consecutiveFailures < 3 else { return }
                 }
             }
         }
+    }
+
+    /// Foreground work belongs to one visit; standalone inactive reads still honor cancellation and connection identity.
+    private func acceptsRead(connection: UUID, activation foreground: UUID?) -> Bool {
+        generation == connection && !Task.isCancelled
+            && (foreground == nil || (active && foreground == activation))
     }
 
     /// Retains refresh failures across successful cache reads until an operation completes.
@@ -394,31 +428,36 @@ public final class EmailViewModel: ObservableObject {
 
     /// Refreshes a thread without overwriting local edits or clearing unrelated action failures.
     public func openThread(_ id: UUID, approvalID: UUID? = nil, refreshOnly: Bool = false) async {
-        guard let api = makeAPIClient() else { return }
+        await openThread(id, approvalID: approvalID, refreshOnly: refreshOnly, activation: active ? activation : nil)
+    }
+
+    /// Validates foreground ownership for both the thread read and an optional separate draft read.
+    private func openThread(_ id: UUID, approvalID: UUID? = nil, refreshOnly: Bool = false, activation foreground: UUID?) async {
+        let connection = generation
+        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         if !refreshOnly {
             clearSelection()
             selectedThreadID = id
         }
         guard selectedThreadID == id else { return }
         let requestID = UUID()
-        let connection = generation
         selectionRequest = requestID
         isLoadingThread = thread == nil
         defer { if selectionRequest == requestID { isLoadingThread = false } }
         do {
             let result = try await api.emailThread(id)
-            guard generation == connection, selectionRequest == requestID else { return }
+            guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
             thread = result
             if let returnedDraft = result.draft { mergeDraft(returnedDraft) }
             else if let draftID = result.draftID {
                 let value = try await api.emailDraft(draftID)
-                guard generation == connection, selectionRequest == requestID else { return }
+                guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
                 mergeDraft(value)
             } else { draft = nil }
             threadReadError = nil
-            if let approvalID, draft?.approvalID == approvalID { await loadReview() }
+            if let approvalID, draft?.approvalID == approvalID { await loadReview(activation: foreground) }
         } catch {
-            guard generation == connection, selectionRequest == requestID else { return }
+            guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
             report(error, draft: true, readAccess: true)
         }
     }
@@ -576,7 +615,7 @@ public final class EmailViewModel: ObservableObject {
             guard generation == connection else { return }
             if let value = result.draft { mergeDraft(value) }
             await watchDraftRun(result.runID, threadID: draft.threadID, connection: connection)
-            await loadReview()
+            await loadReview(activation: nil)
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
@@ -597,15 +636,21 @@ public final class EmailViewModel: ObservableObject {
 
     /// Opens approval only after current account authority and the exact displayed draft match.
     public func loadReview() async {
-        guard let draft, let id = draft.approvalID, let api = makeAPIClient(),
-            !draft.stale, currentEdit?.isDirty == false else { return }
+        await loadReview(activation: active ? activation : nil)
+    }
+
+    /// Foreground reads keep their visit identity; an accepted send proposal may finish review preparation while hidden.
+    private func loadReview(activation foreground: UUID?) async {
         let connection = generation
+        guard acceptsRead(connection: connection, activation: foreground),
+              let draft, let id = draft.approvalID, let api = makeAPIClient(),
+              !draft.stale, currentEdit?.isDirty == false else { return }
         do {
             let accountPage = try await api.emailAccounts()
-            guard generation == connection else { return }
+            guard acceptsRead(connection: connection, activation: foreground) else { return }
             accounts = accountPage.items
             let approval = try await api.getApproval(id)
-            guard generation == connection, self.draft?.id == draft.id,
+            guard acceptsRead(connection: connection, activation: foreground), self.draft?.id == draft.id,
                 self.draft?.revision == draft.revision, currentEdit?.isDirty == false,
                 approval.runID == draft.runID, approval.status == .pending else { return }
             guard approvalMatchesDraft(approval, draft: draft) else {
@@ -614,7 +659,7 @@ public final class EmailViewModel: ObservableObject {
             }
             review = approval
             reviewDraft = draft
-        } catch { if generation == connection { report(error, draft: true) } }
+        } catch { if acceptsRead(connection: connection, activation: foreground) { report(error, draft: true) } }
     }
 
     public func closeReview() { review = nil; reviewDraft = nil }
@@ -680,14 +725,16 @@ public final class EmailViewModel: ObservableObject {
         _ = await saveDraft()
     }
 
+    /// Reads draft history without letting an obsolete panel erase or replace the current visit's state.
     public func loadRevisions() async {
-        guard let draft, let api = makeAPIClient() else { return }
         let connection = generation
+        let foreground = active ? activation : nil
+        guard acceptsRead(connection: connection, activation: foreground), let draft, let api = makeAPIClient() else { return }
         do {
             let page = try await api.emailDraftRevisions(draft.id)
-            guard generation == connection, self.draft?.id == draft.id else { return }
+            guard acceptsRead(connection: connection, activation: foreground), self.draft?.id == draft.id else { return }
             revisions = page.items
-        } catch { if generation == connection { report(error, draft: true, readAccess: true) } }
+        } catch { if acceptsRead(connection: connection, activation: foreground) { report(error, draft: true, readAccess: true) } }
     }
 
     public func useRevision(_ value: EmailDraftView) {
@@ -701,13 +748,15 @@ public final class EmailViewModel: ObservableObject {
         closeReview()
     }
 
+    /// Refreshes learning coverage for the current visit, while still allowing explicit inactive reads.
     public func loadLearning() async {
-        guard let api = makeAPIClient() else { return }
         let connection = generation
+        let foreground = active ? activation : nil
+        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         do {
             let value = try await api.emailLearning()
-            if generation == connection { learning = value }
-        } catch { if generation == connection { report(error, readAccess: true) } }
+            if acceptsRead(connection: connection, activation: foreground) { learning = value }
+        } catch { if acceptsRead(connection: connection, activation: foreground) { report(error, readAccess: true) } }
     }
 
     /// Saves local changes before explicitly endorsing that exact revision as a writing example.

@@ -779,13 +779,17 @@ async def test_saved_answer_supersedes_buffered_model_output(
 
 @pytest.mark.parametrize("event_name", ["message.delta", "reasoning.delta", "usage.provisional"])
 @pytest.mark.parametrize("cursor_offset", [0, 1], ids=("at-answer", "after-answer"))
-@pytest.mark.parametrize("same_run", [True, False], ids=("completed-answer", "prior-run-answer"))
+@pytest.mark.parametrize(
+    "answer_order",
+    ["requested", "earlier", "later"],
+    ids=("completed-answer", "prior-run-answer", "later-run-answer"),
+)
 async def test_reconnect_restores_only_the_requested_runs_completed_answer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     event_name: str,
     cursor_offset: int,
-    same_run: bool,
+    answer_order: str,
 ) -> None:
     """The replay cursor retains answer supersession without hiding another run's output."""
     script = FakeModelScript(
@@ -798,13 +802,16 @@ async def test_reconnect_restores_only_the_requested_runs_completed_answer(
         original = await service.submit(
             principal, session.id, [TextContentBlock(text="first answer")], None, None
         )
-        requested = (
-            original
-            if same_run
+        next_run = (
+            None
+            if answer_order == "requested"
             else await service.submit(
                 principal, session.id, [TextContentBlock(text="next answer")], None, None
             )
         )
+        requested = next_run if answer_order == "earlier" else original
+        cursor_run = next_run if answer_order == "later" else original
+        assert requested is not None and cursor_run is not None
         async with composition.uow_factory() as uow:
             completed = await uow.runs.get(requested.run_id, principal)
             events = await uow.events.list_after(session.id, 0, principal)
@@ -812,7 +819,8 @@ async def test_reconnect_restores_only_the_requested_runs_completed_answer(
         answer = next(
             event
             for event in events
-            if event.run_id == original.run_id and event.event_type == "assistant.message.completed"
+            if event.run_id == cursor_run.run_id
+            and event.event_type == "assistant.message.completed"
         )
         cursor = answer.sequence + cursor_offset
         replay = [
@@ -841,7 +849,7 @@ async def test_reconnect_restores_only_the_requested_runs_completed_answer(
         async with asyncio.timeout(1):
             frames = [frame async for frame in service.stream(principal, requested.run_id, cursor)]
         assert [frame.event for frame in frames if isinstance(frame, TransientStreamFrame)] == (
-            [] if same_run else [event_name]
+            [event_name] if answer_order == "earlier" else []
         )
         assert [frame.sequence for frame in frames if isinstance(frame, PersistedStreamFrame)] == [
             event.sequence for event in replay

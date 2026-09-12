@@ -127,6 +127,9 @@ successful priority result.
 Transient operation-status failures retry the same admitted operation with
 bounded backoff while Email remains active, without admitting another task.
 Leaving Email or replacing the connection cancels obsolete reads silently.
+Foreground reads retain the identity of their activation through projection,
+operation, thread, draft and approval reads. Returning to Email starts a new
+activation; results from an earlier activation cannot update the newly opened view.
 A successful thread read clears an earlier read error without clearing an
 unresolved draft-edit or send error.
 An account awaiting its first update is shown as waiting; a recorded failure

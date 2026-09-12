@@ -526,6 +526,262 @@ import Testing
         #expect(!model.isRefreshing)
     }
 
+    /// Initial, manual and polled projections retain their originating visit across hide and reentry.
+    @Test(arguments: ["initial", "manual", "poll", "reopenedManual"], [200, 403, 404])
+    func testForegroundProjectionReadIgnoresResponsesAfterHide(origin: String, status: Int) async throws {
+        let initial = origin == "initial"
+        let polling = origin == "poll"
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") {
+                let count = requests.snapshot.filter { $0.url!.path.hasSuffix("accounts") }.count
+                if count == (initial ? 1 : 3) {
+                    Thread.sleep(forTimeInterval: 0.15)
+                    return (status, status == 200
+                        ? Self.accountsJSON.replacingOccurrences(of: "Personal", with: "Obsolete account")
+                        : Self.error(status == 403 ? "permission_denied" : "not_found", "Obsolete projection failure"))
+                }
+                return (200, Self.accountsJSON)
+            }
+            if request.url!.path.hasSuffix("refresh") {
+                return (200, self.operationJSON(status: polling ? "RUNNING" : "COMPLETED"))
+            }
+            if request.url!.path.contains("/operations/") { return (200, self.operationJSON(status: "COMPLETED")) }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.resetConnection() }
+        if !initial {
+            try await waitForEmailTestCondition { requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing }
+        }
+        let manual = (initial || polling) ? nil : Task { await model.refresh() }
+        try await waitForEmailTestCondition { requests.snapshot.filter { $0.url!.path.hasSuffix("accounts") }.count == (initial ? 1 : 3) }
+        model.setActive(false)
+        if origin == "reopenedManual" { model.setActive(true) }
+        await manual?.value
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(model.accounts.first?.label == (initial ? nil : "Personal"))
+        #expect(model.items.count == (initial ? 0 : 1))
+        #expect(model.errorMessage == nil)
+        #expect(!model.unavailable)
+    }
+
+    /// A foreground thread refresh must not replace cached content or revoke the connection after hiding.
+    @Test(arguments: [false, true], [200, 403])
+    func testForegroundThreadReadIgnoresResponsesAfterHide(fallbackDraft: Bool, status: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "COMPLETED")) }
+            if request.url!.path.contains("/drafts/") {
+                Thread.sleep(forTimeInterval: 0.15)
+                return (status, status == 200 ? self.draftJSON(revision: 2)
+                    : Self.error("permission_denied", "Obsolete draft failure"))
+            }
+            if requests.snapshot.filter({ $0.url!.path.contains("/threads/") }).count == 3 {
+                if fallbackDraft { return (200, self.threadJSON()) }
+                Thread.sleep(forTimeInterval: 0.15)
+                return (status, status == 200
+                    ? self.threadJSON(draft: self.draftJSON()).replacingOccurrences(of: "Board discussion", with: "Obsolete subject")
+                    : Self.error("permission_denied", "Obsolete thread failure"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.setActive(true)
+        defer { model.resetConnection() }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing }
+        model.changeEdit(\.body, to: "Retain this unsent reply")
+        let manual = Task { await model.refresh() }
+        try await waitForEmailTestCondition {
+            fallbackDraft ? requests.snapshot.contains { $0.url!.path.contains("/drafts/") }
+                : requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count == 3
+        }
+        model.setActive(false)
+        await manual.value
+        #expect(model.thread?.subject == "Board discussion")
+        #expect(model.currentEdit?.body == "Retain this unsent reply")
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.draft?.revision == 1)
+        #expect(model.draftError == nil)
+    }
+
+    /// Approval recovery retains the foreground identity through both of its dependent reads.
+    @Test(arguments: ["accounts", "approval", "directApproval"], [200, 401])
+    func testForegroundApprovalRecoveryIgnoresResponsesAfterHide(stage: String, status: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") {
+                if stage == "accounts", requests.snapshot.filter({ $0.url!.path.hasSuffix("accounts") }).count == 3 {
+                    Thread.sleep(forTimeInterval: 0.15)
+                    return (status, status == 200
+                        ? Self.accountsJSON.replacingOccurrences(of: "Personal", with: "Obsolete approval account")
+                        : Self.error("unauthenticated", "Obsolete approval lookup"))
+                }
+                return (200, Self.accountsJSON)
+            }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "COMPLETED")) }
+            if request.url!.path.contains("/approvals/") {
+                if stage != "accounts" { Thread.sleep(forTimeInterval: 0.15) }
+                return (status, status == 200 ? self.approvalJSON(body: "Thanks, I will review the agenda.")
+                    : Self.error("unauthenticated", "Obsolete approval lookup"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.setActive(true)
+        defer { model.resetConnection() }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing }
+        let read = Task {
+            if stage == "directApproval" { await model.loadReview() }
+            else { await model.openThread(threadID, approvalID: approvalID, refreshOnly: true) }
+        }
+        try await waitForEmailTestCondition {
+            stage == "accounts" ? requests.snapshot.filter { $0.url!.path.hasSuffix("accounts") }.count == 3
+                : requests.snapshot.contains { $0.url!.path.contains("/approvals/") }
+        }
+        model.setActive(false)
+        await read.value
+        #expect(model.accounts.first?.label == "Personal")
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.review == nil)
+        #expect(model.draftError == nil)
+    }
+
+    /// Learning and draft-history panels cannot publish results or erase mail after their active visit ends.
+    @Test(arguments: ["learning", "revisions"], [200, 403])
+    func testForegroundPanelReadIgnoresResponsesAfterHide(panel: String, status: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "COMPLETED")) }
+            if request.url!.path.hasSuffix(panel) {
+                Thread.sleep(forTimeInterval: 0.15)
+                let body = panel == "learning"
+                    ? "{\"paused\":true,\"profile_revision\":2,\"excluded_sources\":0,\"style_examples\":1,\"history_processed\":25,\"history_complete\":false}"
+                    : "{\"items\":[\(self.draftJSON())],\"next_cursor\":null}"
+                return (status, status == 200 ? body : Self.error("permission_denied", "Obsolete panel failure"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.setActive(true)
+        defer { model.resetConnection() }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing }
+        let read = Task {
+            if panel == "learning" { await model.loadLearning() }
+            else { await model.loadRevisions() }
+        }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path.hasSuffix(panel) } }
+        model.setActive(false)
+        await read.value
+        #expect(model.learning == nil)
+        #expect(model.revisions.isEmpty)
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.errorMessage == nil)
+        #expect(model.draftError == nil)
+    }
+
+    /// Foreground pagination follows the same visibility boundary as complete inbox reloads.
+    @Test(arguments: [200, 403])
+    func testForegroundNextPageIgnoresResponsesAfterHide(status: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "COMPLETED")) }
+            if request.url!.query?.contains("cursor=") == true {
+                Thread.sleep(forTimeInterval: 0.15)
+                return (status, status == 200
+                    ? self.pageJSON().replacingOccurrences(of: self.threadID.uuidString,
+                        with: "00000000-0000-0000-0000-000000000899")
+                    : Self.error("permission_denied", "Obsolete page failure"))
+            }
+            return (200, self.pageJSON(cursor: "next"))
+        }
+        model.setActive(true)
+        defer { model.resetConnection() }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing }
+        let page = Task { await model.loadMore() }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.query?.contains("cursor=") == true } }
+        model.setActive(false)
+        await page.value
+        #expect(model.items.map(\.id) == [threadID])
+        #expect(model.errorMessage == nil)
+        #expect(!model.isLoading)
+    }
+
+    /// Returning to Email must resume admission even if an older toolbar request has not returned.
+    @Test func testReactivationDoesNotReuseAnObsoleteManualRefresh() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                if requests.snapshot.filter({ $0.httpMethod == "POST" }).count == 2 {
+                    Thread.sleep(forTimeInterval: 0.15)
+                    return (200, self.operationJSON(status: "FAILED"))
+                }
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.resetConnection() }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing }
+        let manual = Task { await model.refresh() }
+        try await waitForEmailTestCondition { requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2 }
+        model.setActive(false)
+        model.setActive(true)
+        await manual.value
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.count == 3)
+        if posts.count == 3 {
+            #expect(posts[1].value(forHTTPHeaderField: "Idempotency-Key") == posts[2].value(forHTTPHeaderField: "Idempotency-Key"))
+        }
+        #expect(model.errorMessage == nil)
+        #expect(!model.isRefreshing)
+    }
+
+    /// Already-cancelled standalone reads do not clear cached state, even while the mode is inactive.
+    @Test func testCancelledStandaloneReadsPreserveCachedState() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        await model.openThread(threadID)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await model.reload()
+            await model.openThread(UUID())
+        }
+        await cancelled.value
+        #expect(model.items.count == 1)
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.thread?.subject == "Board discussion")
+        #expect(model.errorMessage == nil)
+        #expect(model.draftError == nil)
+    }
+
+    /// Waits for a concrete transport boundary without depending on fixed scheduling delays.
+    private func waitForEmailTestCondition(_ condition: () -> Bool) async throws {
+        for _ in 0..<800 {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        #expect(condition(), "Expected email transport boundary within four seconds")
+    }
+
     /// Cancelling the owned poll or replacing its connection must not surface an old failure.
     @Test(arguments: [false, true])
     func testLeavingEmailDuringAnOperationReadDoesNotReportCancellation(resetConnection: Bool) async throws {

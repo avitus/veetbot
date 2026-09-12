@@ -1279,7 +1279,9 @@ supersedes buffered transient output for that run. The server discards those
 remaining fragments while continuing durable delivery through `run.completed`.
 On reconnect, an answer for the same run at or before `Last-Event-ID` also
 suppresses fragments; the replay cursor must not erase that durable completion
-state. An earlier run's saved answer does not suppress the current run's output.
+state. Completion lookup filters by the requested run before selecting the latest
+typed event below the exclusive cursor boundary. Earlier or later runs' saved
+answers neither suppress the current run's output nor hide its own saved answer.
 The two events commit separately; draining an older text fragment between them
 can otherwise open a second message that completion fills with the same answer.
 
