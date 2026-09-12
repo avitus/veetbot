@@ -9,6 +9,7 @@ from agent_core.domain.errors import ToolTrustRejectedError, ToolValidationError
 from agent_core.domain.memory import MemoryAuthority, Portability, Sensitivity
 from agent_core.ports.email import EmailSemanticPort
 from tests.contract.memory_fixtures import semantic_stack
+from tests.contract.support import NOW
 
 
 async def assert_email_semantic_port(
@@ -50,8 +51,26 @@ async def assert_disabled_email_semantic_port(
     assert await service.form(source, [fact]) == []
 
 
-async def test_governed_email_semantics_satisfies_shared_port_contract() -> None:
-    _, concrete, source, fact, _ = await semantic_stack(age=400)
+@pytest.mark.parametrize(
+    "message_updates",
+    [
+        {},
+        {
+            "id": "message-two",
+            "thread_id": "thread-two",
+            "from": "Casey <casey@example.test>",
+            "body": "The Atlas board vote moved to Friday. Confirmed by Casey.",
+            "internal_date": str(
+                int((NOW - timedelta(days=200)).replace(microsecond=0).timestamp() * 1000)
+            ),
+        },
+    ],
+    ids=["default-message", "custom-message"],
+)
+async def test_governed_email_semantics_satisfies_shared_port_contract(
+    message_updates: dict[str, object],
+) -> None:
+    _, concrete, source, fact, _ = await semantic_stack(enabled=True, age=400, **message_updates)
     service: EmailSemanticPort = concrete
     await assert_email_semantic_port(service, source, fact)
 

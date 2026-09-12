@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
@@ -317,6 +317,8 @@ async def semantic_stack(
     EmailSemanticFact,
     HybridMemoryRetriever,
 ]:
+    """Compose semantic evidence and its source from the same synthetic message."""
+
     clock, factory, _baseline, retriever = await formation_stack()
     sid = UUID(int=410)
     sent_at = (NOW - timedelta(days=age)).replace(microsecond=0)
@@ -355,7 +357,11 @@ async def semantic_stack(
                         call_id="c1",
                         trust=TrustLevel.EXTERNAL_UNTRUSTED,
                         content=[
-                            TextPart(text=json.dumps({"thread_id": "t1", "messages": [message]}))
+                            TextPart(
+                                text=json.dumps(
+                                    {"thread_id": message["thread_id"], "messages": [message]}
+                                )
+                            )
                         ],
                     ).model_dump(mode="json"),
                 },
@@ -393,17 +399,17 @@ async def semantic_stack(
     )
     source = EmailSemanticSource(
         account_id="work",
-        provider_thread_id="t1",
-        message_id="m1",
+        provider_thread_id=str(message["thread_id"]),
+        message_id=str(message["id"]),
         session_id=sid,
         source_event_sequence=event.sequence,
         tool_name="mcp.gmail_work_read.get_thread_page",
-        sender="Alex <alex@example.test>",
-        body=body,
-        sent_at=sent_at,
+        sender=str(message["from"]),
+        body=str(message["body"]),
+        sent_at=datetime.fromtimestamp(int(str(message["internal_date"])) / 1000, tz=UTC),
     )
     fact = EmailSemanticFact(
-        message_id="m1",
+        message_id=source.message_id,
         quote="The Atlas board vote moved to Friday.",
         belief_type=BeliefType.FACT,
         subject="Atlas board vote",
