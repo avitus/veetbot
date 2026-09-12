@@ -134,6 +134,8 @@ def draft_body_fingerprint(body: str) -> str:
 
 
 class EmailExperienceService:
+    """Coordinate owner-scoped mail projections, governed tasks, and feedback."""
+
     def __init__(
         self,
         *,
@@ -153,6 +155,7 @@ class EmailExperienceService:
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
     ) -> None:
+        """Wire ordinary run policy, account bindings, and finite email allowances."""
         self.uow_factory = uow_factory
         self.clock = clock
         self.ids = ids
@@ -706,6 +709,7 @@ class EmailExperienceService:
         return session
 
     async def _check_budget(self, store: EmailStore, principal: Principal, amount: Decimal) -> None:
+        """Count settled usage and unresolved reservations against both windows."""
         now = self.clock.now().astimezone(UTC)
         daily = Decimal("0")
         monthly = Decimal("0")
@@ -737,6 +741,7 @@ class EmailExperienceService:
         instruction: str | None = None,
         idempotency_key: str | None = None,
     ) -> EmailOperation:
+        """Authorize, coalesce, and reserve an email task before durable dispatch."""
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
         await self.expire_cache(principal)
@@ -978,6 +983,7 @@ class EmailExperienceService:
             await save_value(uow.email, principal, "task", str(task.run_id), task, self.clock.now())
 
     async def settle(self, principal: Principal, run_id: UUID) -> None:
+        """Release terminal refresh resources and settle only provable usage."""
         task = await self.get_task(principal, run_id)
         if task is not None and task.kind == "refresh":
             async with self.uow_factory() as uow:

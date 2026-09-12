@@ -607,6 +607,7 @@ async def _current_mail_factory() -> MailboxFactory:
 
 
 async def test_email_schema_rejection_releases_automatic_reservation() -> None:
+    """Exercise zero-cost rejection settlement through the runtime completion hook."""
     from dataclasses import replace
     from decimal import Decimal
     from uuid import UUID

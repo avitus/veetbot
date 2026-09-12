@@ -365,11 +365,13 @@ async def _terminal_email_attempts(
     composition: Composition,
     outcomes: list[tuple[str, dict[str, object], Decimal | None]],
 ) -> UUID:
+    """Seed terminal outcomes with optional durable usage to model crash windows."""
     service = composition.services.email
     service.account_ids = ("work",)
     service.account_servers = {"work": {"read": "gmail_read", "send": "gmail_send"}}
 
     async def leave_queued(run_id: UUID) -> None:
+        """Leave dispatch pending so the test can seed exact accounting evidence."""
         pass
 
     service.dispatch = leave_queued
@@ -426,6 +428,7 @@ async def _terminal_email_attempts(
 
 
 def _schema_rejection(**overrides: object) -> dict[str, object]:
+    """Build a proven pre-generation rejection with explicit evidence overrides."""
     return {
         "error_class": "ModelPermanentError",
         "http_status": 400,
@@ -472,6 +475,7 @@ async def test_email_settlement_requires_proven_outcome_and_durable_usage(
     recorded_cost: Decimal | None,
     settles: bool,
 ) -> None:
+    """Release a hold only when provider outcome and committed usage agree."""
     async with email_client() as (composition, _):
         run_id = await _terminal_email_attempts(composition, [(event_type, details, recorded_cost)])
         await composition.services.email.settle(composition.principal, run_id)
@@ -482,6 +486,7 @@ async def test_email_settlement_requires_proven_outcome_and_durable_usage(
 
 
 async def test_email_schema_rejection_settles_prior_cost_once() -> None:
+    """Keep earlier billed usage when a later rejection settles idempotently."""
     async with email_client() as (composition, _):
         service = composition.services.email
         run_id = await _terminal_email_attempts(
@@ -503,6 +508,7 @@ async def test_email_schema_rejection_settles_prior_cost_once() -> None:
 
 
 async def test_email_admission_reconciles_old_terminal_schema_rejections() -> None:
+    """Recover old terminal holds during the next foreground admission."""
     async with email_client() as (composition, _):
         service = composition.services.email
         run_id = await _terminal_email_attempts(
@@ -528,6 +534,7 @@ async def test_email_admission_reconciles_old_terminal_schema_rejections() -> No
 async def test_email_admission_retains_malformed_attempt_reservation_without_blocking(
     event_type: str, payload: dict[str, object]
 ) -> None:
+    """Quarantine uncertain accounting without blocking other admissible work."""
     async with email_client() as (composition, _):
         service = composition.services.email
         run_id = await _terminal_email_attempts(

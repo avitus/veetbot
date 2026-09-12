@@ -8,25 +8,28 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from agent_core.api import create_app
 from agent_core.application.email import save_value
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError, load_config_document, load_settings
 from agent_core.domain.agents import Principal
-from agent_core.domain.email import EmailTask
+from agent_core.domain.email import EmailBudgetLimits, EmailTask
 from agent_core.domain.runs import RunLimits
 from tests.integration.m2_support import memory_settings
 from tests.unit.test_config import base_environment
 
 
 def write_email_overlay(tmp_path: Path, document: str) -> None:
+    """Install a minimal operator overlay in the isolated test directory."""
     path = tmp_path / "runtime" / "limits.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(document, encoding="utf-8")
 
 
 def test_email_aggregate_defaults_are_versioned_configuration() -> None:
+    """Keep the approved default allowances in versioned configuration."""
     settings = load_settings(base_environment())
     document = load_config_document(settings, "runtime/limits.yaml")
     assert document.get("email") == {"daily_cost": 20, "monthly_cost": 200}
@@ -37,9 +40,26 @@ def test_email_aggregate_defaults_are_versioned_configuration() -> None:
 def test_email_aggregate_configuration_rejects_invalid_amounts(
     tmp_path: Path, key: str, value: str
 ) -> None:
+    """Reject invalid allowances before composing an application."""
     write_email_overlay(tmp_path, f"email:\n  {key}: {value}\n")
     with pytest.raises(ConfigurationError, match=rf"email\.{key}"):
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
+
+
+@pytest.mark.parametrize("key", ["daily_cost", "monthly_cost"])
+@pytest.mark.parametrize("amount", ["0.001", "0.01", "NaN", "Infinity", "-Infinity"])
+def test_email_budget_domain_requires_finite_allowances_of_at_least_one_cent(
+    key: str, amount: str
+) -> None:
+    """Direct domain construction enforces the same minimum as configuration."""
+    values = {"daily_cost": Decimal("20"), "monthly_cost": Decimal("200")}
+    values[key] = Decimal(amount)
+    if amount == "0.01":
+        limits = EmailBudgetLimits.model_validate(values)
+        assert getattr(limits, key) == Decimal("0.01")
+    else:
+        with pytest.raises(ValidationError, match=key):
+            EmailBudgetLimits.model_validate(values)
 
 
 @pytest.mark.parametrize(
@@ -62,6 +82,7 @@ async def test_configured_email_ceilings_govern_refresh_admission(
     per_run: str,
     expected: int,
 ) -> None:
+    """Exercise configured aggregate boundaries and inherited slice limits over HTTP."""
     write_email_overlay(tmp_path, f"email:\n  daily_cost: {daily}\n  monthly_cost: {monthly}\n")
     settings = replace(memory_settings(), config_dir=tmp_path, email_mode_enabled=True)
     principal = Principal(
@@ -80,6 +101,7 @@ async def test_configured_email_ceilings_govern_refresh_admission(
         service.account_servers = {"work": {"read": "gmail_read", "send": "gmail_send"}}
 
         async def leave_queued(run_id: UUID) -> None:
+            """Preserve the admitted reservation without starting provider work."""
             pass
 
         service.dispatch = leave_queued

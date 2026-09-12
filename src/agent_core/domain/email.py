@@ -24,8 +24,8 @@ class EmailValue(BaseModel):
 class EmailBudgetLimits(EmailValue):
     """Finite operator-configured aggregate allowances for automatic email work."""
 
-    daily_cost: Decimal = Field(gt=0, allow_inf_nan=False)
-    monthly_cost: Decimal = Field(gt=0, allow_inf_nan=False)
+    daily_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
+    monthly_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
 
 
 class EmailRecord(EmailValue):
