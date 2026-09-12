@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from agent_core.domain.approvals import ApprovalStatus
@@ -23,6 +23,7 @@ from agent_core.domain.email import (
     EmailThread,
     EmailValue,
     apply_feedback,
+    archive_result_matches,
 )
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,
@@ -31,6 +32,7 @@ from agent_core.domain.email_semantics import (
 )
 from agent_core.domain.errors import (
     ApprovalRequiredError,
+    AuthorizationError,
     ConflictError,
     ContextOverflow,
     ToolTrustRejectedError,
@@ -125,6 +127,8 @@ class EmailTaskRunner:
         io = _TaskIO(context, task, self.registry, self.service, semantics, self.render_context)
         try:
             await io.recover_reads()
+            if task.kind == "archive":
+                return await io.archive()
             if task.kind == "refresh":
                 await io.refresh()
                 return _finished(
@@ -189,7 +193,7 @@ class _TaskIO:
         """Finish durable pending read accounting before admitting new work."""
         calls = self.context.checkpoint.working_state.get("email_calls", {})
         for key, saved in tuple(calls.items()):
-            if key == "send" or saved["accounted"]:
+            if key in {"send", "archive"} or saved["accounted"]:
                 continue
             call = ToolCallItem.model_validate(saved["call"])
             for account_id in self.task.account_ids:
@@ -223,7 +227,9 @@ class _TaskIO:
     ) -> dict[str, Any]:
         c = self.context
         c.token.raise_if_cancelled()
-        mode = "send" if remote == "send_message" else "read"
+        mode = (
+            "send" if remote == "send_message" else "write" if remote == "modify_labels" else "read"
+        )
         server = self.service.account_servers[account_id][mode]
         name = f"mcp.{server}.{remote}"
         if account_id not in self.task.account_ids:
@@ -1320,6 +1326,126 @@ class _TaskIO:
             instruction=instruction,
             run=c.run,
             lease=c.lease,
+        )
+
+    async def archive(self) -> RunOutcome:
+        """Execute one frozen owner gesture through ordinary approval and write recovery."""
+        c = self.context
+        consent = self.task.archive_consent
+        if consent is None or self.task.thread_id is None:
+            raise ConflictError("archive task has no owner consent")
+        saved = c.checkpoint.working_state.get("email_calls", {}).get("archive")
+        prior = None if saved is None else await self._invocation(saved["call"]["call_id"])
+        if (
+            prior is not None
+            and prior.status is ToolInvocationStatus.RUNNING
+            and prior.effect_sent_at is not None
+        ):
+            # Recovery must normalize an already-dispatched write before expiry,
+            # changed credentials, or mailbox reads can turn it into a retry.
+            assert saved is not None
+            with suppress(EmailToolError):
+                await self.call(
+                    consent.account_id,
+                    "modify_labels",
+                    saved["call"]["arguments"],
+                    operation="archive",
+                )
+            prior = await self._invocation(saved["call"]["call_id"])
+            if prior is not None and prior.status is ToolInvocationStatus.RUNNING:
+                return await self._finish_archive(prior)
+        if prior is not None and prior.status in {
+            ToolInvocationStatus.SUCCEEDED,
+            ToolInvocationStatus.UNCERTAIN,
+            ToolInvocationStatus.FAILED,
+            ToolInvocationStatus.DENIED,
+        }:
+            assert saved is not None
+            await self._account_call(
+                saved, Step(run_id=c.run.id, step_number=saved["step"], started_at=c.clock.now())
+            )
+            return await self._finish_archive(prior)
+        try:
+            await self.service.validate_archive(c.principal, c.run, c.lease)
+            profile = await self.call(consent.account_id, "get_profile", {})
+            async with c.uow_factory() as uow:
+                account = await read_value(
+                    uow.email, c.principal, "account", consent.account_id, EmailAccount
+                )
+            if (
+                account is None
+                or not account.email_address
+                or account.email_address.casefold()
+                != str(profile.get("email_address", "")).casefold()
+            ):
+                raise EmailToolError("The mailbox identity cannot be verified.")
+            # Inbox changes target the Gmail conversation, including unseen
+            # incoming messages. Validate identity with one bounded page without
+            # replacing cached content or requiring every body to be downloaded.
+            observed = await self.call(
+                consent.account_id,
+                "get_thread_page",
+                {"thread_id": consent.provider_thread_id, "max_messages": 1},
+            )
+            if (
+                observed.get("source_changed")
+                or observed.get("thread_id") != consent.provider_thread_id
+                or not isinstance(observed.get("messages"), list)
+                or not observed["messages"]
+                or type(observed.get("total_messages")) is not int
+                or observed["total_messages"] < 1
+            ):
+                raise EmailToolError("The mailbox conversation cannot be verified.")
+            await self.service.validate_archive(c.principal, c.run, c.lease)
+            try:
+                await self.call(
+                    consent.account_id, "modify_labels", consent.arguments, operation="archive"
+                )
+            except ApprovalRequiredError as exc:
+                await self.service.approve_archive(c.principal, c.run, c.lease, exc.approval_id)
+                # Resolution never creates a standing grant: time, scope and
+                # source checks also apply to the previously approved invocation.
+                await self.service.validate_archive(c.principal, c.run, c.lease)
+                await self.call(
+                    consent.account_id, "modify_labels", consent.arguments, operation="archive"
+                )
+        except (EmailToolError, ConflictError, AuthorizationError):
+            pass
+        saved = c.checkpoint.working_state.get("email_calls", {}).get("archive")
+        invocation = None if saved is None else await self._invocation(saved["call"]["call_id"])
+        return await self._finish_archive(invocation)
+
+    async def _finish_archive(self, invocation: ToolInvocation | None) -> RunOutcome:
+        """Classify the exact receipt; an ambiguous dispatch never becomes retryable."""
+        c = self.context
+        consent = self.task.archive_consent
+        assert consent is not None
+        status: Literal["completed", "failed", "uncertain"]
+        if (
+            invocation is not None
+            and invocation.status is ToolInvocationStatus.SUCCEEDED
+            and archive_result_matches(consent, invocation.structured_result)
+        ):
+            status = "completed"
+        elif invocation is not None and (
+            invocation.status in {ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.UNCERTAIN}
+            or (
+                invocation.status is ToolInvocationStatus.RUNNING
+                and invocation.effect_sent_at is not None
+            )
+        ):
+            status = "uncertain"
+        else:
+            status = "failed"
+        await self.service.finish_archive(c.principal, c.run, c.lease, status=status)
+        c.checkpoint.pending_tool_calls = []
+        c.checkpoint.pending_approval_ids = []
+        return _finished(
+            "Inbox state updated."
+            if status == "completed"
+            else "The Inbox outcome is uncertain. Check Gmail before another change."
+            if status == "uncertain"
+            else "Inbox state was not changed. Review the email before trying again."
         )
 
     async def send(self) -> RunOutcome:

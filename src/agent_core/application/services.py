@@ -464,6 +464,16 @@ class EmailService(Protocol):
 
     async def operation(self, principal: Principal, operation_id: UUID) -> EmailOperation: ...
 
+    async def archive(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        expected_revision: int,
+        *,
+        archived: bool,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
     async def learning(self, principal: Principal) -> EmailLearningState: ...
 
     async def pause_learning(self, principal: Principal, paused: bool) -> EmailLearningState: ...

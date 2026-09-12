@@ -72,6 +72,20 @@ COMMANDS = (
         "email.write",
         {"expected_revision": 1, "dismissed": False},
     ),
+    Command(
+        "archive",
+        "POST",
+        "/v1/email/threads/{t}/archive",
+        "email.write",
+        {"expected_revision": 1, "archived": True, "idempotency_key": "archive-request"},
+    ),
+    Command(
+        "restore",
+        "POST",
+        "/v1/email/threads/{t}/archive",
+        "email.write",
+        {"expected_revision": 1, "archived": False, "idempotency_key": "restore-request"},
+    ),
     Command("discard", "DELETE", "/v1/email/drafts/{d}?expected_revision=1", "email.write"),
     Command(
         "exclude", "POST", "/v1/email/threads/{t}/exclude", "email.write", {"expected_revision": 1}
@@ -91,6 +105,9 @@ async def _request(
 ) -> tuple[str, dict[str, object] | None]:
     """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
+    if command.name in {"archive", "restore"}:
+        app.principal.scopes.update({"approval.resolve", "mcp.gmail_write.use"})
+        app.services.email.account_servers[thread.account_id]["write"] = "gmail_write"
 
     async def dispatch(run_id: UUID) -> None:
         """Keep boundary tests from executing admitted email work."""
@@ -168,16 +185,19 @@ async def _deny_missing_scope_before_mutation(command: Command) -> None:
 
 
 async def _succeed_and_retry_without_duplicate_actions(command: Command) -> None:
+    """Replay a successful HTTP command without creating another durable operation."""
     async with email_client() as (app, client):
         path, body = await _request(app, client, command)
         headers = {"Idempotency-Key": f"retry-{command.name}"}
+        if command.name in {"archive", "restore"}:
+            body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
         first = await client.request(command.method, path, json=body, headers=headers)
         assert first.status_code == 200, first.text
         second = await client.request(command.method, path, json=body, headers=headers)
         assert second.status_code == 200, second.text
         for response in (first, second):
             assert response.headers["cache-control"] == "private, no-store"
-        if command.name in {"refresh", "generate", "send"}:
+        if command.name in {"refresh", "generate", "send", "archive", "restore"}:
             assert first.json()["run_id"] == second.json()["run_id"]
         if command.name in {"feedback", "discuss", "edit", "endorse", "undo", "discard"}:
             assert first.json() == second.json()
@@ -248,10 +268,13 @@ async def _preserve_current_mail_on_revision_conflict(command: Command) -> None:
 
 
 async def _reject_reused_idempotency_key(name: str) -> None:
+    """Reject a changed action under a previously admitted command identity."""
     command = next(item for item in COMMANDS if item.name == name)
     async with email_client() as (app, client):
         path, body = await _request(app, client, command)
         headers = {"Idempotency-Key": "same-request"}
+        if name in {"archive", "restore"}:
+            body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
         first = await client.request(command.method, path, json=body, headers=headers)
         assert first.status_code == 200
         changes: dict[str, dict[str, object]] = {
@@ -259,6 +282,8 @@ async def _reject_reused_idempotency_key(name: str) -> None:
             "edit": {"body": "A different response."},
             "generate": {"instruction": "Make this shorter."},
             "send": {"expected_revision": 2},
+            "archive": {"archived": False},
+            "restore": {"archived": True},
         }
         updated = {**(body or {}), **changes[name]}
         response = await client.request(command.method, path, json=updated, headers=headers)
@@ -266,6 +291,7 @@ async def _reject_reused_idempotency_key(name: str) -> None:
 
 
 async def _retry_durable_operation_after_dispatch_failure(name: str) -> None:
+    """Recover an admission whose response failed after durable queue persistence."""
     command = next(item for item in COMMANDS if item.name == name)
     async with email_client() as (app, owner):
         path, body = await _request(app, owner, command)
@@ -284,6 +310,8 @@ async def _retry_durable_operation_after_dispatch_failure(name: str) -> None:
             base_url="http://agent.test",
         ) as client:
             headers = {"Idempotency-Key": "lost-dispatch-response"}
+            if name in {"archive", "restore"}:
+                body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
             first = await client.request(command.method, path, json=body, headers=headers)
             assert first.status_code == 500
             assert first.headers["cache-control"] == "private, no-store"
@@ -316,14 +344,16 @@ async def test_email_application_http_boundaries(command: Command) -> None:
         "send",
         "dismiss",
         "unhandle",
+        "archive",
+        "restore",
         "discard",
         "exclude",
         "endorse",
     }:
         await _preserve_current_mail_on_revision_conflict(command)
-    if command.name in {"feedback", "edit", "generate", "send"}:
+    if command.name in {"feedback", "edit", "generate", "send", "archive", "restore"}:
         await _reject_reused_idempotency_key(command.name)
-    if command.name in {"refresh", "generate", "send"}:
+    if command.name in {"refresh", "generate", "send", "archive", "restore"}:
         await _retry_durable_operation_after_dispatch_failure(command.name)
 
 
@@ -360,3 +390,71 @@ async def test_write_commands_never_mutate_then_fail_response_authorization(comm
             assert response.status_code == 200
             assert response.json()["paused"] is (command == "pause")
         assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.parametrize(
+    "missing_scope",
+    [
+        "email.read",
+        "email.write",
+        "run.write",
+        "session.write",
+        "approval.resolve",
+        "mcp.gmail_read.use",
+        "mcp.gmail_write.use",
+    ],
+)
+async def test_archive_requires_every_exact_scope_before_admission(missing_scope: str) -> None:
+    """Mailbox management cannot borrow authority from another account or platform scope."""
+    command = next(item for item in COMMANDS if item.name == "archive")
+    async with email_client() as (app, client):
+        path, body = await _request(app, client, command)
+        app.principal.scopes.remove(missing_scope)
+        app.principal.scopes.add("mcp.gmail_other_write.use")
+        response = await client.post(path, json=body)
+        assert response.status_code == 403
+        assert response.headers["cache-control"] == "private, no-store"
+        async with app.uow_factory() as uow:
+            assert await uow.email.list(app.principal, "task") == []
+            [thread] = await uow.email.list(app.principal, "thread")
+            assert thread.payload["in_inbox"] is True
+            assert thread.payload.get("archive_operation") is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"archived": "true"},
+        {"archived": 1},
+        {"idempotency_key": ""},
+        {"account_id": "other"},
+        {"thread_ids": ["other-provider-thread"]},
+        {"remove_label_ids": ["UNREAD"]},
+    ],
+)
+async def test_archive_rejects_coerced_consent_and_client_selected_targets(
+    change: dict[str, object],
+) -> None:
+    """The HTTP contract accepts only strict consent and a server-resolved source thread."""
+    command = next(item for item in COMMANDS if item.name == "archive")
+    async with email_client() as (app, client):
+        path, body = await _request(app, client, command)
+        response = await client.post(path, json={**(body or {}), **change})
+        assert response.status_code == 400
+        assert response.headers["cache-control"] == "private, no-store"
+        async with app.uow_factory() as uow:
+            assert await uow.email.list(app.principal, "task") == []
+
+
+async def test_archive_rejects_conflicting_transport_idempotency_keys() -> None:
+    """A retry cannot silently select different body and transport operation identities."""
+    command = next(item for item in COMMANDS if item.name == "archive")
+    async with email_client() as (app, client):
+        path, body = await _request(app, client, command)
+        response = await client.post(
+            path, json=body, headers={"Idempotency-Key": "different-request"}
+        )
+        assert response.status_code == 400
+        assert response.headers["cache-control"] == "private, no-store"
+        async with app.uow_factory() as uow:
+            assert await uow.email.list(app.principal, "task") == []

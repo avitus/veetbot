@@ -4025,6 +4025,10 @@ Implement:
 - Both existing Gmail accounts in a short high-precision priority view. Refresh
   on entry and foreground return and every sixty seconds while visible. Only
   fresh client requests admit bounded work; no unattended monitor is authorized.
+- Owner-requested archive and move-to-Inbox actions from the Email checkbox,
+  bound to the originating Gmail account and exact thread. Each gesture supplies
+  single-action consent through the existing approval and tool machinery;
+  autonomous mailbox writes remain excluded (ADR-0095).
 - Reliable account-qualified incremental synchronization and resumable historical
   received and Sent analysis without a fixed age cutoff, with honest partial
   coverage, checkpoints, provider failure recovery and no duplicate learning.

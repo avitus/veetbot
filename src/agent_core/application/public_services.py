@@ -67,7 +67,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
-from agent_core.domain.persistence import IdempotencyRecord
+from agent_core.domain.persistence import IdempotencyRecord, WorkerLease
 from agent_core.domain.persona import (
     PersonaDocument,
     PersonaEntry,
@@ -1326,11 +1326,26 @@ class PublicApprovalService:
         approval_id: UUID,
         decision: ApprovalResolutionType,
         reason: str | None,
+        *,
+        lease: WorkerLease | None = None,
     ) -> ApprovalView:
         require_scope(principal, "approval.resolve")
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, principal)
+            if lease is not None:
+                # An exact owner-consent consumer still belongs to the current
+                # worker lease; fence before mutating the ordinary approval row.
+                await uow.events.append(
+                    NewEvent(
+                        session_id=visible.session_id,
+                        run_id=visible.run_id,
+                        event_type="approval.consent.checked",
+                        actor_type="runtime",
+                        payload={},
+                    ),
+                    lease=lease,
+                )
             if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
                 raise ConflictError(
                     "The approval is no longer pending.",

@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from collections import deque
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -376,6 +376,10 @@ class ToolPipeline:
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
         delegations: DelegationStarter | None = None,
+        before_effect: Callable[
+            [Run, Principal, ToolInvocation, WorkerLease | None], Awaitable[None]
+        ]
+        | None = None,
     ) -> None:
         self._registry = registry
         self._uow_factory = uow_factory
@@ -410,6 +414,7 @@ class ToolPipeline:
         )
         self._standing_authorizer = standing_authorizer
         self._delegations = delegations
+        self._before_effect = before_effect
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
         self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
@@ -986,6 +991,8 @@ class ToolPipeline:
             async with effect_guard:
                 if invocation.effect_sent_at is not None:
                     return
+                if self._before_effect is not None:
+                    await self._before_effect(run, principal, invocation, lease)
                 marked_at = self._clock.now()
                 pending = invocation.model_copy(
                     update={"effect_sent_at": marked_at, "updated_at": marked_at},

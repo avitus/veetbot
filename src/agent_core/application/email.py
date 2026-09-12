@@ -20,11 +20,14 @@ from uuid import UUID
 from agent_core.application.authorization import require_scope
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
     EMAIL_POLICY_VERSION,
     EMAIL_SLICE_RESERVATION,
     EmailAccount,
+    EmailArchiveConsent,
+    EmailArchiveOperation,
     EmailAttachment,
     EmailBudgetLimits,
     EmailDraft,
@@ -40,9 +43,15 @@ from agent_core.domain.email import (
     EmailValue,
     addresses,
     apply_feedback,
+    archive_result_matches,
     feedback_matches,
 )
-from agent_core.domain.errors import BudgetExceededError, ConflictError, NotFoundError
+from agent_core.domain.errors import (
+    AuthorizationError,
+    BudgetExceededError,
+    ConflictError,
+    NotFoundError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
@@ -55,6 +64,7 @@ from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.tools import ToolInvocationStatus
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.email import EmailStore
 from agent_core.ports.persistence import CheckpointSeeder, RepositoryUnitOfWork, UnitOfWorkFactory
@@ -154,6 +164,10 @@ class EmailExperienceService:
         | None = None,
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
+        resolve_archive_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
+        | None = None,
+        archive_self_approval_enabled: bool = True,
+        current_archive_principal: Callable[[], Principal] | None = None,
     ) -> None:
         """Wire ordinary run policy, account bindings, and finite email allowances."""
         self.uow_factory = uow_factory
@@ -170,6 +184,9 @@ class EmailExperienceService:
         self.forget_source = forget_source
         self.cleanup_artifacts = cleanup_artifacts
         self.cancel_parked_run = cancel_parked_run
+        self.resolve_archive_approval = resolve_archive_approval
+        self.archive_self_approval_enabled = archive_self_approval_enabled
+        self.current_archive_principal = current_archive_principal
         self.account_servers = {
             account_id: {
                 mode: f"gmail_{mode}" if index == 0 else f"gmail_{account_id}_{mode}"
@@ -197,6 +214,8 @@ class EmailExperienceService:
                         **account.model_dump(mode="json"),
                         "read_server_id": self.account_servers[account_id]["read"],
                         "send_server_id": self.account_servers[account_id]["send"],
+                        "write_server_id": self.account_servers[account_id].get("write"),
+                        "archive_supported": self._archive_supported(principal, account_id),
                     }
                 )
         return {"items": items, "next_cursor": None}
@@ -240,12 +259,19 @@ class EmailExperienceService:
         require_scope(principal, "email.read")
         if not 1 <= limit <= 100 or (cursor is not None and not cursor.isdecimal()):
             raise ValueError("email page is malformed")
-        async with self.uow_factory() as uow:
+        async with self.uow_factory() as uow, uow.email.lock(principal):
             feedback = await self._feedback(uow.email, principal)
-            threads = [
-                apply_feedback(EmailThread.model_validate(row.payload), feedback)
-                async for row in records(uow.email, principal, "thread")
-            ]
+            threads = []
+            async for row in records(uow.email, principal, "thread"):
+                stored = EmailThread.model_validate(row.payload)
+                if (
+                    stored.account_id not in self.account_servers
+                    or f"mcp.{self.account_servers[stored.account_id]['read']}.use"
+                    not in principal.scopes
+                ):
+                    continue
+                reconciled = await self._reconcile_archive_in(uow, principal, stored)
+                threads.append(apply_feedback(reconciled, feedback))
         eligible: list[EmailThread] = []
         for thread in threads:
             if (
@@ -285,6 +311,7 @@ class EmailExperienceService:
         await self.expire_cache(principal)
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)
+            thread = await self._reconcile_archive_in(uow, principal, thread)
             thread = thread.model_copy(update={"last_accessed_at": self.clock.now()})
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
@@ -734,12 +761,13 @@ class EmailExperienceService:
         self,
         principal: Principal,
         *,
-        kind: Literal["refresh", "draft", "send"],
+        kind: Literal["refresh", "draft", "send", "archive"],
         thread_id: UUID | None = None,
         draft_id: UUID | None = None,
         expected_revision: int | None = None,
         instruction: str | None = None,
         idempotency_key: str | None = None,
+        archived: bool | None = None,
     ) -> EmailOperation:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         for scope in ("email.write", "run.write", "session.write"):
@@ -770,11 +798,12 @@ class EmailExperienceService:
                 require_scope(principal, f"mcp.{self.account_servers[account]['read']}.use")
                 if kind == "send":
                     require_scope(principal, f"mcp.{self.account_servers[account]['send']}.use")
-            digest = hashlib.sha256(
-                json.dumps(
-                    [kind, str(thread_id), str(draft_id), expected_revision, instruction]
-                ).encode()
-            ).hexdigest()
+                if kind == "archive":
+                    self._require_archive(principal, account)
+            intent = [kind, str(thread_id), str(draft_id), expected_revision, instruction]
+            if kind == "archive":
+                intent.append(archived)
+            digest = hashlib.sha256(json.dumps(intent).encode()).hexdigest()
             replay_key = (
                 None
                 if idempotency_key is None
@@ -800,6 +829,34 @@ class EmailExperienceService:
                     status=run.status.value,
                     replayed=True,
                 )
+            if kind == "archive":
+                if (
+                    thread is None
+                    or type(archived) is not bool
+                    or expected_revision != thread.revision
+                ):
+                    raise ConflictError("the thread changed; review it before changing Inbox state")
+                thread = await self._reconcile_archive_in(uow, principal, thread)
+                previous_archive = thread.archive_operation
+                if previous_archive is not None:
+                    if previous_archive.status == "uncertain":
+                        raise ConflictError(
+                            "check Gmail before retrying an uncertain archive operation"
+                        )
+                    if previous_archive.status == "pending":
+                        if previous_archive.target_archived != archived:
+                            raise ConflictError("wait for the current Inbox operation to finish")
+                        prior_run = await uow.runs.get(previous_archive.run_id, principal)
+                        if replay_key is not None:
+                            await self._archive_replay_in(
+                                uow.email, principal, replay_key, digest, prior_run.id, now
+                            )
+                        return EmailOperation(
+                            operation_id=previous_archive.operation_id,
+                            run_id=prior_run.id,
+                            status=prior_run.status.value,
+                            replayed=True,
+                        )
             async for row in task_records(uow.email, principal):
                 old = EmailTask.model_validate(row.payload)
                 try:
@@ -816,6 +873,10 @@ class EmailExperienceService:
                     continue
                 if kind == "send" and old.expected_revision != expected_revision:
                     raise ConflictError("another draft revision already has a send operation")
+                if kind == "archive" and replay_key is not None:
+                    await self._archive_replay_in(
+                        uow.email, principal, replay_key, digest, old.run_id, now
+                    )
                 return EmailOperation(
                     operation_id=old.id,
                     run_id=old.run_id,
@@ -839,14 +900,15 @@ class EmailExperienceService:
                     raise ConflictError("this draft cannot be sent in its current state")
             reservation = (
                 Decimal("0")
-                if kind == "send"
+                if kind in {"send", "archive"}
                 else min(
                     EMAIL_SLICE_RESERVATION,
                     self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION,
                 )
             )
-            await self._check_budget(uow.email, principal, reservation)
-            session = await self._session_in(uow, principal, thread)
+            if kind != "archive":
+                await self._check_budget(uow.email, principal, reservation)
+            session = await self._session_in(uow, principal, None if kind == "archive" else thread)
             if await uow.runs.active_for_session(session.id, principal) is not None:
                 raise ConflictError("the thread conversation has an active run")
             deadline = (
@@ -895,8 +957,40 @@ class EmailExperienceService:
                 instruction=instruction,
                 created_at=now,
                 reservation=reservation,
+                archive_consent=(
+                    EmailArchiveConsent(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        account_id=thread.account_id,
+                        provider_thread_id=thread.provider_thread_id,
+                        read_server_id=self.account_servers[thread.account_id]["read"],
+                        write_server_id=self.account_servers[thread.account_id]["write"],
+                        expected_revision=thread.revision,
+                        archived=archived,
+                        expires_at=now + timedelta(seconds=120),
+                    )
+                    if kind == "archive" and thread is not None and archived is not None
+                    else None
+                ),
             )
             await save_value(uow.email, principal, "task", str(run.id), task, now)
+            if task.archive_consent is not None and thread is not None:
+                await save_value(
+                    uow.email,
+                    principal,
+                    "thread",
+                    str(thread.id),
+                    thread.model_copy(
+                        update={
+                            "archive_operation": EmailArchiveOperation(
+                                operation_id=task.id,
+                                run_id=run.id,
+                                target_archived=task.archive_consent.archived,
+                            )
+                        }
+                    ),
+                    now,
+                )
             if draft is not None:
                 await save_value(
                     uow.email,
@@ -939,6 +1033,25 @@ class EmailExperienceService:
                 )
             )
             await uow.runs.set_seed_event_sequence(run.id, event.sequence)
+            if task.archive_consent is not None:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session.id,
+                        run_id=run.id,
+                        event_type="email.archive.requested",
+                        actor_type="principal",
+                        actor_id=principal.principal_id,
+                        payload={
+                            "task_id": str(task.id),
+                            "thread_id": str(thread_id),
+                            "archived": task.archive_consent.archived,
+                            "consent_digest": hashlib.sha256(
+                                task.archive_consent.model_dump_json().encode()
+                            ).hexdigest(),
+                        },
+                        derivation_key=f"email-archive:{task.id}",
+                    )
+                )
             await uow.events.append(
                 NewEvent(
                     session_id=session.id,
@@ -951,7 +1064,7 @@ class EmailExperienceService:
             await self.seed_checkpoint(uow, run, event.sequence, None, principal)
         if self.activate_session is not None:
             await self.activate_session(session.id)
-        if kind == "refresh":
+        if kind in {"refresh", "archive"}:
             # Admission has pinned the ordinary catalog. The worker opens its
             # own transports; keeping the API's copies leaks a process roster
             # for every foreground poll.
@@ -974,6 +1087,328 @@ class EmailExperienceService:
                     )
         raise NotFoundError("email operation not found")
 
+    def _archive_supported(self, principal: Principal, account_id: str) -> bool:
+        """Advertise only a configured action this principal can explicitly approve."""
+        server = self.account_servers.get(account_id, {}).get("write")
+        return bool(
+            self.resolve_archive_approval is not None
+            and self.archive_self_approval_enabled
+            and server is not None
+            and {
+                "email.read",
+                "email.write",
+                "run.write",
+                "session.write",
+                "approval.resolve",
+                f"mcp.{server}.use",
+            }.issubset(principal.scopes)
+        )
+
+    async def _archive_replay_in(
+        self,
+        store: EmailStore,
+        principal: Principal,
+        key: str,
+        digest: str,
+        run_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Bind every accepted coalesced gesture key before returning its existing action."""
+        await store.put(
+            EmailRecord(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kind="task_replay",
+                key=key,
+                revision=1,
+                payload={"run_id": str(run_id), "request_digest": digest},
+                created_at=now,
+                updated_at=now,
+            ),
+            expected_revision=0,
+        )
+
+    def _require_archive(self, principal: Principal, account_id: str) -> None:
+        """Preflight current authority before storing an owner consent or queue row."""
+        for scope in (
+            "email.read",
+            "email.write",
+            "run.write",
+            "session.write",
+            "approval.resolve",
+        ):
+            require_scope(principal, scope)
+        self._authorize_account(principal, account_id)
+        server = self.account_servers.get(account_id, {}).get("write")
+        if server is None or self.resolve_archive_approval is None:
+            raise ConflictError("Gmail archive is unavailable for this account")
+        require_scope(principal, f"mcp.{server}.use")
+        if not self.archive_self_approval_enabled:
+            raise AuthorizationError("approval requires a distinct resolver")
+
+    async def archive(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        expected_revision: int,
+        *,
+        archived: bool,
+        idempotency_key: str,
+    ) -> EmailOperation:
+        """Admit exactly one explicit Inbox transition; legacy dismiss remains local."""
+        if type(archived) is not bool or not idempotency_key or len(idempotency_key) > 200:
+            raise ValueError("invalid archive request")
+        return await self.submit_task(
+            principal,
+            kind="archive",
+            thread_id=thread_id,
+            expected_revision=expected_revision,
+            archived=archived,
+            idempotency_key=idempotency_key,
+        )
+
+    async def validate_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+    ) -> EmailTask:
+        """Revalidate immutable consent immediately before each undispatched attempt."""
+        principal = self._archive_authority(principal)
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            await self._fence(uow, run, lease)
+            task = await read_value(uow.email, principal, "task", str(run.id), EmailTask)
+            if task is None or task.kind != "archive" or task.thread_id is None:
+                raise ConflictError("archive request is unavailable")
+            consent = task.archive_consent
+            if consent is None or (consent.tenant_id, consent.principal_id) != (
+                principal.tenant_id,
+                principal.principal_id,
+            ):
+                raise ConflictError("archive request does not belong to this owner")
+            self._require_archive(principal, consent.account_id)
+            thread = await self._thread(uow.email, principal, task.thread_id)
+            if (
+                task.session_id != run.session_id
+                or task.account_ids != [consent.account_id]
+                or task.expected_revision != consent.expected_revision
+                or consent.expires_at <= self.clock.now()
+                or thread.revision != consent.expected_revision
+                or thread.account_id != consent.account_id
+                or thread.provider_thread_id != consent.provider_thread_id
+                or self.account_servers[consent.account_id].get("read") != consent.read_server_id
+                or self.account_servers[consent.account_id].get("write") != consent.write_server_id
+                or thread.archive_operation is None
+                or thread.archive_operation.run_id != run.id
+            ):
+                raise ConflictError("archive request expired or the source changed")
+            session = await uow.sessions.get(run.session_id, principal)
+            if session.metadata.get("email_account_servers") != self.account_servers:
+                raise ConflictError("archive account configuration changed")
+            event = await uow.events.get_by_derivation(f"email-archive:{task.id}", principal)
+            if (
+                event is None
+                or event.run_id != run.id
+                or event.actor_type != "principal"
+                or event.actor_id != principal.principal_id
+                or event.payload
+                != {
+                    "task_id": str(task.id),
+                    "thread_id": str(task.thread_id),
+                    "archived": consent.archived,
+                    "consent_digest": hashlib.sha256(
+                        consent.model_dump_json().encode()
+                    ).hexdigest(),
+                }
+            ):
+                raise ConflictError("archive consent has no matching authenticated gesture")
+            for invocation in await uow.invocations.list_for_run(run.id, principal):
+                if not invocation.tool_name.endswith(".modify_labels"):
+                    continue
+                approval = await uow.approvals.get_by_action(invocation.id)
+                if (
+                    invocation.tool_name != consent.tool_name
+                    or invocation.normalized_arguments != consent.arguments
+                    or (
+                        approval is not None
+                        and (approval.expires_at is None or approval.expires_at <= self.clock.now())
+                    )
+                ):
+                    raise ConflictError("the frozen archive invocation expired or changed")
+            return task
+
+    def _archive_authority(self, principal: Principal) -> Principal:
+        """Intersect admission scopes with the current configured owner authority."""
+        if self.current_archive_principal is None:
+            raise AuthorizationError("current archive authority is unavailable")
+        current = self.current_archive_principal()
+        if (current.tenant_id, current.principal_id) != (
+            principal.tenant_id,
+            principal.principal_id,
+        ):
+            raise AuthorizationError("archive owner authority changed")
+        return principal.model_copy(
+            update={
+                "scopes": principal.scopes & current.scopes,
+                "roles": principal.roles & current.roles,
+            }
+        )
+
+    async def approve_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        approval_id: UUID,
+    ) -> None:
+        """Consume the authenticated gesture through ordinary one-time approval resolution."""
+        task = await self.validate_archive(principal, run, lease)
+        consent = task.archive_consent
+        assert consent is not None
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            await self._fence(uow, run, lease)
+            approval = await uow.approvals.get(approval_id, principal)
+            invocations = await uow.invocations.list_for_run(run.id, principal)
+            expected_call = "email-" + hashlib.sha256(f"{run.id}:archive".encode()).hexdigest()[:32]
+            invocation = next((i for i in invocations if i.id == approval.tool_invocation_id), None)
+            if (
+                approval.run_id != run.id
+                or approval.session_id != run.session_id
+                or approval.tool_name != consent.tool_name
+                or approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.APPROVED}
+                or approval.expires_at is None
+                or approval.expires_at <= self.clock.now()
+                or invocation is None
+                or invocation.call_id != expected_call
+                or invocation.tool_name != consent.tool_name
+                or invocation.normalized_arguments != consent.arguments
+                or approval.arguments != consent.arguments
+                or approval.normalized_arguments_hash != invocation.normalized_arguments_hash
+            ):
+                raise ConflictError("approval does not match the requested archive action")
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="approval.requested",
+                    actor_type="runtime",
+                    payload={"approval_id": str(approval.id)},
+                    derivation_key=f"email-archive-approval:{approval.id}",
+                ),
+                lease=lease,
+            )
+        assert self.resolve_archive_approval is not None
+        await self.resolve_archive_approval(self._archive_authority(principal), approval_id, lease)
+
+    async def finish_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        *,
+        status: Literal["completed", "failed", "uncertain"],
+    ) -> None:
+        """Project a confirmed result without overwriting newer source material."""
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            await self._fence(uow, run, lease)
+            task = await read_value(uow.email, principal, "task", str(run.id), EmailTask)
+            if task is None or task.thread_id is None:
+                return
+            thread = await read_value(
+                uow.email, principal, "thread", str(task.thread_id), EmailThread
+            )
+            if (
+                thread is None
+                or thread.archive_operation is None
+                or thread.archive_operation.run_id != run.id
+            ):
+                return
+            if status == "failed":
+                await uow.approvals.cancel_for_run(run.id)
+            await self._archive_result_in(uow, principal, thread, task, status)
+
+    async def _archive_result_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        thread: EmailThread,
+        task: EmailTask,
+        status: Literal["completed", "failed", "uncertain"],
+    ) -> EmailThread:
+        """Retain safe operation status; only confirmed same-revision writes affect labels."""
+        operation = thread.archive_operation
+        assert operation is not None
+        error = (
+            "The outcome is uncertain. Check Gmail before another change."
+            if status == "uncertain"
+            else "Inbox state could not be changed. Try again."
+            if status == "failed"
+            else None
+        )
+        update: dict[str, Any] = {
+            "archive_operation": operation.model_copy(update={"status": status, "error": error})
+        }
+        if status == "completed" and thread.revision == task.expected_revision:
+            archived = operation.target_archived
+            update["in_inbox"] = not archived
+            update["messages"] = [
+                m.model_copy(
+                    update={
+                        "labels": [label for label in m.labels if label != "INBOX"]
+                        if archived
+                        else list(dict.fromkeys([*m.labels, "INBOX"]))
+                    }
+                )
+                for m in thread.messages
+            ]
+        thread = thread.model_copy(update=update)
+        await save_value(uow.email, principal, "thread", str(thread.id), thread, self.clock.now())
+        return thread
+
+    async def _reconcile_archive_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        thread: EmailThread,
+    ) -> EmailThread:
+        """Recover terminal/crashed operation display from durable invocation evidence."""
+        operation = thread.archive_operation
+        if operation is None or operation.status != "pending":
+            return thread
+        try:
+            run = await uow.runs.get(operation.run_id, principal)
+        except NotFoundError:
+            return thread
+        if run.status not in TERMINAL_RUN_STATUSES:
+            return thread
+        task = await read_value(uow.email, principal, "task", str(run.id), EmailTask)
+        if task is None:
+            return thread
+        writes = [
+            i
+            for i in await uow.invocations.list_for_run(run.id, principal)
+            if i.tool_name.endswith(".modify_labels")
+        ]
+        status: Literal["completed", "failed", "uncertain"] = "failed"
+        if task.archive_consent is not None and any(
+            i.status is ToolInvocationStatus.SUCCEEDED
+            and i.call_id
+            == "email-" + hashlib.sha256(f"{run.id}:archive".encode()).hexdigest()[:32]
+            and i.tool_name == task.archive_consent.tool_name
+            and i.normalized_arguments == task.archive_consent.arguments
+            and archive_result_matches(task.archive_consent, i.structured_result)
+            for i in writes
+        ):
+            status = "completed"
+        elif any(
+            i.status is ToolInvocationStatus.UNCERTAIN
+            or i.status is ToolInvocationStatus.SUCCEEDED
+            or (i.status is ToolInvocationStatus.RUNNING and i.effect_sent_at is not None)
+            for i in writes
+        ):
+            status = "uncertain"
+        return await self._archive_result_in(uow, principal, thread, task, status)
+
     async def get_task(self, principal: Principal, run_id: UUID) -> EmailTask | None:
         async with self.uow_factory() as uow:
             return await read_value(uow.email, principal, "task", str(run_id), EmailTask)
@@ -985,7 +1420,7 @@ class EmailExperienceService:
     async def settle(self, principal: Principal, run_id: UUID) -> None:
         """Release terminal refresh resources and settle only provable usage."""
         task = await self.get_task(principal, run_id)
-        if task is not None and task.kind == "refresh":
+        if task is not None and task.kind in {"refresh", "archive"}:
             async with self.uow_factory() as uow:
                 run = await uow.runs.get(run_id, principal)
             if run.status in TERMINAL_RUN_STATUSES:
@@ -1230,6 +1665,133 @@ class EmailExperienceService:
             ),
         }
 
+    async def _archive_observed_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        thread: EmailThread,
+        normalized: dict[str, object],
+        source_session_id: UUID,
+        run: Run | None,
+    ) -> EmailArchiveOperation | None:
+        """Settle uncertainty only from complete, later provider receipts in this refresh."""
+        operation = thread.archive_operation
+        if operation is None or operation.status != "uncertain" or run is None:
+            return operation
+        if source_session_id != run.session_id or not normalized.get("complete"):
+            return operation
+        read_server = self.account_servers[thread.account_id]["read"]
+        if not {"email.read", f"mcp.{read_server}.use"} <= principal.scopes:
+            return operation
+        task = await read_value(uow.email, principal, "task", str(run.id), EmailTask)
+        session = await uow.sessions.get(run.session_id, principal)
+        if (
+            task is None
+            or task.kind != "refresh"
+            or task.session_id != run.session_id
+            or thread.account_id not in task.account_ids
+            or session.metadata.get("email_operational") is not True
+            or session.metadata.get("email_account_servers") != self.account_servers
+        ):
+            return operation
+        prior_task = await read_value(
+            uow.email, principal, "task", str(operation.run_id), EmailTask
+        )
+        consent = None if prior_task is None else prior_task.archive_consent
+        if (
+            prior_task is None
+            or prior_task.kind != "archive"
+            or consent is None
+            or prior_task.id != operation.operation_id
+            or prior_task.thread_id != thread.id
+            or consent.tenant_id != principal.tenant_id
+            or consent.principal_id != principal.principal_id
+            or consent.account_id != thread.account_id
+            or consent.provider_thread_id != thread.provider_thread_id
+            or consent.archived != operation.target_archived
+        ):
+            return operation
+        try:
+            prior_run = await uow.runs.get(operation.run_id, principal)
+        except NotFoundError:
+            return operation
+        if prior_run.status not in TERMINAL_RUN_STATUSES:
+            return operation
+        call_id = "email-" + hashlib.sha256(f"{operation.run_id}:archive".encode()).hexdigest()[:32]
+        writes = [
+            item
+            for item in await uow.invocations.list_for_run(operation.run_id, principal)
+            if item.call_id == call_id
+            and item.tool_name == consent.tool_name
+            and item.normalized_arguments == consent.arguments
+            and item.effect_sent_at is not None
+        ]
+        if len(writes) != 1:
+            return operation
+        # Starting after the final write receipt excludes reads already in flight
+        # when Gmail accepted (or may have accepted) the mutation.
+        written_at = max(writes[0].updated_at, cast(datetime, writes[0].effect_sent_at))
+        reads = {
+            item.call_id: item for item in await uow.invocations.list_for_run(run.id, principal)
+        }
+        events = {
+            event.sequence: event
+            for event in await uow.events.list_after(
+                run.session_id, 0, principal, run_id=run.id, created_at_or_after=written_at
+            )
+            if event.event_type == "tool.call.completed"
+        }
+        raw_messages = normalized.get("messages")
+        if not isinstance(raw_messages, list) or not raw_messages:
+            return operation
+        labels: dict[str, list[str]] = {}
+        for raw in raw_messages:
+            if not isinstance(raw, dict) or raw.get("_header_session_id") != str(run.session_id):
+                return operation
+            sequence = raw.get("_header_event_sequence")
+            event = events.get(sequence) if type(sequence) is int else None
+            read = None if event is None else reads.get(str(event.payload.get("call_id")))
+            page = None if read is None else read.structured_result
+            if (
+                read is None
+                or event is None
+                or read.status is not ToolInvocationStatus.SUCCEEDED
+                or read.session_id != run.session_id
+                or read.created_at <= written_at
+                or event.created_at <= written_at
+                or read.server_id != read_server
+                or read.tool_name != f"mcp.{read_server}.get_thread_page"
+                or event.payload.get("name") != read.tool_name
+                or (read.normalized_arguments or {}).get("thread_id") != thread.provider_thread_id
+                or page is None
+                or page.get("source_changed")
+                or page.get("thread_id") != thread.provider_thread_id
+                or page.get("history_id") != normalized.get("history_id")
+                or type(page.get("total_messages")) is not int
+                or page.get("total_messages") != len(raw_messages)
+                or not isinstance(page.get("messages"), list)
+            ):
+                return operation
+            matching = [
+                item
+                for item in page["messages"]
+                if isinstance(item, dict) and item.get("id") == raw.get("id")
+            ]
+            if (
+                len(matching) != 1
+                or matching[0].get("thread_id") != thread.provider_thread_id
+                or matching[0].get("label_ids") != raw.get("label_ids")
+                or not isinstance(raw.get("label_ids"), list)
+                or not all(isinstance(label, str) for label in raw["label_ids"])
+                or raw.get("id") in labels
+            ):
+                return operation
+            labels[str(raw["id"])] = raw["label_ids"]
+        observed_inbox = any("INBOX" in value for value in labels.values())
+        if observed_inbox == operation.target_archived:
+            return operation
+        return operation.model_copy(update={"status": "completed", "error": None})
+
     async def import_thread(
         self,
         principal: Principal,
@@ -1258,6 +1820,7 @@ class EmailExperienceService:
             sent_at = datetime.fromtimestamp(int(str(raw["internal_date"])) / 1000, tz=UTC)
 
             def parsed(field: str, raw: dict[str, Any] = raw) -> list[str]:
+                """Normalize one provider address header for stable source comparison."""
                 value = raw.get(field, "")
                 return addresses([address for _, address in getaddresses([str(value)]) if address])
 
@@ -1298,6 +1861,10 @@ class EmailExperienceService:
                 sort_keys=True,
             ).encode()
         ).hexdigest()
+        complete = bool(normalized.get("complete")) and all(
+            message.complete for message in messages
+        )
+        in_inbox = any("INBOX" in message.labels for message in messages)
         source_key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         now = self.clock.now()
         async with self.uow_factory() as uow, uow.email.lock(principal):
@@ -1312,9 +1879,39 @@ class EmailExperienceService:
                     uow.email, principal, "thread", str(index.payload["thread_id"]), EmailThread
                 )
             )
-            if previous is not None and previous.source_fingerprint == fingerprint:
-                await self._learn_history(uow.email, principal, previous)
-                return previous
+            archive_operation = (
+                None
+                if previous is None
+                else await self._archive_observed_in(
+                    uow, principal, previous, normalized, source_session_id, run
+                )
+            )
+            if previous is not None and (
+                previous.source_fingerprint == fingerprint
+                or (
+                    previous.complete == complete
+                    and [message.model_dump(exclude={"labels"}) for message in previous.messages]
+                    == [message.model_dump(exclude={"labels"}) for message in messages]
+                )
+            ):
+                if (
+                    previous.messages == messages
+                    and previous.in_inbox == in_inbox
+                    and previous.archive_operation == archive_operation
+                ):
+                    await self._learn_history(uow.email, principal, previous)
+                    return previous
+                # Keep legacy label-bearing fingerprints stable: assessments and
+                # semantic evidence are keyed to that existing content identity.
+                updated = previous.model_copy(
+                    update={
+                        "messages": messages,
+                        "in_inbox": in_inbox,
+                        "archive_operation": archive_operation,
+                    }
+                )
+                await save_value(uow.email, principal, "thread", str(updated.id), updated, now)
+                return updated
             thread = EmailThread(
                 id=self.ids.new_id() if previous is None else previous.id,
                 account_id=account_id,
@@ -1329,12 +1926,12 @@ class EmailExperienceService:
                 revision=1 if previous is None else previous.revision + 1,
                 draft_id=None if previous is None else previous.draft_id,
                 session_id=None if previous is None else previous.session_id,
-                complete=bool(normalized.get("complete"))
-                and all(message.complete for message in messages),
+                complete=complete,
                 messages=messages,
                 source_fingerprint=fingerprint,
                 last_accessed_at=now,
-                in_inbox=any("INBOX" in message.labels for message in messages),
+                in_inbox=in_inbox,
+                archive_operation=archive_operation,
                 source_session_ids=list(
                     dict.fromkeys(
                         [

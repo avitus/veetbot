@@ -352,11 +352,12 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
@@ -377,6 +378,7 @@ from agent_core.domain.messages import (
     TextDeltaEvent,
     UsageEvent,
 )
+from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
@@ -400,7 +402,7 @@ from agent_core.domain.surfaces import (
     SurfaceLimits,
     SurfaceTransportResult,
 )
-from agent_core.domain.tools import ToolExecutionContext, ToolSpec
+from agent_core.domain.tools import ToolExecutionContext, ToolInvocation, ToolSpec
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
@@ -2685,6 +2687,29 @@ async def _compose(
             if settings.delegation_enabled
             else None
         )
+
+        async def guard_email_effect(
+            run: Run,
+            owner: Principal,
+            invocation: ToolInvocation,
+            lease: WorkerLease | None,
+        ) -> None:
+            """Revalidate the exact owner gesture at the provider dispatch watermark."""
+            task = await public_services.email.get_task(owner, run.id)
+            if task is not None and task.kind == "archive":
+                if task.archive_consent is not None and invocation.tool_name.startswith(
+                    f"mcp.{task.archive_consent.read_server_id}."
+                ):
+                    return
+                if not settings.email_mode_enabled:
+                    raise ConflictError("Email mode is disabled")
+                if (
+                    task.archive_consent is None
+                    or invocation.tool_name != task.archive_consent.tool_name
+                ):
+                    raise ConflictError("archive task cannot dispatch another external action")
+                await public_services.email.validate_archive(owner, run, lease)
+
         pipeline = ToolPipeline(
             registry,
             uow_factory,
@@ -2701,6 +2726,7 @@ async def _compose(
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
             delegations=delegation_materializer,
+            before_effect=guard_email_effect,
         )
         token_slot = _ActiveToken()
         schedule_accountant = ScheduleOutcomeAccountant(
@@ -2801,12 +2827,34 @@ async def _compose(
             )
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
+            """Recognize persisted typed work even when its public feature is disabled."""
+            if not settings.email_mode_enabled:
+                task = await public_services.email.get_task(context.principal, context.run.id)
+                if task is None:
+                    return None
+                if task.kind != "archive":
+                    raise ConflictError("Email mode is disabled")
+                # Archive recovery classifies already-dispatched effects before
+                # checking current authority; disabled mode grants no new write.
             return await EmailTaskRunner(
                 public_services.email,
                 registry,
                 semantic_factory=email_semantics,
                 render_context=render_email_context,
             )(context)
+
+        async def resolve_email_archive_approval(
+            owner: Principal,
+            approval_id: UUID,
+            lease: WorkerLease | None,
+        ) -> None:
+            await archive_approval_service.resolve(
+                owner,
+                approval_id,
+                ApprovalResolutionType.APPROVE_ONCE,
+                "Explicit owner archive gesture",
+                lease=lease,
+            )
 
         executor = RunExecutor(
             principal=principal,
@@ -2838,7 +2886,7 @@ async def _compose(
             identical_denial_threshold=identical_denial_threshold,
             max_compactions_per_step=max_compactions_per_step,
             notification_producer=notification_producer,
-            task_runner=execute_email_task if settings.email_mode_enabled else None,
+            task_runner=execute_email_task,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -3098,15 +3146,16 @@ async def _compose(
             await artifact_writers.sweep_expired()
             await trajectory_service.sweep_once()
 
+        archive_approval_service = PublicApprovalService(
+            uow_factory=uow_factory,
+            dispatcher=dispatcher,
+            resume_waiting_run=executor.requeue_after_approval,
+            self_approval_enabled=ruleset.self_approval_enabled,
+        )
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=public_run_service,
-            approvals=PublicApprovalService(
-                uow_factory=uow_factory,
-                dispatcher=dispatcher,
-                resume_waiting_run=executor.requeue_after_approval,
-                self_approval_enabled=ruleset.self_approval_enabled,
-            ),
+            approvals=archive_approval_service,
             artifacts=PublicArtifactService(
                 uow_factory=uow_factory,
                 artifacts=trajectory_artifact_store,
@@ -3139,6 +3188,13 @@ async def _compose(
                 forget_source=forget_email_source,
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,
+                resolve_archive_approval=resolve_email_archive_approval,
+                current_archive_principal=lambda: (
+                    principal
+                    if settings.email_mode_enabled
+                    else principal.model_copy(update={"scopes": set()})
+                ),
+                archive_self_approval_enabled=ruleset.self_approval_enabled,
             ),
         )
         if settings.email_mode_enabled:

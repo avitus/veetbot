@@ -19,6 +19,9 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let historyProcessed: Int
     public let readServerID: String?
     public let sendServerID: String?
+    /// Absent support on an older server never authorizes a Gmail mutation.
+    public let archiveSupported: Bool?
+    public let writeServerID: String?
 
     enum CodingKeys: String, CodingKey {
         case id, label, status, error
@@ -28,6 +31,8 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
         case historyProcessed = "history_processed"
         case readServerID = "read_server_id"
         case sendServerID = "send_server_id"
+        case archiveSupported = "archive_supported"
+        case writeServerID = "write_server_id"
     }
 
     /// Distinguishes a failed attempt from an account still waiting for its initial synchronization.
@@ -79,6 +84,9 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let revision: Int
     /// The source revision the owner handled; later source revisions reopen the thread.
     public var dismissedRevision: Int?
+    /// Missing Inbox state is unknown, rather than evidence of an archived conversation.
+    public var inInbox: Bool?
+    public var archiveOperation: EmailArchiveOperation?
     public let summary: String
     public let reason: String
     public let needsReply: Bool
@@ -92,14 +100,35 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     /// Reflects confirmed attention state only while it still matches the displayed source revision.
     public var isHandled: Bool { dismissedRevision == revision }
 
+    /// Only the server's confirmed mailbox projection determines the checkbox state.
+    public var isArchived: Bool { inInbox == false }
+
     enum CodingKeys: String, CodingKey {
         case id, subject, senders, revision, summary, reason, priority, complete, messages, draft
         case accountID = "account_id"
         case updatedAt = "updated_at"
         case needsReply = "needs_reply"
         case dismissedRevision = "dismissed_revision"
+        case inInbox = "in_inbox"
+        case archiveOperation = "archive_operation"
         case draftID = "draft_id"
         case sessionID = "session_id"
+    }
+}
+
+/// Durable archive progress is separate from both source revision and legacy attention state.
+public struct EmailArchiveOperation: Codable, Equatable, Sendable {
+    public let operationID: UUID
+    public let runID: UUID
+    public let targetArchived: Bool
+    public let status: String
+    public let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, error
+        case operationID = "operation_id"
+        case runID = "run_id"
+        case targetArchived = "target_archived"
     }
 }
 
