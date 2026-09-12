@@ -105,6 +105,7 @@ public final class EmailViewModel: ObservableObject {
         return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
     }
 
+    /// Starts foreground refreshes for a new visit or invalidates reads when Email is hidden.
     public func setActive(_ value: Bool) {
         guard active != value else { return }
         active = value
@@ -171,6 +172,7 @@ public final class EmailViewModel: ObservableObject {
         newImportantCount = 0
     }
 
+    /// Clears thread selection and reloads the chosen account within the current foreground visit.
     public func setAccount(_ id: String?) {
         guard id != selectedAccountID else { return }
         selectedAccountID = id
@@ -179,6 +181,7 @@ public final class EmailViewModel: ObservableObject {
         Task { await reload(activation: foreground) }
     }
 
+    /// Reloads the chosen inbox view without allowing results from an obsolete foreground visit.
     public func setListView(_ value: String) {
         guard value != listView else { return }
         listView = value
@@ -186,6 +189,7 @@ public final class EmailViewModel: ObservableObject {
         Task { await reload(activation: foreground) }
     }
 
+    /// Debounces search changes and binds the eventual reload to the visit that scheduled it.
     public func setSearchText(_ text: String) {
         searchText = text
         searchTask?.cancel()
@@ -599,6 +603,7 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
+    /// Saves edits and proposes the exact draft for approval, retaining accepted work if Email is hidden.
     public func prepareSend() async {
         guard canReview, let api = makeAPIClient() else { return }
         autosaveTask?.cancel()
