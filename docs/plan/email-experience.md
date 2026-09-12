@@ -120,6 +120,13 @@ An empty inbox does not restart its initial loading indicator on each projection
 poll. A failed refresh remains visible across successful reads of cached
 projections until a later refresh succeeds; it is not reported as an empty
 successful priority result.
+Transient operation-status failures retry the same admitted operation with
+bounded backoff while Email remains active, without admitting another task.
+Leaving Email or replacing the connection cancels obsolete reads silently.
+A successful thread read clears an earlier read error without clearing an
+unresolved draft-edit or send error.
+An account awaiting its first update is shown as waiting; a recorded failure
+remains distinct even when that account has never completed synchronization.
 
 Each foreground request may admit a bounded slice. The server does not schedule
 the next slice itself: it requires a fresh active client request. On leaving

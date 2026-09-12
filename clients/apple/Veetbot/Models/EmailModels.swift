@@ -12,6 +12,7 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let label: String
     public let emailAddress: String?
     public let status: String
+    public let error: String?
     public let lastSyncedAt: Date?
     public let historyComplete: Bool
     public let historyProcessed: Int
@@ -19,13 +20,22 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let sendServerID: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, label, status
+        case id, label, status, error
         case emailAddress = "email_address"
         case lastSyncedAt = "last_synced_at"
         case historyComplete = "history_complete"
         case historyProcessed = "history_processed"
         case readServerID = "read_server_id"
         case sendServerID = "send_server_id"
+    }
+
+    public var hasRefreshFailure: Bool { status == "unavailable" && error != nil }
+
+    public var updateMessage: String? {
+        if hasRefreshFailure { return "Account could not be updated. Try refreshing again." }
+        if status == "unavailable" { return "Waiting for an email update." }
+        if status == "syncing" { return "Updating — results may be incomplete." }
+        return nil
     }
 }
 

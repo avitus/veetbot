@@ -128,7 +128,9 @@ public actor HTTPTransport {
         var lastConnectionError: URLError?
         for attempt in 1...request.retryAttempts {
             do {
+                try Task.checkCancellation()
                 let (data, response) = try await session.data(for: urlRequest)
+                try Task.checkCancellation()
                 guard let http = response as? HTTPURLResponse else {
                     throw HTTPTransportError.invalidResponse
                 }
@@ -155,6 +157,7 @@ public actor HTTPTransport {
             } catch let error as HTTPTransportError {
                 throw error
             } catch let error as URLError {
+                if error.code == .cancelled || Task.isCancelled { throw CancellationError() }
                 lastConnectionError = error
                 guard attempt < request.retryAttempts, error.isRetryableConnectionFailure else {
                     throw HTTPTransportError.connection(error)

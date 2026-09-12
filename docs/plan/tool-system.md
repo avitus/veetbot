@@ -1209,11 +1209,19 @@ context engine pins the tool set and the pin must include MCP tools or they
 cannot be advertised. For each configured server: connect, `initialize`,
 `tools/list`, map, register, hash.
 
-Independent server connection, initialization, and discovery operations use a
-process-local bounded fan-out of eight. Catalog persistence, registry mutation,
-and connection or rejection events still commit in configured-server order, so
-startup latency follows the slowest batch member without making the pinned
-catalog or event sequence scheduling-dependent.
+Independent server connection, initialization, and discovery operations share
+eight preparation slots across sessions in one runtime. Stdio startups also
+share two process-startup slots: simultaneous Python imports must not exhaust
+the handshake deadline on a small worker. A stdio startup acquires its process
+slot before a general slot, so queued subprocesses do not crowd out HTTP
+discovery. Capacity waiting precedes the unchanged connection timeout. Catalog
+persistence, registry mutation, and connection or rejection events still commit
+in configured-server order, keeping pins and event order deterministic.
+The SDK adapter owns each transport's complete lifetime in one persistent task;
+connection, authentication renewal and closure may be requested from different
+tasks without transferring SDK cancellation scopes. Caller cancellation requests
+tracked cleanup without waiting indefinitely; interrupted startup is cancelled
+in its owner, which also unwinds any SDK scopes it has already entered.
 Every preparation failure path starts and retains an entered client's cleanup,
 then awaits it through a shield for at most the configured connect timeout. A
 deadline detaches rather than cancels the cleanup task so cancellation-resistant

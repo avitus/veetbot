@@ -205,11 +205,11 @@ class GmailClient:
         )
         try:
             response = await self._http_client.send(request, stream=True)
+            raw = await self._read_body(response, mutating=mutating)
         except httpx.HTTPError as exc:
             code = "gmail.outcome_unknown" if mutating else "gmail.provider_unavailable"
             raise GmailError(code) from exc
         status = response.status_code
-        raw = await self._read_body(response, mutating=mutating)
         if status == 401:
             if mutating:
                 raise GmailError("gmail.outcome_unknown")

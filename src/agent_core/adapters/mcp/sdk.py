@@ -5,6 +5,7 @@ No module outside ``agent_core.adapters.mcp`` imports an MCP SDK type.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import shlex
@@ -38,6 +39,7 @@ from agent_core.domain.mcp import (
 )
 
 _STDIO_SPAWN_LOCK = threading.Lock()
+type _ExitArguments = tuple[type[BaseException] | None, BaseException | None, TracebackType | None]
 
 
 def _exact_environment_stdio_client(parameters: StdioServerParameters) -> Transport:
@@ -133,6 +135,9 @@ class SDKMCPClient:
         self._http_proxy_url = http_proxy_url
         self._stack: AsyncExitStack | None = None
         self._client: Client | None = None
+        self._owner: asyncio.Task[BaseException | None] | None = None
+        self._ready: asyncio.Future[None] | None = None
+        self._shutdown: asyncio.Future[_ExitArguments] | None = None
 
     async def __aenter__(self) -> Self:
         await self._connect()
@@ -207,6 +212,78 @@ class SDKMCPClient:
         return token
 
     async def _connect(self) -> None:
+        """Keep transport and SDK cancellation scopes in a persistent owner task."""
+        if self._owner is not None:
+            raise RuntimeError("MCP client is already connected or closing")
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future[None] = loop.create_future()
+        shutdown: asyncio.Future[_ExitArguments] = loop.create_future()
+        self._ready = ready
+        self._shutdown = shutdown
+        owner = asyncio.create_task(self._connection_lifetime(ready, shutdown))
+        self._owner = owner
+
+        def complete_cancelled_startup(_owner: asyncio.Task[BaseException | None]) -> None:
+            """Wake startup even if shutdown cancelled its owner before its first step."""
+            if not ready.done():
+                ready.set_exception(MCPTransportError())
+                ready.exception()
+
+        owner.add_done_callback(complete_cancelled_startup)
+        try:
+            await asyncio.shield(ready)
+        except BaseException:
+            self._request_close((None, None, None))
+            # The runtime gives cleanup its own bounded wait. In particular, a
+            # startup timeout must propagate while the owner is still unwinding.
+            if owner.done() and self._owner is owner:
+                self._owner = None
+                self._ready = None
+                self._shutdown = None
+            raise
+
+    async def _connection_lifetime(
+        self,
+        ready: asyncio.Future[None],
+        shutdown: asyncio.Future[_ExitArguments],
+    ) -> BaseException | None:
+        """Enter and unwind every SDK context in this task, isolating its failures."""
+        failure: BaseException | None = None
+        exit_arguments: _ExitArguments = (None, None, None)
+        try:
+            await self._open_owned()
+            ready.set_result(None)
+            exit_arguments = await shutdown
+        except BaseException as exc:
+            failure = exc
+        finally:
+            if not ready.done():
+                ready.set_exception(
+                    failure
+                    if isinstance(failure, (MCPUnauthorizedError, MCPTransportError))
+                    else MCPTransportError()
+                )
+                # A cancelled connection caller may no longer await this future.
+                ready.exception()
+            try:
+                await self._close_owned(*exit_arguments)
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+        return failure
+
+    def _request_close(self, arguments: _ExitArguments) -> None:
+        """Request shutdown without cancelling callers or an active SDK cleanup."""
+        shutdown, owner, ready = self._shutdown, self._owner, self._ready
+        if shutdown is None or owner is None:
+            return
+        if not shutdown.done():
+            shutdown.set_result(arguments)
+        if ready is not None and not ready.done() and not owner.cancelling():
+            owner.cancel()
+
+    async def _open_owned(self) -> None:
+        """Construct SDK contexts only from the connection's lifetime task."""
         stack = AsyncExitStack()
         try:
             if self._config.transport is MCPTransport.STDIO:
@@ -241,11 +318,13 @@ class SDKMCPClient:
             )
             self._client = await stack.enter_async_context(client)
             self._stack = stack.pop_all()
-        except Exception as exc:
+        except BaseException as exc:
             await stack.aclose()
             if _unauthorized(exc):
                 raise MCPUnauthorizedError from exc
             if isinstance(exc, (MCPUnauthorizedError, MCPTransportError)):
+                raise
+            if not isinstance(exc, Exception):
                 raise
             raise MCPTransportError from exc
 
@@ -255,6 +334,36 @@ class SDKMCPClient:
         exc: BaseException | None = None,
         traceback: TracebackType | None = None,
     ) -> None:
+        """Ask the owner to close; caller cancellation never interrupts teardown."""
+        owner = self._owner
+        if owner is None:
+            return
+        self._request_close((exc_type, exc, traceback))
+        try:
+            failure = await asyncio.shield(owner)
+        except asyncio.CancelledError as exc:
+            caller = asyncio.current_task()
+            if not owner.cancelled() or (caller is not None and caller.cancelling()):
+                raise
+            # An owner cancelled before its first step has no SDK scopes to
+            # unwind and must not cancel an unrelated close caller.
+            failure = exc
+        if self._owner is owner:
+            self._owner = None
+            self._ready = None
+            self._shutdown = None
+        if failure is not None:
+            if isinstance(failure, (MCPUnauthorizedError, MCPTransportError)):
+                raise failure
+            raise MCPTransportError from failure
+
+    async def _close_owned(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Unwind in the same task that entered the SDK and transport contexts."""
         stack, self._stack = self._stack, None
         self._client = None
         if stack is not None:

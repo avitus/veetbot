@@ -48,7 +48,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var isPerformingAction = false
     @Published public private(set) var unavailable = false
     @Published public private(set) var errorMessage: String?
-    @Published public private(set) var draftError: String?
+    @Published private var draftActionError: String?
+    @Published private var threadReadError: String?
     @Published public private(set) var feedbackMessage: String?
     @Published public private(set) var styleExampleMessage: String?
     @Published public private(set) var feedbackID: UUID?
@@ -96,6 +97,7 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
+    public var draftError: String? { draftActionError ?? threadReadError }
     public var canReview: Bool {
         guard let draft else { return false }
         return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
@@ -141,7 +143,8 @@ public final class EmailViewModel: ObservableObject {
         hasMore = false
         unavailable = false
         errorMessage = nil
-        draftError = nil
+        draftActionError = nil
+        threadReadError = nil
         feedbackMessage = nil
         styleExampleMessage = nil
         feedbackID = nil
@@ -298,11 +301,13 @@ public final class EmailViewModel: ObservableObject {
             refreshKey = nil
             recordRefreshStatus(operation.status)
             await reload(preserveOrder: true)
+            guard generation == connection, active, !Task.isCancelled else { return }
             if !operation.status.isTerminal { watchRefresh(operation.operationID) }
             if let selectedThreadID { await openThread(selectedThreadID, refreshOnly: true) }
         } catch {
-            guard generation == connection else { return }
-            if isUnavailable(error) { unavailable = true } else { report(error) }
+            guard generation == connection, active, !Task.isCancelled else { return }
+            if isUnavailable(error) { unavailable = true }
+            else { recordRefreshFailure(error) }
         }
     }
 
@@ -311,20 +316,49 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         operationTask = Task { [weak self] in
             guard let self else { return }
+            var consecutiveFailures = 0
             while self.active && self.generation == connection && !Task.isCancelled {
                 do {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    let delay = UInt64(2 << consecutiveFailures) * 1_000_000_000
+                    try await Task.sleep(nanoseconds: delay)
                     guard self.active, let api = self.makeAPIClient(), !Task.isCancelled else { return }
                     let operation = try await api.emailOperation(id)
-                    guard self.generation == connection, !Task.isCancelled else { return }
+                    guard self.generation == connection, self.active, !Task.isCancelled else { return }
+                    consecutiveFailures = 0
                     self.recordRefreshStatus(operation.status)
                     await self.reload(preserveOrder: true)
+                    guard self.generation == connection, self.active, !Task.isCancelled else { return }
                     if let selected = self.selectedThreadID { await self.openThread(selected, refreshOnly: true) }
                     if operation.status.isTerminal { return }
                 } catch is CancellationError { return }
-                catch { self.report(error, readAccess: true); return }
+                catch {
+                    guard self.generation == connection, self.active, !Task.isCancelled else { return }
+                    self.recordRefreshFailure(error, readAccess: true)
+                    consecutiveFailures += 1
+                    guard Self.isTransientReadFailure(error), consecutiveFailures < 3 else { return }
+                }
             }
         }
+    }
+
+    private func recordRefreshFailure(_ error: Error, readAccess: Bool = false) {
+        guard !(error is CancellationError), !Task.isCancelled else { return }
+        refreshFailure = error.localizedDescription
+        report(error, readAccess: readAccess)
+    }
+
+    private static func isTransientReadFailure(_ error: Error) -> Bool {
+        if case HTTPTransportError.api(let failure) = error, let status = failure.statusCode {
+            return status == 429 || (500...599).contains(status)
+        }
+        if case HTTPTransportError.connection(let failure) = error {
+            switch failure.code {
+            case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+                 .dnsLookupFailed, .notConnectedToInternet: return true
+            default: return false
+            }
+        }
+        return false
     }
 
     private func recordRefreshStatus(_ status: RunStatus) {
@@ -343,7 +377,8 @@ public final class EmailViewModel: ObservableObject {
         conflict = nil
         review = nil
         reviewDraft = nil
-        draftError = nil
+        draftActionError = nil
+        threadReadError = nil
         revisions = []
         feedbackMessage = nil
         styleExampleMessage = nil
@@ -372,6 +407,7 @@ public final class EmailViewModel: ObservableObject {
                 guard generation == connection, selectionRequest == requestID else { return }
                 mergeDraft(value)
             } else { draft = nil }
+            threadReadError = nil
             if let approvalID, draft?.approvalID == approvalID { await loadReview() }
         } catch {
             guard generation == connection, selectionRequest == requestID else { return }
@@ -415,7 +451,7 @@ public final class EmailViewModel: ObservableObject {
         guard edit.isDirty else { return true }
         guard !isSaving, !(conflict?.id == id) else { return false }
         isSaving = true
-        draftError = nil
+        draftActionError = nil
         let connection = generation
         let key: String
         if let previous = saveKeys[id], previous.0 == edit { key = previous.1 }
@@ -458,7 +494,7 @@ public final class EmailViewModel: ObservableObject {
         edits[conflict.id] = EmailDraftEdit(conflict)
         draft = conflict
         self.conflict = nil
-        draftError = nil
+        draftActionError = nil
     }
 
     public func keepLocalDraft() async {
@@ -563,7 +599,7 @@ public final class EmailViewModel: ObservableObject {
                 self.draft?.revision == draft.revision, currentEdit?.isDirty == false,
                 approval.runID == draft.runID, approval.status == .pending else { return }
             guard approvalMatchesDraft(approval, draft: draft) else {
-                draftError = "The approval does not match this draft. Refresh the thread and review again."
+                draftActionError = "The approval does not match this draft. Refresh the thread and review again."
                 return
             }
             review = approval
@@ -658,7 +694,7 @@ public final class EmailViewModel: ObservableObject {
         guard generation == connection, selectedThreadID == selection,
               let draft, draft.id == draftID, let api = makeAPIClient() else { return }
         isPerformingAction = true
-        draftError = nil
+        draftActionError = nil
         styleExampleMessage = nil
         defer { if generation == connection { isPerformingAction = false } }
         do {
@@ -745,13 +781,16 @@ public final class EmailViewModel: ObservableObject {
     }
 
     private func report(_ error: Error, draft: Bool = false, readAccess: Bool = false) {
-        if error is CancellationError { return }
+        if error is CancellationError || Task.isCancelled { return }
         if case HTTPTransportError.reauthenticationRequired = error {
             resetConnection()
             authenticationFailure?(error)
         } else if readAccess, case HTTPTransportError.authorizationDenied = error {
             resetConnection()
         }
-        if draft { draftError = error.localizedDescription } else { errorMessage = error.localizedDescription }
+        if draft {
+            if readAccess { threadReadError = error.localizedDescription }
+            else { draftActionError = error.localizedDescription }
+        } else { errorMessage = error.localizedDescription }
     }
 }

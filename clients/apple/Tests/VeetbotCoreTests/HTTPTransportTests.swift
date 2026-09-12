@@ -313,6 +313,21 @@ import Testing
         #expect(await client.transport.authorizationState() == .authenticated)
     }
 
+    @Test
+    func testURLSessionCancellationRemainsCancellationInsteadOfAConnectionFailure() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        let client = try makeClient(token: "valid")
+        do {
+            _ = try await client.emailAccounts()
+            Issue.record("Expected request cancellation")
+        } catch is CancellationError {
+            #expect(await client.transport.authorizationState() == .authenticated)
+        } catch {
+            Issue.record("Expected cancellation, not a visible connection failure: \(error)")
+        }
+    }
+
     @Test(arguments: [
         "Sun, 06 Nov 1994 08:49:37 GMT",
         "Sunday, 06-Nov-94 08:49:37 GMT",

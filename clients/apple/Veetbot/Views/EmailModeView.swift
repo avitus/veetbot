@@ -75,10 +75,8 @@ public struct EmailModeView: View {
                 ForEach(model.accounts.filter { model.selectedAccountID == nil || $0.id == model.selectedAccountID }) { account in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(account.label).appFont(.caption)
-                        if account.status == "unavailable" {
-                            Text("Account could not be updated. Try refreshing again.").foregroundColor(.orange)
-                        } else if account.status == "syncing" {
-                            Text("Updating — results may be incomplete.").foregroundColor(.secondary)
+                        if let update = account.updateMessage {
+                            Text(update).foregroundColor(account.hasRefreshFailure ? .orange : .secondary)
                         } else if let date = account.lastSyncedAt {
                             HStack { Text("Last updated"); Text(date, style: .relative) }.foregroundColor(.secondary)
                         } else {

@@ -276,6 +276,144 @@ import Testing
         #expect(model.errorMessage == nil)
     }
 
+    @Test func testGatewayRefreshFailurePersistsUntilConfirmedRefreshSuccess() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                if requests.snapshot.filter({ $0.httpMethod == "POST" }).count <= 2 {
+                    return (502, "<html>Bad Gateway</html>")
+                }
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        for _ in 0..<1000 {
+            if model.errorMessage != nil && !model.isRefreshing { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(model.errorMessage != nil)
+        await model.reload(preserveOrder: true)
+        #expect(model.errorMessage != nil, "cached reads do not prove refresh recovered")
+        #expect(model.items.count == 1)
+        await model.refresh()
+        #expect(model.errorMessage == nil)
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.count == 3)
+        #expect(Set(posts.compactMap { $0.value(forHTTPHeaderField: "Idempotency-Key") }).count == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func testOperationPollingRecoversAfterATransientGatewayFailureWithoutNewAdmission(timeout: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "RUNNING")) }
+            if request.url!.path.contains("/operations/") {
+                if requests.snapshot.filter({ $0.url!.path.contains("/operations/") }).count == 1 {
+                    if timeout { throw URLError(.timedOut) }
+                    return (502, "<html>Bad Gateway</html>")
+                }
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        for _ in 0..<400 {
+            if model.errorMessage != nil { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(model.errorMessage != nil)
+        await model.reload(preserveOrder: true)
+        #expect(model.errorMessage != nil)
+        for _ in 0..<500 {
+            if requests.snapshot.filter({ $0.url!.path.contains("/operations/") }).count >= 2 && model.errorMessage == nil { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 2)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        #expect(model.errorMessage == nil)
+        #expect(model.items.count == 1)
+    }
+
+    @Test func testOperationPollingExhaustsBoundedRetriesWithoutSubmittingAnotherRefresh() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "RUNNING")) }
+            if request.url!.path.contains("/operations/") { return (502, "<html>Bad Gateway</html>") }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        for _ in 0..<1600 {
+            if requests.snapshot.filter({ $0.url!.path.contains("/operations/") }).count >= 3 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 3)
+        // A fourth exponential-backoff attempt would arrive after sixteen
+        // more seconds. Wait past that boundary to prove the retry cap.
+        try await Task.sleep(nanoseconds: 17_000_000_000)
+        #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 3)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test(arguments: [false, true])
+    func testRecoveredThreadReadClearsOnlyItsOwnGatewayFailure(preserveActionFailure: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.httpMethod == "POST" { return (400, Self.error("invalid_argument", "Feedback was rejected.")) }
+            let reads = requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count
+            if reads == 2 { return (502, "<html>Bad Gateway</html>") }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        if preserveActionFailure { await model.giveFeedback(target: .thread, judgment: "important") }
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draftError != nil)
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draftError == (preserveActionFailure ? "Feedback was rejected." : nil))
+        #expect(model.draft?.body == "Thanks, I will review the agenda.")
+    }
+
+    @Test(arguments: [false, true])
+    func testLeavingEmailDuringAnOperationReadDoesNotReportCancellation(resetConnection: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "RUNNING")) }
+            if request.url!.path.contains("/operations/") {
+                Thread.sleep(forTimeInterval: 0.15)
+                return (502, "<html>Bad Gateway</html>")
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        for _ in 0..<400 {
+            if requests.snapshot.contains(where: { $0.url!.path.contains("/operations/") }) { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(requests.snapshot.contains { $0.url!.path.contains("/operations/") })
+        model.setActive(false)
+        if resetConnection { model.resetConnection() }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        #expect(model.errorMessage == nil)
+        #expect(model.draftError == nil)
+    }
+
+    private func operationJSON(status: String) -> String {
+        "{\"operation_id\":\"\(threadID)\",\"run_id\":\"\(runID)\",\"status\":\"\(status)\",\"replayed\":false}"
+    }
+
     @Test func testUnavailableFeatureDoesNotRequestMailboxWrites() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -403,7 +541,7 @@ import Testing
 
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
-        handler: @escaping (URLRequest) -> (Int, String)
+        handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
         let configuration = URLSessionConfiguration.ephemeral
@@ -451,8 +589,8 @@ private final class EmailRequestRecorder: @unchecked Sendable {
 
 private final class EmailTestURLProtocol: URLProtocol {
     private static let lock = NSLock()
-    private static var handlers: [String: (URLRequest) -> (Int, String)] = [:]
-    static func register(_ handler: @escaping (URLRequest) -> (Int, String)) -> String {
+    private static var handlers: [String: (URLRequest) throws -> (Int, String)] = [:]
+    static func register(_ handler: @escaping (URLRequest) throws -> (Int, String)) -> String {
         let id = UUID().uuidString
         lock.withLock { handlers[id] = handler }
         return id
@@ -462,11 +600,15 @@ private final class EmailTestURLProtocol: URLProtocol {
     override func startLoading() {
         guard let id = request.value(forHTTPHeaderField: "X-Email-Test"),
             let handler = Self.lock.withLock({ Self.handlers[id] }) else { return }
-        let (status, body) = handler(request)
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        do {
+            let (status, body) = try handler(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
     }
     override func stopLoading() {}
 }
