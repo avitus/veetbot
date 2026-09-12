@@ -64,6 +64,7 @@ public struct EmailModeView: View {
         EmailThreadScreen(model: model, discussInChat: discussInChat).id(model.selectedThreadID)
     }
 
+    /// Shows account freshness and independently actionable thread rows without opening mail to handle it.
     private var inbox: some View {
         List {
             Section {
@@ -162,6 +163,7 @@ public struct EmailModeView: View {
 
     private func accountLabel(_ id: String) -> String { model.accounts.first { $0.id == id }?.label ?? id }
 
+    /// Preserves platform navigation while keeping thread opening separate from the adjacent checkbox.
     @ViewBuilder private func threadRow(_ thread: EmailThreadView) -> some View {
         if directSelection {
             Button { Task { await model.openThread(thread.id) } } label: { threadLabel(thread) }
@@ -172,6 +174,7 @@ public struct EmailModeView: View {
         }
     }
 
+    /// Gives confirmed handled state precedence over draft and reply-needed labels in the inbox.
     private func threadLabel(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -193,6 +196,7 @@ private struct EmailHandledButton: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
 
+    /// Toggles server-confirmed attention state with a full hit target and a reversible accessibility label.
     var body: some View {
         Button {
             Task { await model.setThreadHandled(thread, handled: !thread.isHandled) }
@@ -223,6 +227,7 @@ private struct EmailThreadScreen: View {
     @State private var showingRevisions = false
     @FocusState private var focusedField: Field?
 
+    /// Keeps attention controls beside the source conversation, errors and preserved draft editor.
     var body: some View {
         Group {
             if model.isLoadingThread { ProgressView("Opening thread…") }

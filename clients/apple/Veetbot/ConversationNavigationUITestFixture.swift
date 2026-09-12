@@ -64,6 +64,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailStatus = "ready"
     private static var learningPaused = false
     private static var emailHandled = false
+    /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
         emailLock.lock()
         defer { emailLock.unlock() }
@@ -77,6 +78,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// Serves deterministic native-test routes, retaining handled state across list and detail reads.
     override func startLoading() {
         guard let url = request.url else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
@@ -303,6 +305,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             {"id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
             """
     }
+    /// Projects the same source revision and attention state into the fixture's inbox and thread responses.
     private static var emailThreadJSON: String {
         let dismissedRevision = emailLock.withLock { emailHandled ? "1" : "null" }
         return """

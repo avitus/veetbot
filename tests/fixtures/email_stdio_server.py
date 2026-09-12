@@ -41,7 +41,11 @@ def main() -> None:
 
     def respond(request: httpx.Request) -> httpx.Response:
         """Reject unexpected operations instead of ever using a real network."""
-        if request.url.host == "oauth2.googleapis.com" and request.url.path == "/token":
+        if (
+            request.method == "POST"
+            and request.url.host == "oauth2.googleapis.com"
+            and request.url.path == "/token"
+        ):
             return httpx.Response(200, json={"access_token": "fixture-access", "expires_in": 3600})
         if request.method != "GET" or request.url.host != "gmail.googleapis.com":
             raise AssertionError("the fixture only supports read-only mailbox operations")

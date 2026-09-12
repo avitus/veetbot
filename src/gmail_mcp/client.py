@@ -195,6 +195,7 @@ class GmailClient:
         mutating: bool = False,
         allow_reauthentication: bool = True,
     ) -> dict[str, Any]:
+        """Bound response reads and normalize failures according to dispatch safety."""
         token = await self._token()
         request = self._http_client.build_request(
             method,

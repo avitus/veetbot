@@ -55,6 +55,7 @@ extension VeetbotAPIClient {
         try await emailCommand(path: "/threads/\(id.uuidString)/discussion", values: [:], key: idempotencyKey)
     }
 
+    /// Sets reversible attention state for the source revision the owner actually reviewed.
     public func dismissEmailThread(_ thread: EmailThreadView, dismissed: Bool = true, idempotencyKey: String) async throws -> EmailThreadView {
         try await emailCommand(path: "/threads/\(thread.id.uuidString)/dismiss",
                                values: ["expected_revision": .number(Double(thread.revision)),

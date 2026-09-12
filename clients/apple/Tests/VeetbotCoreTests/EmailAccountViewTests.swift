@@ -3,6 +3,7 @@ import Testing
 @testable import VeetbotCore
 
 struct EmailAccountViewTests {
+    /// An account with no recorded error remains pending rather than appearing failed or ready.
     @Test func testNeverSynchronizedAccountWaitsWithoutReportingFailure() throws {
         let account = try decode(status: "unavailable", error: nil)
         #expect(account.status == "unavailable")
@@ -11,6 +12,7 @@ struct EmailAccountViewTests {
         #expect(account.updateMessage == "Waiting for an email update.")
     }
 
+    /// A failed first attempt remains a failure even without a prior successful synchronization.
     @Test func testFailedFirstRefreshIsNotMistakenForAnUnstartedAccount() throws {
         let account = try decode(status: "unavailable", error: "Mailbox refresh is incomplete.")
         #expect(account.error == "Mailbox refresh is incomplete.")
@@ -19,6 +21,7 @@ struct EmailAccountViewTests {
         #expect(account.updateMessage == "Account could not be updated. Try refreshing again.")
     }
 
+    /// Recovery keeps the incomplete-state disclosure until the server confirms readiness.
     @Test func testRecoveryRemainsIncompleteUntilServerReportsReady() throws {
         let failed = try decode(status: "unavailable", error: "Mailbox refresh is incomplete.")
         #expect(failed.hasRefreshFailure)
@@ -31,6 +34,7 @@ struct EmailAccountViewTests {
         #expect(completed.updateMessage == nil)
     }
 
+    /// Decodes the wire representation, including backwards-compatible omission of optional errors.
     private func decode(status: String, error: String?) throws -> EmailAccountView {
         var value: [String: Any] = [
             "id": "personal", "label": "Personal", "status": status,

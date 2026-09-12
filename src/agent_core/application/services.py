@@ -481,7 +481,9 @@ class EmailService(Protocol):
         expected_revision: int,
         *,
         dismissed: bool = True,
-    ) -> dict[str, object]: ...
+    ) -> dict[str, object]:
+        """Set or clear handled state, rejecting a stale expected thread revision."""
+        ...
 
     async def discard_draft(
         self, principal: Principal, draft_id: UUID, expected_revision: int

@@ -129,6 +129,7 @@ class SDKMCPClient:
         *,
         http_proxy_url: str | None = None,
     ) -> None:
+        """Keep connection settings and lifecycle coordination private to this client."""
         self._config = config
         self._credential = credential
         self._environment = dict(environment)
@@ -140,6 +141,7 @@ class SDKMCPClient:
         self._shutdown: asyncio.Future[_ExitArguments] | None = None
 
     async def __aenter__(self) -> Self:
+        """Wait for the owner task to establish a usable SDK connection."""
         await self._connect()
         return self
 
@@ -170,6 +172,7 @@ class SDKMCPClient:
         return {}
 
     async def _exchange_client_token(self) -> str:
+        """Exchange client credentials over HTTPS with normalized authentication failures."""
         if self._credential is None or self._config.token_endpoint is None:
             raise MCPUnauthorizedError
         token_endpoint = urlsplit(self._config.token_endpoint)

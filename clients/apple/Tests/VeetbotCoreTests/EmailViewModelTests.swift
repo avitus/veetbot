@@ -9,6 +9,7 @@ import Testing
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    /// A successful attention command updates its summary without replacing the open draft.
     @Test func testDismissalUpdatesSelectedThreadWithoutLosingDraftEdits() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -36,6 +37,7 @@ import Testing
         #expect(model.thread?.isHandled == true)
     }
 
+    /// Undo clears attention state, while a newer source revision reopens an older dismissal.
     @Test func testHandledStateCanBeUndoneAndNewSourceReopensIt() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -62,6 +64,7 @@ import Testing
         #expect(try decoder.decode(EmailThreadView.self, from: Data(changed.utf8)).isHandled == false)
     }
 
+    /// A rejected inbox checkbox leaves the row unchanged and exposes a recoverable error.
     @Test func testFailedHandledActionKeepsThreadAndReportsError() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
@@ -77,6 +80,36 @@ import Testing
         #expect(model.selectedThreadID == nil)
         #expect(model.errorMessage != nil)
         #expect(!model.isPerformingAction)
+    }
+
+    /// Handling another inbox row must not erase a failed send review or the selected draft's edits.
+    @Test func testHandlingAnotherThreadPreservesSelectedDraftActionFailure() async throws {
+        let otherJSON = threadJSON().replacingOccurrences(
+            of: threadID.uuidString, with: "00000000-0000-0000-0000-000000000899"
+        )
+        let other = try JSONDecoder.server.decode(EmailThreadView.self, from: Data(otherJSON.utf8))
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (400, Self.error("invalid_argument", "Review could not be prepared."))
+            }
+            if request.url!.path.hasSuffix("dismiss") {
+                return (200, otherJSON.replacingOccurrences(of: "\"revision\":1,\"summary\"",
+                    with: "\"dismissed_revision\":1,\"revision\":1,\"summary\""))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+        #expect(model.draftError == "Review could not be prepared.")
+        model.changeEdit(\.body, to: "Keep this unsent edit")
+        await model.setThreadHandled(other, handled: true)
+        #expect(model.draftError == "Review could not be prepared.")
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.currentEdit?.body == "Keep this unsent edit")
+        #expect(model.thread?.isHandled == false)
     }
 
     @Test func testReviewRefusesAnApprovalForDifferentMessageContent() async throws {
@@ -346,6 +379,7 @@ import Testing
         #expect(model.errorMessage == nil)
     }
 
+    /// The first refresh exhausts two transport POST attempts; one manual retry is POST three.
     @Test func testGatewayRefreshFailurePersistsUntilConfirmedRefreshSuccess() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -376,6 +410,7 @@ import Testing
         #expect(Set(posts.compactMap { $0.value(forHTTPHeaderField: "Idempotency-Key") }).count == 1)
     }
 
+    /// Gateway and timeout recovery must poll the existing operation without a second admission.
     @Test(arguments: [false, true])
     func testOperationPollingRecoversAfterATransientGatewayFailureWithoutNewAdmission(timeout: Bool) async throws {
         let requests = EmailRequestRecorder()
@@ -411,6 +446,7 @@ import Testing
         #expect(model.items.count == 1)
     }
 
+    /// Sustained failure stops after three status reads, including past the next backoff deadline.
     @Test func testOperationPollingExhaustsBoundedRetriesWithoutSubmittingAnotherRefresh() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -435,6 +471,7 @@ import Testing
         #expect(model.errorMessage != nil)
     }
 
+    /// Reading recovered mail must not erase a previously rejected owner action.
     @Test(arguments: [false, true])
     func testRecoveredThreadReadClearsOnlyItsOwnGatewayFailure(preserveActionFailure: Bool) async throws {
         let requests = EmailRequestRecorder()
@@ -454,6 +491,42 @@ import Testing
         #expect(model.draft?.body == "Thanks, I will review the agenda.")
     }
 
+    /// A toolbar task can outlive Email visibility without owning the foreground loop task.
+    @Test func testManualRefreshDoesNotReloadAfterEmailIsHidden() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                if requests.snapshot.filter({ $0.httpMethod == "POST" }).count == 2 {
+                    Thread.sleep(forTimeInterval: 0.15)
+                }
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        for _ in 0..<1000 {
+            if requests.snapshot.contains(where: { $0.httpMethod == "POST" }) && !model.isRefreshing { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(!model.isRefreshing)
+        let manualRefresh = Task { await model.refresh() }
+        for _ in 0..<1000 {
+            if requests.snapshot.filter({ $0.httpMethod == "POST" }).count == 2 { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2)
+        model.setActive(false)
+        let readsAtExit = requests.snapshot.filter { $0.httpMethod == "GET" }.count
+        await manualRefresh.value
+        #expect(requests.snapshot.filter { $0.httpMethod == "GET" }.count == readsAtExit)
+        #expect(model.errorMessage == nil)
+        #expect(!model.isRefreshing)
+    }
+
+    /// Cancelling the owned poll or replacing its connection must not surface an old failure.
     @Test(arguments: [false, true])
     func testLeavingEmailDuringAnOperationReadDoesNotReportCancellation(resetConnection: Bool) async throws {
         let requests = EmailRequestRecorder()
@@ -480,6 +553,7 @@ import Testing
         #expect(model.draftError == nil)
     }
 
+    /// Produces a content-free admitted-operation response for the transport fixture.
     private func operationJSON(status: String) -> String {
         "{\"operation_id\":\"\(threadID)\",\"run_id\":\"\(runID)\",\"status\":\"\(status)\",\"replayed\":false}"
     }
@@ -609,6 +683,7 @@ import Testing
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("style-example") })
     }
 
+    /// Isolates each model's URLSession route and allows real transport errors from its handler.
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
         handler: @escaping (URLRequest) throws -> (Int, String)
@@ -660,6 +735,7 @@ private final class EmailRequestRecorder: @unchecked Sendable {
 private final class EmailTestURLProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var handlers: [String: (URLRequest) throws -> (Int, String)] = [:]
+    /// Allocates a distinct fixture host so concurrent tests cannot replace each other's routes.
     static func register(_ handler: @escaping (URLRequest) throws -> (Int, String)) -> String {
         let id = UUID().uuidString
         lock.withLock { handlers[id] = handler }
@@ -667,6 +743,7 @@ private final class EmailTestURLProtocol: URLProtocol {
     }
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    /// Delivers HTTP responses and URLSession failures through the same production transport path.
     override func startLoading() {
         guard let id = request.value(forHTTPHeaderField: "X-Email-Test"),
             let handler = Self.lock.withLock({ Self.handlers[id] }) else { return }

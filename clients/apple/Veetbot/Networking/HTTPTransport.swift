@@ -120,10 +120,12 @@ public actor HTTPTransport {
         return try JSONDecoder.server.decode(Response.self, from: data)
     }
 
+    /// Sends within the request's retry bound, keeping cancellation separate from authorization failures.
     public func sendData(
         _ request: TransportRequest,
         accepting additionalStatusCodes: Set<Int> = []
     ) async throws -> (Data, HTTPURLResponse) {
+        try Task.checkCancellation()
         let urlRequest = try await makeURLRequest(request)
         var lastConnectionError: URLError?
         for attempt in 1...request.retryAttempts {
@@ -187,6 +189,7 @@ public actor HTTPTransport {
         try throwAPIError(data: data, response: response)
     }
 
+    /// Resolves the token without changing authentication state for an obsolete request.
     private func makeURLRequest(_ request: TransportRequest) async throws -> URLRequest {
         let url = try configuration.url(path: request.path, queryItems: request.queryItems)
         var urlRequest = URLRequest(url: url)
@@ -198,7 +201,9 @@ public actor HTTPTransport {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         if request.requiresAuthentication {
-            guard let token = try await tokenStore.readToken(), !token.isEmpty else {
+            let token = try await tokenStore.readToken()
+            try Task.checkCancellation()
+            guard let token, !token.isEmpty else {
                 state = .requiresReauthentication
                 throw HTTPTransportError.missingToken
             }

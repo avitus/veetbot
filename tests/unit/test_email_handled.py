@@ -7,6 +7,7 @@ from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
 
 async def test_handled_can_be_undone_without_changing_mail_feedback_or_drafts() -> None:
+    """Handling and restoring attention are idempotent and leave learned state intact."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
         path = f"/v1/email/threads/{thread.id}"
@@ -33,6 +34,7 @@ async def test_handled_can_be_undone_without_changing_mail_feedback_or_drafts() 
 
 
 async def test_new_source_revision_reopens_handled_mail_and_rejects_stale_actions() -> None:
+    """New content needs attention and cannot be handled through an obsolete revision."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
         path = f"/v1/email/threads/{thread.id}/dismiss"
@@ -55,6 +57,7 @@ async def test_new_source_revision_reopens_handled_mail_and_rejects_stale_action
 
 @pytest.mark.parametrize("value", ["false", 0, None, [], {}])
 async def test_handled_requires_a_boolean(value: object) -> None:
+    """Malformed handled flags fail validation without dismissing the thread."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
         response = await client.post(

@@ -16,6 +16,7 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    /// Verifies both confirmed attention transitions without leaving the open thread.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
         XCTAssertTrue(action.waitForExistence(timeout: 5))
@@ -38,6 +39,7 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
+    /// Checks off a row directly, then finds its reversible handled state in Other mail.
     func testEmailCanBeCheckedOffFromInboxWithoutOpeningThread() {
         let mode = app.buttons["mode.email"]
         XCTAssertTrue(mode.waitForExistence(timeout: 10))
@@ -99,6 +101,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Resume learning"].waitForExistence(timeout: 5))
     }
 
+    /// Exercises handled state, feedback, editing and exact-send approval on the native thread screen.
     func testEmailThreadFeedbackEditingAndExplicitSend() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
@@ -334,6 +337,7 @@ final class ConversationNavigationUITests: XCTestCase {
     #endif
 
     #if os(macOS)
+    /// Exercises Mac thread attention and approval controls through actual native interactions.
     func testEmailModeAndExactDraftApprovalOnMac() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))

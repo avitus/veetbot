@@ -42,7 +42,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.events import NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import (
     FakeModelScript,
     ScriptedToolCall,
@@ -56,7 +56,7 @@ from agent_core.domain.policies import (
     RiskLevel,
     TrustLevel,
 )
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolExecutionContext,
@@ -657,6 +657,7 @@ def test_transient_sse_frames_and_heartbeats_have_no_id() -> None:
 async def test_persisted_replay_is_gapless_duplicate_free_with_session_gaps(
     tmp_path: Path,
 ) -> None:
+    """Reconnect replays each durable run event once across unrelated session sequences."""
     async with _composition(tmp_path) as composition:
         principal = composition.principal
         session = await composition.services.sessions.create(principal, "general", {})
@@ -730,6 +731,7 @@ async def test_saved_answer_supersedes_buffered_model_output(
     event_name: str,
     answer_already_saved: bool,
 ) -> None:
+    """Saving the final answer suppresses old fragments without dropping durable events."""
     async with _composition(tmp_path) as composition:
         principal = composition.principal
         session = await composition.services.sessions.create(principal, "general", {})
@@ -775,7 +777,80 @@ async def test_saved_answer_supersedes_buffered_model_output(
         assert sum(frame.event == "run.completed" for frame in frames) == 1
 
 
+@pytest.mark.parametrize("event_name", ["message.delta", "reasoning.delta", "usage.provisional"])
+@pytest.mark.parametrize("cursor_offset", [0, 1], ids=("at-answer", "after-answer"))
+@pytest.mark.parametrize("same_run", [True, False], ids=("completed-answer", "prior-run-answer"))
+async def test_reconnect_restores_only_the_requested_runs_completed_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_name: str,
+    cursor_offset: int,
+    same_run: bool,
+) -> None:
+    """The replay cursor retains answer supersession without hiding another run's output."""
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="First answer"), ScriptedTurn(text="Next answer")]
+    )
+    async with _composition(tmp_path, script=script) as composition:
+        principal = composition.principal
+        session = await composition.services.sessions.create(principal, "general", {})
+        service = composition.services.runs
+        original = await service.submit(
+            principal, session.id, [TextContentBlock(text="first answer")], None, None
+        )
+        requested = (
+            original
+            if same_run
+            else await service.submit(
+                principal, session.id, [TextContentBlock(text="next answer")], None, None
+            )
+        )
+        async with composition.uow_factory() as uow:
+            completed = await uow.runs.get(requested.run_id, principal)
+            events = await uow.events.list_after(session.id, 0, principal)
+        assert completed.status is RunStatus.COMPLETED
+        answer = next(
+            event
+            for event in events
+            if event.run_id == original.run_id and event.event_type == "assistant.message.completed"
+        )
+        cursor = answer.sequence + cursor_offset
+        replay = [
+            event
+            for event in events
+            if event.run_id == requested.run_id and event.sequence > cursor
+        ]
+        broadcaster = InMemoryLiveEventBroadcaster()
+        calls = 0
+
+        async def read_events(
+            reader: Principal, run_id: UUID, sequence: int
+        ) -> tuple[Run, list[EventEnvelope]]:
+            """Deliver a delayed fragment while durable finalization is still pending."""
+            nonlocal calls
+            assert reader == principal and run_id == requested.run_id
+            assert sequence == cursor
+            calls += 1
+            if calls == 1:
+                await broadcaster.publish(session.id, run_id, event_name, {"text": "old"})
+                return completed.model_copy(update={"status": RunStatus.RUNNING}), []
+            return completed, replay
+
+        monkeypatch.setattr(service, "_events_after", read_events)
+        monkeypatch.setattr(service, "_live_events", broadcaster)
+        async with asyncio.timeout(1):
+            frames = [frame async for frame in service.stream(principal, requested.run_id, cursor)]
+        assert [frame.event for frame in frames if isinstance(frame, TransientStreamFrame)] == (
+            [] if same_run else [event_name]
+        )
+        assert [frame.sequence for frame in frames if isinstance(frame, PersistedStreamFrame)] == [
+            event.sequence for event in replay
+        ]
+        assert calls == 2
+
+
 async def test_submission_is_idempotent_and_reuse_conflicts(tmp_path: Path) -> None:
+    """Repeated submissions reuse one run while changed payloads or sessions reject the key."""
     async with _composition(tmp_path) as composition, _client(composition) as client:
         session_id = await _create_session(client)
         path = f"/v1/sessions/{session_id}/messages"

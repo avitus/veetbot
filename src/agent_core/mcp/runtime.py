@@ -134,6 +134,7 @@ class MCPRuntime:
         *,
         connect_timeout_seconds: float = 10,
     ) -> None:
+        """Share bounded preparation capacity across this runtime's sessions."""
         self._uow_factory = uow_factory
         self._registry = registry
         self._clients = clients
@@ -296,6 +297,7 @@ class MCPRuntime:
                 await self._close_preparation_client(result.client)
 
     async def prepare(self, session_id: UUID, principal: Principal) -> None:
+        """Discover servers concurrently, then register results in configured order."""
         if session_id in self._prepared:
             return
         async with self._lock(session_id):

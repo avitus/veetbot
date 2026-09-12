@@ -1277,6 +1277,9 @@ to persist deltas.
 Once a stream has delivered `assistant.message.completed`, the saved answer
 supersedes buffered transient output for that run. The server discards those
 remaining fragments while continuing durable delivery through `run.completed`.
+On reconnect, an answer for the same run at or before `Last-Event-ID` also
+suppresses fragments; the replay cursor must not erase that durable completion
+state. An earlier run's saved answer does not suppress the current run's output.
 The two events commit separately; draining an older text fragment between them
 can otherwise open a second message that completion fills with the same answer.
 

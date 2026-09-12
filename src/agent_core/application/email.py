@@ -1779,6 +1779,7 @@ class EmailExperienceService:
         *,
         dismissed: bool = True,
     ) -> dict[str, object]:
+        """Update revision-scoped handled state without changing mail or learning."""
         require_scope(principal, "email.write")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)

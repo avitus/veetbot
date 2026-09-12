@@ -976,11 +976,18 @@ class PublicRunService:
         run_id: UUID,
         after_sequence: int | None,
     ) -> AsyncIterator[StreamFrame]:
+        """Replay durable run events while suppressing fragments of an already saved answer."""
         require_scope(principal, "run.read")
         watermark = max(0, after_sequence or 0)
         answer_delivered = False
         run = await self.get(principal, run_id)
         async with self._live_events.subscribe(run.session_id) as subscription:
+            if watermark:
+                async with self._uow_factory() as uow:
+                    answer = await uow.events.latest_before(
+                        run.session_id, watermark + 1, "assistant.message.completed", principal
+                    )
+                answer_delivered = answer is not None and answer.run_id == run_id
             while True:
                 current, events = await self._events_after(principal, run_id, watermark)
                 for event in events:

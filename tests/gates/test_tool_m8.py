@@ -76,6 +76,7 @@ def _server(
     idempotency: IdempotencyClass = IdempotencyClass.IDEMPOTENT,
     credential_ref: str | None = None,
 ) -> MCPServerConfig:
+    """Build an operator-approved fixture server with explicit transport and effects."""
     return MCPServerConfig(
         tenant_id="local",
         server_id=server_id,
@@ -516,6 +517,7 @@ def _preparation_settings(directory: Path) -> Settings:
 
 
 async def test_prepare_discovers_independent_servers_concurrently(tmp_path: Path) -> None:
+    """Independent HTTP handshakes progress together rather than serially."""
     factory = _BarrierFactory(expected=3)
     async with build(
         settings=_preparation_settings(tmp_path),
@@ -530,6 +532,7 @@ async def test_prepare_discovers_independent_servers_concurrently(tmp_path: Path
 
 
 async def test_prepare_bounds_server_discovery_fan_out(tmp_path: Path) -> None:
+    """A ninth HTTP handshake waits until one of the eight shared slots is free."""
     factory = _BarrierFactory(expected=8, hold_until_released=True)
     configs = tuple(_server(f"server_{index}", transport=MCPTransport.HTTP) for index in range(9))
     async with build(

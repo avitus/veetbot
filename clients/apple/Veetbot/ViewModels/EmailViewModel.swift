@@ -97,6 +97,7 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
+    /// Keeps an unresolved owner-action failure visible even when a later thread read fails or recovers.
     public var draftError: String? { draftActionError ?? threadReadError }
     public var canReview: Bool {
         guard let draft else { return false }
@@ -120,6 +121,7 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Cancels obsolete work and removes all mail, local edits and errors from the old connection.
     public func resetConnection() {
         generation = UUID()
         listRequest = UUID()
@@ -288,6 +290,7 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Admits one foreground refresh and ignores results after its connection or visibility expires.
     public func refresh() async {
         guard active, !unavailable, !isRefreshing, let api = makeAPIClient() else { return }
         isRefreshing = true
@@ -297,7 +300,7 @@ public final class EmailViewModel: ObservableObject {
         defer { if generation == connection { isRefreshing = false } }
         do {
             let operation = try await api.refreshEmail(idempotencyKey: key)
-            guard generation == connection else { return }
+            guard generation == connection, active, !Task.isCancelled else { return }
             refreshKey = nil
             recordRefreshStatus(operation.status)
             await reload(preserveOrder: true)
@@ -311,6 +314,7 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Retries status reads for the same admitted operation, bounded by failures and foreground visibility.
     private func watchRefresh(_ id: UUID) {
         operationTask?.cancel()
         let connection = generation
@@ -341,12 +345,14 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Retains refresh failures across successful cache reads until an operation completes.
     private func recordRefreshFailure(_ error: Error, readAccess: Bool = false) {
         guard !(error is CancellationError), !Task.isCancelled else { return }
         refreshFailure = error.localizedDescription
         report(error, readAccess: readAccess)
     }
 
+    /// Allows bounded retries for temporary HTTP and network failures, never authorization errors.
     private static func isTransientReadFailure(_ error: Error) -> Bool {
         if case HTTPTransportError.api(let failure) = error, let status = failure.statusCode {
             return status == 429 || (500...599).contains(status)
@@ -369,6 +375,7 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Clears thread presentation and its errors without discarding draft edits stored by draft ID.
     public func clearSelection() {
         selectionRequest = UUID()
         selectedThreadID = nil
@@ -385,6 +392,7 @@ public final class EmailViewModel: ObservableObject {
         feedbackID = nil
     }
 
+    /// Refreshes a thread without overwriting local edits or clearing unrelated action failures.
     public func openThread(_ id: UUID, approvalID: UUID? = nil, refreshOnly: Bool = false) async {
         guard let api = makeAPIClient() else { return }
         if !refreshOnly {
@@ -446,6 +454,7 @@ public final class EmailViewModel: ObservableObject {
     }
 
     @discardableResult
+    /// Saves the expected draft revision and preserves both versions when another device has edited it.
     public func saveDraft(_ id: UUID? = nil) async -> Bool {
         guard let id = id ?? draft?.id, let edit = edits[id], let api = makeAPIClient() else { return false }
         guard edit.isDirty else { return true }
@@ -586,6 +595,7 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Opens approval only after current account authority and the exact displayed draft match.
     public func loadReview() async {
         guard let draft, let id = draft.approvalID, let api = makeAPIClient(),
             !draft.stale, currentEdit?.isDirty == false else { return }
@@ -639,15 +649,16 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error, draft: true) }; return nil }
     }
 
+    /// Marks the selected source revision handled through the reversible attention command.
     public func dismissSelectedThread() async {
         guard let thread else { return }
         await setThreadHandled(thread, handled: true)
     }
 
+    /// Applies confirmed attention state while retaining open message content and unsaved draft text.
     public func setThreadHandled(_ thread: EmailThreadView, handled: Bool) async {
         guard let api = makeAPIClient(), !isPerformingAction else { return }
         isPerformingAction = true
-        draftActionError = nil
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
         do {
@@ -699,6 +710,7 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error, readAccess: true) } }
     }
 
+    /// Saves local changes before explicitly endorsing that exact revision as a writing example.
     public func endorseDraftStyle() async {
         guard !isPerformingAction, conflict == nil, !unavailable, let draftID = draft?.id else { return }
         let connection = generation
@@ -793,6 +805,7 @@ public final class EmailViewModel: ObservableObject {
         return failure.statusCode == 404 || failure.statusCode == 405
     }
 
+    /// Routes visible errors by their source; cancellation is silent and revoked read access clears mail.
     private func report(_ error: Error, draft: Bool = false, readAccess: Bool = false) {
         if error is CancellationError || Task.isCancelled { return }
         if case HTTPTransportError.reauthenticationRequired = error {

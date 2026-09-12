@@ -1384,6 +1384,7 @@ class _FailingGmail:
         self.requests: list[httpx.Request] = []
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
+        """Authenticate normally and return a controlled Gmail failure with raw diagnostics."""
         self.requests.append(request)
         if str(request.url) == GOOGLE_TOKEN_ENDPOINT:
             return httpx.Response(
@@ -1474,6 +1475,7 @@ async def _assert_provider_failure_is_stable_and_classification_aware(
     read_code: str,
     write_code: str,
 ) -> None:
+    """Check stable read/write failure codes and a single dispatched write request."""
     read_fake = _FailingGmail(status=status)
     read = await _client("read", read_fake)  # type: ignore[arg-type]
     with pytest.raises(Exception) as read_failure:

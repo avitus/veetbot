@@ -12,6 +12,7 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let label: String
     public let emailAddress: String?
     public let status: String
+    /// A recorded refresh failure; absence does not prove the account has completed its first update.
     public let error: String?
     public let lastSyncedAt: Date?
     public let historyComplete: Bool
@@ -29,8 +30,10 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
         case sendServerID = "send_server_id"
     }
 
+    /// Distinguishes a failed attempt from an account still waiting for its initial synchronization.
     public var hasRefreshFailure: Bool { status == "unavailable" && error != nil }
 
+    /// Describes pending, incomplete or failed refreshes without claiming cached mail is current.
     public var updateMessage: String? {
         if hasRefreshFailure { return "Account could not be updated. Try refreshing again." }
         if status == "unavailable" { return "Waiting for an email update." }
@@ -74,6 +77,7 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let senders: [String]
     public let updatedAt: Date
     public let revision: Int
+    /// The source revision the owner handled; later source revisions reopen the thread.
     public var dismissedRevision: Int?
     public let summary: String
     public let reason: String
@@ -85,6 +89,7 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let messages: [EmailMessageView]?
     public let draft: EmailDraftView?
 
+    /// Reflects confirmed attention state only while it still matches the displayed source revision.
     public var isHandled: Bool { dismissedRevision == revision }
 
     enum CodingKeys: String, CodingKey {

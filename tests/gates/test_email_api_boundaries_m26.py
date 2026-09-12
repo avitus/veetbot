@@ -89,9 +89,11 @@ COMMANDS = (
 async def _request(
     app: Composition, client: httpx.AsyncClient, command: Command
 ) -> tuple[str, dict[str, object] | None]:
+    """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
 
     async def dispatch(run_id: UUID) -> None:
+        """Keep boundary tests from executing admitted email work."""
         return None
 
     app.services.email.dispatch = dispatch
