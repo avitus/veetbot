@@ -55,6 +55,7 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.sessions import (
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
+    SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     Session,
     SessionCursor,
     SessionStatus,
@@ -141,6 +142,7 @@ class InMemoryAgentRepository:
 class InMemorySessionRepository:
     def __init__(self) -> None:
         self._sessions: dict[UUID, Session] = {}
+        self._chat_sessions: set[UUID] = set()
         self._lock = asyncio.Lock()
 
     async def create(self, session: Session) -> None:
@@ -199,7 +201,13 @@ class InMemorySessionRepository:
                 and session.principal_id == principal.principal_id
                 and (
                     not exclude_operational
-                    or session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is not True
+                    or (
+                        session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is not True
+                        and (
+                            SESSION_EMAIL_THREAD_ID_METADATA_KEY not in session.metadata
+                            or session.id in self._chat_sessions
+                        )
+                    )
                 )
                 and (
                     cursor is None
@@ -477,6 +485,12 @@ class InMemoryEventRepository:
             stream.append(envelope)
             if event.derivation_key is not None:
                 self._derived[event.derivation_key] = envelope
+        if (
+            isinstance(self._sessions, InMemorySessionRepository)
+            and event.actor_type == "principal"
+            and event.event_type in {"email.discussion.opened", "user.message.created"}
+        ):
+            self._sessions._chat_sessions.add(event.session_id)
         touch = getattr(self._sessions, "touch", None)
         if touch is not None:
             await touch(event.session_id, occurred_at)

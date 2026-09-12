@@ -522,10 +522,15 @@ nested semantic facts, for strict structured output. Nullable values and empty
 lists express absence explicitly. Domain defaults and local evidence validation
 remain unchanged, and token estimation uses the actual transmitted schema.
 
-The conversation index excludes the server-owned operational marker within each
-repository query before cursor limits apply. Feedback evidence queries are
-scoped to the current run before fetching events, retaining the same principal
-and owner-authorship checks.
+The conversation index excludes the server-owned operational marker and draft-only
+email thread sessions within each repository query before cursor limits apply.
+An email thread session becomes visible after an owner `user.message.created`
+event or an explicit Discuss in Chat action, recorded once per session as a
+content-free, principal-authored `email.discussion.opened` event. Existing draft
+sessions without either event remain accessible to Email but absent from Chat;
+existing owner conversations remain visible. No draft or session is deleted.
+Feedback evidence queries are scoped to the current run before fetching events,
+retaining the same principal and owner-authorship checks.
 
 ### State ownership
 

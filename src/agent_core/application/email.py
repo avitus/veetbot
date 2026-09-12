@@ -1766,6 +1766,17 @@ class EmailExperienceService:
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)
             session = await self._session_in(uow, principal, thread)
+            await uow.events.append(
+                NewEvent(
+                    session_id=session.id,
+                    run_id=None,
+                    event_type="email.discussion.opened",
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={},
+                    derivation_key=f"email-discussion:{session.id}",
+                )
+            )
             result = thread_summary(thread.model_copy(update={"session_id": session.id}))
         if self.activate_session is not None:
             await self.activate_session(session.id)

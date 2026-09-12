@@ -6,6 +6,7 @@ from agent_core.adapters.persistence.memory import InMemorySessionRepository
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.sessions import SessionCursor
+from agent_core.ports.events import EventRepository
 from agent_core.ports.repositories import SessionRepository
 from tests.contract.support import NOW, SESSION_ID, principal, session
 
@@ -68,6 +69,7 @@ async def assert_session_index_filters_before_pagination(repository: SessionRepo
         (702, {"email_operational": True}),
         (703, {"email_operational": False}),
         (704, {"email_operational": True}),
+        (705, {"email_thread_id": "draft-thread"}),
     ):
         await repository.create(
             session().model_copy(update={"id": UUID(int=value), "metadata": metadata})
@@ -81,8 +83,8 @@ async def assert_session_index_filters_before_pagination(repository: SessionRepo
         exclude_operational=True,
     )
     assert [row.id for row in second] == [UUID(int=701)]
-    all_rows = await repository.list(principal(), limit=4)
-    assert len(all_rows) == 4
+    all_rows = await repository.list(principal(), limit=5)
+    assert len(all_rows) == 5
     assert (
         await repository.list(
             principal().model_copy(update={"principal_id": "foreign"}),
@@ -95,3 +97,45 @@ async def assert_session_index_filters_before_pagination(repository: SessionRepo
 
 async def test_session_index_filters_before_pagination() -> None:
     await assert_session_index_filters_before_pagination(InMemorySessionRepository())
+
+
+async def assert_email_chat_visibility_preserves_owner_messages(
+    repository: SessionRepository, events: EventRepository
+) -> None:
+    from agent_core.domain.events import NewEvent
+
+    for value, event_type, actor_type in (
+        (711, "user.message.created", "principal"),
+        (712, "email.discussion.opened", "principal"),
+        (713, "assistant.message.completed", "application"),
+        (714, "user.message.created", "application"),
+    ):
+        session_id = UUID(int=value)
+        await repository.create(
+            session().model_copy(
+                update={"id": session_id, "metadata": {"email_thread_id": str(value)}}
+            )
+        )
+        await events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None,
+                event_type=event_type,
+                actor_type=actor_type,
+                actor_id=principal().principal_id,
+            )
+        )
+    visible = await repository.list(principal(), limit=20, exclude_operational=True)
+    assert {row.id for row in visible} & {UUID(int=i) for i in range(711, 715)} == {
+        UUID(int=711),
+        UUID(int=712),
+    }
+    # Direct reads still preserve draft-only sessions and all their state.
+    assert (await repository.get(UUID(int=713), principal())).metadata["email_thread_id"] == "713"
+
+
+async def test_email_chat_visibility_preserves_owner_messages() -> None:
+    from tests.contract.support import memory_stack
+
+    _, sessions, _, events = await memory_stack()
+    await assert_email_chat_visibility_preserves_owner_messages(sessions, events)
