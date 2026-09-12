@@ -63,6 +63,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailRevision = 1
     private static var emailStatus = "ready"
     private static var learningPaused = false
+    private static var emailHandled = false
     static func resetEmail() {
         emailLock.lock()
         defer { emailLock.unlock() }
@@ -70,6 +71,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         emailRevision = 1
         emailStatus = "ready"
         learningPaused = false
+        emailHandled = false
     }
     override static func canInit(with request: URLRequest) -> Bool { true }
 
@@ -104,7 +106,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = Self.emailAccountsJSON
         case ("GET", "/v1/email/threads"):
             statusCode = 200
-            body = "{\"items\":[\(Self.emailThreadJSON)],\"next_cursor\":null}"
+            let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
+            let handled = Self.emailLock.withLock { Self.emailHandled }
+            let included = view == "all" || (view == "other" ? handled : !handled)
+            body = "{\"items\":[\(included ? Self.emailThreadJSON : "")],\"next_cursor\":null}"
+        case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
+            let values = requestJSON()
+            Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
+            statusCode = 200
+            body = Self.emailThreadJSON
         case ("GET", "/v1/email/threads/\(Self.emailThreadID)"):
             statusCode = 200
             body = Self.emailThreadJSON
@@ -294,9 +304,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             """
     }
     private static var emailThreadJSON: String {
-        """
+        let dismissedRevision = emailLock.withLock { emailHandled ? "1" : "null" }
+        return """
         {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
-        """
+        """.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"dismissed_revision\":\(dismissedRevision),\"revision\":1,\"summary\"")
     }
     private static var emailApprovalJSON: String {
         let (body, sent) = emailLock.withLock { (emailBody, emailStatus == "sent") }

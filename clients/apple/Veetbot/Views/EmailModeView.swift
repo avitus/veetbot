@@ -108,9 +108,14 @@ public struct EmailModeView: View {
 
             Section(model.listView == "priority" ? "Important" : "Other mail") {
                 ForEach(model.items) { thread in
-                    threadRow(thread)
+                    HStack(spacing: 8) {
+                        threadRow(thread)
+                            .accessibilityIdentifier("email.thread.\(thread.id.uuidString)")
+                        EmailHandledButton(model: model, thread: thread)
+                            .labelStyle(.iconOnly)
+                            .accessibilityIdentifier("email.handled.\(thread.id.uuidString)")
+                    }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("email.thread.\(thread.id.uuidString)")
                     .listRowBackground(thread.id == model.selectedThreadID ? AppTheme.turquoise.opacity(0.12) : Color.clear)
                 }
                 if model.hasMore {
@@ -172,7 +177,7 @@ public struct EmailModeView: View {
             HStack {
                 Text(accountLabel(thread.accountID)).appFont(.caption).foregroundColor(AppTheme.turquoise)
                 Spacer()
-                Text(thread.draftID != nil ? "Draft" : thread.needsReply ? "Needs reply" : "For your attention")
+                Text(thread.isHandled ? "Handled" : thread.draftID != nil ? "Draft" : thread.needsReply ? "Needs reply" : "For your attention")
                     .appFont(.caption).foregroundColor(.secondary)
             }
             Text(thread.senders.joined(separator: ", ")).appFont(.headline).lineLimit(1)
@@ -181,6 +186,27 @@ public struct EmailModeView: View {
             if !thread.complete { Text("Partial thread").appFont(.caption).foregroundColor(.orange) }
         }.padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+    }
+}
+
+private struct EmailHandledButton: View {
+    @ObservedObject var model: EmailViewModel
+    let thread: EmailThreadView
+
+    var body: some View {
+        Button {
+            Task { await model.setThreadHandled(thread, handled: !thread.isHandled) }
+        } label: {
+            Label(thread.isHandled ? "Handled" : "Mark handled",
+                  systemImage: thread.isHandled ? "checkmark.square.fill" : "square")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .foregroundColor(AppTheme.turquoise)
+        .disabled(model.isPerformingAction || model.unavailable)
+        .accessibilityLabel(thread.isHandled ? "Mark unhandled" : "Mark handled")
+        .accessibilityValue(thread.isHandled ? "Handled" : "Not handled")
+        .help(thread.isHandled ? "Return this thread to attention" : "I've dealt with this thread")
     }
 }
 
@@ -205,6 +231,8 @@ private struct EmailThreadScreen: View {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(thread.subject).appFont(.title2)
                         Text(accountDescription(thread.accountID)).appFont(.caption).foregroundColor(.secondary)
+                        EmailHandledButton(model: model, thread: thread)
+                            .accessibilityIdentifier("email.handled.detail")
                         Text(thread.summary)
                         DisclosureGroup("Why this matters") { Text(thread.reason).frame(maxWidth: .infinity, alignment: .leading) }
                         feedback
@@ -226,7 +254,6 @@ private struct EmailThreadScreen: View {
                         draftEditor
                         Button("Discuss in Chat") { Task { await discussInChat() } }
                             .accessibilityIdentifier("email.discuss")
-                        Button("Dismiss from priority") { Task { await model.dismissSelectedThread() } }
                         Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
                     }
                     .padding().frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)

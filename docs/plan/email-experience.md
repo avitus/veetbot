@@ -70,10 +70,14 @@ mail and Review other mail make false negatives discoverable without cluttering
 the default list. New qualifying mail is announced in place rather than moving
 the selected row beneath the owner.
 
-Viewing a thread does not automatically mark it read in Gmail. Dismiss from
-priority affects Veetbot's attention state for that thread revision; it neither
-archives mail nor silently teaches that the person is unimportant. New material
-in a dismissed thread is assessed again. After a confirmed reply, the thread
+Viewing a thread does not automatically mark it read in Gmail. A visible
+**Mark handled** checkmark on each row and near the top of thread detail means
+the owner has already dealt with that thread revision. It uses the existing
+dismissal attention state, removes the thread from priority, and shows Handled
+when the thread is opened or found in other mail. **Mark unhandled** reverses
+the action. Both actions require server confirmation, preserve draft edits,
+and neither archive mail nor teach that the person is unimportant. New material
+in a handled thread is assessed again. After a confirmed reply, the thread
 leaves Needs reply unless another unanswered request remains.
 
 Freshness is shown per account. A failed or unfinished scan says so. The UI
@@ -579,6 +583,15 @@ validation, authorization, unavailable/partial state, conflicts, cancellation,
 and uncertain results using the existing error vocabulary where possible. SSE
 continues to carry ordinary run progress; email projections refresh by version
 after completion. No custom streaming transport is required.
+
+`POST /v1/email/threads/{id}/dismiss` accepts `expected_revision` and an optional
+strict boolean `dismissed` (default `true` for existing clients). `true` marks
+the current source revision handled; `false` clears that attention state.
+Repeated same-state requests are idempotent. A stale source revision conflicts
+without changing state. Clients derive Handled from the existing
+`dismissed_revision == revision` projection, so new source material reopens it
+and the same state is visible on every device. This command changes no Gmail
+labels, importance feedback, reply-need judgment, or draft content.
 
 ## 8. Privacy, retention, and controls
 

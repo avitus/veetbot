@@ -74,6 +74,7 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let senders: [String]
     public let updatedAt: Date
     public let revision: Int
+    public var dismissedRevision: Int?
     public let summary: String
     public let reason: String
     public let needsReply: Bool
@@ -84,11 +85,14 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let messages: [EmailMessageView]?
     public let draft: EmailDraftView?
 
+    public var isHandled: Bool { dismissedRevision == revision }
+
     enum CodingKeys: String, CodingKey {
         case id, subject, senders, revision, summary, reason, priority, complete, messages, draft
         case accountID = "account_id"
         case updatedAt = "updated_at"
         case needsReply = "needs_reply"
+        case dismissedRevision = "dismissed_revision"
         case draftID = "draft_id"
         case sessionID = "session_id"
     }

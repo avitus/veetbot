@@ -640,13 +640,26 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public func dismissSelectedThread() async {
-        guard let thread, let api = makeAPIClient() else { return }
+        guard let thread else { return }
+        await setThreadHandled(thread, handled: true)
+    }
+
+    public func setThreadHandled(_ thread: EmailThreadView, handled: Bool) async {
+        guard let api = makeAPIClient(), !isPerformingAction else { return }
+        isPerformingAction = true
+        draftActionError = nil
         let connection = generation
+        defer { if generation == connection { isPerformingAction = false } }
         do {
-            _ = try await api.dismissEmailThread(thread, idempotencyKey: UUID().uuidString)
+            let result = try await api.dismissEmailThread(thread, dismissed: handled, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
+            // The command returns a summary. Preserve the open messages and
+            // unsaved draft, updating only server-confirmed attention state.
+            if self.thread?.id == result.id, self.thread?.revision == result.revision {
+                self.thread?.dismissedRevision = result.dismissedRevision
+            }
             await reload(preserveOrder: true)
-        } catch { if generation == connection { report(error, draft: true) } }
+        } catch { if generation == connection { report(error, draft: selectedThreadID == thread.id) } }
     }
 
     public func confirmCurrentSourceReviewed() async {

@@ -9,6 +9,76 @@ import Testing
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    @Test func testDismissalUpdatesSelectedThreadWithoutLosingDraftEdits() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let dismissed = requests.snapshot.contains { $0.url!.path.hasSuffix("dismiss") }
+            if request.url!.path.hasSuffix("threads") {
+                return (200, dismissed ? "{\"items\":[],\"next_cursor\":null}" : self.pageJSON())
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()).replacingOccurrences(
+                of: "\"revision\":1,\"summary\"",
+                with: "\"dismissed_revision\":\(dismissed ? "1" : "null"),\"revision\":1,\"summary\""
+            ))
+        }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep my unfinished reply")
+        await model.dismissSelectedThread()
+        let selected = try #require(model.thread)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(selected)) as! [String: Any]
+        #expect(encoded["dismissed_revision"] as? Int == 1)
+        #expect(model.items.isEmpty)
+        #expect(model.currentEdit?.body == "Keep my unfinished reply")
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.thread?.isHandled == true)
+    }
+
+    @Test func testHandledStateCanBeUndoneAndNewSourceReopensIt() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("dismiss") }
+            return (200, self.threadJSON(draft: self.draftJSON()).replacingOccurrences(
+                of: "\"revision\":1,\"summary\"",
+                with: "\"dismissed_revision\":\(undone ? "null" : "1"),\"revision\":1,\"summary\""
+            ))
+        }
+        await model.openThread(threadID)
+        let handled = try #require(model.thread)
+        #expect(handled.isHandled)
+        await model.setThreadHandled(handled, handled: false)
+        #expect(model.thread?.isHandled == false)
+        #expect(model.items.map(\.id) == [threadID])
+        let changed = threadJSON().replacingOccurrences(of: "\"revision\":1,\"summary\"",
+            with: "\"dismissed_revision\":1,\"revision\":2,\"summary\"")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        #expect(try decoder.decode(EmailThreadView.self, from: Data(changed.utf8)).isHandled == false)
+    }
+
+    @Test func testFailedHandledActionKeepsThreadAndReportsError() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("dismiss") { return (409, Self.error("invalid_state", "New mail arrived. Refresh this thread.")) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        let row = try #require(model.items.first)
+        await model.setThreadHandled(row, handled: true)
+        #expect(model.items.map(\.id) == [threadID])
+        #expect(model.items.first?.isHandled == false)
+        #expect(model.selectedThreadID == nil)
+        #expect(model.errorMessage != nil)
+        #expect(!model.isPerformingAction)
+    }
+
     @Test func testReviewRefusesAnApprovalForDifferentMessageContent() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
