@@ -22,12 +22,11 @@ from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
-    EMAIL_DAILY_CEILING,
-    EMAIL_MONTHLY_CEILING,
     EMAIL_POLICY_VERSION,
     EMAIL_SLICE_RESERVATION,
     EmailAccount,
     EmailAttachment,
+    EmailBudgetLimits,
     EmailDraft,
     EmailDraftEdit,
     EmailDraftStatus,
@@ -135,6 +134,8 @@ def draft_body_fingerprint(body: str) -> str:
 
 
 class EmailExperienceService:
+    """Coordinate owner-scoped mail projections, governed tasks, and feedback."""
+
     def __init__(
         self,
         *,
@@ -142,6 +143,7 @@ class EmailExperienceService:
         clock: Clock,
         ids: IdFactory,
         account_ids: tuple[str, ...],
+        budget_limits: EmailBudgetLimits,
         agent: AgentSpec,
         dispatch: Callable[[UUID], Awaitable[None]],
         seed_checkpoint: CheckpointSeeder,
@@ -153,10 +155,12 @@ class EmailExperienceService:
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
     ) -> None:
+        """Wire ordinary run policy, account bindings, and finite email allowances."""
         self.uow_factory = uow_factory
         self.clock = clock
         self.ids = ids
         self.account_ids = account_ids
+        self.budget_limits = budget_limits
         self.agent = agent
         self.dispatch = dispatch
         self.seed_checkpoint = seed_checkpoint
@@ -705,6 +709,7 @@ class EmailExperienceService:
         return session
 
     async def _check_budget(self, store: EmailStore, principal: Principal, amount: Decimal) -> None:
+        """Count settled usage and unresolved reservations against both windows."""
         now = self.clock.now().astimezone(UTC)
         daily = Decimal("0")
         monthly = Decimal("0")
@@ -715,7 +720,10 @@ class EmailExperienceService:
                 daily += cost
             if task.settled_cost is None or task.created_at >= now - timedelta(days=30):
                 monthly += cost
-        if daily + amount > EMAIL_DAILY_CEILING or monthly + amount > EMAIL_MONTHLY_CEILING:
+        if (
+            daily + amount > self.budget_limits.daily_cost
+            or monthly + amount > self.budget_limits.monthly_cost
+        ):
             raise BudgetExceededError(
                 "email_aggregate_cost",
                 "Automatic email work has reached its cost ceiling; "
@@ -733,6 +741,7 @@ class EmailExperienceService:
         instruction: str | None = None,
         idempotency_key: str | None = None,
     ) -> EmailOperation:
+        """Authorize, coalesce, and reserve an email task before durable dispatch."""
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
         await self.expire_cache(principal)
@@ -793,20 +802,26 @@ class EmailExperienceService:
                 )
             async for row in task_records(uow.email, principal):
                 old = EmailTask.model_validate(row.payload)
+                try:
+                    run = await uow.runs.get(old.run_id, principal)
+                except NotFoundError:
+                    # Missing accounting evidence never releases a reservation.
+                    continue
+                if run.status in TERMINAL_RUN_STATUSES:
+                    await self._settle_task_in(uow, principal, old, run)
+                    continue
                 if old.kind != kind or (
                     kind != "refresh" and (old.thread_id != thread_id or old.draft_id != draft_id)
                 ):
                     continue
-                run = await uow.runs.get(old.run_id, principal)
-                if run.status not in TERMINAL_RUN_STATUSES:
-                    if kind == "send" and old.expected_revision != expected_revision:
-                        raise ConflictError("another draft revision already has a send operation")
-                    return EmailOperation(
-                        operation_id=old.id,
-                        run_id=old.run_id,
-                        status=run.status.value,
-                        replayed=True,
-                    )
+                if kind == "send" and old.expected_revision != expected_revision:
+                    raise ConflictError("another draft revision already has a send operation")
+                return EmailOperation(
+                    operation_id=old.id,
+                    run_id=old.run_id,
+                    status=run.status.value,
+                    replayed=True,
+                )
             if draft is not None:
                 assert thread is not None
                 if (
@@ -968,6 +983,7 @@ class EmailExperienceService:
             await save_value(uow.email, principal, "task", str(task.run_id), task, self.clock.now())
 
     async def settle(self, principal: Principal, run_id: UUID) -> None:
+        """Release terminal refresh resources and settle only provable usage."""
         task = await self.get_task(principal, run_id)
         if task is not None and task.kind == "refresh":
             async with self.uow_factory() as uow:
@@ -982,46 +998,65 @@ class EmailExperienceService:
                 return
             run = await uow.runs.get(run_id, principal)
             if run.status in TERMINAL_RUN_STATUSES:
-                events = await uow.events.list_after(run.session_id, 0, principal)
-                started = {
-                    str(event.payload["attempt_id"])
-                    for event in events
-                    if event.run_id == run.id and event.event_type == "model.request.started"
-                }
-                completed = {
-                    str(event.payload["attempt_id"])
-                    for event in events
-                    if event.run_id == run.id and event.event_type == "model.response.completed"
-                }
-                if started - completed:
-                    await save_value(
-                        uow.email,
-                        principal,
-                        "task",
-                        str(run_id),
-                        task.model_copy(
-                            update={
-                                "stage": "cost_reconciliation_required",
-                            }
-                        ),
-                        self.clock.now(),
-                    )
-                    return
-                await save_value(
-                    uow.email,
-                    principal,
-                    "task",
-                    str(run_id),
-                    task.model_copy(
-                        update={
-                            "settled_cost": run.usage.cost,
-                            "stage": run.status.value.lower(),
-                        }
-                    ),
-                    self.clock.now(),
-                )
+                await self._settle_task_in(uow, principal, task, run)
+
+    async def _settle_task_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        task: EmailTask,
+        run: Run,
+    ) -> None:
+        """Reconcile a terminal task while the caller holds the principal lock."""
+        events = await uow.events.list_after(run.session_id, 0, principal, run_id=run.id)
+        started: set[UUID] = set()
+        observed: set[UUID] = set()
+        known: set[UUID] = set()
+        malformed = False
+        for event in events:
+            if event.event_type not in {
+                "model.request.started",
+                "model.response.completed",
+                "model.response.failed",
+            }:
+                continue
+            raw_attempt_id = event.payload.get("attempt_id")
+            if not isinstance(raw_attempt_id, str):
+                malformed = True
+                continue
+            try:
+                attempt_id = UUID(raw_attempt_id)
+            except ValueError:
+                malformed = True
+                continue
+            observed.add(attempt_id)
+            if event.event_type == "model.request.started":
+                started.add(attempt_id)
+            elif event.event_type == "model.response.completed" or (
+                event.payload.get("error_class") == "ModelPermanentError"
+                and event.payload.get("http_status") == 400
+                and event.payload.get("provider_code") == "invalid_json_schema"
+            ):
+                known.add(attempt_id)
+        # Terminal events precede durable usage. Unknown failures can record a
+        # synthetic zero, so both accounting and a proven outcome are required.
+        if (
+            malformed
+            or observed != started
+            or started - known
+            or (run.usage.model_calls != len(started))
+        ):
+            if task.stage == "cost_reconciliation_required":
+                return
+            updated = task.model_copy(update={"stage": "cost_reconciliation_required"})
+        else:
+            updated = task.model_copy(
+                update={"settled_cost": run.usage.cost, "stage": run.status.value.lower()}
+            )
+        await save_value(uow.email, principal, "task", str(run.id), updated, self.clock.now())
 
     async def _release_refresh_session(self, session_id: UUID) -> None:
+        """Release ephemeral refresh resources while preserving durable evidence."""
         try:
             if self.close_session is not None:
                 await self.close_session(session_id)

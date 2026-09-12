@@ -24,6 +24,9 @@ run_defaults:
   max_steps: 32
   max_model_calls: 16
   max_tool_calls: 32
+email:
+  daily_cost: 20.0
+  monthly_cost: 200.0
 scheduling:
   scan_batch: 100
   fallback_poll_seconds: 30

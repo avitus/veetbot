@@ -215,7 +215,15 @@ defaults are **USD 20 per UTC day and USD 200 per rolling thirty days**, across
 both accounts/devices and all automatic classification, history, style,
 drafting, and formation work. Reserve each slice's maximum cost transactionally
 before admission, settle actual usage afterward, and retain unresolved
-reservations through crash recovery. Admission queries select unsettled tasks
+reservations through crash recovery. Settlement requires every started model
+attempt to have a completed response or a proven pre-generation rejection and
+the durable usage count to match all started attempts. HTTP 400
+`invalid_json_schema` permanent failures are proven request rejections;
+transport failures, timeouts, missing outcomes, and incomplete accounting keep
+their reservations. Admission reconsiders terminal unsettled tasks under the
+same principal lock before checking the aggregate budget, so a repaired
+accounting path can recover old holds without resetting the allowance.
+Admission queries select unsettled tasks
 and, for budget calculation, settled tasks created within the rolling thirty-day
 window before pagination. Older settled task records remain available for audit
 and idempotent command replay. Dependent extraction calls cannot escape
@@ -228,6 +236,14 @@ throughput and cost before changing these approved limits or any existing spend
 ceiling. The numbers are reviewable configuration defaults, not permission to
 spend outside the approved implementation and evaluation scope. “Maximum learning” means broad, resumable evidence use,
 not an unbounded parallel import or automatic budget increase.
+
+The shipped `runtime/limits.yaml` values `email.daily_cost` and
+`email.monthly_cost` hold these defaults. A reviewed operator overlay under
+`AGENT_CONFIG_DIR` can set owner-authorized allowances; both values must be
+finite numeric dollar amounts of at least USD 0.01. The composition root
+injects the effective values into email admission. Changing them does not
+renew prior usage or reservations, raise the USD 1 slice reservation, or
+bypass lower applicable limits.
 
 ## 4. Importance learning
 
@@ -807,7 +823,7 @@ Private quality and owner-smoke evidence cannot be replaced by synthetic tests.
    `gate.email.experience_history_progress`. **M26.**
 9. **Governed task execution.** Typed deterministic ingestion uses ordinary durable worker leases, checkpoints, cancellation, policy and budgets without direct API-handler Gmail calls, fabricated owner messages or model-selected pagination. Registered as
    `gate.email.experience_governed_tasks`. **M26.**
-10. **Aggregate automatic-email cost.** Atomic reservations and actual usage cover all automatic email stages across accounts and devices, enforce USD 20 per UTC day and USD 200 per rolling thirty days with lower limits prevailing, and release or reconcile reservations on every terminal path. Registered as
+10. **Aggregate automatic-email cost.** Atomic reservations and actual usage cover all automatic email stages across accounts and devices, enforce the configured ceilings (shipped defaults USD 20 per UTC day and USD 200 per rolling thirty days) with lower limits prevailing, and release or reconcile reservations on every terminal path. Registered as
    `gate.email.experience_aggregate_cost`. **M26.**
 11. **Feedback scope.** Thread, person, topic and reply-need feedback have distinct authenticated effects; explicit owner corrections dominate inferred evidence across Email and Chat. Registered as
    `gate.email.experience_feedback_scope`. **M26.**

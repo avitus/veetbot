@@ -355,6 +355,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
+from agent_core.domain.email import EmailBudgetLimits
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
@@ -1850,6 +1851,7 @@ async def _compose(
     storage: Literal["memory", "postgres"],
     settings: Settings,
     agent: AgentSpec,
+    email_budget_limits: EmailBudgetLimits,
     principal: Principal,
     uow_factory: UnitOfWorkFactory,
     clock: Clock,
@@ -3128,6 +3130,7 @@ async def _compose(
                     settings.email_account_ids or (("default",) if settings.email_enabled else ())
                 ),
                 agent=agent,
+                budget_limits=email_budget_limits,
                 dispatch=dispatcher.dispatch,
                 seed_checkpoint=checkpoint_seeder,
                 catalogs=skill_catalogs,
@@ -3570,6 +3573,7 @@ async def build(
         load_config_document(effective_settings, "memory/profiles.yaml")
     )
     run_defaults = runtime_config["run_defaults"]
+    email_budget_limits = EmailBudgetLimits.model_validate(runtime_config["email"])
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
     worker_config = runtime_config["worker"]
@@ -3889,6 +3893,7 @@ async def build(
             storage=storage,
             settings=effective_settings,
             agent=agent,
+            email_budget_limits=email_budget_limits,
             principal=effective_principal,
             uow_factory=uow_factory,
             clock=effective_clock,
