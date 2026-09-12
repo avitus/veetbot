@@ -1478,6 +1478,14 @@ The first context builder should assemble:
 
 The builder enforces the prompt-stability invariant (Section 10.1): platform policy, agent instructions, and tool definitions form a byte-stable prefix built once per session; volatile items - the current date, retrieved memory, and tool results - are placed in the user turn so the cached prefix never changes mid-session.
 
+The owner-authorized [ADR-0094](../adr/0094-context-authority-at-run-boundaries.md)
+refines session prefix stability at a run boundary: before a run pins its tools,
+new effective scope grants start a logged context epoch using the filters
+below. Tool definitions remain byte-stable during that run, including retries
+and approval resumes. A restricted scheduled briefing and an authenticated
+owner reply can therefore share history without sharing the briefing's
+restricted tool advertisement or widening the briefing's execution authority.
+
 Do not load every registered tool. Filter tools by:
 
 - Agent configuration
@@ -4017,6 +4025,10 @@ Implement:
 - Both existing Gmail accounts in a short high-precision priority view. Refresh
   on entry and foreground return and every sixty seconds while visible. Only
   fresh client requests admit bounded work; no unattended monitor is authorized.
+- Owner-requested archive and move-to-Inbox actions from the Email checkbox,
+  bound to the originating Gmail account and exact thread. Each gesture supplies
+  single-action consent through the existing approval and tool machinery;
+  autonomous mailbox writes remain excluded (ADR-0095).
 - Reliable account-qualified incremental synchronization and resumable historical
   received and Sent analysis without a fixed age cutoff, with honest partial
   coverage, checkpoints, provider failure recovery and no duplicate learning.

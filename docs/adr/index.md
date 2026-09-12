@@ -102,3 +102,5 @@ implementation without one.
 - [ADR-0091 — Schedule identity in outcome notifications (Proposed)](0091-schedule-identity-in-notifications.md)
 - [ADR-0092 — Client modes and a shared adaptive email experience (Accepted; Milestone 26)](0092-client-modes-and-email-experience.md)
 - [ADR-0093 — Keep an independently selected, evidenced memory model](0093-independent-memory-model-policy.md)
+- [ADR-0094 — Refresh context authority at run boundaries (Proposed)](0094-context-authority-at-run-boundaries.md)
+- [ADR-0095 — Owner-requested Gmail archive from Email mode (Proposed)](0095-owner-requested-gmail-archive.md)

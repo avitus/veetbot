@@ -70,15 +70,22 @@ mail and Review other mail make false negatives discoverable without cluttering
 the default list. New qualifying mail is announced in place rather than moving
 the selected row beneath the owner.
 
-Viewing a thread does not automatically mark it read in Gmail. A visible
-**Mark handled** checkmark on each row and near the top of thread detail means
-the owner has already dealt with that thread revision. It uses the existing
-dismissal attention state, removes the thread from priority, and shows Handled
-when the thread is opened or found in other mail. **Mark unhandled** reverses
-the action. Both actions require server confirmation, preserve draft edits,
-and neither archive mail nor teach that the person is unimportant. New material
-in a handled thread is assessed again. After a confirmed reply, the thread
-leaves Needs reply unless another unanswered request remains.
+Viewing a thread does not automatically mark it read in Gmail. On servers
+advertising archive support, the checkbox on each row and in thread detail
+means **Archive in Gmail**. Checking it removes `INBOX` from that conversation
+in its originating account; unchecking an archived conversation explicitly
+moves it back to the same account's Inbox. The clearly labelled gesture supplies
+single-action owner consent under ADR-0095. Keep the row and previous checked
+state while the operation is pending; show failures or uncertain outcomes and
+change the state only after confirmation. Preserve draft edits, unread state,
+other labels, and importance feedback. New correspondence is assessed again.
+After a confirmed reply, the thread leaves Needs reply unless another
+unanswered request remains.
+
+Legacy clients' **Mark handled** command remains a local, reversible dismissal
+of that source revision. It does not archive Gmail and is not evidence that a
+thread is archived. New clients must not silently substitute this command when
+the server or selected account lacks archive support.
 
 Freshness is shown per account. A failed or unfinished scan says so. The UI
 must not equate an incomplete scan or model failure with an empty priority inbox.
@@ -522,10 +529,15 @@ nested semantic facts, for strict structured output. Nullable values and empty
 lists express absence explicitly. Domain defaults and local evidence validation
 remain unchanged, and token estimation uses the actual transmitted schema.
 
-The conversation index excludes the server-owned operational marker within each
-repository query before cursor limits apply. Feedback evidence queries are
-scoped to the current run before fetching events, retaining the same principal
-and owner-authorship checks.
+The conversation index excludes the server-owned operational marker and draft-only
+email thread sessions within each repository query before cursor limits apply.
+An email thread session becomes visible after an owner `user.message.created`
+event or an explicit Discuss in Chat action, recorded once per session as a
+content-free, principal-authored `email.discussion.opened` event. Existing draft
+sessions without either event remain accessible to Email but absent from Chat;
+existing owner conversations remain visible. No draft or session is deleted.
+Feedback evidence queries are scoped to the current run before fetching events,
+retaining the same principal and owner-authorship checks.
 
 ### State ownership
 
@@ -568,6 +580,7 @@ normal contract naming review:
 | `/v1/email/learning` | Inspect profile/coverage, pause/resume learning, reset derived preferences or exclude a source. |
 | `/v1/email/threads/{id}/drafts` and draft detail | Start/refine a governed generation run; read/save revisions; discard internal proposals. |
 | `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references. |
+| `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
 | Existing approval routes | Resolve every send once; no alternate direct-send HTTP route. |
 
 The exact platform scopes are `email.read` and `email.write` for application
@@ -595,6 +608,41 @@ without changing state. Clients derive Handled from the existing
 `dismissed_revision == revision` projection, so new source material reopens it
 and the same state is visible on every device. This command changes no Gmail
 labels, importance feedback, reply-need judgment, or draft content.
+
+`POST /v1/email/threads/{id}/archive` accepts an expected source revision, a
+strict `archived` boolean, and an idempotency key. The server fixes the action
+to one provider thread and the `INBOX` label; callers cannot supply another
+account, tool, or label. Account projections advertise `archive_supported`
+and `write_server_id`; missing support disables this action without disabling
+Email browsing. Thread projections retain Inbox state and a durable archive
+operation with its run identity, target state, and pending, completed, failed,
+or uncertain outcome so another device can recover the presentation.
+
+Archive admission requires current `email.read`, `email.write`, `run.write`,
+`session.write`, `approval.resolve`, and the account's exact read/write MCP
+scopes. The typed task performs no model work and consumes no automatic-email
+dollar reservation. It uses the existing tool pipeline and approval floor,
+validating the immutable, expiring owner request against the exact pending
+action before ordinary one-time resolution. Preserve requested/resolved audit
+ordering, policy revalidation, worker fencing, and uncertain-effect rules.
+Identical command retries replay their durable result. Labels alone are not
+new source content: synchronization must not stale a draft, reopen handled
+attention, or renew learned evidence solely because Inbox membership changed.
+The tool's pre-effect dispatch guard checks current owner authority and exact
+consent again after approval resolution. Recorded-status reads recover durable
+outcomes without calling Gmail; an uncertain effect remains uncertain until an
+authoritative fresh mailbox read establishes the requested state. These reads
+never redispatch an uncertain write.
+Archive freshness is an account and thread identity check, not a requirement to
+download every message body or match cached Gmail history. A bounded first-page
+read verifies the account-bound conversation; Gmail history changes on label
+writes, so that change must not block an immediate move back to Inbox. The
+command applies to the entire conversation, including mail that Gmail knows
+about but the client has not yet loaded, just as Gmail's conversation archive
+does. Expected local content revision is still checked before admission and
+dispatch; a concurrent local update invalidates that gesture. Never replace
+cached source or draft content with a partial archive preflight. Exact-content
+freshness for sending remains unchanged.
 
 ## 8. Privacy, retention, and controls
 

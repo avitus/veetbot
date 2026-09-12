@@ -9,6 +9,508 @@ import Testing
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    /// A clearly labelled archive gesture must reach the originating thread's remote command.
+    @Test(arguments: ["personal", "work"])
+    func testArchiveUsesAccountBoundCommandAndPreservesDraft(account: String) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "COMPLETED")) }
+            let archived = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let thread = self.archiveThreadJSON(account: account, inInbox: !archived,
+                status: archived ? "completed" : nil, draft: self.draftJSON())
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(archived ? "" : thread)],\"next_cursor\":null}")
+            }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Preserve my unfinished reply")
+        let thread = try #require(model.thread)
+        await model.setThreadArchived(thread, archived: true)
+        let command = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("archive") })
+        let body = try Self.archiveRequestBody(command)
+        #expect(body["archived"] as? Bool == true)
+        #expect(body["expected_revision"] as? Int == 1)
+        #expect(body["account_id"] == nil)
+        #expect(body["idempotency_key"] as? String == command.value(forHTTPHeaderField: "Idempotency-Key"))
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("dismiss") })
+        #expect(model.items.isEmpty)
+        #expect(model.currentEdit?.body == "Preserve my unfinished reply")
+        #expect(model.selectedThreadID == threadID)
+    }
+
+    /// An unsupported mailbox cannot borrow archive support from another connected account.
+    @Test(arguments: [false, true])
+    func testArchiveRefusesMissingOrFalseAccountCapability(explicitFalse: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let unsupported = Self.archiveAccountsJSON.replacingOccurrences(
+            of: "\"archive_supported\":true,\"write_server_id\":\"gmail_write\",",
+            with: explicitFalse ? "\"archive_supported\":false," : "")
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, unsupported) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.archiveThreadJSON(inInbox: true))
+        }
+        await model.reload()
+        await model.openThread(threadID)
+        await model.setThreadArchived(try #require(model.thread), archived: true)
+        #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
+        #expect(!model.unavailable)
+    }
+
+    /// A lost admission response must reuse its action key; explicit retry cannot create a second archive.
+    @Test func testArchiveLostResponseReusesOneKey() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("archive") {
+                if requests.snapshot.filter({ $0.httpMethod == "POST" }).count <= 2 { return (502, "Bad Gateway") }
+                return (202, self.operationJSON(status: "COMPLETED"))
+            }
+            let completed = requests.snapshot.filter { $0.httpMethod == "POST" }.count >= 3
+            let thread = self.archiveThreadJSON(inInbox: !completed, status: completed ? "completed" : nil)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        await model.setThreadArchived(row, archived: true)
+        await model.setThreadArchived(row, archived: true)
+        let commands = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(commands.count == 3)
+        #expect(commands.allSatisfy { $0.url!.path.hasSuffix("archive") })
+        #expect(Set(commands.compactMap { $0.value(forHTTPHeaderField: "Idempotency-Key") }).count == 1)
+    }
+
+    /// A new client must not substitute local dismissal when a server lacks the archive route.
+    @Test(arguments: [404, 405])
+    func testArchiveUnsupportedRouteNeverFallsBack(status: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.httpMethod == "POST" { return (status, Self.error("not_found", "Unavailable")) }
+            let thread = self.archiveThreadJSON(inInbox: true)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            return (200, thread)
+        }
+        await model.reload()
+        let row = try #require(model.items.first)
+        await model.setThreadArchived(row, archived: true)
+        await model.setThreadArchived(row, archived: true)
+        #expect(!model.unavailable)
+        #expect(model.items.count == 1)
+        let commands = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(commands.count == 1)
+        #expect(commands.allSatisfy { $0.url!.path.hasSuffix("archive") })
+    }
+
+    /// A completed foreground poll removes the archived row without a second mutation or losing edits.
+    @Test func testArchivePendingProjectionRecoversAcrossVisits() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("refresh") { return (202, self.operationJSON(status: "RUNNING")) }
+            if request.url!.path.contains("/operations/") { return (200, self.operationJSON(status: "RUNNING")) }
+            let recovered = requests.snapshot.contains { $0.url!.path == "/v1/email/threads/\(self.threadID.uuidString)" }
+            let thread = self.archiveThreadJSON(inInbox: !recovered, status: recovered ? "completed" : "pending")
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(recovered ? "" : thread)],\"next_cursor\":null}")
+            }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let pending = try #require(model.items.first)
+        #expect(!pending.isArchived)
+        #expect(!model.canArchive(pending))
+        #expect(model.archiveMessage(for: pending) == "Archiving in Gmail…")
+        model.setActive(true)
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.url!.path == "/v1/email/threads/\(threadID.uuidString)" }
+        }
+        try await waitForEmailTestCondition { model.items.isEmpty }
+        #expect(model.items.isEmpty)
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("archive") || $0.url!.path.hasSuffix("dismiss") })
+    }
+
+    /// Failed and uncertain outcomes keep observed state; checking uncertain work never reissues the write.
+    @Test(arguments: ["pending", "failed", "uncertain"])
+    func testArchiveOutcomeKeepsMailboxStateAndDraft(status: String) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            let thread = self.archiveThreadJSON(inInbox: true, status: status, draft: self.draftJSON())
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep this draft while Gmail recovers")
+        await model.checkArchiveStatus(threadID)
+        let thread = try #require(model.thread)
+        #expect(!thread.isArchived)
+        #expect(model.items.count == 1)
+        #expect(model.archiveMessage(for: thread) != nil)
+        #expect(model.canArchive(thread) == (status == "failed"))
+        #expect(model.currentEdit?.body == "Keep this draft while Gmail recovers")
+        #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
+    }
+
+    /// Restoring an archived conversation explicitly adds Inbox and preserves unrelated send-review errors.
+    @Test func testMoveToInboxPreservesUnrelatedSendError() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("send-proposal") { return (400, Self.error("malformed_request", "Review failed.")) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "COMPLETED")) }
+            let restored = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let thread = self.archiveThreadJSON(inInbox: restored, status: restored ? "completed" : nil,
+                targetArchived: false, draft: self.draftJSON())
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        await model.prepareSend()
+        #expect(model.draftError == "Review failed.")
+        model.changeEdit(\.body, to: "Unsent and retained")
+        await model.setThreadArchived(try #require(model.thread), archived: false)
+        #expect(model.thread?.inInbox == true)
+        #expect(model.draftError == "Review failed.")
+        #expect(model.currentEdit?.body == "Unsent and retained")
+        let command = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("archive") })
+        #expect(try Self.archiveRequestBody(command)["archived"] as? Bool == false)
+    }
+
+    /// A previous terminal projection cannot discard the retry identity of a newer unacknowledged action.
+    @Test func testArchiveOldTerminalProjectionPreservesNewerLostResponseKey() async throws {
+        let requests = EmailRequestRecorder()
+        let previousOperation = UUID(uuidString: "00000000-0000-0000-0000-000000000805")!
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("archive") { return (502, "Bad Gateway") }
+            let previous = self.archiveThreadJSON(inInbox: false, status: "completed", operationID: previousOperation)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(previous)],\"next_cursor\":null}") }
+            return (200, previous)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let archived = try #require(model.items.first)
+        await model.setThreadArchived(archived, archived: false)
+        let firstAttempts = requests.snapshot.filter { $0.url!.path.hasSuffix("archive") }
+        #expect(firstAttempts.count == 2)
+        #expect(model.archiveErrors[threadID] != nil)
+
+        // A read that still observes the prior operation supplies no outcome for the lost restore admission.
+        await model.checkArchiveStatus(threadID)
+        await model.setThreadArchived(try #require(model.items.first), archived: false)
+        let commands = requests.snapshot.filter { $0.url!.path.hasSuffix("archive") }
+        #expect(commands.count == 4)
+        #expect(Set(commands.compactMap { $0.value(forHTTPHeaderField: "Idempotency-Key") }).count == 1)
+        #expect(try commands.allSatisfy { try Self.archiveRequestBody($0)["archived"] as? Bool == false })
+    }
+
+    /// Recovering a status read shows the durable pending action instead of retaining a stale transport failure.
+    @Test func testArchiveSuccessfulPendingStatusClearsReadFailure() async throws {
+        let requests = EmailRequestRecorder()
+        let pointPath = "/v1/email/threads/\(threadID.uuidString)"
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path == pointPath,
+               requests.snapshot.filter({ $0.url!.path == pointPath }).count == 1 {
+                return (502, "Bad Gateway")
+            }
+            let pending = self.archiveThreadJSON(inInbox: true, status: "pending")
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(pending)],\"next_cursor\":null}") }
+            return (200, pending)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.checkArchiveStatus(threadID)
+        #expect(model.archiveErrors[threadID] != nil)
+        await model.checkArchiveStatus(threadID)
+        let pending = try #require(model.items.first)
+        #expect(model.archiveErrors[threadID] == nil)
+        #expect(model.archiveMessage(for: pending) == "Archiving in Gmail…")
+        #expect(!pending.isArchived)
+        #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
+    }
+
+    /// Admission metadata cannot replace Inbox state confirmed after the gesture's source snapshot was obtained.
+    @Test func testArchiveAdmissionPreservesNewerConfirmedInboxState() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED")) }
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(self.archiveThreadJSON(inInbox: true))],\"next_cursor\":null}")
+            }
+            if requests.snapshot.contains(where: { $0.url!.path.hasSuffix("archive") }) {
+                return (502, "Bad Gateway")
+            }
+            return (200, self.archiveThreadJSON(inInbox: false, draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let gestureSnapshot = try #require(model.items.first)
+        await model.openThread(threadID)
+        #expect(model.thread?.isArchived == true)
+        await model.setThreadArchived(gestureSnapshot, archived: true)
+        #expect(model.thread?.archiveOperation?.status == "pending")
+        #expect(model.thread?.isArchived == true)
+        #expect(model.thread?.inInbox == false)
+    }
+
+    /// An erased thread's resource error cannot disable archive for a different thread in the same account.
+    @Test func testArchiveErasedThreadDoesNotDisableOtherAccountRow() async throws {
+        let requests = EmailRequestRecorder()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path == "/v1/email/threads/\(self.threadID.uuidString)/archive" {
+                return (404, Self.error("not_found", "email thread not found"))
+            }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED")) }
+            let other = self.archiveThreadJSON(inInbox: true, status: "pending")
+                .replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString)
+            if request.url!.path.hasSuffix("threads") {
+                let first = self.archiveThreadJSON(inInbox: true)
+                let second = self.archiveThreadJSON(inInbox: true)
+                    .replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString)
+                return (200, "{\"items\":[\(first),\(second)],\"next_cursor\":null}")
+            }
+            return (200, other)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let erased = try #require(model.items.first { $0.id == threadID })
+        let other = try #require(model.items.first { $0.id == otherID })
+        await model.setThreadArchived(erased, archived: true)
+        #expect(model.archiveErrors[threadID] != nil)
+        #expect(model.archiveUnavailableReason(for: other) == nil)
+        await model.setThreadArchived(other, archived: true)
+        #expect(requests.snapshot.contains { $0.url!.path == "/v1/email/threads/\(otherID.uuidString)/archive" })
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("dismiss") })
+    }
+
+    /// New correspondence discovered by an archive status read updates source and draft freshness while retaining edits.
+    @Test func testArchiveSourceChangePreservesEditsAndShowsStaleDraft() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            let pointReads = requests.snapshot.filter { $0.url!.path == "/v1/email/threads/\(self.threadID.uuidString)" }.count
+            var thread = self.archiveThreadJSON(inInbox: true, status: pointReads > 1 ? "failed" : nil,
+                draft: self.draftJSON())
+            if pointReads > 1 {
+                thread = thread.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"revision\":2,\"summary\"")
+                    .replacingOccurrences(of: "Board discussion", with: "A new reply arrived")
+                    .replacingOccurrences(of: "\"stale\":false", with: "\"stale\":true")
+            }
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep my wording")
+        await model.checkArchiveStatus(threadID)
+        #expect(model.thread?.revision == 2)
+        #expect(model.thread?.subject == "A new reply arrived")
+        #expect(model.draft?.stale == true)
+        #expect(model.currentEdit?.body == "Keep my wording")
+        #expect(!model.canReview)
+    }
+
+    /// An old foreground status read cannot change mailbox state or clear the connection after hiding Email.
+    @Test(arguments: [200, 403])
+    func testArchiveStatusReadIgnoresObsoleteActivation(status: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let path = "/v1/email/threads/\(threadID.uuidString)"
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("refresh") { return (202, self.operationJSON(status: "RUNNING")) }
+            if request.url!.path == path {
+                Thread.sleep(forTimeInterval: 0.15)
+                return (status, status == 200 ? self.archiveThreadJSON(inInbox: false, status: "completed")
+                    : Self.error("authorization_error", "Read revoked"))
+            }
+            return (200, "{\"items\":[\(self.archiveThreadJSON(inInbox: true))],\"next_cursor\":null}")
+        }
+        defer { model.resetConnection() }
+        model.setActive(true)
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path.hasSuffix("refresh") } && !model.isRefreshing }
+        let read = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path == path } }
+        model.setActive(false)
+        await read.value
+        #expect(model.items.first?.inInbox == true)
+        #expect(model.accounts.count == 2)
+        #expect(model.archiveErrors.isEmpty)
+    }
+
+    /// Rapid repeated gestures share the in-flight admission and retain the same target.
+    @Test func testArchiveConcurrentGesturesCoalesce() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if request.url!.path.hasSuffix("archive") {
+                Thread.sleep(forTimeInterval: 0.15)
+                return (202, self.operationJSON(status: "RUNNING"))
+            }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let thread = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            return (200, thread)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let first = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path.hasSuffix("archive") } }
+        await model.setThreadArchived(row, archived: false)
+        await first.value
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        #expect(model.items.first?.archiveOperation?.targetArchived == true)
+        #expect(model.items.first?.inInbox == true)
+    }
+
+    /// Archiving one row cannot discard the body read for a different selected conversation.
+    @Test func testArchiveOtherRowDoesNotInvalidateSelectedDetailRead() async throws {
+        let requests = EmailRequestRecorder()
+        let responseGate = EmailArchiveResponseGate()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let otherPath = "/v1/email/threads/\(otherID.uuidString)"
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "COMPLETED"), nil) }
+            let other = self.archiveThreadJSON(inInbox: true, draft: self.draftJSON())
+                .replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString)
+            if request.url!.path == otherPath { return (200, other, responseGate) }
+            let archived = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let first = self.archiveThreadJSON(inInbox: !archived, status: archived ? "completed" : nil)
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(archived ? "" : first + ",")\(other)],\"next_cursor\":null}", nil)
+            }
+            return (200, first, nil)
+        }
+        defer { responseGate.release(); model.resetConnection() }
+        await model.reload()
+        let first = try #require(model.items.first { $0.id == threadID })
+        let opening = Task { await model.openThread(otherID) }
+        try await waitForEmailTestCondition { responseGate.isWaiting }
+        await model.setThreadArchived(first, archived: true)
+        responseGate.release()
+        await opening.value
+
+        #expect(model.selectedThreadID == otherID)
+        #expect(model.thread?.id == otherID)
+        #expect(model.thread?.subject == "Board discussion")
+        #expect(model.draftError == nil)
+        #expect(!model.isLoadingThread)
+    }
+
+    /// A point read buffered before autosave cannot restore an older clean draft after the save succeeds.
+    @Test func testArchiveDelayedPointReadPreservesNewerSavedDraft() async throws {
+        let requests = EmailRequestRecorder()
+        let responseGate = EmailArchiveResponseGate()
+        let pointPath = "/v1/email/threads/\(threadID.uuidString)"
+        let savedBody = "Keep the wording that was just saved."
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: savedBody), nil) }
+            let previous = self.archiveThreadJSON(inInbox: true, status: "pending", draft: self.draftJSON())
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(previous)],\"next_cursor\":null}", nil) }
+            let delayed = request.url!.path == pointPath
+                && requests.snapshot.filter { $0.url!.path == pointPath }.count == 2
+            return (200, previous, delayed ? responseGate : nil)
+        }
+        defer { responseGate.release(); model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        let checking = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { responseGate.isWaiting }
+        model.changeEdit(\.body, to: savedBody)
+        #expect(await model.saveDraft())
+        #expect(model.draft?.revision == 2)
+        #expect(model.currentEdit?.isDirty == false)
+        responseGate.release()
+        await checking.value
+
+        #expect(model.draft?.revision == 2)
+        #expect(model.currentEdit?.base.revision == 2)
+        #expect(model.currentEdit?.body == savedBody)
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
+    /// Builds an isolated transport whose selected response can be delivered after an independent request finishes.
+    private func makeArchiveRaceModel(
+        handler: @escaping (URLRequest) throws -> (Int, String, EmailArchiveResponseGate?)
+    ) throws -> EmailViewModel {
+        let id = EmailArchiveRaceURLProtocol.register(handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [EmailArchiveRaceURLProtocol.self]
+        configuration.httpAdditionalHeaders = ["X-Email-Archive-Race": id]
+        let api = VeetbotAPIClient(transport: HTTPTransport(
+            configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
+            tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
+        ))
+        return EmailViewModel(makeAPIClient: { api })
+    }
+
+    /// Adds explicit feature support without changing unrelated account fixture defaults.
+    private static var archiveAccountsJSON: String {
+        accountsJSON.replacingOccurrences(of: "\"read_server_id\":\"gmail_read\"",
+            with: "\"archive_supported\":true,\"write_server_id\":\"gmail_write\",\"read_server_id\":\"gmail_read\"")
+            .replacingOccurrences(of: "\"read_server_id\":\"gmail_work_read\"",
+                with: "\"archive_supported\":true,\"write_server_id\":\"gmail_work_write\",\"read_server_id\":\"gmail_work_read\"")
+    }
+
+    /// Supplies mailbox state and durable action outcomes through the real JSON decoder.
+    private func archiveThreadJSON(account: String = "personal", inInbox: Bool, status: String? = nil,
+        targetArchived: Bool = true, draft: String = "null", operationID: UUID? = nil) -> String {
+        let operation = status.map { "{\"operation_id\":\"\(operationID ?? threadID)\",\"run_id\":\"\(runID)\",\"target_archived\":\(targetArchived),\"status\":\"\($0)\",\"error\":null}" } ?? "null"
+        return threadJSON(draft: draft).replacingOccurrences(of: "\"account_id\":\"personal\"",
+            with: "\"account_id\":\"\(account)\",\"in_inbox\":\(inInbox),\"archive_operation\":\(operation)")
+    }
+
+    /// Reads the URLSession request stream without bypassing the production transport.
+    private static func archiveRequestBody(_ request: URLRequest) throws -> [String: Any] {
+        if let data = request.httpBody { return try JSONSerialization.jsonObject(with: data) as! [String: Any] }
+        let stream = try #require(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var bytes = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&bytes, maxLength: bytes.count)
+            if count <= 0 { break }
+            data.append(bytes, count: count)
+        }
+        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
     /// A successful attention command updates its summary without replacing the open draft.
     @Test func testDismissalUpdatesSelectedThreadWithoutLosingDraftEdits() async throws {
         let requests = EmailRequestRecorder()
@@ -979,6 +1481,78 @@ import Testing
         {"id":"\(approvalID)","run_id":"\(runID)","session_id":"\(threadID)","status":"PENDING","tool_name":"mcp.gmail_send.send_message","action_summary":"Send reply","arguments":{"thread_id":"provider-thread","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)"},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
         """
     }
+}
+
+/// Holds one response without blocking URLSession from servicing an independent save or archive request.
+private final class EmailArchiveResponseGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var delivery: (() -> Void)?
+    private var released = false
+
+    /// Signals that the original HTTP result has been captured and can safely be ordered after another request.
+    var isWaiting: Bool { lock.withLock { delivery != nil } }
+
+    /// Retains the response until release, including the case where cleanup released it before registration.
+    func install(_ callback: @escaping () -> Void) {
+        let deliverNow = lock.withLock {
+            if released { return true }
+            delivery = callback
+            return false
+        }
+        if deliverNow { callback() }
+    }
+
+    /// Delivers at most once and runs callbacks outside the state lock.
+    func release() {
+        let callback = lock.withLock {
+            released = true
+            let callback = delivery
+            delivery = nil
+            return callback
+        }
+        callback?()
+    }
+}
+
+/// Allows deterministic response ordering while preserving the production JSON and HTTP transport paths.
+private final class EmailArchiveRaceURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var handlers: [String: (URLRequest) throws -> (Int, String, EmailArchiveResponseGate?)] = [:]
+
+    /// Each model receives a distinct response handler so delayed delivery cannot affect another test.
+    static func register(_ handler: @escaping (URLRequest) throws -> (Int, String, EmailArchiveResponseGate?)) -> String {
+        let id = UUID().uuidString
+        lock.withLock { handlers[id] = handler }
+        return id
+    }
+
+    /// Intercepts only the ephemeral test session that explicitly installs this protocol.
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    /// Leaves the production request unchanged for route and body assertions.
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    /// Captures server state now and optionally waits for the test to release its response.
+    override func startLoading() {
+        guard let id = request.value(forHTTPHeaderField: "X-Email-Archive-Race"),
+              let handler = Self.lock.withLock({ Self.handlers[id] }) else { return }
+        do {
+            let (status, body, gate) = try handler(request)
+            let deliver = {
+                let response = HTTPURLResponse(url: self.request.url!, statusCode: status, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                self.client?.urlProtocol(self, didLoad: Data(body.utf8))
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if let gate { gate.install(deliver) } else { deliver() }
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    /// Deferred callbacks are released explicitly by each test, including cleanup paths.
+    override func stopLoading() {}
 }
 
 private final class EmailRequestRecorder: @unchecked Sendable {

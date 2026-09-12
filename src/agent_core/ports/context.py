@@ -37,6 +37,8 @@ class ContextPlanner(Protocol):
         agent: AgentSpec,
         principal: Principal,
         model: ResolvedModel,
+        *,
+        refresh_authorization: bool = False,
     ) -> ContextPlan: ...
 
     async def current(self, session_id: UUID) -> ContextPlan | None: ...

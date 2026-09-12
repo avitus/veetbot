@@ -115,6 +115,7 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
 
     ios_cases = [
         "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
+        "testEmailArchiveFailurePreservesInboxRow",
         "testEmailModePreservesAnUnsentChatMessage",
         "testEmailThreadFeedbackEditingAndExplicitSend",
         "testEmailLearningControlsShowCurrentState",
@@ -129,6 +130,7 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
             [
                 "testEmailModeAndExactDraftApprovalOnMac",
                 "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
+                "testEmailArchiveFailurePreservesInboxRow",
                 "testEmailReadingKeepsFeedbackOptionalAndReplyReachable",
                 "testEmailReadingInDarkAppearance",
                 "testEmailReadingAtDefaultMacWindowSize",

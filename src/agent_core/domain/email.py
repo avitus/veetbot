@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from email.utils import getaddresses
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -83,6 +83,57 @@ class EmailMessage(EmailValue):
     direction: Literal["sent", "received"] = "received"
 
 
+class EmailArchiveOperation(EmailValue):
+    """Latest durable Inbox action, shared by every client of the source thread."""
+
+    """Durable latest mailbox action; pending or uncertain never implies success."""
+
+    operation_id: UUID
+    run_id: UUID
+    target_archived: bool
+    status: Literal["pending", "completed", "failed", "uncertain"] = "pending"
+    error: str | None = None
+
+
+class EmailArchiveConsent(EmailValue):
+    """Finite authenticated owner gesture bound to one exact account label delta."""
+
+    """Server-authored consent to one immutable account-bound Inbox label change."""
+
+    tenant_id: str
+    principal_id: str
+    account_id: str
+    provider_thread_id: str
+    read_server_id: str
+    write_server_id: str
+    expected_revision: int
+    archived: bool
+    expires_at: datetime
+
+    @property
+    def tool_name(self) -> str:
+        """Select the operator-bound originating account write capability."""
+        return f"mcp.{self.write_server_id}.modify_labels"
+
+    @property
+    def arguments(self) -> dict[str, object]:
+        """Return the sole INBOX transition; callers cannot supply arbitrary labels."""
+        return {
+            "thread_ids": [self.provider_thread_id],
+            "add_label_ids": None if self.archived else ["INBOX"],
+            "remove_label_ids": ["INBOX"] if self.archived else None,
+        }
+
+
+def archive_result_matches(consent: EmailArchiveConsent, result: dict[str, Any] | None) -> bool:
+    """Require the first-party write receipt to name exactly the requested delta."""
+    return isinstance(result, dict) and (
+        result.get("thread_ids") == [consent.provider_thread_id]
+        and result.get("add_label_ids") == ([] if consent.archived else ["INBOX"])
+        and result.get("remove_label_ids") == (["INBOX"] if consent.archived else [])
+    )
+
+
 class EmailThread(EmailValue):
     id: UUID
     account_id: str
@@ -108,6 +159,7 @@ class EmailThread(EmailValue):
     in_inbox: bool = True
     source_session_ids: list[UUID] = Field(default_factory=list)
     reply_blocked_reason: str | None = None
+    archive_operation: EmailArchiveOperation | None = None
 
 
 class EmailDraftStatus(StrEnum):
@@ -172,12 +224,13 @@ class EmailTask(EmailValue):
     id: UUID
     run_id: UUID
     session_id: UUID
-    kind: Literal["refresh", "draft", "send"]
+    kind: Literal["refresh", "draft", "send", "archive"]
     account_ids: list[str]
     thread_id: UUID | None = None
     draft_id: UUID | None = None
     expected_revision: int | None = None
     instruction: str | None = None
+    archive_consent: EmailArchiveConsent | None = None
     created_at: datetime
     reservation: Decimal = Decimal("0")
     settled_cost: Decimal | None = None

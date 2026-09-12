@@ -6,7 +6,7 @@ import builtins
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
@@ -62,6 +62,30 @@ class EmailRuntimeServices(Protocol):
     account_servers: dict[str, dict[str, str]]
 
     async def get_task(self, principal: Principal, run_id: UUID) -> EmailTask | None: ...
+
+    async def validate_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+    ) -> EmailTask: ...
+
+    async def approve_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        approval_id: UUID,
+    ) -> None: ...
+
+    async def finish_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        *,
+        status: Literal["completed", "failed", "uncertain"],
+    ) -> None: ...
 
     async def _thread(
         self, store: EmailStore, principal: Principal, thread_id: UUID

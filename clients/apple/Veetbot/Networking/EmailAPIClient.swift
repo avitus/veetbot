@@ -62,6 +62,13 @@ extension VeetbotAPIClient {
                                         "dismissed": .bool(dismissed)], key: idempotencyKey)
     }
 
+    /// Retries one explicit, account-bound Gmail action using the same durable admission identity.
+    public func archiveEmailThread(_ thread: EmailThreadView, archived: Bool, idempotencyKey: String) async throws -> EmailOperationView {
+        try await emailCommand(path: "/threads/\(thread.id.uuidString)/archive",
+            values: ["expected_revision": .number(Double(thread.revision)), "archived": .bool(archived),
+                     "idempotency_key": .string(idempotencyKey)], key: idempotencyKey)
+    }
+
     public func generateEmailDraft(
         threadID: UUID, instruction: String?, idempotencyKey: String
     ) async throws -> EmailDraftOperation {

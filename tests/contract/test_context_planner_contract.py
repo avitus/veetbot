@@ -16,6 +16,7 @@ from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import build_prefix
+from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.memory import MemoryCorrection, RecallQuery, RecallResult
 from agent_core.domain.messages import ModelLimits, ResolvedModel
@@ -24,6 +25,7 @@ from agent_core.memory.profiles import SnapshotProfiles
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.web_fetch import WebFetchTool
+from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from tests.contract.memory_fixtures import formation_stack, memory
 from tests.contract.support import NOW, agent, memory_stack, principal, session
 from tests.unit.test_web_tools import FakeWebProvider
@@ -168,6 +170,82 @@ async def test_context_planner_rotates_a_plan_from_the_previous_builder(
     assert previous.builder_version == "context-builder@2"
     assert rotated.builder_version == "context-builder@3"
     assert rotated.epoch == previous.epoch + 1
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_context_authority_refresh_is_durable_and_requires_an_unpinned_run(
+    legacy: bool,
+) -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    registry = StaticToolRegistry()
+    registry.register(WorkspaceReadTextTool())
+    configured_agent = agent().model_copy(update={"enabled_tools": ["workspace.read_text"]})
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    restricted = principal()
+    owner = restricted.model_copy(update={"scopes": {"workspace.read"}})
+
+    def planner() -> EventContextPlanner:
+        return EventContextPlanner(
+            factory,
+            registry,
+            ConservativeTokenEstimator(),
+            clock,
+            restricted,
+            config,
+            policy_version="contract-policy@1",
+        )
+
+    initial = await planner().plan(session(), configured_agent, restricted, model)
+    assert initial.tool_names == ()
+    if legacy:
+        payload = initial.model_dump(exclude={"authority_scope_hashes"})
+        payload["epoch"] = initial.epoch + 1
+        initial = await planner()._append(
+            ContextPlan.model_validate(payload), "context.epoch.rotated", "legacy-fixture"
+        )
+        assert initial.authority_scope_hashes is None
+
+    # Reconstruction and a different principal cannot refresh a running plan.
+    assert await planner().plan(session(), configured_agent, owner, model) == initial
+    refreshed = await planner().plan(
+        session(), configured_agent, owner, model, refresh_authorization=True
+    )
+    assert refreshed.tool_names == ("workspace.read_text",)
+    assert refreshed.epoch == initial.epoch + 1
+    assert refreshed.authority_scope_hashes is not None
+    assert await planner().current(session().id) == refreshed
+    assert (
+        await planner().plan(session(), configured_agent, owner, model, refresh_authorization=True)
+        == refreshed
+    )
+    async with factory() as uow:
+        event = await uow.events.latest_before(
+            session().id, (1 << 63) - 1, "context.epoch.rotated", restricted
+        )
+        assert event is not None and event.payload["reason"] == "run_authority_changed"
+
+    # Revocation alone preserves the prefix even across run boundaries.
+    assert await planner().plan(session(), configured_agent, restricted, model) == refreshed
+    reduced = await planner().plan(
+        session(), configured_agent, restricted, model, refresh_authorization=True
+    )
+    assert reduced == refreshed
+    assert registry.specs_for_session(configured_agent, restricted, "test", "test") == []
+    assert (
+        await planner().plan(
+            session(), configured_agent, restricted, model, refresh_authorization=True
+        )
+        == reduced
+    )
+
+    # Even an identical prefix must not make event replay alias different authority.
+    changed = reduced.model_copy(update={"authority_scope_hashes": ("f" * 64,)})
+    conflicted = await planner()._append(changed, "context.epoch.rotated", "authority-conflict")
+    assert conflicted.epoch == reduced.epoch + 1
+    assert conflicted.authority_scope_hashes == changed.authority_scope_hashes
 
 
 async def test_context_planner_does_not_require_snapshot_config_without_memory() -> None:

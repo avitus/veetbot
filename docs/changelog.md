@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-12 — Faster local verification
+
+- `make check` overlaps two independent jobs, and local static tests use the
+  same two-worker configuration as CI. Contract tests remain serial and follow
+  static tests; the complete check set is preserved.
+- Website verification reuses a healthy local dependency installation when its
+  manifests, runtime, and npm configuration match. CI still installs cleanly,
+  and `WEBSITE_INSTALL_FORCE=1` forces a local reinstall.
+- Agent instructions require one final aggregate verification and measured
+  timing reports before commits, avoiding separate repeats of included checks.
+
 ## 2026-09-11 — Astra and Fable model defaults
 
 - New production sessions default to the `astra` policy, selecting OpenAI

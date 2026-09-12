@@ -716,6 +716,16 @@ class RunExecutor:
                 agent,
                 principal,
                 resolved_model,
+                # A scheduled run may already have a seed checkpoint. Only
+                # initialized pins (including empty ones) or pending calls make
+                # this a continuation whose advertised tools must stay frozen.
+                refresh_authorization=not (
+                    checkpoint_state.tool_pins_initialized
+                    or checkpoint_state.pinned_tool_names
+                    or checkpoint_state.pinned_tool_versions
+                    or checkpoint_state.pinned_tool_specs
+                    or checkpoint_state.pending_tool_calls
+                ),
             )
             self._apply_tool_pins(
                 checkpoint_state,

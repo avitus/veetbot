@@ -169,6 +169,7 @@ async def test_postgres_email_session_and_event_query_filters() -> None:
         assert_event_query_filters_run_before_limit,
     )
     from tests.contract.test_session_repository_contract import (
+        assert_email_chat_visibility_preserves_owner_messages,
         assert_session_index_filters_before_pagination,
     )
 
@@ -177,6 +178,7 @@ async def test_postgres_email_session_and_event_query_filters() -> None:
         app.uow_factory() as uow,
     ):
         await assert_session_index_filters_before_pagination(uow.sessions)
+        await assert_email_chat_visibility_preserves_owner_messages(uow.sessions, uow.events)
         await uow.sessions.create(contract_session())
         await assert_event_query_filters_run_before_limit(uow.events)
 

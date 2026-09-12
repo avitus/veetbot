@@ -23,6 +23,7 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.errors import (
+    ApprovalRequiredError,
     AuthorizationError,
     ConflictError,
     NotFoundError,
@@ -35,7 +36,9 @@ from agent_core.domain.messages import (
     StopReason,
     TextPart,
     ToolCallItem,
+    ToolResultItem,
 )
+from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
     ActionKind,
     ExecutionTarget,
@@ -46,6 +49,7 @@ from agent_core.domain.policies import (
     ProposedAction,
     RiskLevel,
     SideEffectClass,
+    StandingAuthorization,
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunStatus, Step
@@ -484,6 +488,301 @@ async def test_execution_validation_is_distinct_from_output_validation(
     assert result[0].is_error is True
     assert invocation.outcome is not None
     assert invocation.outcome.reason_code == expected_reason
+
+
+@pytest.mark.parametrize("blocked_boundary", ["callback", "watermark"])
+async def test_tool_timeout_includes_pre_effect_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocked_boundary: str
+) -> None:
+    """A stalled dispatch guard or watermark cannot outlive the tool budget."""
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _SchedulingTool(
+        name="demo.deadline_write", side_effect=SideEffectClass.EXTERNAL_WRITE, parallel=False
+    )
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("prepare a pre-effect timeout test")
+        active_run = (await app.runs.get(run_id)).model_copy(
+            update={"deadline_at": app.clock.now() + timedelta(milliseconds=50)}
+        )
+        actor = app.principal.model_copy(update={"scopes": {*app.principal.scopes, "demo.write"}})
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            checkpoint = await uow.checkpoints.latest(run_id)
+            invocations = uow.invocations
+        assert checkpoint is not None
+        active_agent = active_agent.model_copy(update={"enabled_tools": [tool.spec.name]})
+        boundary_entered = False
+
+        async def block_boundary() -> None:
+            nonlocal boundary_entered
+            boundary_entered = True
+            await asyncio.sleep(1)
+
+        async def before_effect(
+            run: Run, principal: Principal, invocation: ToolInvocation, lease: WorkerLease | None
+        ) -> None:
+            if blocked_boundary == "callback":
+                await block_boundary()
+
+        transition = invocations.transition
+
+        async def transition_with_blocked_watermark(
+            invocation_id: UUID,
+            expected_status: ToolInvocationStatus,
+            updated: ToolInvocation,
+            *,
+            lease: WorkerLease | None = None,
+        ) -> ToolInvocation:
+            if blocked_boundary == "watermark" and updated.effect_sent_at is not None:
+                await block_boundary()
+            return await transition(invocation_id, expected_status, updated, lease=lease)
+
+        monkeypatch.setattr(invocations, "transition", transition_with_blocked_watermark)
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=_AllowPolicy(),
+            before_effect=before_effect,
+        )
+        result = await pipeline.dispatch(
+            run=active_run,
+            checkpoint=checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="deadline-call",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={},
+                    raw_arguments="{}",
+                )
+            ],
+            principal=actor,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, actor))[0]
+
+    assert boundary_entered
+    assert result[0].is_error
+    assert tool.started == 0
+    assert invocation.status is ToolInvocationStatus.FAILED
+    assert invocation.effect_sent_at is None
+    assert invocation.outcome is not None
+    assert invocation.outcome.reason_code == "tool.timeout"
+
+
+@pytest.mark.parametrize("authorization_work", ["stalled", "elapsed_clock", "elapsed_monotonic"])
+async def test_standing_authorization_shares_the_execution_deadline(
+    tmp_path: Path, authorization_work: str
+) -> None:
+    """Standing authority is bounded and cannot renew the action budget."""
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _RecordingTool()
+    registry = StaticToolRegistry()
+    registry.register(tool)
+
+    class ApprovalPolicy:
+        async def evaluate(
+            self, proposed: ProposedAction, actor: Principal, active_run: Run
+        ) -> PolicyDecision:
+            return PolicyDecision(
+                decision=PolicyDecisionType.REQUIRE_APPROVAL,
+                reason_code="policy.test.approval",
+                explanation="Require exact standing authority or interactive approval.",
+                policy_version="test@approval+h00000000",
+            )
+
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("prepare a standing authorization timeout test")
+        active_run = (await app.runs.get(run_id)).model_copy(update={"deadline_at": None})
+        if authorization_work == "stalled":
+            active_run = active_run.model_copy(
+                update={"deadline_at": app.clock.now() + timedelta(milliseconds=50)}
+            )
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        active_agent = active_agent.model_copy(update={"enabled_tools": [tool.spec.name]})
+
+        class StandingAuthorizer:
+            async def authorize(
+                self,
+                *,
+                action: ProposedAction,
+                decision: PolicyDecision,
+                principal: Principal,
+                run: Run,
+                agent_version: str,
+                action_deadline: datetime,
+            ) -> StandingAuthorization:
+                expected_deadline = NOW + timedelta(seconds=tool.spec.timeout_seconds)
+                if run.deadline_at is not None:
+                    expected_deadline = min(expected_deadline, run.deadline_at)
+                assert action_deadline == expected_deadline
+                if authorization_work == "stalled":
+                    await asyncio.sleep(1)
+                elif authorization_work == "elapsed_clock":
+                    assert isinstance(app.clock, FixedClock)
+                    app.clock.advance(timedelta(seconds=2))
+                else:
+                    await asyncio.sleep(0.05)
+                return StandingAuthorization(
+                    allowed=True,
+                    reason_code="browser.grant.authorized",
+                    authorization_kind="standing_browser_grant",
+                    authorization_ref="test-grant",
+                )
+
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=ApprovalPolicy(),
+            standing_authorizer=StandingAuthorizer(),
+        )
+        dispatch = pipeline.dispatch(
+            run=active_run,
+            checkpoint=checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="standing-deadline-call",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={"value": "candidate"},
+                    raw_arguments='{"value":"candidate"}',
+                )
+            ],
+            principal=app.principal,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+        if authorization_work == "stalled":
+            with pytest.raises(ApprovalRequiredError):
+                await dispatch
+        else:
+            result = await dispatch
+            assert result[0].is_error is (authorization_work == "elapsed_clock")
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, app.principal))[0]
+
+    if authorization_work == "stalled":
+        assert invocation.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
+        assert invocation.effect_sent_at is None
+        assert tool.observed is None
+    elif authorization_work == "elapsed_clock":
+        assert invocation.outcome is not None
+        assert invocation.outcome.reason_code == "tool.timeout"
+        assert invocation.effect_sent_at is None
+        assert tool.observed is None
+    else:
+        assert tool.observed_timeout is not None
+        assert 0 < tool.observed_timeout <= tool.spec.timeout_seconds - 0.05
+
+
+@pytest.mark.parametrize(
+    "idempotency", [IdempotencyClass.IDEMPOTENT, IdempotencyClass.CONDITIONALLY_IDEMPOTENT]
+)
+@pytest.mark.parametrize("reject_recovery", [False, True])
+async def test_pre_watermarked_recovery_revalidates_before_each_execution(
+    tmp_path: Path, idempotency: IdempotencyClass, reject_recovery: bool
+) -> None:
+    """A recovery watermark is not evidence of current authorization."""
+
+    class RecoveryTool(_SchedulingTool):
+        async def execute(
+            self, arguments: dict[str, object], context: ToolExecutionContext
+        ) -> ToolResult:
+            self.started += 1
+            await context.mark_effect_sent()
+            if self.started == 1:
+                raise asyncio.CancelledError
+            return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
+
+    tool = RecoveryTool(
+        name="demo.recovery_write", side_effect=SideEffectClass.EXTERNAL_WRITE, parallel=False
+    )
+    tool.spec = tool.spec.model_copy(update={"idempotency": idempotency})
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    guard_calls = 0
+
+    async def before_effect(
+        run: Run, principal: Principal, invocation: ToolInvocation, lease: WorkerLease | None
+    ) -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls > 1 and reject_recovery:
+            raise ConflictError("the original authorization is no longer valid")
+
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("prepare a pre-watermarked recovery test")
+        active_run = await app.runs.get(run_id)
+        actor = app.principal.model_copy(update={"scopes": {*app.principal.scopes, "demo.write"}})
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        active_agent = active_agent.model_copy(update={"enabled_tools": [tool.spec.name]})
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=_AllowPolicy(),
+            before_effect=before_effect,
+        )
+
+        async def dispatch() -> list[ToolResultItem]:
+            return await pipeline.dispatch(
+                run=active_run,
+                checkpoint=checkpoint,
+                tool_calls=[
+                    ToolCallItem(
+                        call_id="recovery-call",
+                        item_index=0,
+                        name=tool.spec.name,
+                        arguments={},
+                        raw_arguments="{}",
+                    )
+                ],
+                principal=actor,
+                step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+                agent=active_agent,
+                token=RunCancellationToken(app.clock, None),
+            )
+
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch()
+        async with app.uow_factory() as uow:
+            [interrupted] = await uow.invocations.list_for_run(run_id, actor)
+        assert interrupted.status is ToolInvocationStatus.RUNNING
+        assert interrupted.effect_sent_at is not None
+        assert guard_calls == tool.started == 1
+
+        result = await dispatch()
+        async with app.uow_factory() as uow:
+            [recovered] = await uow.invocations.list_for_run(run_id, actor)
+
+    assert guard_calls == 2
+    assert tool.started == (1 if reject_recovery else 2)
+    assert result[0].is_error is reject_recovery
+    assert recovered.effect_sent_at == interrupted.effect_sent_at
 
 
 async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(

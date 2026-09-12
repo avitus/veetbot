@@ -136,3 +136,27 @@ async def test_chat_feedback_requires_current_owner_source_and_replays_shared_ru
 
 async def test_chat_context_uses_shared_owner_style_with_independent_source_binding() -> None:
     await assert_chat_shared_style()
+
+
+async def test_draft_only_session_is_hidden_until_discussed_without_losing_draft() -> None:
+    from tests.gates.test_email_runtime_m26 import _seed_draft
+
+    async with email_client() as (composition, client):
+        service = composition.services.email
+        service.account_ids = ("default",)
+        service.account_servers = {"default": {"read": "gmail_read", "send": "gmail_send"}}
+        thread, draft = await _seed_draft(composition)
+        assert draft.session_id is not None
+        response = await client.get("/v1/sessions")
+        assert response.status_code == 200
+        assert str(draft.session_id) not in {item["id"] for item in response.json()["items"]}
+        selected = await service.discussion(composition.principal, thread.id)
+        assert selected["session_id"] == str(draft.session_id)
+        await service.discussion(composition.principal, thread.id)
+        response = await client.get("/v1/sessions")
+        assert str(draft.session_id) in {item["id"] for item in response.json()["items"]}
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(draft.session_id, 0, composition.principal)
+        assert sum(e.event_type == "email.discussion.opened" for e in events) == 1
+        assert not any(e.event_type == "user.message.created" for e in events)
+        assert await service.draft(composition.principal, draft.id) == draft

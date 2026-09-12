@@ -173,6 +173,9 @@ Four fields need their justification.
 run deadline. A tool never sees `ToolSpec.timeout_seconds` and never computes
 its own budget; the executor does that once, in one place, where it can also
 refuse to start a call that cannot finish.
+Standing authorization, pre-effect checks, watermark persistence, and execution
+share one absolute deadline. Unavailable standing authority falls back to
+interactive approval; an authorized call exhausting its budget returns `tool.timeout`.
 
 `credentials` is a resolver, not a dictionary. It takes a `credential_ref` from
 configuration and returns a short-lived value; the reference is what appears in
@@ -650,11 +653,11 @@ tool_invocations
   + effect_sent_at   TIMESTAMPTZ NULL
 ```
 
-A tool declared `NON_IDEMPOTENT` or `CONDITIONALLY_IDEMPOTENT` must call
-`await ctx.mark_effect_sent()` immediately before the operation that can leave
-a mark — the HTTP request, the file write, the message send — and must not call
-it before. The call writes `effect_sent_at = now()` in its own short
-transaction and returns. It is idempotent itself; a second call is a no-op.
+Per [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md), the executor calls
+`await ctx.mark_effect_sent()` before invoking any tool whose declared side
+effect is not `NONE`, even when that invocation may only read. The call writes
+`effect_sent_at = now()` in its own short transaction and returns. Tools may
+also call it at their effect boundary; subsequent calls are no-ops.
 
 Recovery then reads a fact rather than making an inference:
 
@@ -669,9 +672,9 @@ Recovery then reads a fact rather than making an inference:
 
 The last two rows are the point. Section 8.4's rule — "do not automatically
 retry a non-idempotent tool left in `RUNNING`" — is preserved exactly for calls
-that may have escaped, and the far more common case of a worker that died
-during argument marshalling, during connection setup, or while waiting on a
-lock is now retried safely instead of being escalated to a person.
+that may have escaped. A worker that dies before the executor commits the
+watermark can be retried safely. A crash during the implementation, including
+connection setup before any effect, conservatively requires human review.
 
 The honest limits of this, stated rather than buried:
 
@@ -682,12 +685,12 @@ The honest limits of this, stated rather than buried:
 - A crash between the watermark commit and the outbound request produces an
   `UNCERTAIN` for a call that did nothing. This is a false positive that costs
   a human review, and it is the direction to be wrong in.
-- A tool that forgets to call it is unsafe in exactly the way the current
-  design already is. So a `NON_IDEMPOTENT` or `CONDITIONALLY_IDEMPOTENT` tool
-  that returns `ok` without having called `mark_effect_sent` is a **contract
-  violation**, the contract suite asserts it for every registered tool, and the
-  executor records `tool.contract.no_watermark` on the invocation so the gap is
-  visible in production rather than only in tests.
+- The executor establishes the watermark before invoking a non-`NONE` tool.
+  A rejected pre-effect check or failed watermark transaction prevents the
+  implementation from starting; the executor settles the applicable failure.
+  Recovery re-runs the pre-effect authorization check once per execution
+  attempt even when a previous attempt already committed the watermark.
+  The existing timestamp is retained; it never substitutes for current authority.
 
 ### Deduplication on the way in
 
@@ -1757,11 +1760,11 @@ smuggled a pipeline inside step 10.
 
 The ones worth naming, each with the thing that catches it.
 
-**A tool forgets `mark_effect_sent`.** Then a crash mid-call produces a
-re-execution that duplicates an external write. Caught by the contract suite,
-which asserts that every `NON_IDEMPOTENT` and `CONDITIONALLY_IDEMPOTENT`
-registered tool sets the watermark on its success path against a fake target,
-and by the `tool.contract.no_watermark` flag in production.
+**A pre-effect check or watermark transaction fails.** The executor establishes
+both before invoking a non-`NONE` tool, so the implementation never starts
+when either fails. Recovery tests cover existing watermarks with invalidated
+authorization; timeout tests cover stalled guards and watermark persistence.
+Neither failure permits an external effect to bypass its dispatch boundary.
 
 **Two workers execute one call.** Caught by `UNIQUE(idempotency_key)` at step
 8, which turns the race into a `ConcurrencyConflict` rather than a duplicate

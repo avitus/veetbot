@@ -104,13 +104,12 @@ validates the floor, and no trailer means lane A.
 
 ## Verification
 
-Run the checks that exist in the repository today:
-
-```bash
-make docs-check     # validates documentation and builds it in strict mode
-make check          # runs docs-check; will grow as tooling is added
-make citations-fix  # repoints line-number citations an edit has moved
-```
+Run `make check` once on the final inputs; it includes `docs-check` and the
+website checks. Do not separately rerun passed checks unless their inputs change.
+Use `make docs-check` for standalone documentation verification, and
+`make citations-fix` to repair moved citations before the final verification.
+Measure each verification stage and report durations, total wall-clock time,
+overlap, and the slowest checks before each commit; label estimates explicitly.
 
 The specifications cite each other by line number through the citation ledger.
 After editing a document that others cite into, run `make citations-fix` and

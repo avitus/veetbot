@@ -8,10 +8,16 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
+from agent_core.adapters.models.fake import FakeModelProvider
+from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
+from agent_core.context.planner import EventContextPlanner
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
@@ -26,7 +32,10 @@ from agent_core.domain.schedules import (
     WeeklyCadence,
 )
 from agent_core.domain.tools import ToolFailureKind
+from agent_core.runtime.checkpoints import DurableCheckpointSeeder
+from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.tools.registry import RegisteredTool
+from agent_core.tools.schedule_create import ScheduleCreateTool
 from tests.contract.support import tool_context
 from tests.integration.m2_support import memory_settings
 
@@ -203,6 +212,131 @@ async def test_schedule_update_runs_through_approval_and_writes_one_revision() -
         timezone="America/Los_Angeles",
     )
     assert len(events) == 1
+
+
+@pytest.mark.parametrize("legacy_resume", [False, True])
+async def test_owner_reply_to_scheduled_briefing_can_update_its_cadence(
+    legacy_resume: bool,
+) -> None:
+    update_call = ScriptedToolCall(
+        name=UPDATE_NAME,
+        arguments={
+            "schedule_id": str(SCHEDULE_ID),
+            "expected_revision": 1,
+            "cadence": {
+                "kind": "WEEKLY",
+                "local_time": "08:55:00",
+                "weekdays": [5],
+                "timezone": "America/Los_Angeles",
+            },
+        },
+    )
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(text="Today's daily briefing is ready."),
+            ScriptedTurn(tool_calls=[ScriptedToolCall(name="schedule.list", arguments={})]),
+            ScriptedTurn(tool_calls=[update_call]),
+            ScriptedTurn(text="Your briefing is now weekly on Fridays at 8:55 a.m. Pacific."),
+        ]
+    )
+    async with build(
+        settings=_enabled_settings(),
+        script=script,
+        fixed_clock_at=datetime(2026, 9, 12, 15, 59, tzinfo=UTC),
+        sequential_ids=True,
+        enabled_tools=["schedule.list", UPDATE_NAME],
+    ) as composition:
+        registered = cast(
+            RegisteredTool, composition.tool_pipeline._registry.get("schedule.create")
+        )
+        create = cast(ScheduleCreateTool, registered.implementation)
+        result = await create.execute(
+            {
+                "title": "Daily briefing",
+                "instruction": "Summarize the day's important news.",
+                "cadence": {
+                    "kind": "DAILY",
+                    "local_time": "09:00:00",
+                    "timezone": "America/Los_Angeles",
+                },
+            },
+            replace(
+                tool_context(), principal=composition.principal, idempotency_key="daily-source"
+            ),
+        )
+        assert result.ok and result.structured is not None
+        schedule_id = UUID(result.structured["schedule_id"])
+        cast(dict[str, Any], update_call.arguments)["schedule_id"] = str(schedule_id)
+        original = await composition.schedules.get(composition.principal, schedule_id)
+        clock = composition.clock
+        assert isinstance(clock, FixedClock)
+        clock.advance(timedelta(minutes=1))
+        materializer = ScheduleMaterializer(
+            uow_factory=composition.uow_factory,
+            principals=StaticSchedulePrincipalDirectory(composition.principal),
+            admission=AllowScheduleAdmissionController(),
+            clock=clock,
+            ids=composition.ids,
+            seed_checkpoint=DurableCheckpointSeeder(clock),
+        )
+        occurrence = await materializer.materialize(schedule_id)
+        assert occurrence is not None and occurrence.run_id is not None
+        assert occurrence.session_id is not None
+        await composition.executor.execute(occurrence.run_id)
+        briefing = await composition.runs.get(occurrence.run_id)
+        assert briefing.status is RunStatus.COMPLETED, briefing.failure
+        assert briefing.principal_scopes == set()
+        planner = composition.executor._context_planner
+        briefing_plan = await planner.current(occurrence.session_id)
+        assert briefing_plan is not None and not briefing_plan.tool_names
+
+        run_id = await composition.runs.submit(
+            "Change this briefing to weekly on Fridays at 8:55 a.m. Pacific, "
+            "replacing the daily 9:00 a.m. briefing.",
+            occurrence.session_id,
+        )
+        provider = composition.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        owner_request = provider.requests[1]
+        assert {"schedule.list", UPDATE_NAME} <= {spec.name for spec in owner_request.tools}
+        assert "Today's daily briefing is ready." in owner_request.model_dump_json()
+        [approval] = await composition.approvals.list_pending(run_id=run_id)
+        assert approval.tool_name == UPDATE_NAME
+        assert approval.required_scopes == {"schedule.write"}
+        assert approval.arguments == update_call.arguments
+        owner_plan = await planner.current(occurrence.session_id)
+        assert owner_plan is not None and owner_plan.epoch == briefing_plan.epoch + 1
+        before_approval = await composition.schedules.get(composition.principal, schedule_id)
+        assert before_approval.revision == original.revision
+
+        if legacy_resume:
+            # Older saved plans have no authority marker. Resuming an approval
+            # must retain even those pins instead of rotating as a new run.
+            payload = owner_plan.model_dump(exclude={"authority_scope_hashes"})
+            payload["epoch"] = owner_plan.epoch + 1
+            owner_plan = await cast(EventContextPlanner, planner)._append(
+                ContextPlan.model_validate(payload), "context.epoch.rotated", "legacy-fixture"
+            )
+        await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        completed = await composition.runs.wait_terminal(run_id)
+        assert completed.status is RunStatus.COMPLETED, completed.failure
+        assert await planner.current(occurrence.session_id) == owner_plan
+        updated = await composition.schedules.get(composition.principal, schedule_id)
+        assert updated.schedule.current_revision == 2
+        assert updated.schedule.next_fire_at == datetime(2026, 9, 18, 15, 55, tzinfo=UTC)
+        assert updated.revision.cadence == WeeklyCadence(
+            local_time=time(8, 55), weekdays=(5,), timezone="America/Los_Angeles"
+        )
+        assert (
+            updated.revision.requested_scopes == original.revision.requested_scopes == frozenset()
+        )
+        assert updated.revision.limits == original.revision.limits
+        assert updated.revision.instruction == original.revision.instruction
+        async with composition.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(occurrence.run_id)
+            assert checkpoint is not None and checkpoint.tool_pins_initialized
+            assert checkpoint.pinned_tool_names == []
+            assert len(await uow.process_events.list("schedule.updated")) == 1
 
 
 async def test_schedule_update_preserves_hidden_fields_and_paused_state() -> None:

@@ -16,17 +16,17 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
-    /// Verifies both confirmed attention transitions without leaving the open thread.
+    /// Verifies confirmed Gmail archive and Inbox restoration without leaving the open thread.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
         XCTAssertTrue(action.waitForExistence(timeout: 5))
-        XCTAssertEqual(action.label, "Mark handled")
+        XCTAssertEqual(action.label, "Archive in Gmail")
         #if os(macOS)
         action.click()
         #else
         action.tap()
         #endif
-        let handled = NSPredicate(format: "label == %@ AND enabled == true", "Mark unhandled")
+        let handled = NSPredicate(format: "label == %@ AND enabled == true", "Move to Inbox")
         expectation(for: handled, evaluatedWith: action)
         waitForExpectations(timeout: 5)
         #if os(macOS)
@@ -34,12 +34,12 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         action.tap()
         #endif
-        let unhandled = NSPredicate(format: "label == %@ AND enabled == true", "Mark handled")
+        let unhandled = NSPredicate(format: "label == %@ AND enabled == true", "Archive in Gmail")
         expectation(for: unhandled, evaluatedWith: action)
         waitForExpectations(timeout: 5)
     }
 
-    /// Checks off a row directly, then finds its reversible handled state in Other mail.
+    /// Archives a row without opening it, then finds its confirmed state in Other mail.
     func testEmailCanBeCheckedOffFromInboxWithoutOpeningThread() {
         let mode = app.buttons["mode.email"]
         XCTAssertTrue(mode.waitForExistence(timeout: 10))
@@ -55,6 +55,14 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         check.tap()
         #endif
+        let progress = app.staticTexts["email.archive.status.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 5))
+        #if os(macOS)
+        XCTAssertEqual(progress.value as? String, "Archiving in Gmail…")
+        #else
+        XCTAssertEqual(progress.label, "Archiving in Gmail…")
+        #endif
+        XCTAssertFalse(check.isEnabled)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: check)
         waitForExpectations(timeout: 5)
         XCTAssertFalse(app.buttons["email.handled.detail"].exists)
@@ -67,7 +75,39 @@ final class ConversationNavigationUITests: XCTestCase {
         other.tap()
         #endif
         XCTAssertTrue(check.waitForExistence(timeout: 5))
-        XCTAssertEqual(check.label, "Mark unhandled")
+        XCTAssertEqual(check.label, "Move to Inbox")
+    }
+
+    /// A failed Gmail operation leaves the original row available with an explicit retryable outcome.
+    func testEmailArchiveFailurePreservesInboxRow() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-email-archive-failure")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        mode.click()
+        #else
+        mode.tap()
+        #endif
+        let action = app.buttons["email.handled.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(action.waitForExistence(timeout: 10))
+        #if os(macOS)
+        action.click()
+        #else
+        action.tap()
+        #endif
+        let status = app.staticTexts["email.archive.status.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        #if os(macOS)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "could not complete"), evaluatedWith: status)
+        #else
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "could not complete"), evaluatedWith: status)
+        #endif
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(action.exists)
+        XCTAssertTrue(action.isEnabled)
+        XCTAssertEqual(action.label, "Archive in Gmail")
     }
 
     /// Verifies the reading and reply flow with normal platform appearance.

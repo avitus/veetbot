@@ -353,7 +353,7 @@ joined by dots, of which the last is the action. All thirty-three have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1245` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1248` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -1321,3 +1321,11 @@ read precede an atomic local frozen-action claim. Observed source or content
 changes invalidate approval; an external change after the read remains a Gmail
 race, and possibly dispatched non-idempotent sends remain uncertain without
 automatic retry. Email content and inferred style never become trusted policy.
+
+ADR-0095 adds a model-free archive/move-to-Inbox command. The labelled owner
+gesture supplies expiring consent to one exact account-bound `INBOX` change.
+It does not lower the Gmail write approval floor: after validating that consent,
+the application records `approval.requested`, uses ordinary `APPROVE_ONCE`
+resolution, and resumes the same frozen invocation with normal revalidation.
+Current authority, source revision, expiry, worker fencing, and distinct-resolver
+policy remain enforced. An uncertain write is not automatically repeated.

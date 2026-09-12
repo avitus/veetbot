@@ -8,11 +8,11 @@ import json
 import logging
 import re
 from collections import deque
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol, cast
 from uuid import UUID
@@ -376,6 +376,10 @@ class ToolPipeline:
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
         delegations: DelegationStarter | None = None,
+        before_effect: Callable[
+            [Run, Principal, ToolInvocation, WorkerLease | None], Awaitable[None]
+        ]
+        | None = None,
     ) -> None:
         self._registry = registry
         self._uow_factory = uow_factory
@@ -410,6 +414,7 @@ class ToolPipeline:
         )
         self._standing_authorizer = standing_authorizer
         self._delegations = delegations
+        self._before_effect = before_effect
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
         self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
@@ -798,6 +803,11 @@ class ToolPipeline:
         }:
             raise AssertionError(f"unhandled tool recovery action {recovery.value}")
 
+        deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
+        if run.deadline_at is not None:
+            deadline = min(deadline, run.deadline_at)
+        loop = asyncio.get_running_loop()
+        monotonic_deadline = loop.time() + max(0.0, (deadline - self._clock.now()).total_seconds())
         standing_authorization: StandingAuthorization | None = None
         if not approval_granted:
             if decision is None:
@@ -808,18 +818,26 @@ class ToolPipeline:
                     run, call, tool, invocation, decision.reason_code, lease
                 )
             if decision.decision is PolicyDecisionType.REQUIRE_APPROVAL:
-                standing_authorization = await self._standing_authorization(
-                    run=run,
-                    checkpoint=checkpoint,
-                    principal=principal,
-                    agent=agent,
-                    step=step,
-                    tool=tool,
-                    invocation=invocation,
-                    arguments=arguments,
-                    arguments_hash=arguments_hash,
-                    decision=decision,
-                )
+                try:
+                    if loop.time() >= monotonic_deadline:
+                        raise TimeoutError
+                    async with asyncio.timeout_at(monotonic_deadline):
+                        standing_authorization = await self._standing_authorization(
+                            run=run,
+                            checkpoint=checkpoint,
+                            principal=principal,
+                            agent=agent,
+                            step=step,
+                            tool=tool,
+                            invocation=invocation,
+                            arguments=arguments,
+                            arguments_hash=arguments_hash,
+                            decision=decision,
+                            action_deadline=deadline,
+                        )
+                except TimeoutError:
+                    # Unavailable standing authority follows the ordinary approval path.
+                    standing_authorization = None
                 if standing_authorization is None or not standing_authorization.allowed:
                     approval = await self._request_approval(
                         run, call, principal, agent, tool, invocation, decision, lease
@@ -980,10 +998,15 @@ class ToolPipeline:
             )
 
         effect_guard = asyncio.Lock()
+        effect_authorized = False
 
         async def mark_effect_sent() -> None:
-            nonlocal invocation
+            nonlocal invocation, effect_authorized
             async with effect_guard:
+                if not effect_authorized:
+                    if self._before_effect is not None:
+                        await self._before_effect(run, principal, invocation, lease)
+                    effect_authorized = True
                 if invocation.effect_sent_at is not None:
                     return
                 marked_at = self._clock.now()
@@ -1053,10 +1076,14 @@ class ToolPipeline:
                 "retryable": False,
             }
 
-        deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
-        if run.deadline_at is not None:
-            deadline = min(deadline, run.deadline_at)
-        effective_timeout = max(0.0, (deadline - self._clock.now()).total_seconds())
+        effective_timeout = max(
+            0.0,
+            min(
+                (deadline - self._clock.now()).total_seconds(),
+                monotonic_deadline - loop.time(),
+            ),
+        )
+        monotonic_deadline = min(monotonic_deadline, loop.time() + effective_timeout)
         execution_context = ToolExecutionContext(
             invocation_id=invocation.id,
             call_id=call.call_id,
@@ -1122,9 +1149,9 @@ class ToolPipeline:
         try:
             if effective_timeout <= 0:
                 raise TimeoutError
-            if tool.spec.side_effect is not SideEffectClass.NONE:
-                await mark_effect_sent()
-            async with asyncio.timeout(effective_timeout):
+            async with asyncio.timeout_at(monotonic_deadline):
+                if tool.spec.side_effect is not SideEffectClass.NONE:
+                    await mark_effect_sent()
                 try:
                     result = await tool.execute(arguments, execution_context)
                 except ToolTrustRejectedError:
@@ -1411,6 +1438,7 @@ class ToolPipeline:
         arguments: dict[str, Any],
         arguments_hash: str,
         decision: PolicyDecision,
+        action_deadline: datetime,
     ) -> StandingAuthorization | None:
         if self._standing_authorizer is None:
             return None
@@ -1423,9 +1451,6 @@ class ToolPipeline:
             arguments,
             arguments_hash,
         )
-        deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
-        if run.deadline_at is not None:
-            deadline = min(deadline, run.deadline_at)
         try:
             authorization = await self._standing_authorizer.authorize(
                 action=action,
@@ -1433,7 +1458,7 @@ class ToolPipeline:
                 principal=principal,
                 run=run,
                 agent_version=agent.version,
-                action_deadline=deadline,
+                action_deadline=action_deadline,
             )
         except Exception:
             logger.exception(

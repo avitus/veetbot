@@ -64,6 +64,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailStatus = "ready"
     private static var learningPaused = false
     private static var emailHandled = false
+    private static var emailArchiveTarget: Bool?
+    private static var emailArchiveReads = 0
+    /// Keeps pending visible across XCTest's initial accessibility poll before confirming the fake Gmail result.
+    private static let emailArchiveCompletionRead = 4
+    private static var emailArchived = false
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
         emailLock.lock()
@@ -73,6 +78,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         emailStatus = "ready"
         learningPaused = false
         emailHandled = false
+        emailArchiveTarget = nil
+        emailArchiveReads = 0
+        emailArchived = false
     }
     override static func canInit(with request: URLRequest) -> Bool { true }
 
@@ -109,7 +117,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/email/threads"):
             statusCode = 200
             let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
-            let handled = Self.emailLock.withLock { Self.emailHandled }
+            let handled = Self.emailLock.withLock { Self.emailHandled || Self.emailArchived }
             let included = view == "all" || (view == "other" ? handled : !handled)
             body = "{\"items\":[\(included ? Self.emailThreadJSON : "")],\"next_cursor\":null}"
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
@@ -117,7 +125,23 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
             statusCode = 200
             body = Self.emailThreadJSON
+        case ("POST", "/v1/email/threads/\(Self.emailThreadID)/archive"):
+            let values = requestJSON()
+            Self.emailLock.withLock {
+                Self.emailArchiveTarget = values["archived"] as? Bool
+                Self.emailArchiveReads = 0
+            }
+            statusCode = 202
+            body = "{\"operation_id\":\"\(Self.emailThreadID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"RUNNING\",\"replayed\":false}"
         case ("GET", "/v1/email/threads/\(Self.emailThreadID)"):
+            Self.emailLock.withLock {
+                if let target = Self.emailArchiveTarget {
+                    Self.emailArchiveReads += 1
+                    if Self.emailArchiveReads >= Self.emailArchiveCompletionRead && !ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-failure") {
+                        Self.emailArchived = target
+                    }
+                }
+            }
             statusCode = 200
             body = Self.emailThreadJSON
         case ("POST", "/v1/email/refresh"):
@@ -296,7 +320,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         "{\"paused\":\(emailLock.withLock { learningPaused }),\"profile_revision\":1,\"excluded_sources\":0,\"style_examples\":8,\"history_processed\":42,\"history_complete\":false}"
     }
     private static let emailAccountsJSON = """
-        {"items":[{"id":"work","label":"Work","email_address":"owner@work.example","status":"ready","last_synced_at":"2026-09-11T00:00:00Z","history_complete":false,"history_processed":42,"read_server_id":"gmail_work_read","send_server_id":"gmail_work_send"}],"next_cursor":null}
+        {"items":[{"id":"work","label":"Work","email_address":"owner@work.example","status":"ready","last_synced_at":"2026-09-11T00:00:00Z","history_complete":false,"history_processed":42,"archive_supported":true,"write_server_id":"gmail_work_write","read_server_id":"gmail_work_read","send_server_id":"gmail_work_send"}],"next_cursor":null}
         """
     private static var emailDraftJSON: String {
         let (body, revision, status) = emailLock.withLock { (emailBody, emailRevision, emailStatus) }
@@ -305,12 +329,20 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             {"id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
             """
     }
-    /// Projects the same source revision and attention state into the fixture's inbox and thread responses.
+    /// Projects confirmed mailbox state separately from a deliberately observable pending archive operation.
     private static var emailThreadJSON: String {
-        let dismissedRevision = emailLock.withLock { emailHandled ? "1" : "null" }
+        let (dismissedRevision, archived, target, reads) = emailLock.withLock {
+            (emailHandled ? "1" : "null", emailArchived, emailArchiveTarget, emailArchiveReads)
+        }
+        let archiveOperation: String
+        if let target {
+            let failed = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-failure")
+            let status = reads < emailArchiveCompletionRead ? "pending" : failed ? "failed" : "completed"
+            archiveOperation = "{\"operation_id\":\"\(emailThreadID)\",\"run_id\":\"\(emailRunID)\",\"target_archived\":\(target),\"status\":\"\(status)\",\"error\":null}"
+        } else { archiveOperation = "null" }
         return """
         {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
-        """.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"dismissed_revision\":\(dismissedRevision),\"revision\":1,\"summary\"")
+        """.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"dismissed_revision\":\(dismissedRevision),\"in_inbox\":\(!archived),\"archive_operation\":\(archiveOperation),\"revision\":1,\"summary\"")
     }
     private static var emailApprovalJSON: String {
         let (body, sent) = emailLock.withLock { (emailBody, emailStatus == "sent") }

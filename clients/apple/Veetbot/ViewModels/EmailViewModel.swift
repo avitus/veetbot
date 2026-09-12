@@ -61,6 +61,10 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var learning: EmailLearningState?
     @Published public private(set) var revisions: [EmailDraftView] = []
+    @Published public private(set) var archiveErrors: [UUID: String] = [:]
+    @Published private var archiveSubmitting: Set<UUID> = []
+    @Published private var archiveUnsupportedAccounts: Set<String> = []
+    @Published private var archiveUnavailableThreads: Set<UUID> = []
 
     public var authenticationFailure: ((Error) -> Void)?
     private let makeAPIClient: () -> VeetbotAPIClient?
@@ -81,6 +85,22 @@ public final class EmailViewModel: ObservableObject {
     private var pendingNewItems: [EmailThreadView]?
     private var saveKeys: [UUID: (EmailDraftEdit, String)] = [:]
     private var sendKeys: [UUID: (Int, String)] = [:]
+    private struct ArchiveRequest {
+        let thread: EmailThreadView
+        let archived: Bool
+        let key: String
+        var operationID: UUID?
+    }
+    private var archiveRequests: [UUID: ArchiveRequest] = [:]
+    private var archiveTasks: [UUID: Task<Void, Never>] = [:]
+    private struct ArchiveMailboxState {
+        var inInbox: Bool?
+        var operation: EmailArchiveOperation?
+        var dismissedRevision: Int?
+    }
+    private var archiveVersions: [UUID: UUID] = [:]
+    private var archiveStates: [UUID: ArchiveMailboxState] = [:]
+    private var archiveReadErrors: Set<UUID> = []
 
     public init(
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
@@ -95,6 +115,7 @@ public final class EmailViewModel: ObservableObject {
         operationTask?.cancel()
         autosaveTask?.cancel()
         searchTask?.cancel()
+        archiveTasks.values.forEach { $0.cancel() }
     }
 
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
@@ -113,6 +134,8 @@ public final class EmailViewModel: ObservableObject {
         isRefreshing = false
         refreshTask?.cancel()
         operationTask?.cancel()
+        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks = [:]
         guard value else { return }
         let foreground = activation
         let connection = generation
@@ -137,6 +160,16 @@ public final class EmailViewModel: ObservableObject {
         operationTask?.cancel()
         autosaveTask?.cancel()
         searchTask?.cancel()
+        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks = [:]
+        archiveRequests = [:]
+        archiveErrors = [:]
+        archiveSubmitting = []
+        archiveUnsupportedAccounts = []
+        archiveUnavailableThreads = []
+        archiveReadErrors = []
+        archiveVersions = [:]
+        archiveStates = [:]
         active = false
         accounts = []
         items = []
@@ -210,6 +243,7 @@ public final class EmailViewModel: ObservableObject {
     /// Retains the initiating visit through every asynchronous projection read and error path.
     private func reload(preserveOrder: Bool = false, activation foreground: UUID?) async {
         let connection = generation
+        let mailboxVersions = archiveVersions
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         let requestID = UUID()
         listRequest = requestID
@@ -232,6 +266,7 @@ public final class EmailViewModel: ObservableObject {
             )
             let (loadedAccounts, page) = try await (accountPage, threadPage)
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             accounts = loadedAccounts.items
             unavailable = false
             seenCursors = []
@@ -239,21 +274,22 @@ public final class EmailViewModel: ObservableObject {
             hasMore = nextCursor != nil
             if preserveOrder && !items.isEmpty {
                 let oldIDs = Set(items.map(\.id))
-                let additions = page.items.filter { !oldIDs.contains($0.id) }
+                let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
                 if !additions.isEmpty {
-                    pendingNewItems = page.items
+                    pendingNewItems = loadedThreads
                     newImportantCount = additions.count
-                    let current = Dictionary(page.items.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+                    let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
                     items = items.compactMap { current[$0.id] }
                 } else {
-                    let current = Dictionary(page.items.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+                    let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
                     items = items.compactMap { current[$0.id] }
                 }
             } else {
-                items = page.items
+                items = loadedThreads
                 pendingNewItems = nil
                 newImportantCount = 0
             }
+            for value in loadedThreads { observeArchive(value) }
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             if isUnavailable(error) {
@@ -438,6 +474,7 @@ public final class EmailViewModel: ObservableObject {
     /// Validates foreground ownership for both the thread read and an optional separate draft read.
     private func openThread(_ id: UUID, approvalID: UUID? = nil, refreshOnly: Bool = false, activation foreground: UUID?) async {
         let connection = generation
+        let mailboxVersions = archiveVersions
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         if !refreshOnly {
             clearSelection()
@@ -449,9 +486,11 @@ public final class EmailViewModel: ObservableObject {
         isLoadingThread = thread == nil
         defer { if selectionRequest == requestID { isLoadingThread = false } }
         do {
-            let result = try await api.emailThread(id)
+            let response = try await api.emailThread(id)
             guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
+            let result = preservingArchiveState(response, since: mailboxVersions)
             thread = result
+            observeArchive(result)
             if let returnedDraft = result.draft { mergeDraft(returnedDraft) }
             else if let draftID = result.draftID {
                 let value = try await api.emailDraft(draftID)
@@ -721,6 +760,185 @@ public final class EmailViewModel: ObservableObject {
             }
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error, draft: selectedThreadID == thread.id) } }
+    }
+
+    /// Requires explicit support from this thread's account and known mailbox state.
+    public func archiveUnavailableReason(for thread: EmailThreadView) -> String? {
+        guard !unavailable, !archiveUnsupportedAccounts.contains(thread.accountID),
+              let account = accounts.first(where: { $0.id == thread.accountID }),
+              account.archiveSupported == true, account.writeServerID != nil else {
+            return "Gmail archiving is unavailable for this account. Update or reconnect the server."
+        }
+        if archiveUnavailableThreads.contains(thread.id) { return "This thread or its Gmail archive endpoint is unavailable. Reconnect to check again." }
+        return thread.inInbox == nil ? "Refresh this thread to check its Gmail Inbox state." : nil
+    }
+
+    /// Pending and uncertain writes cannot be replaced by another checkbox action.
+    public func canArchive(_ thread: EmailThreadView) -> Bool {
+        guard archiveUnavailableReason(for: thread) == nil, !archiveSubmitting.contains(thread.id) else { return false }
+        if let operation = thread.archiveOperation {
+            return operation.status == "completed" || operation.status == "failed"
+        }
+        return true
+    }
+
+    /// Describes this mailbox action without replacing unrelated refresh, editing or send errors.
+    public func archiveMessage(for thread: EmailThreadView) -> String? {
+        if let error = archiveErrors[thread.id] { return error }
+        if archiveSubmitting.contains(thread.id) { return "Requesting the Gmail change…" }
+        guard let operation = thread.archiveOperation else { return nil }
+        switch operation.status {
+        case "pending": return operation.targetArchived ? "Archiving in Gmail…" : "Moving to Inbox…"
+        case "failed": return operation.error ?? "Gmail could not complete this action. Try again."
+        case "uncertain": return "Outcome not confirmed. Check Gmail; recorded status may update after a later email refresh."
+        case "completed": return nil
+        default: return "Checking the Gmail action's status…"
+        }
+    }
+
+    /// Supplies one-action consent and retains the same request after an uncertain admission response.
+    public func setThreadArchived(_ thread: EmailThreadView, archived: Bool) async {
+        guard let api = makeAPIClient(), !archiveSubmitting.contains(thread.id) else { return }
+        guard archiveUnavailableReason(for: thread) == nil else {
+            archiveErrors[thread.id] = archiveUnavailableReason(for: thread)
+            return
+        }
+        if archiveRequests[thread.id]?.operationID != nil || !canArchive(thread) {
+            await checkArchiveStatus(thread.id)
+            return
+        }
+        let connection = generation
+        let request = archiveRequests[thread.id] ?? ArchiveRequest(thread: thread, archived: archived, key: UUID().uuidString)
+        archiveRequests[thread.id] = request
+        archiveErrors[thread.id] = nil
+        archiveReadErrors.remove(thread.id)
+        archiveVersions[thread.id] = UUID()
+        archiveSubmitting.insert(thread.id)
+        defer { if generation == connection { archiveSubmitting.remove(thread.id) } }
+        do {
+            let operation = try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)
+            guard generation == connection else { return }
+            archiveRequests[thread.id]?.operationID = operation.operationID
+            let pending = EmailArchiveOperation(operationID: operation.operationID, runID: operation.runID,
+                targetArchived: request.archived, status: "pending", error: nil)
+            if let index = items.firstIndex(where: { $0.id == thread.id }) { items[index].archiveOperation = pending }
+            if self.thread?.id == thread.id { self.thread?.archiveOperation = pending }
+            let current = self.thread?.id == thread.id ? self.thread : items.first { $0.id == thread.id }
+            archiveStates[thread.id] = ArchiveMailboxState(inInbox: current?.inInbox ?? thread.inInbox,
+                operation: pending, dismissedRevision: current?.dismissedRevision ?? thread.dismissedRevision)
+            archiveVersions[thread.id] = UUID()
+            await checkArchiveStatus(thread.id)
+        } catch {
+            guard generation == connection, !(error is CancellationError), !Task.isCancelled else { return }
+            if isUnavailable(error) {
+                if case HTTPTransportError.api(let failure) = error, failure.statusCode == 405 {
+                    archiveUnsupportedAccounts.insert(thread.accountID)
+                } else { archiveUnavailableThreads.insert(thread.id) }
+                archiveRequests[thread.id] = nil
+                archiveErrors[thread.id] = archiveUnavailableReason(for: thread)
+            } else {
+                if case HTTPTransportError.api(let failure) = error,
+                   let status = failure.statusCode, (400...499).contains(status), status != 408, status != 429 {
+                    archiveRequests[thread.id] = nil
+                }
+                archiveErrors[thread.id] = error.localizedDescription
+                if case HTTPTransportError.reauthenticationRequired = error { report(error) }
+                if case HTTPTransportError.authorizationDenied = error { archiveRequests[thread.id] = nil }
+            }
+        }
+    }
+
+    /// Reads durable action state without admitting a replacement Gmail mutation.
+    public func checkArchiveStatus(_ threadID: UUID) async {
+        let connection = generation
+        let foreground = active ? activation : nil
+        let mailboxVersions = archiveVersions
+        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
+        do {
+            let value = try await api.emailThread(threadID)
+            guard acceptsRead(connection: connection, activation: foreground), archiveVersions[threadID] == mailboxVersions[threadID] else { return }
+            if archiveReadErrors.remove(threadID) != nil { archiveErrors[threadID] = nil }
+            guard acceptsArchiveOperation(value) else { return }
+            mergeArchive(value)
+            if value.archiveOperation?.status == "completed" {
+                await reload(preserveOrder: true, activation: foreground)
+            }
+            observeArchive(value)
+        } catch {
+            guard acceptsRead(connection: connection, activation: foreground), archiveVersions[threadID] == mailboxVersions[threadID] else { return }
+            archiveReadErrors.insert(threadID)
+            archiveErrors[threadID] = error.localizedDescription
+            if case HTTPTransportError.reauthenticationRequired = error { report(error) }
+            if case HTTPTransportError.authorizationDenied = error { report(error, readAccess: true) }
+        }
+    }
+
+    /// Applies fresh source context and mailbox state while retaining local drafts and independent errors.
+    private func mergeArchive(_ value: EmailThreadView) {
+        archiveVersions[value.id] = UUID()
+        archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox, operation: value.archiveOperation,
+            dismissedRevision: value.dismissedRevision)
+        if let index = items.firstIndex(where: { $0.id == value.id }), value.revision >= items[index].revision {
+            items[index] = value
+        }
+        if thread?.id == value.id, let revision = thread?.revision, value.revision >= revision {
+            thread = value
+            if let returnedDraft = value.draft,
+               draft?.id != returnedDraft.id || returnedDraft.revision >= (draft?.revision ?? 0) {
+                mergeDraft(returnedDraft)
+            }
+        }
+    }
+
+    /// Retains newer mailbox changes without discarding an otherwise useful conversation or inbox read.
+    private func preservingArchiveState(_ value: EmailThreadView, since versions: [UUID: UUID]) -> EmailThreadView {
+        if archiveVersions[value.id] != versions[value.id] || !acceptsArchiveOperation(value) {
+            if let state = archiveStates[value.id] {
+                var preserved = value
+                preserved.inInbox = state.inInbox
+                preserved.archiveOperation = state.operation
+                preserved.dismissedRevision = state.dismissedRevision
+                return preserved
+            }
+        } else {
+            archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox,
+                operation: value.archiveOperation, dismissedRevision: value.dismissedRevision)
+        }
+        return value
+    }
+
+    /// An older operation cannot settle or replace a newer request whose admission response is missing.
+    private func acceptsArchiveOperation(_ value: EmailThreadView) -> Bool {
+        guard let request = archiveRequests[value.id] else { return true }
+        guard let operation = value.archiveOperation else { return false }
+        if let id = request.operationID { return operation.operationID == id }
+        return operation.operationID != request.thread.archiveOperation?.operationID
+            && operation.targetArchived == request.archived
+    }
+
+    /// Resumes pending actions learned from another device and clears only confirmed action failures.
+    private func observeArchive(_ value: EmailThreadView) {
+        guard acceptsArchiveOperation(value), let operation = value.archiveOperation else { return }
+        if operation.status == "completed" || operation.status == "failed" || operation.status == "uncertain" {
+            archiveRequests[value.id] = nil
+            archiveErrors[value.id] = nil
+            archiveReadErrors.remove(value.id)
+            archiveTasks[value.id]?.cancel()
+            archiveTasks[value.id] = nil
+        } else if active, archiveTasks[value.id] == nil {
+            let connection = generation
+            let foreground = activation
+            archiveTasks[value.id] = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.activation == foreground, self.generation == connection { self.archiveTasks[value.id] = nil } }
+                for _ in 0..<60 {
+                    do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+                    guard self.acceptsRead(connection: connection, activation: foreground) else { return }
+                    await self.checkArchiveStatus(value.id)
+                    if self.archiveErrors[value.id] != nil { return }
+                }
+            }
+        }
     }
 
     public func confirmCurrentSourceReviewed() async {

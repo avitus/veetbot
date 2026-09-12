@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
@@ -97,6 +98,11 @@ class ContextPlan(BaseModel):
     tool_names: tuple[str, ...]
     tool_specs: tuple[ToolSpec, ...]
     tool_schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # Hashes identify scope grants without duplicating scope names in plan events.
+    # None means legacy/unknown; an empty tuple means known empty authority.
+    authority_scope_hashes: tuple[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], ...] | None = (
+        None
+    )
     snapshot_id: UUID | None = None
     snapshot_watermark: int = Field(default=0, ge=0)
     memory_snapshot: str = ""

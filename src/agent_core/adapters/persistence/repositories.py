@@ -121,6 +121,7 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.sessions import (
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
+    SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     Session,
     SessionCursor,
     SessionStatus,
@@ -344,6 +345,20 @@ class PostgresSessionRepository:
                 SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]
                 .as_boolean()
                 .is_not(True)
+            )
+            predicates.append(
+                or_(
+                    ~SessionRow.metadata_json.has_key(SESSION_EMAIL_THREAD_ID_METADATA_KEY),
+                    select(EventRow.id)
+                    .where(
+                        EventRow.session_id == SessionRow.id,
+                        EventRow.actor_type == "principal",
+                        EventRow.event_type.in_(
+                            ("email.discussion.opened", "user.message.created")
+                        ),
+                    )
+                    .exists(),
+                )
             )
         if cursor is not None:
             predicates.append(

@@ -172,21 +172,29 @@ its own [setup guide](clients/apple/README.md).
 
 | Command | What it does |
 | --- | --- |
-| `make check` | Run formatting checks, linting, strict types, fast tests, deployment-script tests, and documentation checks |
+| `make check` | Run formatting, lint, types, fast tests, deployment, documentation, and website checks with two concurrent jobs |
 | `make format` | Apply Ruff formatting and safe lint fixes |
 | `make test` | Run every non-live Python test |
-| `make test-static` | Run unit and structural tests without I/O |
+| `make test-static` | Run unit and structural tests with two workers |
 | `make test-contract` | Run shared contracts against in-memory and fake adapters |
 | `make test-integration` | Run tests that need PostgreSQL or another local service |
 | `make docs` | Build the MkDocs site and standalone HTML documentation |
 | `make docs-serve` | Serve the documentation locally with live reload |
-| `make test-website` | Install, build, test, and lint the public static website |
+| `make test-website` | Reuse matching local dependencies, build, test, and lint the public static website |
 
 `make check` does not require a database or provider credential. Static and
 contract tests block network access; only explicitly enabled live tests may
 contact model providers and incur cost. The provider-assisted memory evaluator
 currently makes 25 bounded provider calls (at most USD 1.25 under its per-call
 ceiling).
+
+Use one `make check` after the final edits: documentation and website checks
+are included, so no separate repeat is needed on unchanged inputs. Static tests
+finish before contract tests; independent lanes overlap. For serial debugging,
+use `make check CHECK_JOBS=1 STATIC_TEST_WORKERS=0`. Website installs are reused
+only when the manifests, Node/npm runtime, npm configuration, and dependency
+tree checks match. CI always installs cleanly; locally force a reinstall with
+`WEBSITE_INSTALL_FORCE=1 make website-install`.
 
 ### Configuration and project conventions
 

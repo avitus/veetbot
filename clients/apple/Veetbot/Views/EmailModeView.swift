@@ -138,13 +138,20 @@ public struct EmailModeView: View {
                 } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil {
                     emptyInbox.emailHideSeparator()
                 }
+                if !model.items.isEmpty {
+                    Text("Check a conversation to archive it in Gmail.")
+                        .appFont(.caption).foregroundColor(.secondary).emailHideSeparator()
+                    if model.accounts.contains(where: { $0.archiveSupported != true }) {
+                        Text("Gmail archiving is unavailable for accounts without archive support. Email browsing remains available.")
+                            .appFont(.caption).foregroundColor(.secondary).emailHideSeparator()
+                    }
+                }
                 ForEach(model.items) { thread in
                     HStack(spacing: 8) {
                         threadRow(thread)
                             .accessibilityIdentifier("email.thread.\(thread.id.uuidString)")
-                        EmailHandledButton(model: model, thread: thread)
+                        EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.\(thread.id.uuidString)")
                             .labelStyle(.iconOnly)
-                            .accessibilityIdentifier("email.handled.\(thread.id.uuidString)")
                     }
                     .buttonStyle(.plain)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -354,25 +361,46 @@ public struct EmailModeView: View {
     }
 }
 
-private struct EmailHandledButton: View {
+private struct EmailArchiveButton: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
+    let accessibilityID: String
+    var showsAvailability = false
 
-    /// Toggles server-confirmed attention state without opening mail or changing priority learning.
+    /// The labelled gesture authorizes one Gmail label change; only confirmed Inbox state checks the box.
     var body: some View {
-        Button {
-            Task { await model.setThreadHandled(thread, handled: !thread.isHandled) }
-        } label: {
-            Label(thread.isHandled ? "Handled" : "Mark handled",
-                  systemImage: thread.isHandled ? "checkmark.square.fill" : "square")
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+        VStack(alignment: .trailing, spacing: 5) {
+            Button {
+                Task { await model.setThreadArchived(thread, archived: !thread.isArchived) }
+            } label: {
+                Label(thread.isArchived ? "Move to Inbox" : "Archive in Gmail",
+                      systemImage: thread.isArchived ? "checkmark.square.fill" : "square")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .foregroundColor(EmailSurface.accent)
+            .disabled(!model.canArchive(thread))
+            .accessibilityIdentifier(accessibilityID)
+            .accessibilityLabel(thread.isArchived ? "Move to Inbox" : "Archive in Gmail")
+            .accessibilityValue(thread.isArchived ? "Archived" : "In Inbox")
+            .help(thread.isArchived ? "Move this conversation to its Gmail account's Inbox"
+                  : "Archive this conversation in its originating Gmail account")
+            if let message = model.archiveMessage(for: thread) {
+                Text(message).appFont(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("email.archive.status.\(thread.id.uuidString)")
+                if thread.archiveOperation != nil {
+                    Button(thread.archiveOperation?.status == "uncertain" ? "Check recorded status" : "Check status") {
+                        Task { await model.checkArchiveStatus(thread.id) }
+                    }
+                        .appFont(.caption).labelStyle(.titleOnly)
+                        .accessibilityIdentifier("email.archive.check.\(thread.id.uuidString)")
+                }
+            } else if showsAvailability, let reason = model.archiveUnavailableReason(for: thread) {
+                Text(reason).appFont(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .foregroundColor(EmailSurface.accent)
-        .disabled(model.isPerformingAction || model.unavailable)
-        .accessibilityLabel(thread.isHandled ? "Mark unhandled" : "Mark handled")
-        .accessibilityValue(thread.isHandled ? "Handled" : "Not handled")
-        .help(thread.isHandled ? "Return this thread to attention" : "I've dealt with this thread")
     }
 }
 
@@ -479,9 +507,8 @@ private struct EmailThreadScreen: View {
             HStack {
                 EmailThreadStatus(thread: thread, draft: model.draft)
                 Spacer()
-                EmailHandledButton(model: model, thread: thread)
+                EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail", showsAvailability: true)
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("email.handled.detail")
                 Menu {
                     Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
                 } label: {
@@ -836,6 +863,7 @@ private struct EmailThreadStatus: View {
     var draft: EmailDraftView? = nil
 
     private var title: String {
+        if thread.isArchived { return "Archived" }
         if thread.isHandled { return "Handled" }
         switch (draft ?? thread.draft)?.status {
         case "ready": return "Draft ready"
@@ -853,7 +881,7 @@ private struct EmailThreadStatus: View {
     var body: some View {
         Label(
             title,
-            systemImage: thread.isHandled ? "checkmark" : thread.draftID != nil
+            systemImage: thread.isArchived || thread.isHandled ? "checkmark" : thread.draftID != nil
                 ? "square.and.pencil" : thread.needsReply ? "arrowshape.turn.up.left" : "bookmark"
         )
         .appFont(.caption, weight: .medium)

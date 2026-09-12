@@ -36,6 +36,11 @@ class DismissRequest(RevisionRequest):
     dismissed: bool = Field(default=True, strict=True)
 
 
+class ArchiveRequest(RevisionRequest):
+    archived: bool = Field(strict=True)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
 class LearningRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paused: bool
@@ -158,6 +163,26 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
     ) -> EmailOperation:
         return await service.submit_task(
             authenticated, kind="refresh", idempotency_key=idempotency_key
+        )
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/archive", openapi_extra={"required_scope": "email.write"}
+    )
+    async def archive(
+        thread_id: UUID,
+        body: ArchiveRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> EmailOperation:
+        """One authenticated gesture authorizes only this thread's Inbox label change."""
+        if idempotency_key is not None and idempotency_key != body.idempotency_key:
+            raise HTTPException(status_code=400, detail="Idempotency keys must match")
+        return await service.archive(
+            authenticated,
+            thread_id,
+            body.expected_revision,
+            archived=body.archived,
+            idempotency_key=body.idempotency_key,
         )
 
     @router.get(
