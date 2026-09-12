@@ -21,6 +21,7 @@ enum ConversationScrollTarget: Equatable {
 }
 
 public struct ChatView: View {
+    @Environment(\.activeClientMode) private var activeMode
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
@@ -30,6 +31,7 @@ public struct ChatView: View {
         self.state = model.runState
     }
 
+    /// Renders the live conversation and composer while the active mode controls the window title.
     public var body: some View {
         VStack(spacing: 0) {
             header
@@ -130,7 +132,7 @@ public struct ChatView: View {
             Divider()
             composer
         }
-        .navigationTitle("Conversation")
+        .navigationTitle(activeMode == .chat ? "Conversation" : "Email")
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)
         }

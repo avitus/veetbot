@@ -96,6 +96,7 @@ async def test_email_foreground_admission(apple_core: str) -> None:
 
 
 def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path) -> None:
+    """Require real, unskipped interaction results across Mac, iPhone and iPad layouts."""
     inventory = json.loads(
         native_command(["xcrun", "simctl", "list", "devices", "available", "-j"], apple_environment)
     )
@@ -113,13 +114,27 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
         devices[family] = max(candidates)[1]
 
     ios_cases = [
+        "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
         "testEmailModePreservesAnUnsentChatMessage",
         "testEmailThreadFeedbackEditingAndExplicitSend",
         "testEmailLearningControlsShowCurrentState",
         "testEmailCompactTraitNavigationReturnsToSelectedInbox",
+        "testEmailReadingKeepsFeedbackOptionalAndReplyReachable",
+        "testEmailReadingInDarkAppearance",
     ]
     for platform, destination, cases in [
-        ("macos", "platform=macOS", ["testEmailModeAndExactDraftApprovalOnMac"]),
+        (
+            "macos",
+            "platform=macOS",
+            [
+                "testEmailModeAndExactDraftApprovalOnMac",
+                "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
+                "testEmailReadingKeepsFeedbackOptionalAndReplyReachable",
+                "testEmailReadingInDarkAppearance",
+                "testEmailReadingAtDefaultMacWindowSize",
+                "testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets",
+            ],
+        ),
         ("iphone", f"platform=iOS Simulator,id={devices['iPhone']}", ios_cases),
         ("ipad", f"platform=iOS Simulator,id={devices['iPad']}", ios_cases),
     ]:

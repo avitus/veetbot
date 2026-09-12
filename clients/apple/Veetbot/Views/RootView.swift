@@ -1,5 +1,17 @@
 import SwiftUI
 
+private struct ActiveClientModeKey: EnvironmentKey {
+    static let defaultValue = ClientMode.chat
+}
+
+extension EnvironmentValues {
+    /// Identifies which mounted client mode owns visible titles and toolbar actions.
+    var activeClientMode: ClientMode {
+        get { self[ActiveClientModeKey.self] }
+        set { self[ActiveClientModeKey.self] = newValue }
+    }
+}
+
 #if os(macOS)
 import AppKit
 #endif
@@ -9,12 +21,20 @@ struct VeetbotSceneRoot: View {
     @ObservedObject var appearance: AppearancePreferences
     @ObservedObject var smsIntegration: SmsIntegrationPreferences
 
+    /// Applies shared appearance and platform bounds without changing the scene's autosave identity.
     var body: some View {
         RootView(model: model)
             .environmentObject(appearance)
             .environmentObject(smsIntegration)
             .appTypography(appearance)
             .tint(AppTheme.turquoise)
+        #if DEBUG && !SWIFT_PACKAGE
+            .preferredColorScheme(
+                ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument)
+                    && ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_COLOR_SCHEME"] == "dark"
+                    ? .dark : nil
+            )
+        #endif
         #if DEBUG && os(iOS)
             .transformEnvironment(\.horizontalSizeClass) { value in
                 if ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument),
@@ -128,6 +148,7 @@ public struct RootView: View {
         #endif
     }
 
+    /// Keeps both mode trees alive while constraining them to the space below the mode selector.
     @ViewBuilder
     private var configuredContent: some View {
         VStack(spacing: 0) {
@@ -159,19 +180,29 @@ public struct RootView: View {
             Divider()
             // Keeping each navigation tree mounted preserves compact navigation,
             // scroll position and live Chat rendering across a mode switch.
-            ZStack {
-                chatContent
-                    .opacity(coordinator.mode == .chat ? 1 : 0)
-                    .allowsHitTesting(coordinator.mode == .chat)
-                    .accessibilityHidden(coordinator.mode != .chat)
-                EmailModeView(model: coordinator.email) {
-                    await coordinator.discussSelectedThread()
+            GeometryReader { geometry in
+                ZStack {
+                    chatContent
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .opacity(coordinator.mode == .chat ? 1 : 0)
+                        .allowsHitTesting(coordinator.mode == .chat)
+                        .accessibilityHidden(coordinator.mode != .chat)
+                    EmailModeView(model: coordinator.email, viewportHeight: geometry.size.height) {
+                        await coordinator.discussSelectedThread()
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .opacity(coordinator.mode == .email ? 1 : 0)
+                    .allowsHitTesting(coordinator.mode == .email)
+                    .accessibilityHidden(coordinator.mode != .email)
                 }
-                .opacity(coordinator.mode == .email ? 1 : 0)
-                .allowsHitTesting(coordinator.mode == .email)
-                .accessibilityHidden(coordinator.mode != .email)
+                // Mounted navigation trees must fit the available window instead
+                // of moving the mode controls outside a smaller Mac window.
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
+        .environment(\.activeClientMode, coordinator.mode)
     }
 
     private func updateEmailActivity() {
@@ -300,6 +331,7 @@ enum SessionSidebarDestination: Hashable, Sendable {
 }
 
 private struct SessionSidebar: View {
+    @Environment(\.activeClientMode) private var activeMode
     @ObservedObject var model: ChatViewModel
     let usesDirectActivation: Bool
     let openSettings: () -> Void
@@ -313,6 +345,7 @@ private struct SessionSidebar: View {
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
 
+    /// Presents session navigation and contributes global toolbar actions only while Chat is active.
     var body: some View {
         Group {
             if #available(iOS 16.0, macOS 13.0, *) {
@@ -346,83 +379,94 @@ private struct SessionSidebar: View {
         }
         .toolbar {
             #if os(macOS)
-            ToolbarItem(placement: .automatic) {
-                Button(action: openSettings) {
-                    Image(systemName: "gearshape")
-                        .foregroundColor(AppTheme.orange)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button(action: openSettings) {
+                            Image(systemName: "gearshape")
+                                .foregroundColor(AppTheme.orange)
+                        }
+                        .accessibilityLabel("Settings")
+                        .accessibilityIdentifier("sidebar.settings")
+                    }
                 }
-                .accessibilityLabel("Settings")
-                .accessibilityIdentifier("sidebar.settings")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showingMemoryBrowser = true
-                } label: {
-                    Image(systemName: "brain.head.profile")
-                        .foregroundColor(AppTheme.turquoise)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button {
+                            showingMemoryBrowser = true
+                        } label: {
+                            Image(systemName: "brain.head.profile")
+                                .foregroundColor(AppTheme.turquoise)
+                        }
+                        .accessibilityLabel("Memory")
+                        .accessibilityIdentifier("sidebar.memory")
+                    }
                 }
-                .accessibilityLabel("Memory")
-                .accessibilityIdentifier("sidebar.memory")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showingPersonaEditor = true
-                } label: {
-                    Image(systemName: "person.crop.circle")
-                        .foregroundColor(AppTheme.turquoise)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button {
+                            showingPersonaEditor = true
+                        } label: {
+                            Image(systemName: "person.crop.circle")
+                                .foregroundColor(AppTheme.turquoise)
+                        }
+                        .accessibilityLabel("Persona")
+                        .accessibilityIdentifier("sidebar.persona")
+                    }
                 }
-                .accessibilityLabel("Persona")
-                .accessibilityIdentifier("sidebar.persona")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showingScheduleBrowser = true
-                } label: {
-                    Image(systemName: "calendar")
-                        .foregroundColor(AppTheme.orange)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button {
+                            showingScheduleBrowser = true
+                        } label: {
+                            Image(systemName: "calendar")
+                                .foregroundColor(AppTheme.orange)
+                        }
+                        .accessibilityLabel("Schedules")
+                        .accessibilityIdentifier("sidebar.schedules")
+                    }
                 }
-                .accessibilityLabel("Schedules")
-                .accessibilityIdentifier("sidebar.schedules")
-            }
             #else
-            ToolbarItem(placement: .automatic) {
-                Menu {
-                    Button {
-                        showingMemoryBrowser = true
-                    } label: {
-                        Label("Memory", systemImage: "brain.head.profile")
-                    }
-                    .accessibilityIdentifier("sidebar.memory")
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Menu {
+                            Button {
+                                showingMemoryBrowser = true
+                            } label: {
+                                Label("Memory", systemImage: "brain.head.profile")
+                            }
+                            .accessibilityIdentifier("sidebar.memory")
 
-                    Button {
-                        showingScheduleBrowser = true
-                    } label: {
-                        Label("Schedules", systemImage: "calendar")
-                    }
-                    .accessibilityIdentifier("sidebar.schedules")
+                            Button {
+                                showingScheduleBrowser = true
+                            } label: {
+                                Label("Schedules", systemImage: "calendar")
+                            }
+                            .accessibilityIdentifier("sidebar.schedules")
 
-                    Button {
-                        showingPersonaEditor = true
-                    } label: {
-                        Label("Persona", systemImage: "person.crop.circle")
-                    }
-                    .accessibilityIdentifier("sidebar.persona")
+                            Button {
+                                showingPersonaEditor = true
+                            } label: {
+                                Label("Persona", systemImage: "person.crop.circle")
+                            }
+                            .accessibilityIdentifier("sidebar.persona")
 
-                    Divider()
+                            Divider()
 
-                    Button(action: openSettings) {
-                        Label("Settings", systemImage: "gearshape")
+                            Button(action: openSettings) {
+                                Label("Settings", systemImage: "gearshape")
+                            }
+                            .accessibilityIdentifier("sidebar.settings")
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("More")
+                        .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
+                        .accessibilityIdentifier("sidebar.more")
                     }
-                    .accessibilityIdentifier("sidebar.settings")
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .accessibilityLabel("More")
-                .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
-                .accessibilityIdentifier("sidebar.more")
-            }
             #endif
+
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
