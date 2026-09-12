@@ -21,6 +21,7 @@ enum ConversationScrollTarget: Equatable {
 }
 
 public struct ChatView: View {
+    @Environment(\.activeClientMode) private var activeMode
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
@@ -130,7 +131,7 @@ public struct ChatView: View {
             Divider()
             composer
         }
-        .navigationTitle("Conversation")
+        .navigationTitle(activeMode == .chat ? "Conversation" : "Email")
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)
         }

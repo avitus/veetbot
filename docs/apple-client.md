@@ -294,6 +294,27 @@ preserving errors from editing, feedback or send actions.
 Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
+The inbox keeps search, Important / Other mail and account filtering together
+above the thread list. Rows distinguish correspondent, account, subject,
+attention summary and reply state. A compact mailbox-status disclosure retains
+per-account freshness; incomplete scans and account failures remain visible in
+its collapsed label. Historical coverage lives in the scrollable Email learning
+pane. Only the active mode contributes toolbar actions.
+Mark handled remains available beside every inbox row and at the top of the
+reading column; its confirmed state can be reversed with Mark unhandled.
+
+The reading column separates the attention summary, original conversation and
+reply composer. Why this matters and Improve priorities expand on demand, while
+the persistent Your reply action reaches the editor without scrolling through
+the conversation. From and To stay visible; Cc, Bcc and subject expand together
+and initially open when copy recipients are present. Draft options collect save,
+history, writing-example endorsement and discard. Review & Send remains the
+primary composer action and opens a separate, scrollable exact-message review.
+Native interaction coverage checks the reply shortcut, optional feedback,
+recipient-field discovery and separation of Chat and Email toolbar actions in
+light and dark appearance. Email uses adaptive surfaces and text accents while
+filled action buttons retain contrasting text.
+
 Thread detail renders text and attachment metadata without remote content.
 Feedback distinguishes people, topics, thread importance and reply need, reports
 the applied scope and judgment, and supports Undo. Learning controls expose

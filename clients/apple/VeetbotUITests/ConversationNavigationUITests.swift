@@ -58,14 +58,80 @@ final class ConversationNavigationUITests: XCTestCase {
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: check)
         waitForExpectations(timeout: 5)
         XCTAssertFalse(app.buttons["email.handled.detail"].exists)
-        let other = app.buttons["Review other mail"]
         #if os(macOS)
+        let other = app.radioButtons["Other mail"]
+        XCTAssertTrue(other.waitForExistence(timeout: 5))
         other.click()
         #else
+        let other = app.buttons["Other mail"]
         other.tap()
         #endif
         XCTAssertTrue(check.waitForExistence(timeout: 5))
         XCTAssertEqual(check.label, "Mark unhandled")
+    }
+
+    func testEmailReadingKeepsFeedbackOptionalAndReplyReachable() {
+        checkEmailReadingFlow()
+    }
+
+    func testEmailReadingInDarkAppearance() {
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_COLOR_SCHEME"] = "dark"
+        app.launch()
+        checkEmailReadingFlow()
+    }
+
+    private func checkEmailReadingFlow() {
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        activate(emailMode)
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["email.search"].exists)
+        XCTAssertFalse(app.buttons["sidebar.settings"].isHittable, "The hidden Chat toolbar must not leak into Email")
+        attachEmailScreenshot("Priority inbox")
+        activate(row)
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        attachEmailScreenshot("Reading a thread")
+
+        let reply = app.buttons["email.jump-to-reply"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 5), "A reply must be reachable without scrolling through the conversation")
+        XCTAssertTrue(reply.isHittable)
+        XCTAssertFalse(app.textFields["Explain what matters (optional)"].isHittable,
+                       "Feedback must not compete with reading the message")
+        activate(reply)
+        let editor = app.textViews["email.draft-body"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertTrue(editor.isHittable)
+        XCTAssertTrue(app.buttons["email.review-send"].isHittable)
+        attachEmailScreenshot("Reply composer")
+
+        let envelope = app.buttons["email.draft-envelope"]
+        XCTAssertTrue(envelope.exists)
+        activate(envelope)
+        XCTAssertTrue(app.textFields["email.draft-cc"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["email.draft-bcc"].exists)
+        XCTAssertTrue(app.textFields["email.draft-subject"].exists)
+        activate(app.buttons["mode.chat"])
+        XCTAssertFalse(app.textFields["email.search"].isHittable, "Mail search belongs to Email mode")
+        #if os(macOS)
+        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable)
+        #endif
+    }
+
+    private func activate(_ element: XCUIElement) {
+        #if os(macOS)
+        element.click()
+        #else
+        element.tap()
+        #endif
+    }
+
+    private func attachEmailScreenshot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     #if os(iOS)
@@ -111,7 +177,8 @@ final class ConversationNavigationUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
         checkHandledActionInDetail()
-        app.buttons["Important"].tap()
+        app.buttons["email.feedback"].tap()
+        app.buttons["email.feedback-important"].tap()
         XCTAssertTrue(app.staticTexts["Marked this thread as important."].waitForExistence(timeout: 5))
         let editor = app.textViews["email.draft-body"]
         scrollEmailUntilVisible(editor)

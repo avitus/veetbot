@@ -1,5 +1,16 @@
 import SwiftUI
 
+private struct ActiveClientModeKey: EnvironmentKey {
+    static let defaultValue = ClientMode.chat
+}
+
+extension EnvironmentValues {
+    var activeClientMode: ClientMode {
+        get { self[ActiveClientModeKey.self] }
+        set { self[ActiveClientModeKey.self] = newValue }
+    }
+}
+
 #if os(macOS)
 import AppKit
 #endif
@@ -15,6 +26,13 @@ struct VeetbotSceneRoot: View {
             .environmentObject(smsIntegration)
             .appTypography(appearance)
             .tint(AppTheme.turquoise)
+        #if DEBUG && !SWIFT_PACKAGE
+            .preferredColorScheme(
+                ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument)
+                    && ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_COLOR_SCHEME"] == "dark"
+                    ? .dark : nil
+            )
+        #endif
         #if DEBUG && os(iOS)
             .transformEnvironment(\.horizontalSizeClass) { value in
                 if ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument),
@@ -172,6 +190,7 @@ public struct RootView: View {
                 .accessibilityHidden(coordinator.mode != .email)
             }
         }
+        .environment(\.activeClientMode, coordinator.mode)
     }
 
     private func updateEmailActivity() {
@@ -300,6 +319,7 @@ enum SessionSidebarDestination: Hashable, Sendable {
 }
 
 private struct SessionSidebar: View {
+    @Environment(\.activeClientMode) private var activeMode
     @ObservedObject var model: ChatViewModel
     let usesDirectActivation: Bool
     let openSettings: () -> Void
@@ -346,83 +366,94 @@ private struct SessionSidebar: View {
         }
         .toolbar {
             #if os(macOS)
-            ToolbarItem(placement: .automatic) {
-                Button(action: openSettings) {
-                    Image(systemName: "gearshape")
-                        .foregroundColor(AppTheme.orange)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button(action: openSettings) {
+                            Image(systemName: "gearshape")
+                                .foregroundColor(AppTheme.orange)
+                        }
+                        .accessibilityLabel("Settings")
+                        .accessibilityIdentifier("sidebar.settings")
+                    }
                 }
-                .accessibilityLabel("Settings")
-                .accessibilityIdentifier("sidebar.settings")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showingMemoryBrowser = true
-                } label: {
-                    Image(systemName: "brain.head.profile")
-                        .foregroundColor(AppTheme.turquoise)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button {
+                            showingMemoryBrowser = true
+                        } label: {
+                            Image(systemName: "brain.head.profile")
+                                .foregroundColor(AppTheme.turquoise)
+                        }
+                        .accessibilityLabel("Memory")
+                        .accessibilityIdentifier("sidebar.memory")
+                    }
                 }
-                .accessibilityLabel("Memory")
-                .accessibilityIdentifier("sidebar.memory")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showingPersonaEditor = true
-                } label: {
-                    Image(systemName: "person.crop.circle")
-                        .foregroundColor(AppTheme.turquoise)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button {
+                            showingPersonaEditor = true
+                        } label: {
+                            Image(systemName: "person.crop.circle")
+                                .foregroundColor(AppTheme.turquoise)
+                        }
+                        .accessibilityLabel("Persona")
+                        .accessibilityIdentifier("sidebar.persona")
+                    }
                 }
-                .accessibilityLabel("Persona")
-                .accessibilityIdentifier("sidebar.persona")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showingScheduleBrowser = true
-                } label: {
-                    Image(systemName: "calendar")
-                        .foregroundColor(AppTheme.orange)
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Button {
+                            showingScheduleBrowser = true
+                        } label: {
+                            Image(systemName: "calendar")
+                                .foregroundColor(AppTheme.orange)
+                        }
+                        .accessibilityLabel("Schedules")
+                        .accessibilityIdentifier("sidebar.schedules")
+                    }
                 }
-                .accessibilityLabel("Schedules")
-                .accessibilityIdentifier("sidebar.schedules")
-            }
             #else
-            ToolbarItem(placement: .automatic) {
-                Menu {
-                    Button {
-                        showingMemoryBrowser = true
-                    } label: {
-                        Label("Memory", systemImage: "brain.head.profile")
-                    }
-                    .accessibilityIdentifier("sidebar.memory")
+                ToolbarItem(placement: .automatic) {
+                    if activeMode == .chat {
+                        Menu {
+                            Button {
+                                showingMemoryBrowser = true
+                            } label: {
+                                Label("Memory", systemImage: "brain.head.profile")
+                            }
+                            .accessibilityIdentifier("sidebar.memory")
 
-                    Button {
-                        showingScheduleBrowser = true
-                    } label: {
-                        Label("Schedules", systemImage: "calendar")
-                    }
-                    .accessibilityIdentifier("sidebar.schedules")
+                            Button {
+                                showingScheduleBrowser = true
+                            } label: {
+                                Label("Schedules", systemImage: "calendar")
+                            }
+                            .accessibilityIdentifier("sidebar.schedules")
 
-                    Button {
-                        showingPersonaEditor = true
-                    } label: {
-                        Label("Persona", systemImage: "person.crop.circle")
-                    }
-                    .accessibilityIdentifier("sidebar.persona")
+                            Button {
+                                showingPersonaEditor = true
+                            } label: {
+                                Label("Persona", systemImage: "person.crop.circle")
+                            }
+                            .accessibilityIdentifier("sidebar.persona")
 
-                    Divider()
+                            Divider()
 
-                    Button(action: openSettings) {
-                        Label("Settings", systemImage: "gearshape")
+                            Button(action: openSettings) {
+                                Label("Settings", systemImage: "gearshape")
+                            }
+                            .accessibilityIdentifier("sidebar.settings")
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("More")
+                        .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
+                        .accessibilityIdentifier("sidebar.more")
                     }
-                    .accessibilityIdentifier("sidebar.settings")
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .accessibilityLabel("More")
-                .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
-                .accessibilityIdentifier("sidebar.more")
-            }
             #endif
+
         }
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
