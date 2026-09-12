@@ -1129,9 +1129,9 @@ class ToolPipeline:
         try:
             if effective_timeout <= 0:
                 raise TimeoutError
-            if tool.spec.side_effect is not SideEffectClass.NONE:
-                await mark_effect_sent()
             async with asyncio.timeout(effective_timeout):
+                if tool.spec.side_effect is not SideEffectClass.NONE:
+                    await mark_effect_sent()
                 try:
                     result = await tool.execute(arguments, execution_context)
                 except ToolTrustRejectedError:

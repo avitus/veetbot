@@ -134,11 +134,10 @@ import Testing
         #expect(!model.canArchive(pending))
         #expect(model.archiveMessage(for: pending) == "Archiving in Gmail…")
         model.setActive(true)
-        for _ in 0..<1500 {
-            if requests.snapshot.contains(where: { $0.url!.path == "/v1/email/threads/\(threadID.uuidString)" }) { break }
-            try await Task.sleep(nanoseconds: 1_000_000)
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.url!.path == "/v1/email/threads/\(threadID.uuidString)" }
         }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForEmailTestCondition { model.items.isEmpty }
         #expect(model.items.isEmpty)
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("archive") || $0.url!.path.hasSuffix("dismiss") })
     }

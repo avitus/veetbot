@@ -173,6 +173,9 @@ Four fields need their justification.
 run deadline. A tool never sees `ToolSpec.timeout_seconds` and never computes
 its own budget; the executor does that once, in one place, where it can also
 refuse to start a call that cannot finish.
+The pre-effect authorization callback and effect-watermark transaction share
+that timeout with tool execution. A timeout before the watermark is committed
+settles as `tool.timeout` without dispatching an external effect.
 
 `credentials` is a resolver, not a dictionary. It takes a `credential_ref` from
 configuration and returns a short-lived value; the reference is what appears in

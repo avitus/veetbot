@@ -36,6 +36,7 @@ from agent_core.domain.messages import (
     TextPart,
     ToolCallItem,
 )
+from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
     ActionKind,
     ExecutionTarget,
@@ -484,6 +485,95 @@ async def test_execution_validation_is_distinct_from_output_validation(
     assert result[0].is_error is True
     assert invocation.outcome is not None
     assert invocation.outcome.reason_code == expected_reason
+
+
+@pytest.mark.parametrize("blocked_boundary", ["callback", "watermark"])
+async def test_tool_timeout_includes_pre_effect_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocked_boundary: str
+) -> None:
+    """A stalled dispatch guard or watermark cannot outlive the tool budget."""
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _SchedulingTool(
+        name="demo.deadline_write", side_effect=SideEffectClass.EXTERNAL_WRITE, parallel=False
+    )
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("prepare a pre-effect timeout test")
+        active_run = (await app.runs.get(run_id)).model_copy(
+            update={"deadline_at": app.clock.now() + timedelta(milliseconds=50)}
+        )
+        actor = app.principal.model_copy(update={"scopes": {*app.principal.scopes, "demo.write"}})
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            checkpoint = await uow.checkpoints.latest(run_id)
+            invocations = uow.invocations
+        assert checkpoint is not None
+        active_agent = active_agent.model_copy(update={"enabled_tools": [tool.spec.name]})
+        boundary_entered = False
+
+        async def block_boundary() -> None:
+            nonlocal boundary_entered
+            boundary_entered = True
+            await asyncio.sleep(1)
+
+        async def before_effect(
+            run: Run, principal: Principal, invocation: ToolInvocation, lease: WorkerLease | None
+        ) -> None:
+            if blocked_boundary == "callback":
+                await block_boundary()
+
+        transition = invocations.transition
+
+        async def transition_with_blocked_watermark(
+            invocation_id: UUID,
+            expected_status: ToolInvocationStatus,
+            updated: ToolInvocation,
+            *,
+            lease: WorkerLease | None = None,
+        ) -> ToolInvocation:
+            if blocked_boundary == "watermark" and updated.effect_sent_at is not None:
+                await block_boundary()
+            return await transition(invocation_id, expected_status, updated, lease=lease)
+
+        monkeypatch.setattr(invocations, "transition", transition_with_blocked_watermark)
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=_AllowPolicy(),
+            before_effect=before_effect,
+        )
+        result = await pipeline.dispatch(
+            run=active_run,
+            checkpoint=checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="deadline-call",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={},
+                    raw_arguments="{}",
+                )
+            ],
+            principal=actor,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, actor))[0]
+
+    assert boundary_entered
+    assert result[0].is_error
+    assert tool.started == 0
+    assert invocation.status is ToolInvocationStatus.FAILED
+    assert invocation.effect_sent_at is None
+    assert invocation.outcome is not None
+    assert invocation.outcome.reason_code == "tool.timeout"
 
 
 async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(
