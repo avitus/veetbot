@@ -75,6 +75,7 @@ public final class EmailViewModel: ObservableObject {
     private var autosaveTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private var refreshKey: String?
+    private var refreshFailure: String?
     private var pendingNewItems: [EmailThreadView]?
     private var saveKeys: [UUID: (EmailDraftEdit, String)] = [:]
     private var sendKeys: [UUID: (Int, String)] = [:]
@@ -147,6 +148,7 @@ public final class EmailViewModel: ObservableObject {
         learning = nil
         revisions = []
         refreshKey = nil
+        refreshFailure = nil
         saveKeys = [:]
         sendKeys = [:]
         isLoading = false
@@ -188,7 +190,7 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         listRequest = requestID
         let visibleCount = preserveOrder ? max(5, items.count) : 5
-        isLoading = !preserveOrder || items.isEmpty
+        isLoading = !preserveOrder
         if !preserveOrder {
             items = []
             nextCursor = nil
@@ -196,7 +198,7 @@ public final class EmailViewModel: ObservableObject {
             pendingNewItems = nil
             newImportantCount = 0
         }
-        errorMessage = nil
+        errorMessage = refreshFailure
         defer { if listRequest == requestID { isLoading = false } }
         do {
             async let accountPage = api.emailAccounts()
@@ -294,6 +296,7 @@ public final class EmailViewModel: ObservableObject {
             let operation = try await api.refreshEmail(idempotencyKey: key)
             guard generation == connection else { return }
             refreshKey = nil
+            recordRefreshStatus(operation.status)
             await reload(preserveOrder: true)
             if !operation.status.isTerminal { watchRefresh(operation.operationID) }
             if let selectedThreadID { await openThread(selectedThreadID, refreshOnly: true) }
@@ -314,12 +317,21 @@ public final class EmailViewModel: ObservableObject {
                     guard self.active, let api = self.makeAPIClient(), !Task.isCancelled else { return }
                     let operation = try await api.emailOperation(id)
                     guard self.generation == connection, !Task.isCancelled else { return }
+                    self.recordRefreshStatus(operation.status)
                     await self.reload(preserveOrder: true)
                     if let selected = self.selectedThreadID { await self.openThread(selected, refreshOnly: true) }
                     if operation.status.isTerminal { return }
                 } catch is CancellationError { return }
                 catch { self.report(error, readAccess: true); return }
             }
+        }
+    }
+
+    private func recordRefreshStatus(_ status: RunStatus) {
+        if status == .failed {
+            refreshFailure = "Email refresh failed. Previously loaded mail remains available. Try refreshing again."
+        } else if status == .completed {
+            refreshFailure = nil
         }
     }
 

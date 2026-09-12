@@ -116,6 +116,11 @@ server coalesces overlapping requests from multiple devices, with one active
 refresh per principal/account and a single historical-learning slice per
 principal. Repeated requests cannot build an unbounded backlog.
 
+An empty inbox does not restart its initial loading indicator on each projection
+poll. A failed refresh remains visible across successful reads of cached
+projections until a later refresh succeeds; it is not reported as an empty
+successful priority result.
+
 Each foreground request may admit a bounded slice. The server does not schedule
 the next slice itself: it requires a fresh active client request. On leaving
 Email, stop admitting new slices; an admitted slice may finish its bounded work
@@ -474,6 +479,18 @@ index must not fill with polling sessions. User interaction or draft generation
 for a thread lazily creates/reuses its ordinary conversation session; Discuss
 in Chat selects it. This introduces task associations and an index filter, not
 a new session trust class or separate agent loop.
+
+Release operational refresh MCP transports in the admitting process before
+dispatch, then release the worker's transports when the run becomes terminal,
+including failures awaiting cost reconciliation. Discard the matching ephemeral
+catalog cache so worker execution/recovery performs discovery normally. Durable
+sessions, pinned catalogs, events, and source receipts retain their existing
+lifecycle; draft and Chat session transports are unaffected.
+
+Assessment and draft response schemas require all declared properties, including
+nested semantic facts, for strict structured output. Nullable values and empty
+lists express absence explicitly. Domain defaults and local evidence validation
+remain unchanged, and token estimation uses the actual transmitted schema.
 
 The conversation index excludes the server-owned operational marker within each
 repository query before cursor limits apply. Feedback evidence queries are
