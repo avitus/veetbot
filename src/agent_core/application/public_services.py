@@ -477,9 +477,7 @@ class PublicSessionService:
         decoded = _decode_session_cursor(cursor)
         async with self._uow_factory() as uow:
             rows = await uow.sessions.list(
-                principal,
-                limit=effective_limit + 1,
-                cursor=decoded,
+                principal, limit=effective_limit + 1, cursor=decoded, exclude_operational=True
             )
             latest_runs = await uow.runs.latest_for_sessions(
                 [row.id for row in rows[:effective_limit]], principal

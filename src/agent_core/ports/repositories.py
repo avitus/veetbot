@@ -72,6 +72,7 @@ class SessionRepository(Protocol):
         *,
         limit: int,
         cursor: SessionCursor | None = None,
+        exclude_operational: bool = False,
     ) -> list[Session]: ...
 
     async def close(
@@ -372,6 +373,15 @@ class MaintenanceRepository(Protocol):
 
 
 class SessionDeletionRepository(Protocol):
+    async def erase_email_source(
+        self,
+        principal: Principal,
+        account_id: str,
+        thread_id: str,
+        message_ids: frozenset[str],
+        erased_at: datetime,
+    ) -> dict[str, int]: ...
+
     async def delete(
         self, session_id: UUID, principal: Principal, deleted_at: datetime
     ) -> bool: ...

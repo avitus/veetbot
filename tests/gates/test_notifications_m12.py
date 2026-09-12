@@ -290,6 +290,7 @@ def test_notification_payload_is_content_free() -> None:
         "question_id",
         "schedule_id",
         "occurrence_id",
+        "schedule_context",
         "invocation_id",
         "device_id",
         "notification_id",
@@ -307,6 +308,30 @@ def test_notification_payload_is_content_free() -> None:
         assert isinstance(field, str)
         with pytest.raises(ValidationError):
             NotificationPayload.model_validate({**_approval_payload(), field: value})
+
+    # The owner-authorized exception is closed and confined to schedule kinds.
+    context = {"title": "Daily briefing", "scheduled_for": NOW}
+    schedule_payload = {
+        **_base_payload(NotificationKind.SCHEDULE_OCCURRENCE_SKIPPED, "Scheduled run skipped"),
+        "status": OccurrenceDisposition.MISSED,
+        "schedule_id": SCHEDULE_ID,
+        "occurrence_id": OCCURRENCE_ID,
+        "schedule_context": context,
+    }
+    parsed = NotificationPayload.model_validate(schedule_payload)
+    assert parsed.schedule_context is not None
+    assert parsed.schedule_context.title == "Daily briefing"
+    for member in members:
+        raw = yaml.safe_load(member.read_text(encoding="utf-8"))
+        with pytest.raises(ValidationError):
+            NotificationPayload.model_validate(
+                {
+                    **schedule_payload,
+                    "schedule_context": {**context, raw["field"]: raw["value"]},
+                }
+            )
+    with pytest.raises(ValidationError):
+        NotificationPayload.model_validate({**_approval_payload(), "schedule_context": context})
 
     serialized = json.dumps(
         NotificationPayload.model_validate(_approval_payload()).model_dump(mode="json")

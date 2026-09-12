@@ -47,8 +47,8 @@ class _InjectedCrashError(Exception):
 
 
 class _NoNotificationProducer:
-    async def for_schedule_occurrence(self, uow, *, schedule, occurrence):  # type: ignore[no-untyped-def]
-        del uow, schedule, occurrence
+    async def for_schedule_occurrence(self, uow, *, schedule, occurrence, revision):  # type: ignore[no-untyped-def]
+        del uow, schedule, occurrence, revision
         return False
 
 
@@ -127,7 +127,7 @@ async def _create_schedule(composition, *, missed: bool):  # type: ignore[no-unt
     revision = ScheduleRevision(
         schedule_id=schedule_id,
         revision=1,
-        title="Schedule title is never copied",
+        title="Daily briefing",
         instruction="Schedule instruction is never copied",
         agent_id=agent().id,
         agent_version=agent().version,
@@ -321,7 +321,12 @@ async def _assert_schedule_skip_notification_atomic() -> None:
             assert occurrence.disposition is OccurrenceDisposition.MISSED
             async with composition.uow_factory() as uow:
                 rows = await uow.notification_outbox.list(composition.principal, limit=100)
-                assert sum(row.occurrence_id == occurrence.id for row in rows) == 1
+                [notification] = [row for row in rows if row.occurrence_id == occurrence.id]
+                context = notification.payload.schedule_context
+                assert context is not None
+                assert context.title == "Daily briefing"
+                assert context.scheduled_for == occurrence.nominal_fire_at
+                assert "Schedule instruction" not in notification.payload.model_dump_json()
 
 
 async def test_schedule_skip_does_not_probe_a_notification_that_was_not_written() -> None:
@@ -398,7 +403,12 @@ async def _assert_schedule_accounting_notification_atomic() -> None:
             assert await retry.account(occurrence.run_id)
             async with composition.uow_factory() as uow:
                 rows = await uow.notification_outbox.list(composition.principal, limit=100)
-                assert sum(row.occurrence_id == occurrence.id for row in rows) == 1
+                [notification] = [row for row in rows if row.occurrence_id == occurrence.id]
+                context = notification.payload.schedule_context
+                assert context is not None
+                assert context.title == "Daily briefing"
+                assert context.scheduled_for == occurrence.nominal_fire_at
+                assert "Schedule instruction" not in notification.payload.model_dump_json()
 
 
 @pytest.mark.parametrize(

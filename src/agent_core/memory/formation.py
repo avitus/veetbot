@@ -2399,7 +2399,7 @@ class GovernedMemoryService:
         derivation: MemoryDerivation = MemoryDerivation.DIRECT,
         longevity: MemoryLongevity = MemoryLongevity.DURABLE,
     ) -> MemoryRecord:
-        record, _action = await self._remember(
+        record, _action = await self.remember_formation(
             session_id=session_id,
             run_id=run_id,
             statement=statement,
@@ -2424,7 +2424,7 @@ class GovernedMemoryService:
         )
         return record
 
-    async def _remember(
+    async def remember_formation(
         self,
         *,
         session_id: UUID,
@@ -2450,9 +2450,12 @@ class GovernedMemoryService:
         longevity: MemoryLongevity = MemoryLongevity.DURABLE,
         evidence_at: datetime | None = None,
         attributed_external: bool = False,
+        semantic_external: bool = False,
+        audit_model: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
     ) -> tuple[MemoryRecord, str]:
+        """Apply validated formation evidence within an optional caller-owned transaction."""
         attributed_shape = (
             origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
             and not explicit
@@ -2461,7 +2464,15 @@ class GovernedMemoryService:
             and derivation is MemoryDerivation.HYPOTHESIS
             and longevity is MemoryLongevity.TENTATIVE
             and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
-            and portability is Portability.LOCAL
+            and (
+                portability is Portability.LOCAL
+                or (
+                    semantic_external
+                    and portability is Portability.CONTEXTUAL
+                    and self._policy_version == "email-semantic@1"
+                    and trigger == "email-semantic@1"
+                )
+            )
         )
         if attributed_external:
             if not attributed_shape:
@@ -2503,7 +2514,7 @@ class GovernedMemoryService:
                 session_id=session_id,
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
-                model=self._extractor.name,
+                model=audit_model or self._extractor.name,
                 policy_version=self._policy_version,
                 candidates_proposed=1,
                 committed=0,
@@ -2533,6 +2544,21 @@ class GovernedMemoryService:
                 )
                 for current in sorted(related, key=lambda item: item.store_position, reverse=True)
             ]
+            if semantic_external:
+                # Import order is not evidence order. A historical message cannot
+                # supersede or cast doubt on a newer source merely because its
+                # operational event was appended later. One message can also
+                # contain several independent facts about the same subject.
+                classified = [
+                    (
+                        current,
+                        "independent"
+                        if relation == "same_source" and current.statement != clean_statement
+                        else relation,
+                    )
+                    for current, relation in classified
+                    if evidence_at is None or evidence_at >= current.valid_from
+                ]
             # A replay is a no-op whichever related belief the ordering reaches
             # first, so it is decided over all of them before any is acted on.
             # A conflict leaves both halves of the pair live and lifts the
@@ -3122,7 +3148,7 @@ class GovernedMemoryService:
                         # several beliefs is counted once and supersedes each.
                         counted = key_index == 0
                         try:
-                            belief, action = await self._remember(
+                            belief, action = await self.remember_formation(
                                 session_id=session_id,
                                 run_id=source_event.run_id,
                                 statement=candidate.statement,

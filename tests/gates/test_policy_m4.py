@@ -1065,7 +1065,7 @@ async def test_prompt_not_authz() -> None:
 
 
 def test_scope_grammar() -> None:
-    assert len(PLATFORM_SCOPES) == 31
+    assert len(PLATFORM_SCOPES) == 33
     assert {
         "schedule.read",
         "schedule.write",
@@ -1075,6 +1075,8 @@ def test_scope_grammar() -> None:
         "notification.read",
         "memory.read",
         "run.delegate",
+        "email.read",
+        "email.write",
     } <= PLATFORM_SCOPES
     bad_mcp = ToolSpec(
         name="mcp.files.write",

@@ -15,6 +15,14 @@ struct VeetbotSceneRoot: View {
             .environmentObject(smsIntegration)
             .appTypography(appearance)
             .tint(AppTheme.turquoise)
+        #if DEBUG && os(iOS)
+            .transformEnvironment(\.horizontalSizeClass) { value in
+                if ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument),
+                   ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_SIZE_CLASS"] == "compact" {
+                    value = .compact
+                }
+            }
+        #endif
         #if os(macOS)
             .frame(minWidth: 780, minHeight: 560)
         #endif
@@ -23,6 +31,13 @@ struct VeetbotSceneRoot: View {
 
 public struct RootView: View {
     @ObservedObject var model: ChatViewModel
+    @StateObject private var coordinator: AppCoordinator
+    @StateObject private var globalMemory = MemoryViewModel()
+    @StateObject private var globalPersona = PersonaViewModel()
+    @StateObject private var globalSchedules = ScheduleViewModel()
+    @State private var showingGlobalMemory = false
+    @State private var showingGlobalPersona = false
+    @State private var showingGlobalSchedules = false
     #if !os(macOS)
     @State private var showingSettings = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -40,6 +55,7 @@ public struct RootView: View {
 
     public init(model: ChatViewModel) {
         self.model = model
+        _coordinator = StateObject(wrappedValue: AppCoordinator(chat: model))
     }
 
     public var body: some View {
@@ -50,6 +66,15 @@ public struct RootView: View {
                 ConnectionSettingsView(model: model, embedded: true)
             }
         }
+        .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory) }
+        .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
+        .sheet(isPresented: $showingGlobalSchedules) { ScheduleBrowserView(model: globalSchedules) }
+        .onChange(of: coordinator.mode) { _ in updateEmailActivity() }
+        .onChange(of: model.isConfigured) { _ in updateEmailActivity() }
+        .onChange(of: model.connectionGeneration) { _ in updateEmailActivity() }
+        .onChange(of: model.isReconfiguring) { _ in updateEmailActivity() }
+        .onChange(of: scenePhase) { _ in updateEmailActivity() }
+        .onAppear { updateEmailActivity() }
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
             ConnectionSettingsView(model: model, embedded: false)
@@ -105,6 +130,56 @@ public struct RootView: View {
 
     @ViewBuilder
     private var configuredContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                ForEach(ClientMode.allCases) { mode in
+                    Button { coordinator.mode = mode } label: {
+                        Label(mode.title, systemImage: mode.symbol)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(coordinator.mode == mode ? AppTheme.turquoise.opacity(0.17) : Color.clear)
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("mode.\(mode.rawValue)")
+                    .accessibilityAddTraits(coordinator.mode == mode ? .isSelected : [])
+                }
+                Spacer()
+                if coordinator.mode == .email {
+                    Menu {
+                        Button("Memory") { showingGlobalMemory = true }
+                        Button("Persona") { showingGlobalPersona = true }
+                        Button("Schedules") { showingGlobalSchedules = true }
+                        Button("Settings", action: presentSettings)
+                    } label: { Image(systemName: "ellipsis.circle").padding(10) }
+                    .accessibilityLabel("More")
+                    .accessibilityIdentifier("email.more")
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            Divider()
+            // Keeping each navigation tree mounted preserves compact navigation,
+            // scroll position and live Chat rendering across a mode switch.
+            ZStack {
+                chatContent
+                    .opacity(coordinator.mode == .chat ? 1 : 0)
+                    .allowsHitTesting(coordinator.mode == .chat)
+                    .accessibilityHidden(coordinator.mode != .chat)
+                EmailModeView(model: coordinator.email) {
+                    await coordinator.discussSelectedThread()
+                }
+                .opacity(coordinator.mode == .email ? 1 : 0)
+                .allowsHitTesting(coordinator.mode == .email)
+                .accessibilityHidden(coordinator.mode != .email)
+            }
+        }
+    }
+
+    private func updateEmailActivity() {
+        coordinator.email.setActive(model.isConfigured && !model.isReconfiguring && scenePhase == .active && coordinator.mode == .email)
+    }
+
+    @ViewBuilder
+    private var chatContent: some View {
         if #available(iOS 16.0, macOS 13.0, *) {
             NavigationSplitView {
                 SessionSidebar(

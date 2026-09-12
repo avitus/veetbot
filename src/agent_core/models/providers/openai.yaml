@@ -22,7 +22,7 @@ limits:
   max_tool_count: 128
 models:
   - id: gpt-5.6-sol
-    aliases: [gpt-5.6, default]
+    aliases: [gpt-5.6]
     limits:
       context_window_tokens: 272000
       max_output_tokens: 128000
@@ -35,3 +35,18 @@ models:
       reasoning_priced_separately: false
       source: docs_snapshot
       effective_at: "2026-08-03T00:00:00Z"
+  - id: gpt-6-astra
+    aliases: [astra, default]
+    limits:
+      # Stay within the standard pricing tier until tiered accounting is supported.
+      context_window_tokens: 272000
+      max_output_tokens: 128000
+    pricing:
+      input_per_mtok: "10.00"
+      cached_input_per_mtok: "1.00"
+      cache_write_per_mtok: "12.50"
+      output_per_mtok: "50.00"
+      reasoning_per_mtok: null
+      reasoning_priced_separately: false
+      source: docs_snapshot
+      effective_at: "2026-09-11T00:00:00Z"

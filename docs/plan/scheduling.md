@@ -912,11 +912,13 @@ schedule permits one consecutive failure before automatic pause. No model
 argument can widen any of these values.
 
 The successful result contains `schedule_id`, `state`, `next_fire_at`, and
-whether the application request replayed. Milestone 12's notification behavior
-is unchanged: after the occurrence's run is accounted, the outbox emits the
-generic content-free `schedule_run_finished` notification. The push does not
-contain the title or instruction and can arrive after the nominal instant by
-the duration of the scheduled run.
+whether the application request replayed. After the occurrence's run is
+accounted, the outbox emits `schedule_run_finished`, which can arrive after the
+nominal instant by the duration of the scheduled run. ADR-0091 subsequently
+authorizes the occurrence's pinned revision title and nominal firing time in
+the alert; instructions and run results remain excluded. The accountant and
+materializer pass the already loaded revision to notification production so
+both terminal and skipped outcomes preserve the schedule identity at firing.
 
 ## Model-callable lifecycle
 

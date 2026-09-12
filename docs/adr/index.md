@@ -99,3 +99,6 @@ implementation without one.
 - [ADR-0088 — Milestone 23 conversational schedule update (Proposed)](0088-milestone-23-conversational-schedule-update.md)
 - [ADR-0089 — Recent terminal schedule history and bounded retention (Proposed)](0089-terminal-schedule-history-and-retention.md)
 - [ADR-0090 — Attributed communication may form memory without becoming owner speech (Proposed)](0090-attributed-communication-memory-formation.md)
+- [ADR-0091 — Schedule identity in outcome notifications (Proposed)](0091-schedule-identity-in-notifications.md)
+- [ADR-0092 — Client modes and a shared adaptive email experience (Accepted; Milestone 26)](0092-client-modes-and-email-experience.md)
+- [ADR-0093 — Keep an independently selected, evidenced memory model](0093-independent-memory-model-policy.md)

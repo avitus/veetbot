@@ -53,7 +53,13 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session, SessionCursor, SessionStatus, conversation_title
+from agent_core.domain.sessions import (
+    SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
+    Session,
+    SessionCursor,
+    SessionStatus,
+    conversation_title,
+)
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -183,6 +189,7 @@ class InMemorySessionRepository:
         *,
         limit: int,
         cursor: SessionCursor | None = None,
+        exclude_operational: bool = False,
     ) -> list[Session]:
         async with self._lock:
             rows = [
@@ -190,6 +197,10 @@ class InMemorySessionRepository:
                 for session in self._sessions.values()
                 if session.tenant_id == principal.tenant_id
                 and session.principal_id == principal.principal_id
+                and (
+                    not exclude_operational
+                    or session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is not True
+                )
                 and (
                     cursor is None
                     or session.updated_at < cursor.updated_at
@@ -477,6 +488,7 @@ class InMemoryEventRepository:
         sequence: int,
         principal: Principal,
         *,
+        run_id: UUID | None = None,
         created_at_or_after: datetime | None = None,
         created_before: datetime | None = None,
         limit: int | None = None,
@@ -489,6 +501,7 @@ class InMemoryEventRepository:
                 event.model_copy(deep=True)
                 for event in self._events[session_id]
                 if event.sequence > sequence
+                and (run_id is None or event.run_id == run_id)
                 and (created_at_or_after is None or event.created_at >= created_at_or_after)
                 and (created_before is None or event.created_at < created_before)
             ]

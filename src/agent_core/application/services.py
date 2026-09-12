@@ -5,7 +5,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -17,6 +17,7 @@ from agent_core.domain.browser import (
     BrowserProfileView,
 )
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
+from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.schedules import (
@@ -401,3 +402,90 @@ class PersonaService(Protocol):
     async def affirm(self, principal: Principal, nomination_id: UUID) -> PersonaView: ...
 
     async def decline(self, principal: Principal, nomination_id: UUID) -> PersonaNominationView: ...
+
+
+class EmailService(Protocol):
+    """Email projections and commands; entry points cannot reach repositories."""
+
+    async def accounts(self, principal: Principal) -> dict[str, object]: ...
+
+    async def threads(
+        self,
+        principal: Principal,
+        *,
+        view: Literal["priority", "other", "all"] = "priority",
+        account_id: str | None = None,
+        text: str | None = None,
+        cursor: str | None = None,
+        limit: int = 5,
+    ) -> dict[str, object]: ...
+
+    async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]: ...
+
+    async def feedback(
+        self,
+        principal: Principal,
+        *,
+        thread_id: UUID,
+        target: Literal["thread", "person", "topic"],
+        judgment: Literal["important", "less_important", "needs_reply", "no_reply_needed"],
+        explanation: str | None = None,
+        target_value: str | None = None,
+        expected_revision: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]: ...
+
+    async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]: ...
+
+    async def draft(self, principal: Principal, draft_id: UUID) -> EmailDraft: ...
+
+    async def edit_draft(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        edit: EmailDraftEdit,
+        *,
+        idempotency_key: str | None = None,
+    ) -> EmailDraft: ...
+
+    async def draft_revisions(self, principal: Principal, draft_id: UUID) -> dict[str, object]: ...
+
+    async def submit_task(
+        self,
+        principal: Principal,
+        *,
+        kind: Literal["refresh", "draft", "send"],
+        thread_id: UUID | None = None,
+        draft_id: UUID | None = None,
+        expected_revision: int | None = None,
+        instruction: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> EmailOperation: ...
+
+    async def operation(self, principal: Principal, operation_id: UUID) -> EmailOperation: ...
+
+    async def learning(self, principal: Principal) -> EmailLearningState: ...
+
+    async def pause_learning(self, principal: Principal, paused: bool) -> EmailLearningState: ...
+
+    async def reset_learning(
+        self, principal: Principal, scope: Literal["preferences", "style", "all"]
+    ) -> EmailLearningState: ...
+
+    async def discussion(self, principal: Principal, thread_id: UUID) -> dict[str, object]: ...
+
+    async def dismiss(
+        self, principal: Principal, thread_id: UUID, expected_revision: int
+    ) -> dict[str, object]: ...
+
+    async def discard_draft(
+        self, principal: Principal, draft_id: UUID, expected_revision: int
+    ) -> EmailDraft: ...
+
+    async def exclude_source(
+        self, principal: Principal, thread_id: UUID, expected_revision: int
+    ) -> dict[str, object]: ...
+
+    async def endorse_style(
+        self, principal: Principal, draft_id: UUID, expected_revision: int
+    ) -> EmailLearningState: ...

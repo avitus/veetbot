@@ -814,3 +814,17 @@ resist decay, subjects that are repeatedly queried with no result queue targeted
 re-derivation hints for stage 8, beliefs that prove useful outside the project they
 were learned in are recorded as promotion candidates, and beliefs the user rejects
 from a trace enter as typed corrections that every later run must honour.
+
+## Milestone 26 semantic correspondence extension
+
+[ADR-0092](../adr/0092-client-modes-and-email-experience.md) and the approved
+[email experience](email-experience.md) authorize a separately versioned,
+evaluated semantic email source policy. Existing extractor versions and the
+ADR-0090 deterministic LOCAL excerpt adapter remain unchanged. New-policy
+CONTEXTUAL evidence may be recalled across the same owner's projects/accounts,
+without widening tenant, principal, sensitivity or instruction authority.
+Correspondence and historical Sent evidence remain attributed and inferred;
+source age, not import time, governs lifecycle. Explicit corrections survive
+replay and policy upgrades. Source erasure removes retained copies and derived
+influence with suppression; independently supported owner evidence survives.
+All existing formation gates remain binding beside Milestone 26's new gates.

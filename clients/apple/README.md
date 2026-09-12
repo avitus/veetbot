@@ -45,12 +45,25 @@ On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
 
-Website Access creates and lists dedicated browser profiles. The app opens the
+Website Access creates and lists dedicated browser profiles from one Website URL.
+Enter a homepage such as `example.com` or a full login link such as
+`https://www.example.com/login?next=%2Fhome`. HTTPS is added when omitted. The app
+derives the primary allowed origin and opens the full URL in the isolated browser.
+Under Advanced settings, optionally add exact HTTPS origins as a comma- or
+newline-separated list for redirects, scripts, styles, images, or sign-in.
+Bare and `www` hostnames are distinct origins; redirects between them need both.
+Unlisted origins remain blocked, which can leave a site blank when its required
+scripts are served elsewhere. The app opens the
 server-provided isolated login ceremony only after a separate Continue in web
 browser action, where the user enters website
 credentials directly; usernames, passwords, passkeys, MFA values, cookies, and
 browser storage never pass through this client or chat. Selecting a ready
 profile binds only its opaque UUID to newly created conversations.
+Veetbot reuses the encrypted browser session across runs while the website
+accepts it. There is no fixed reauthentication interval: expiration, logout, or
+a site's MFA/CAPTCHA challenge requires user sign-in again. The five-minute
+ceremony limit applies only to the interactive login window. Website passwords
+are not stored for automatic sign-in.
 The saved selection is revalidated against the current principal when the
 bearer credential changes and when the app reconnects after launch; missing or
 non-ready profiles are cleared before another conversation can use them. If the

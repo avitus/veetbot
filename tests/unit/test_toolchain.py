@@ -654,7 +654,7 @@ def test_production_preflight_normalizes_command_timeout(
     assert "timed out" in result.stderr
 
 
-def test_production_preflight_requires_the_balanced_provider_credential(tmp_path: Path) -> None:
+def test_production_preflight_requires_the_chat_default_provider_credential(tmp_path: Path) -> None:
     environment = {
         "DATABASE_URL": "postgresql+asyncpg://" + "agent:agent@localhost:5432/agent",
         "DEPLOYMENT_MODE": "development",
@@ -669,7 +669,7 @@ def test_production_preflight_requires_the_balanced_provider_credential(tmp_path
 
     overlay = tmp_path / "models" / "policies.yaml"
     overlay.parent.mkdir(parents=True)
-    overlay.write_text("model_policies:\n  balanced:\n    provider: ollama\n", encoding="utf-8")
+    overlay.write_text("model_policies:\n  astra:\n    provider: ollama\n", encoding="utf-8")
     local = load_settings({**environment, "AGENT_CONFIG_DIR": str(tmp_path)})
     assert production_check._model_policy_failures(local) == []
 
@@ -1670,13 +1670,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 25 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 26 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(26)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(27)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1699,7 +1699,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 26):
+    for milestone in range(12, 27):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

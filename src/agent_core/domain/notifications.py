@@ -1,8 +1,9 @@
-"""Notification domain values and content-free push vocabulary."""
+"""Closed notification vocabulary with owner-authorized schedule identity."""
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.schedules import OccurrenceDisposition
+from agent_core.domain.security import contains_credential
 
 
 class NotificationKind(StrEnum):
@@ -84,8 +86,36 @@ class DeviceInvocationSubjectStatus(StrEnum):
     PENDING = "pending"
 
 
+class ScheduleNotificationContext(BaseModel):
+    """Bounded identity from the occurrence's immutable schedule revision."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: str = Field(min_length=1, max_length=160, repr=False)
+    scheduled_for: datetime
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_title(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = " ".join(
+            "".join(char for char in value if unicodedata.category(char) != "Cf").split()
+        )
+        if not normalized or contains_credential(value) or contains_credential(normalized):
+            return "Scheduled task"
+        return normalized if len(normalized) <= 160 else normalized[:159] + "…"
+
+    @field_validator("scheduled_for")
+    @classmethod
+    def preserve_aware_offset(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("scheduled notification time must be timezone-aware")
+        return value
+
+
 class NotificationPayload(BaseModel):
-    """Closed, content-free payload sent through a push provider."""
+    """Closed payload with a narrow schedule-title and occurrence-time exception."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -105,6 +135,7 @@ class NotificationPayload(BaseModel):
     question_id: UUID | None = None
     schedule_id: UUID | None = None
     occurrence_id: UUID | None = None
+    schedule_context: ScheduleNotificationContext | None = Field(default=None, repr=False)
     invocation_id: UUID | None = None
     device_id: UUID | None = None
     notification_id: UUID
@@ -168,6 +199,11 @@ class NotificationPayload(BaseModel):
 
         if self.kind is NotificationKind.TEST and self.tool_name is not None:
             raise ValueError("test notification cannot carry a tool name")
+        if self.schedule_context is not None and self.kind not in {
+            NotificationKind.SCHEDULE_RUN_FINISHED,
+            NotificationKind.SCHEDULE_OCCURRENCE_SKIPPED,
+        }:
+            raise ValueError("only schedule notifications may carry schedule context")
         return self
 
 

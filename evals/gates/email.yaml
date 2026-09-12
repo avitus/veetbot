@@ -101,3 +101,197 @@
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Multi-account configuration bounds** — the accounts manifest is versioned, closed, bounded at eight unique ids, requires its declared default and three absolute private credential paths per account, and is mutually exclusive with the legacy triplet; every violation fails at startup."
   check: tests/gates/test_email_m18.py::test_multi_account_manifest_rejects_every_invalid_boundary
+
+# Milestone 26: client modes and adaptive email experience.
+- id: gate.email.experience_shared_mode_state
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Shared mode state** — Chat and Email preserve the same principal, agent, persona, memories, active Chat run, composer and selections across switching and thread handoff."
+  check: tests/native/test_email_m26.py::test_email_shared_mode_state
+- id: gate.email.experience_native_layouts
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Native layouts** — iPhone, compact and regular iPad, and Mac expose accessible adaptive navigation and editing while retaining supported operating-system floors."
+  check: tests/native/test_email_m26.py::test_email_native_layouts
+- id: gate.email.experience_scope_and_flag
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Scope and feature confinement** — Email application routes and capabilities require the email experience feature flag, exact email.read or email.write scope, and current account-specific authority; disabled composition exposes no email application routes."
+  check: tests/gates/test_email_experience_m26.py::test_email_api_is_flag_gated_scope_checked_and_private
+- id: gate.email.experience_account_identity
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Stable account identity** — Verified principal-scoped mailbox identity survives default-account changes; reconnecting another Google identity cannot reinterpret old evidence or dispatch with another account credential."
+  check: tests/gates/test_email_experience_m26.py::test_account_capability_rebinding_preserves_old_evidence_and_new_operations
+- id: gate.email.experience_foreground_admission
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Foreground admission** — Entry, foreground return and sixty-second visible refresh admit bounded coalesced work; hidden or background clients admit no new slices and repeated multi-device requests cannot create an unbounded backlog."
+  check: tests/native/test_email_m26.py::test_email_foreground_admission
+- id: gate.email.experience_sync_contract
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Synchronization contract** — The first-party MCP contract returns bounded versioned account-qualified identities, history changes, labels, direction, dates, reply headers and completeness with shared fake-provider contract coverage."
+  check: tests/gates/test_email_m26_gmail.py::test_m26_thread_pages_are_complete_and_carry_reply_provenance
+- id: gate.email.experience_sync_recovery
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Synchronization recovery** — Projection updates and cursors commit consistently; duplicate or reordered observations, pagination, cursor expiry, deletions, revocation and partial account failure preserve accurate recoverable source state."
+  check: tests/gates/test_email_runtime_m26.py::test_deleted_last_message_updates_projection_before_history_cursor_advances
+- id: gate.email.experience_history_progress
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Historical progress** — Active bounded slices resume through recent and arbitrarily old eligible history without starvation, duplicate evidence or claiming metadata-only coverage as semantic understanding."
+  check: tests/gates/test_email_runtime_m26.py::test_rolling_history_waits_for_analysis_then_reaches_later_source_windows
+- id: gate.email.experience_governed_tasks
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Governed task execution** — Typed deterministic ingestion uses ordinary durable worker leases, checkpoints, cancellation, policy and budgets without direct API-handler Gmail calls, fabricated owner messages or model-selected pagination."
+  check: tests/gates/test_email_runtime_m26.py::test_refresh_uses_governed_mailbox_reads_without_owner_prompt_or_model
+- id: gate.email.experience_aggregate_cost
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Aggregate automatic-email cost** — Atomic reservations and actual usage cover all automatic email stages across accounts and devices, enforce USD 20 per UTC day and USD 200 per rolling thirty days with lower limits prevailing, and release or reconcile reservations on every terminal path."
+  check: tests/gates/test_email_experience_m26.py::test_aggregate_email_ceilings_cover_accounts_and_unresolved_reservations
+- id: gate.email.experience_feedback_scope
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Feedback scope** — Thread, person, topic and reply-need feedback have distinct authenticated effects; explicit owner corrections dominate inferred evidence across Email and Chat."
+  check: tests/gates/test_email_chat_m26.py::test_chat_feedback_requires_current_owner_source_and_replays_shared_rule
+- id: gate.email.experience_feedback_replay
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Feedback replay and undo** — Idempotent feedback, undo, correction and reset rebuild derived influence from surviving evidence without replaying removed influence or learning negative preference from mere viewing or dismissal."
+  check: tests/gates/test_email_experience_m26.py::test_priority_selection_feedback_scope_and_undo
+- id: gate.email.experience_assessment_invalidation
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Assessment invalidation** — Source and relevant profile or extractor revisions invalidate affected assessments; unchanged current polls spend no classification work while unfinished historical work remains resumable."
+  check: tests/gates/test_email_runtime_m26.py::test_changed_mail_is_assessed_and_drafted_once_through_metered_model
+- id: gate.email.experience_priority_quality
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Priority quality** — Frozen chronological holdouts satisfy the approved precision, coverage and personalization gates, per-account floors, no future-evidence leakage and reported uncertainty against declared baselines."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.experience_relationship_evidence
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Relationship evidence** — Correspondent and organization linkage requires supported identity and relationship evidence; role or domain alone cannot establish portfolio membership, ownership or personal importance."
+  check: tests/gates/test_email_learning_m26.py::test_relationship_context_respects_provider_sensitivity_and_deal_recency
+- id: gate.email.experience_style_lineage
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Style lineage** — Historical SENT examples exclude quoted, forwarded, automated and ambiguous-author material as specified; user edits dominate, generated-draft lineage prevents self-training, and learned style never edits trusted persona."
+  check: tests/gates/test_email_learning_m26.py::test_generated_sent_lineage_survives_mime_whitespace_and_body_expiry
+- id: gate.email.experience_style_quality
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Style quality** — The private paired evaluation satisfies the approved style preference and rewrite thresholds with separately blocking factual and recipient faithfulness checks."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.experience_draft_relevance
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Draft relevance** — At most three relevant automatic reply proposals are prepared, with approved reply-need quality and abstention for answered threads, missing decisions, essential unread attachments and unsupported commitments."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.experience_draft_revisions
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Draft revisions** — Server-owned internal drafts preserve owner edits and immutable history, avoid duplicates, use optimistic concurrency and retain both conflicting device edits without a Gmail write."
+  check: tests/gates/test_email_experience_m26.py::test_draft_edits_preserve_revisions_and_reject_stale_writes
+- id: gate.email.experience_send_approval
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Exact send approval** — Every send requires approval of the exact mailbox, recipients, subject and body; edited content or observed source changes invalidate prior approval, and no direct send API bypass exists."
+  check: tests/gates/test_email_runtime_m26.py::test_send_freezes_exact_value_and_rechecks_source_after_approval
+- id: gate.email.experience_send_claim
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Atomic send claim** — A fresh bounded thread read precedes a serialized local frozen-action claim; concurrent edit or double-send cannot reuse stale approval, while the unavoidable external post-read race is stated honestly."
+  check: tests/gates/test_email_runtime_m26.py::test_external_reply_after_approval_invalidates_send_without_dispatch
+- id: gate.email.experience_send_uncertainty
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Send uncertainty** — Confirmed sends persist outcome; pre-dispatch failures follow governed retry, but any possibly dispatched non-idempotent send becomes uncertain and never automatically resends after crash or lost response."
+  check: tests/gates/test_email_runtime_m26.py::test_recovery_after_send_dispatch_preserves_uncertainty_before_any_fresh_read
+- id: gate.email.experience_reply_headers
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Reply headers and recipients** — Reply and reply-all use verified sender identities, correct Reply-To and owner exclusion, matching subject/thread and RFC reply headers without trusting message-body recipient instructions."
+  check: tests/gates/test_email_m26_gmail.py::test_m26_outbound_reply_headers_are_encoded_by_value
+- id: gate.email.experience_semantic_grounding
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Semantic memory grounding** — A separately versioned evaluated email extractor yields exact source-span-grounded useful facts with account, message, author and event provenance and the approved precision and recall floors."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.experience_semantic_authority
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Semantic memory authority** — Correspondent and historical SENT evidence stay attributed, inferred and sensitivity-governed, cannot overwrite owner assertions, and leave existing evaluated extraction policies unchanged."
+  check: tests/unit/test_email_semantics_m26.py::test_semantic_formation_preserves_attribution_historical_dates_and_shared_scope
+- id: gate.email.experience_semantic_lifecycle
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Semantic memory lifecycle** — Historical source age and freshness govern current beliefs; import, repeated reads and self-citation cannot renew stale claims, and deliberate historical recall remains dated."
+  check: tests/unit/test_email_semantics_m26.py::test_historical_fact_is_absent_from_current_recall_but_visible_as_of_source_date
+- id: gate.email.experience_shared_recall
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Shared recall** — Eligible new-policy contextual email memories and profiles are relevantly usable across the same owner's accounts and Chat without broadening tenant, principal, sensitivity or credential authority or the old adapter's LOCAL contract."
+  check: tests/gates/test_email_chat_m26.py::test_chat_context_uses_shared_owner_style_with_independent_source_binding
+- id: gate.email.experience_source_erasure
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Source erasure** — Scoped authenticated exclusion and erasure remove source copies and derived influence across projections, examples, events, checkpoints, profiles and memory with replay suppression while preserving independently supported owner evidence."
+  check: tests/contract/test_email_source_erasure_contract.py::test_memory_source_erasure_contract
+- id: gate.email.experience_retention
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Retention** — The thirty-day body-cache and sent/discarded-draft windows, five-hundred bounded style excerpts, until-deletion audit copies and backup expiry are enforced without misrepresenting cache expiry as universal deletion."
+  check: tests/gates/test_email_experience_m26.py::test_maintenance_expires_body_cache_and_sent_drafts_but_keeps_unsent_edits
+- id: gate.email.experience_privacy
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Privacy and trust** — Adversarial mail cannot confer action authority, alter persona or leak foreign-principal data or secrets; raw personal content stays out of logs, notifications and public or checked-in evaluation material."
+  check: tests/gates/test_email_privacy_m26.py::test_email_privacy_boundaries
+- id: gate.email.experience_api_boundaries
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Application API boundaries** — Every new public command has happy-path, validation, authorization, conflict, failure and retry coverage with scoped repositories, PostgreSQL RLS, migration parity and current account authority."
+  check: tests/gates/test_email_api_boundaries_m26.py::test_email_application_http_boundaries
+- id: gate.email.experience_release_evidence
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Integrated release evidence** — All functional and quality gates, native platform lanes, cost/performance calibration and authorized two-account mailbox smoke pass; final-head hosted review and merged-revision production evidence remain required before milestone completion."
+  check: tests/gates/pending.py::pending_gate

@@ -1804,3 +1804,32 @@ These fail the build.
     validates one set and a reviewer checking the 9.2 matrix against
     reality would have one table to read rather than six. Reversal
     moves rows and changes no values.
+
+## Milestone 26 Chat access to the shared email experience
+
+Two additional conditional capability tools are owned by
+[email-experience.md](email-experience.md). The composition root registers and
+enables them only when `AGENT_EMAIL_MODE_ENABLED` is true; they do not change
+an unenabled deployment's roster.
+
+| Tool | Required scopes | Side effect / risk / idempotency | Result trust |
+| --- | --- | --- | --- |
+| `email.context` | `email.read` | `NONE` / `LOW` / `READ_ONLY` | `EXTERNAL_UNTRUSTED` |
+| `email.feedback` | `email.read`, `email.write` | `NONE` / `MEDIUM` / `IDEMPOTENT` | `INTERNAL_TOOL` |
+
+`email.context` reads the owner's scoped cached thread and shared style/profile
+projections. It performs no Gmail access or model invocation. `email.feedback`
+records the same versioned, undoable owner feedback used by Email mode. The
+owner's explicit feedback must be quoted from the current authenticated turn
+and the quote argument must retain `USER` trust;
+mail content, model inference, old owner turns, and tool output cannot stand in
+for that authority. Neither capability admits refresh work, drafts, a Gmail
+mutation, or a send. A Discuss in Chat transition associates typed thread/account
+references through `context.working_state.updated`, without inventing an
+owner-authored message or changing source trust.
+
+The feedback result is a fixed acknowledgment containing only the feedback ID
+and applied status; it never promotes a mail-derived summary to internal trust.
+Cached thread, inbox-row and writing-example results retain separate
+server-authored account/thread/message source wrappers so selective erasure
+can remove one source without deleting another account's context.

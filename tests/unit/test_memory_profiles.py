@@ -54,6 +54,14 @@ def test_unknown_profile_key_is_rejected() -> None:
         MemoryProfiles.from_document({**document, "retrieval": retrieval})
 
 
+def test_formation_model_policy_is_an_independent_validated_reference() -> None:
+    assert FormationProfile().model_policy == "balanced"
+    assert FormationProfile(model_policy="astra").model_policy == "astra"
+    for invalid in ("", " ", "astra model", "../astra"):
+        with pytest.raises(ValidationError):
+            FormationProfile(model_policy=invalid)
+
+
 def test_interactive_snapshot_knobs_are_not_in_the_memory_profile() -> None:
     document = _document(MEMORY_PROFILE_DOCUMENT)
 

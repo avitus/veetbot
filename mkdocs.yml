@@ -94,11 +94,14 @@ nav:
       - Adaptive Memory Distillation: plan/adaptive-memory-distillation.md
       - Persona Surface: plan/persona-surface.md
       - Email Integration: plan/email-integration.md
+      - Client Modes and Email Experience: plan/email-experience.md
       - Device Channel & SMS: plan/device-channel-and-sms.md
       - WhatsApp Surface: plan/whatsapp-surface.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
+  - Proposals:
+      - Client Modes and Email Experience: email-mode-proposal.md
   - Implementation:
       - Architecture: architecture.md
       - Events: events.md
@@ -204,4 +207,7 @@ nav:
       - ADR-0088 Milestone 23 conversational schedule update: adr/0088-milestone-23-conversational-schedule-update.md
       - ADR-0089 Recent terminal schedule history and bounded retention: adr/0089-terminal-schedule-history-and-retention.md
       - ADR-0090 Attributed communication memory formation: adr/0090-attributed-communication-memory-formation.md
+      - ADR-0091 Schedule identity in outcome notifications: adr/0091-schedule-identity-in-notifications.md
+      - ADR-0092 Client modes and email experience: adr/0092-client-modes-and-email-experience.md
+      - ADR-0093 Independent memory model policy: adr/0093-independent-memory-model-policy.md
   - Changelog: changelog.md

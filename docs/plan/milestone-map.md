@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 28 subject specifications declare 438 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 447
-declarations, 444 registry entries once the 3 aliases are subtracted.
+The 29 subject specifications declare 470 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 479
+declarations, 476 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1514,6 +1514,48 @@ record, and the scheduling record is what this document is. Gate 7 is
 Milestone 1 rather than Milestone 0 because the build-sequence table it
 reads is only meaningful once there are build steps to order.
 
+### Client modes and email experience, thirty-two gates
+
+[email-experience.md](email-experience.md) declares thirty-two further gates in
+the existing `email` area, all at Milestone 26 under ADR-0092. They preserve
+Milestone 18 requirements and the verified Milestone 12 ceiling.
+
+```text
+#   id                                                   kind    M
+1   gate.email.experience_shared_mode_state                  case    26
+2   gate.email.experience_native_layouts                     case    26
+3   gate.email.experience_scope_and_flag                     case    26
+4   gate.email.experience_account_identity                   case    26
+5   gate.email.experience_foreground_admission               case    26
+6   gate.email.experience_sync_contract                      case    26
+7   gate.email.experience_sync_recovery                      case    26
+8   gate.email.experience_history_progress                   case    26
+9   gate.email.experience_governed_tasks                     case    26
+10  gate.email.experience_aggregate_cost                     case    26
+11  gate.email.experience_feedback_scope                     case    26
+12  gate.email.experience_feedback_replay                    case    26
+13  gate.email.experience_assessment_invalidation            case    26
+14  gate.email.experience_priority_quality                   case    26
+15  gate.email.experience_relationship_evidence              case    26
+16  gate.email.experience_style_lineage                      case    26
+17  gate.email.experience_style_quality                      case    26
+18  gate.email.experience_draft_relevance                    case    26
+19  gate.email.experience_draft_revisions                    case    26
+20  gate.email.experience_send_approval                      case    26
+21  gate.email.experience_send_claim                         case    26
+22  gate.email.experience_send_uncertainty                   case    26
+23  gate.email.experience_reply_headers                      case    26
+24  gate.email.experience_semantic_grounding                 case    26
+25  gate.email.experience_semantic_authority                 case    26
+26  gate.email.experience_semantic_lifecycle                 case    26
+27  gate.email.experience_shared_recall                      case    26
+28  gate.email.experience_source_erasure                     case    26
+29  gate.email.experience_retention                          case    26
+30  gate.email.experience_privacy                            case    26
+31  gate.email.experience_api_boundaries                     case    26
+32  gate.email.experience_release_evidence                   case    26
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1604,6 +1646,9 @@ milestone  new gates  cumulative  the earliest of them
                                   handshake, string-id idempotency,
                                   the template window, the loopback
                                   bind, inherited surface guarantees
+26                32         476  shared client modes, active email sync,
+                                  feedback, style, drafts, approved sends,
+                                  shared semantic memory and lifecycle
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1624,15 +1669,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of four hundred and forty-four gates are green before
+2.  **Forty-one of four hundred and seventy-six gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches four hundred and forty-four, which is every
-registry entry, at Milestone 25. Six of Milestone 10's gates are
+The cumulative column reaches four hundred and seventy-six, which is every
+registry entry, at Milestone 26. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1646,7 +1691,8 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.persona.*` in an area of their own; Milestone 23 adds twelve more to
 `gate.schedule.*`, Milestone 24's twelve return to the existing
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
-area of their own. Every authorized milestone now has a specification
+area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
+entries to the existing email area. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

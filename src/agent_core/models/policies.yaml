@@ -3,10 +3,16 @@ enabled_profiles: [openai, anthropic, ollama]
 model_policies:
   balanced:
     provider: openai
-    model: default
+    model: gpt-5.6-sol
   flagship:
     provider: anthropic
     model: anthropic-default
+  astra:
+    provider: openai
+    model: gpt-6-astra
+  fable:
+    provider: anthropic
+    model: claude-fable-5-1
   local:
     provider: ollama
     model: local-small

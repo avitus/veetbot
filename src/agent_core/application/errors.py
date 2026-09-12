@@ -11,3 +11,7 @@ class MemoryCursorError(ValueError):
 
 class SessionMetadataValidationError(ValueError):
     """Session metadata failed a service-owned boundary rule."""
+
+
+class BrowserLoginURLValidationError(ValueError):
+    """A login URL is invalid or outside the owned profile's exact origins."""

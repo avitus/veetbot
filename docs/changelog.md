@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-11 — Astra and Fable model defaults
+
+- New production sessions default to the `astra` policy, selecting OpenAI
+  GPT-6 Astra; `flagship` and `fable` select Claude Fable 5.1.
+  GPT-5.6 Sol and Claude Opus 5 retain their model IDs and named aliases.
+- Updated the new models' price snapshots. Astra remains within the existing
+  272,000-token standard-price boundary; Fable retains a one-million-token
+  window. No provider adapter or reasoning settings change.
+- Memory formation independently retains `balanced` on GPT-5.6 Sol under
+  ADR-0093, preserving its exact activation evidence. The initial Astra
+  evaluations failed existing gates; wording mismatches, omissions, duplicate
+  memories, and classification differences need further work. Selection
+  audits distinguish chat and memory policies. Existing sessions retain their
+  recorded model policy; new sessions receive the changed chat default.
+
 ## 2026-09-10 — Current schedules and recent terminal history
 
 - The native schedule browser now defaults to ACTIVE and PAUSED records and

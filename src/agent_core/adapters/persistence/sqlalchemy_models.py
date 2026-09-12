@@ -1805,3 +1805,23 @@ class DeviceTriageSessionRow(Base):
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
     )
+
+
+class EmailRecordRow(Base):
+    """Independent principal-scoped email projection or immutable-history record."""
+
+    __tablename__ = "email_records"
+    __table_args__ = (
+        CheckConstraint("revision > 0", name="email_record_revision_positive"),
+        CheckConstraint("jsonb_typeof(payload) = 'object'", name="email_record_payload_object"),
+        Index("ix_email_records_owner_updated", "tenant_id", "principal_id", "updated_at"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(Text(collation="C"), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

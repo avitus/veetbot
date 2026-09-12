@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
             This policy explains how Veetbot handles information on its public
             website and in its optional Gmail integration.
           </p>
-          <p className="effective-date">Effective September 7, 2026</p>
+          <p className="effective-date">Effective September 11, 2026</p>
         </header>
 
         <div className="legal-layout">
@@ -119,6 +119,17 @@ export default function PrivacyPolicy() {
                 <li>maintaining security, reliability, and an inspectable record of agent work.</li>
               </ul>
               <p>
+                When enabled, Email mode retrieves priority mail on opening and
+                refreshes while it is active. It progressively analyzes received,
+                archived, and Sent correspondence, including older history, from
+                your connected work and personal accounts. Your feedback, draft
+                edits, and explicitly endorsed examples inform importance and
+                writing style. Useful memories and preferences are shared with
+                Chat and your other connected account within the same assistant,
+                never with other users. Suggested replies remain internal drafts
+                until you approve the exact message for sending.
+              </p>
+              <p>
                 Veetbot does not sell Google user data, use it for advertising,
                 use it to determine creditworthiness, or use it to train a
                 general-purpose AI model. It is not an email-warming, cold email,
@@ -133,7 +144,9 @@ export default function PrivacyPolicy() {
                 may be sent to the AI model provider configured by the Veetbot
                 operator. This processing is limited to producing the requested
                 user-facing result, such as a summary, classification, draft,
-                or proposed action. The hosted deployment uses the OpenAI and
+                proposed action, learned writing-style observation, or useful
+                memory. Historical Email mode analysis uses this same hosted
+                model processing. The hosted deployment uses the OpenAI and
                 Anthropic APIs, depending on the selected model. Veetbot does
                 not permit either provider, or any replacement provider, to use
                 transferred Google user data to train or improve a
@@ -177,11 +190,23 @@ export default function PrivacyPolicy() {
                 events, and logs.
               </p>
               <p>
+                Email mode caches full message bodies for 30 days after their
+                last access and refetches older content when needed. Minimal
+                source identifiers and synchronization cursors remain while the
+                account is enabled. Writing-style examples are limited to 500
+                excerpts of at most 2,000 characters each. Unsent drafts remain
+                until discarded; sent or discarded draft body revisions are
+                removed after 30 days. Structured feedback and derived
+                preferences remain until reset or erased.
+              </p>
+              <p>
                 Gmail content selected for a task, tool inputs and outputs,
                 generated summaries and drafts, approval records, and related
-                artifacts may be retained in Veetbot&apos;s session and run
-                history until you delete the session or ask the deployment
-                operator to delete it. This supports inspection, continuation,
+                artifacts may be retained in Veetbot&apos;s operational and
+                conversational session and run history until you delete the session,
+                use source exclusion, or ask the deployment operator to delete it.
+                These copies can outlast the separate 30-day cache and draft-store
+                windows. This supports inspection, continuation,
                 recovery, and auditing. Deletion removes the corresponding live
                 records and artifacts; encrypted backup copies may remain for
                 no more than 35 days before automatic expiration. Deleting mail
@@ -199,12 +224,23 @@ export default function PrivacyPolicy() {
                   revoke Veetbot&apos;s Google access through your Google Account&apos;s
                   third-party connection settings;
                 </li>
-                <li>disable the Gmail integration and remove its credential files; and</li>
+                <li>disable the Gmail integration and remove its credential files;</li>
+                <li>
+                  pause email learning, reset importance preferences or writing
+                  style, and exclude an email thread from retained sources and
+                  derived learning; and
+                </li>
                 <li>
                   delete available sessions or ask the deployment operator to
                   delete associated Veetbot records and artifacts.
                 </li>
               </ul>
+              <p>
+                Source exclusion removes matching retained email content and
+                its derived influence, including operational copies. Independently
+                supported owner statements and content-free audit metadata remain.
+                It does not delete the original messages in Gmail.
+              </p>
               <p>
                 Revoking Google access stops future Gmail API access but does
                 not automatically erase existing Veetbot records. A deletion

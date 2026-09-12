@@ -32,7 +32,8 @@ Milestone 13 is the next sequential authorized milestone and has not started.
 ## Scope
 
 Milestone 12 delivers the first half of Section 29: a device registry and a
-durable, content-free notification path to one transport. It includes:
+durable notification path to one transport. Payloads remain content-free except
+for the subsequently authorized schedule identity in ADR-0091. It includes:
 
 - a `Device` registry: register, refresh, list, revoke, and delete a device for
   a principal, keyed by a client-minted installation identity;
@@ -46,7 +47,7 @@ durable, content-free notification path to one transport. It includes:
   user input, a run fails, a scheduled occurrence's run reaches a terminal
   state, a scheduled occurrence is missed or skipped, and a device
   invocation is pending (Milestone 24, ADR-0081);
-- content-free payloads that deep-link the Apple client to the session, run,
+- bounded payloads that deep-link the Apple client to the session, run,
   approval, or question;
 - device and notification routes with exact scopes, an offline notification
   inbox, default-off activation, and the Apple client's registration, token
@@ -90,9 +91,10 @@ This yields three load-bearing invariants:
    derivation-style deduplication key; the transport is never a correctness
    dependency and losing a push cannot lose the underlying approval, question,
    or result, all of which remain readable through the existing API.
-3. A payload is content-free. It carries identifiers, a closed kind, a closed
-   status, and a templated title. The client fetches the content after the
-   tap, authenticated, from the API.
+3. A payload carries identifiers, a closed kind, a closed status, and a
+   templated title. ADR-0091 additionally permits the pinned schedule title and
+   nominal time on schedule notifications. The client fetches instructions and
+   results after the tap, authenticated, from the API.
 
 The existing `LiveEventBroadcaster` (`ports/live_events.py`) remains the
 answer for a client that holds an open connection. The seam audit drew the
@@ -289,6 +291,7 @@ class NotificationPayload(BaseModel):
     severity: Literal["info", "warn", "critical", "recovered"] | None   # ops kinds only
     reason_code: str | None       # ops kinds only: from the checked-in table
     release_id: str | None        # ops kinds only
+    schedule_context: ScheduleNotificationContext | None  # schedule kinds only, ADR-0091
 ```
 
 `title` is chosen from a fixed template per kind — "Approval needed", "The
@@ -300,12 +303,54 @@ four ops fields are null for every kind but the two ops kinds, for which
 and `reason_code` comes from the checked-in table — never free text. `tool_name` is registry vocabulary (`domain.verb`), never user
 content. The model has no extra fields. What the payload never carries:
 message text, tool arguments, an approval's `action_summary`, question text, a
-failure `message`, a schedule's `title` or `instruction`, reasoning, or a
+failure `message`, a schedule's `instruction`, reasoning, or a
 traceback. The reasons are the ones the corpus already states for the event
 stream and the export (ADR-0006, ADR-0032, [scheduling.md](scheduling.md)'s
 "never logged" rule for instructions), plus one more: this payload transits
 Apple's servers and the lock screen of a phone that may be face-up on a table.
 The client fetches details after the tap, when it is online and authenticated.
+
+APNs presentation uses a templated alert title and body derived only from this
+closed payload. The `veetbot` dictionary retains its version and fixed title so
+installed clients can still validate and open the notification. The visible
+alert distinguishes completed, failed, and cancelled scheduled runs, and missed,
+overlapping, unauthorized, and misconfigured occurrences. Every kind explains
+the outcome or next action. Approval production copies the persisted approval's
+registry tool name; device-action production copies the invocation's tool name.
+Absent tool names use a generic next-action template. Operations alerts name
+the declared health signal and severity through fixed display labels, with a
+generic health-check label for an unrecognized signal. No template uses
+user text, arguments, question, failure message, or summary, apart from the
+explicit schedule-title exception below.
+
+### Authorized schedule identity exception
+
+[ADR-0091](../adr/0091-schedule-identity-in-notifications.md) records the owner's
+2026-09-11 request to identify the actual schedule in its outcome alert. It
+supersedes the content-free rule only for a closed optional `schedule_context`
+on `schedule_run_finished` and `schedule_occurrence_skipped` payloads:
+
+```python
+class ScheduleNotificationContext(BaseModel):
+    title: str             # single line, at most 160 characters, credential-filtered
+    scheduled_for: datetime  # aware nominal instant, preserving its UTC offset
+```
+
+The producer receives the revision already loaded by accounting or
+materialization and verifies it matches the occurrence's schedule and revision.
+It snapshots that revision's title and nominal instant, rendered in the pinned
+recurring timezone (UTC for one-time schedules). It never reads the current
+title during dispatch. Normalization removes invisible formatting controls,
+collapses whitespace, and truncates with an ellipsis after checking the complete
+original and normalized title for credentials. A credential-bearing or empty
+legacy title uses `Scheduled task`. The title is excluded from model reprs.
+
+APNs places the title in `aps.alert.subtitle` and the scheduled time, with its
+numeric UTC offset, in the body. The transport excludes `schedule_context` from
+the version-1 `veetbot` dictionary to preserve installed-client deep links. The
+authenticated inbox and persisted JSON retain the snapshot. Old rows without it
+remain readable and use the generic display. No instruction, result, message,
+or failure preview is allowed, and logs and delivery records gain no title.
 
 ## Triggers
 
@@ -615,8 +660,9 @@ purged conversation must survive long enough to be settled `superseded`, and
 the offline inbox must still show that it was enqueued. Session erasure, in the
 same transaction and before deleting the session graph, deletes the session's
 *pending* outbox rows so that a purged conversation cannot still ring a phone;
-settled rows remain as content-free audit facts under the existing retention
-rule.
+settled rows remain under the existing retention rule, including the bounded
+schedule identity snapshot authorized by ADR-0091 when present. Process events
+and delivery records remain content-free.
 
 Device lifecycle is audited as process events — `device.registered`,
 `device.push_token_updated`, `device.revoked`, `device.push_token_invalidated`,
@@ -743,6 +789,12 @@ notification state of its own. Concretely:
   derived from the build configuration, the platform, a device name, and the
   bundle identifier; it re-posts on launch and on token change and revokes on
   disconnect;
+- authorization is requested only while the system status is undetermined;
+  an existing grant proceeds to push registration and an existing denial is
+  respected without a recurring application error. The equivalent
+  `UNError.notificationsNotAllowed` rejection is also nonfatal; unrelated
+  registration failures remain visible. Enabling notifications again is an
+  operating-system setting, followed by client registration;
 - the `aps-environment` entitlement is added beside the existing keychain
   entitlement, the push capability is enabled on the application identifier,
   and provisioning profiles are regenerated — owner actions outside the
@@ -849,11 +901,13 @@ content, tokens, or the key.
    unknown commit, a repeated hook invocation, two processes recording one
    transition — produce exactly one outbox row per deduplication key.
    Registered as `gate.notify.dedupe`, property. **M12.**
-10. **Payloads are content-free.** A corpus of approvals, questions, failures,
+10. **Payloads are content-free except for authorized schedule identity.** A corpus of approvals, questions, failures,
     and schedule instructions carrying secrets, arguments, message text, and
     reasoning yields payloads with only the closed key set and a templated
-    title; a structural walk finds no free-text field on the payload model
-    beyond the title and the registry tool name. Registered as
+    title; only the two schedule kinds may also carry ADR-0091's bounded,
+    credential-filtered pinned title and nominal time. Instruction and result
+    previews remain forbidden, and the APNs tap dictionary stays unchanged.
+    Registered as
     `gate.notify.content_free`, corpus. **M12.**
 11. **Concurrent dispatch is safe and replay is bounded.** Two dispatchers
     racing on one pending row deliver it to each target once under the claim

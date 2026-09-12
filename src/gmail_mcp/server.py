@@ -91,6 +91,49 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
 
             return await _call(client.list_labels)
 
+        @server.tool(meta={"veetbot/application-only": True})
+        async def get_profile() -> CallToolResult:
+            """Read verified primary mailbox identity, counts, and initial history cursor."""
+
+            return await _call(client.get_profile)
+
+        @server.tool(meta={"veetbot/application-only": True})
+        async def sync_changes(
+            start_history_id: str,
+            max_results: Annotated[int, Field(ge=1, le=100)] = 100,
+            page_token: str | None = None,
+        ) -> CallToolResult:
+            """Read one bounded history page; expired cursors require full resynchronization."""
+
+            return await _call(client.sync_changes, start_history_id, max_results, page_token)
+
+        @server.tool(meta={"veetbot/application-only": True})
+        async def get_thread_page(
+            thread_id: str,
+            max_messages: Annotated[int, Field(ge=1, le=10)] = 10,
+            page_token: str | None = None,
+        ) -> CallToolResult:
+            """Read bounded message pages pinned to one thread revision; restart if changed."""
+
+            return await _call(client.get_thread_page, thread_id, max_messages, page_token)
+
+        @server.tool(meta={"veetbot/application-only": True})
+        async def get_message_body(
+            message_id: str,
+            offset: Annotated[int, Field(ge=0)] = 0,
+            max_bytes: Annotated[int, Field(ge=1024, le=65536)] = 65536,
+            expected_history_id: str | None = None,
+        ) -> CallToolResult:
+            """Continue a UTF-8 message body by byte offset without downloading attachments."""
+
+            return await _call(
+                client.get_message_body,
+                message_id,
+                offset,
+                max_bytes,
+                expected_history_id,
+            )
+
     elif mode == "write":
 
         @server.tool()
@@ -101,10 +144,22 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
             cc: str | None = None,
             bcc: str | None = None,
             thread_id: str | None = None,
+            in_reply_to: str | None = None,
+            references: str | None = None,
         ) -> CallToolResult:
             """Create a plain-text draft, optionally in an existing thread."""
 
-            return await _call(client.create_draft, to, subject, body, cc, bcc, thread_id)
+            return await _call(
+                client.create_draft,
+                to,
+                subject,
+                body,
+                cc,
+                bcc,
+                thread_id,
+                in_reply_to,
+                references,
+            )
 
         @server.tool()
         async def modify_labels(
@@ -143,9 +198,21 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
             cc: str | None = None,
             bcc: str | None = None,
             thread_id: str | None = None,
+            in_reply_to: str | None = None,
+            references: str | None = None,
         ) -> CallToolResult:
             """Send one plain-text message by value, optionally as a reply."""
 
-            return await _call(client.send_message, to, subject, body, cc, bcc, thread_id)
+            return await _call(
+                client.send_message,
+                to,
+                subject,
+                body,
+                cc,
+                bcc,
+                thread_id,
+                in_reply_to,
+                references,
+            )
 
     return server

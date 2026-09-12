@@ -325,10 +325,12 @@ Job 6 is an additional native-client gate outside `make check`; it runs
 Swift Testing bundle without executing it, then runs `make test-apple-ui` on
 macOS and on available iPhone and iPad simulators. The macOS case resizes the
 real SwiftUI window, terminates the application, and asserts that its size is
-restored after relaunch. The simulator cases use a debug-only in-process
+restored after relaunch; a second Mac case verifies Email mode and exact draft
+approval. The simulator cases use a debug-only in-process
 fixture to exercise historical-transcript
 selection, switching, and new-conversation navigation without a live server or
-credential. The simulator test products are built once, then the iPhone and
+credential, together with Email mode, editing, learning and compact-trait
+journeys. The simulator test products are built once, then the iPhone and
 iPad destinations run concurrently without rebuilding. Each platform writes a
 distinct result bundle, and CircleCI retains those bundles for diagnosis.
 Release packaging depends on all three additional gates.

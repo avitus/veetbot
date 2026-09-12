@@ -248,9 +248,41 @@ docker run --rm --runtime=runsc hello-world
 
 Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`, replace every
 `REQUIRED_` value, select the free PostgreSQL port in both locations, and add
-`VEETBOT_OPENAI_KEY` for the shipped production `balanced` policy. A reviewed
-model-policy overlay may instead retarget `balanced` to another configured
+`VEETBOT_OPENAI_KEY` for the shipped production `astra` policy. A reviewed
+model-policy overlay may instead retarget `astra` to another configured
 provider.
+
+New production sessions default to `astra`, selecting OpenAI `gpt-6-astra`;
+`flagship` and `fable` select Anthropic `claude-fable-5-1`. Existing sessions
+retain their recorded agent version and model policy. `balanced` explicitly
+selects `gpt-5.6-sol` (`gpt-5.6` alias), and `claude-opus-5` (`opus` alias)
+remains registered for operator overlays.
+The new profiles use the standard prices verified on 2026-09-11 in the
+[OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra)
+and [Anthropic model documentation](https://platform.claude.com/docs/en/models/fable-5-1/overview):
+USD 10 input and USD 50 output per million tokens; cached input is USD 1
+for Astra and USD 0.25 for Fable. Cache writes are USD 12.50 with the
+Anthropic adapter's default five-minute TTL. Astra retains the 272,000-token
+window required by ADR-0039's single-tier pricing rule; Fable uses 1,000,000
+tokens, and both allow up to 128,000 output tokens.
+
+Changing these profiles changes the registry version. Drain active and
+suspended runs before deploying: existing provider pins fail closed when
+their registry version is unavailable. Provider-assisted memory also requires
+evaluation evidence for the exact selected model and model-policy name;
+the GPT-5.6 Sol artifacts do not authorize Astra or Fable. Without matching
+evidence, `auto` uses deterministic formation and `required` refuses startup.
+
+Memory formation deliberately remains on GPT-5.6 Sol while chat uses the new
+defaults (ADR-0093). `formation.model_policy: balanced` in
+`memory/profiles.yaml` independently selects its evidenced tuple, so the
+bundled `formation@9` evidence still activates and `formation@10` remains its
+evidenced fallback. An `AGENT_CONFIG_DIR` overlay may change that reference,
+but the replacement still needs its own exact evidence. Selection audits name
+both `chat_model_policy` and the memory `model_policy`. The memory evaluators'
+`--model-policy astra` continues to evaluate Astra explicitly. Memory formation
+remains active Milestone 21 work: audit scorer semantics and run a controlled
+Sol/Astra comparison before changing this temporary choice.
 
 To enable the initial Keenable comparison, add all three provider credentials
 and route half of each capability to Keenable in that same root-owned file:

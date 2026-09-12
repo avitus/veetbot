@@ -451,3 +451,28 @@ def test_persona_tables_encode_versioning_and_open_nomination_uniqueness() -> No
     assert "state = 'nominated'" in str(open_unique.dialect_options["postgresql"]["where"]).replace(
         '"', ""
     )
+
+
+def test_email_records_encode_scoped_revisioned_state() -> None:
+    assert "email_records" in Base.metadata.tables
+    table = Base.metadata.tables["email_records"]
+    assert {column.name for column in table.primary_key.columns} == {
+        "tenant_id",
+        "principal_id",
+        "kind",
+        "key",
+    }
+    assert {"revision", "payload", "created_at", "updated_at"} <= set(table.columns.keys())
+    assert any(
+        "revision > 0" in str(getattr(constraint, "sqltext", ""))
+        for constraint in table.constraints
+    )
+
+    from sqlalchemy import Text
+
+    assert isinstance(table.c.key.type, Text)
+    assert table.c.key.type.collation == "C"
+    assert any(
+        "jsonb_typeof(payload) = 'object'" in str(getattr(constraint, "sqltext", ""))
+        for constraint in table.constraints
+    )

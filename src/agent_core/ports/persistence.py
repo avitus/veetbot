@@ -19,6 +19,7 @@ from agent_core.ports.devices import (
     DeviceRegistry,
 )
 from agent_core.ports.dispatch import RunQueue
+from agent_core.ports.email import EmailStore
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
@@ -82,6 +83,7 @@ class RepositoryUnitOfWork(Protocol):
     episodes: IntegratedEpisodeStore
     traces: TraceStore
     personas: PersonaStore
+    email: EmailStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository

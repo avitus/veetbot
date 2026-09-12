@@ -103,6 +103,7 @@ from agent_core.adapters.persistence.device_channel import (
     PostgresDeviceIngestStore,
     PostgresDeviceInvocationStore,
 )
+from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -244,6 +245,7 @@ from agent_core.application.device_management import (
     DeviceManagementService,
     NotificationInboxService,
 )
+from agent_core.application.email import EmailExperienceService
 from agent_core.application.notification_dispatcher import (
     NotificationDispatcher,
     NotificationDispatchUnitOfWorkFactory,
@@ -320,6 +322,7 @@ from agent_core.config import (
     MEMORY_DISTILLATION_HOLDOUT_PATH,
     MEMORY_FORMATION_CORPUS_PATH,
     PACKAGE_ROOT,
+    PRODUCTION_MODEL_POLICY,
     AuthMode,
     BrowserProviderKind,
     ConfigurationError,
@@ -346,6 +349,7 @@ from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.compactor import StructuredCompactor
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
+from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
@@ -373,7 +377,14 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, Run, RunLimits, RunStatus
+from agent_core.domain.runs import (
+    TERMINAL_RUN_STATUSES,
+    CancelReason,
+    Run,
+    RunLimits,
+    RunOutcome,
+    RunStatus,
+)
 from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
 from agent_core.domain.sessions import (
     DEFAULT_PROJECT_SCOPE,
@@ -403,6 +414,10 @@ from agent_core.memory.communication_sources import AttributedCommunicationCandi
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
     distillation_evidence_matches,
+)
+from agent_core.memory.email_semantics import (
+    EmailSemanticFormationService,
+    load_email_semantic_evidence,
 )
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
@@ -457,7 +472,9 @@ from agent_core.ports.web import WebProvider, WebProviderRouter
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
+from agent_core.runtime.email_tasks import EmailTaskRunner
 from agent_core.runtime.executor import RunExecutor, SurfaceRunStateWriter
+from agent_core.runtime.loop import RunContext
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
 from agent_core.scheduling.materializer import ScheduleMaterializer
@@ -475,6 +492,7 @@ from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolRuntime
+from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
@@ -524,6 +542,7 @@ class ApplicationServices:
     surfaces: PublicSurfaceServiceContract
     memory: PublicMemoryReadServiceContract
     persona: PublicPersonaServiceContract
+    email: EmailExperienceService
 
 
 @dataclass(frozen=True, slots=True)
@@ -781,6 +800,7 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        email=InMemoryEmailStore(),
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -864,6 +884,7 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            email=PostgresEmailStore(session),
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,
@@ -2091,6 +2112,15 @@ async def _compose(
     memory_extractor: MemoryCandidateExtractor | None = None
     memory_policy_version = FORMATION_POLICY_VERSION
     memory_mode = settings.memory_provider_extraction_mode
+    extraction_model_policy = (
+        agent.model_policy
+        if (
+            agent.model_policy in NON_ROUTED_MODEL_POLICIES
+            or memory_provider_evaluation_mode
+            or memory_distillation_evaluation_mode
+        )
+        else memory_profiles.formation.model_policy
+    )
     extraction_model: ResolvedModel | None = None
     evidence_build_ref: str | None = None
     evidence_corpus_sha256: str | None = None
@@ -2103,17 +2133,17 @@ async def _compose(
         or memory_distillation_evaluation_mode
     ):
         try:
-            if agent.model_policy in NON_ROUTED_MODEL_POLICIES:
+            if extraction_model_policy in NON_ROUTED_MODEL_POLICIES:
                 extraction_model = ResolvedModel(
                     provider="fake",
                     model="scripted",
                     credential_ref="fake",
-                    policy_name=agent.model_policy,
+                    policy_name=extraction_model_policy,
                     resolved_at=clock.now(),
                 )
             else:
                 extraction_model = await model_router.resolve(
-                    agent.model_policy,
+                    extraction_model_policy,
                     tenant_id=principal.tenant_id,
                     required=frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING}),
                 )
@@ -2359,6 +2389,7 @@ async def _compose(
             str(agent.id),
             agent.version,
             agent.model_policy,
+            extraction_model_policy,
             agent.policy_profile,
             ruleset.policy_version,
             memory_mode.value,
@@ -2375,7 +2406,7 @@ async def _compose(
             else settings.memory_formation_policy_pin.value,
         )
     )
-    selection_key = f"memory.provider_extraction.selection:v3:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v4:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -2394,7 +2425,8 @@ async def _compose(
                     "policy_profile": agent.policy_profile,
                     "policy_version": ruleset.policy_version,
                     "formation_policy_version": memory_policy_version,
-                    "model_policy": agent.model_policy,
+                    "model_policy": extraction_model_policy,
+                    "chat_model_policy": agent.model_policy,
                     "provider": None if extraction_model is None else extraction_model.provider,
                     "model": None if extraction_model is None else extraction_model.model,
                     "evidence_source": evidence_source,
@@ -2686,6 +2718,10 @@ async def _compose(
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
+                await public_services.email.settle(principal, run_id)
+            except Exception:
+                logger.exception("email_run_accounting_failed", extra={"run_id": str(run_id)})
+            try:
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
@@ -2741,6 +2777,35 @@ async def _compose(
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 
+        def email_semantics(context: RunContext) -> EmailSemanticFormationService:
+            evidence = (
+                None
+                if settings.email_semantic_evidence is None
+                else load_email_semantic_evidence(
+                    settings.email_semantic_evidence,
+                    provider=context.resolved_model.provider,
+                    model=context.resolved_model.model,
+                    build_ref=settings.release_id,
+                )
+            )
+            return EmailSemanticFormationService(
+                uow_factory,
+                clock,
+                ids,
+                context.principal,
+                provider=context.resolved_model.provider,
+                model=context.resolved_model.model,
+                evidence=evidence,
+            )
+
+        async def execute_email_task(context: RunContext) -> RunOutcome | None:
+            return await EmailTaskRunner(
+                public_services.email,
+                registry,
+                semantic_factory=email_semantics,
+                render_context=render_email_context,
+            )(context)
+
         executor = RunExecutor(
             principal=principal,
             principals=principal_resolver,
@@ -2771,6 +2836,7 @@ async def _compose(
             identical_denial_threshold=identical_denial_threshold,
             max_compactions_per_step=max_compactions_per_step,
             notification_producer=notification_producer,
+            task_runner=execute_email_task if settings.email_mode_enabled else None,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -3008,6 +3074,28 @@ async def _compose(
             sms_enabled=settings.device_sms_enabled,
             ingest_daily_cap=device_ingest_daily_cap,
         )
+
+        async def forget_email_source(
+            owner: Principal,
+            account_id: str,
+            thread_id: str,
+            message_ids: frozenset[str],
+        ) -> None:
+            service = EmailSemanticFormationService(
+                uow_factory,
+                clock,
+                ids,
+                owner,
+                provider=resolved_model.provider,
+                model=resolved_model.model,
+            )
+            for message_id in message_ids:
+                await service.exclude_source(account_id, thread_id, message_id)
+
+        async def cleanup_email_artifacts() -> None:
+            await artifact_writers.sweep_expired()
+            await trajectory_service.sweep_once()
+
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=public_run_service,
@@ -3032,7 +3120,27 @@ async def _compose(
             surfaces=surface_management,
             memory=PublicMemoryService(uow_factory=uow_factory),
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            email=EmailExperienceService(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                account_ids=(
+                    settings.email_account_ids or (("default",) if settings.email_enabled else ())
+                ),
+                agent=agent,
+                dispatch=dispatcher.dispatch,
+                seed_checkpoint=checkpoint_seeder,
+                catalogs=skill_catalogs,
+                activate_session=mcp_runtime.activate_session,
+                close_session=close_session,
+                forget_source=forget_email_source,
+                cleanup_artifacts=cleanup_email_artifacts,
+                cancel_parked_run=executor.cancel_parked_run,
+            ),
         )
+        if settings.email_mode_enabled:
+            registry.register(EmailContextTool(public_services.email))
+            registry.register(EmailFeedbackTool(public_services.email))
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 
         def schedule_worker_factory() -> WorkerService:
@@ -3123,6 +3231,7 @@ async def _compose(
                     sweep_approvals=approval_service.expire_due,
                     sweep_exports=trajectory_service.sweep_once,
                     sweep_artifacts=artifact_writers.sweep_expired,
+                    sweep_email_cache=lambda: public_services.email.expire_cache(principal),
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
@@ -3307,7 +3416,7 @@ def _effective_model_policy(
     if requested_policy is not None:
         return requested_policy
     if deployment_mode is DeploymentMode.PRODUCTION:
-        return "balanced"
+        return PRODUCTION_MODEL_POLICY
     return "fake-balanced"
 
 
@@ -3556,6 +3665,7 @@ async def build(
         "memory.remember",
         "memory.search",
         "memory.recall_episodes",
+        *(["email.context", "email.feedback"] if effective_settings.email_mode_enabled else []),
         *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),

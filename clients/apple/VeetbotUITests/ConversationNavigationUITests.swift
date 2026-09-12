@@ -17,6 +17,90 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     #if os(iOS)
+    func testEmailCompactTraitNavigationReturnsToSelectedInbox() {
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_SIZE_CLASS"] = "compact"
+        app.launch()
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.tap()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        XCTAssertFalse(row.isHittable, "Compact navigation must show the selected detail, not a side-by-side inbox")
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.isHittable)
+    }
+
+    func testEmailLearningControlsShowCurrentState() {
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.tap()
+        let learning = app.buttons["email.learning"]
+        XCTAssertTrue(learning.waitForExistence(timeout: 5))
+        learning.tap()
+        XCTAssertTrue(app.staticTexts["Email learning"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Pause learning"].waitForExistence(timeout: 5))
+        app.buttons["Pause learning"].tap()
+        XCTAssertTrue(app.buttons["Resume learning"].waitForExistence(timeout: 5))
+    }
+
+    func testEmailThreadFeedbackEditingAndExplicitSend() {
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.tap()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        app.buttons["Important"].tap()
+        XCTAssertTrue(app.staticTexts["Marked this thread as important."].waitForExistence(timeout: 5))
+        let editor = app.textViews["email.draft-body"]
+        scrollEmailUntilVisible(editor)
+        XCTAssertTrue(editor.isHittable, app.debugDescription)
+        editor.tap()
+        editor.typeText(" Thanks again.")
+        let keyboardDone = app.buttons["email.keyboard-done"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+        let review = app.buttons["email.review-send"]
+        scrollEmailUntilVisible(review)
+        XCTAssertTrue(review.isHittable)
+        review.tap()
+        let send = app.buttons["email.approve-send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["To: alex@example.test"].exists)
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+        send.tap()
+        XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 10))
+    }
+
+    func testEmailModePreservesAnUnsentChatMessage() {
+        let historicalRow = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-000000000123"
+        ]
+        XCTAssertTrue(historicalRow.waitForExistence(timeout: 10))
+        historicalRow.tap()
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("Keep my unfinished message")
+
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 5))
+        emailMode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["email.inbox"].waitForExistence(timeout: 5))
+        app.buttons["mode.chat"].tap()
+
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertEqual(composer.value as? String, "Keep my unfinished message")
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].exists)
+    }
+
     func testHistoricalAndNewConversationRowsOpenChat() {
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
@@ -171,16 +255,13 @@ final class ConversationNavigationUITests: XCTestCase {
         scrollUntilVisible(websiteAccess)
         XCTAssertTrue(websiteAccess.exists)
 
-        let origin = app.textFields["website-access.origin"]
-        let login = app.textFields["website-access.login-url"]
-        scrollUntilVisible(origin)
-        XCTAssertTrue(origin.exists)
-        origin.tap()
-        origin.typeText("https://example.org")
-        scrollUntilVisible(login)
-        XCTAssertTrue(login.exists)
-        login.tap()
-        login.typeText("https://example.org/login")
+        let website = app.textFields["website-access.url"]
+        scrollUntilVisible(website)
+        XCTAssertTrue(website.exists)
+        XCTAssertFalse(app.textFields["website-access.origin"].exists)
+        XCTAssertFalse(app.textFields["website-access.login-url"].exists)
+        website.tap()
+        website.typeText("example.org")
         if app.keyboards.buttons["Return"].exists {
             app.keyboards.buttons["Return"].tap()
         }
@@ -202,6 +283,29 @@ final class ConversationNavigationUITests: XCTestCase {
     #endif
 
     #if os(macOS)
+    func testEmailModeAndExactDraftApprovalOnMac() {
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.click()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.click()
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5), app.debugDescription)
+        let review = app.buttons["email.review-send"]
+        for _ in 0..<8 where !review.isHittable {
+            app.scrollViews["email.detail"].scroll(byDeltaX: 0, deltaY: -350)
+        }
+        XCTAssertTrue(review.isHittable)
+        review.click()
+        let send = app.buttons["email.approve-send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["To: alex@example.test"].exists)
+        send.click()
+        XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 10))
+        app.buttons["mode.chat"].click()
+        XCTAssertTrue(app.descendants(matching: .any)["sidebar.new-conversation"].waitForExistence(timeout: 5))
+    }
+
     func testMainWindowSizePersistsAcrossApplicationRestart() {
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
@@ -294,6 +398,17 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(scrollView.waitForExistence(timeout: 5))
         for _ in 0..<6 where !element.exists || !element.isHittable {
             scrollView.swipeUp()
+        }
+    }
+
+    private func scrollEmailUntilVisible(_ element: XCUIElement) {
+        let scrollView = app.scrollViews["email.detail"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            let bottom = app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY - 12 : app.frame.maxY - 50
+            if element.exists && element.isHittable && element.frame.maxY < bottom { return }
+            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo: scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.3)))
         }
     }
     #endif

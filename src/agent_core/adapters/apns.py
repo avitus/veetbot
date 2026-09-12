@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
+from agent_core.adapters.apns_alerts import apns_alert
 from agent_core.domain.devices import PushEnvironment, PushProvider, PushTarget
 from agent_core.domain.notifications import DeliveryOutcome, PushMessage, PushOutcome
 from agent_core.ports.determinism import Clock
@@ -78,8 +79,10 @@ class APNsPushTransport:
         if message.expires_at is not None:
             headers["apns-expiration"] = str(int(message.expires_at.timestamp()))
         payload = {
-            "aps": {"alert": {"title": message.payload.title}},
-            "veetbot": message.payload.model_dump(mode="json", exclude_none=True),
+            "aps": {"alert": apns_alert(message.payload)},
+            "veetbot": message.payload.model_dump(
+                mode="json", exclude_none=True, exclude={"schedule_context"}
+            ),
         }
         try:
             response = await client.post(

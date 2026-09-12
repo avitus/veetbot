@@ -1,4 +1,4 @@
-#if DEBUG && os(iOS)
+#if DEBUG
 import Foundation
 
 enum ConversationNavigationUITestFixture {
@@ -12,6 +12,7 @@ enum ConversationNavigationUITestFixture {
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        ConversationNavigationUITestURLProtocol.resetEmail()
 
         let suiteName = "com.veetbot.apple.ui-tests"
         guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
@@ -57,6 +58,19 @@ enum ConversationNavigationUITestFixture {
 }
 
 private final class ConversationNavigationUITestURLProtocol: URLProtocol {
+    private static let emailLock = NSLock()
+    private static var emailBody = "Thanks, Alex. I'll review the agenda."
+    private static var emailRevision = 1
+    private static var emailStatus = "ready"
+    private static var learningPaused = false
+    static func resetEmail() {
+        emailLock.lock()
+        defer { emailLock.unlock() }
+        emailBody = "Thanks, Alex. I'll review the agenda."
+        emailRevision = 1
+        emailStatus = "ready"
+        learningPaused = false
+    }
     override static func canInit(with request: URLRequest) -> Bool { true }
 
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -70,6 +84,72 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let body: String
         let statusCode: Int
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/email/learning"):
+            statusCode = 200
+            body = Self.learningJSON
+        case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/style-example"):
+            let values = requestJSON()
+            statusCode = (values["expected_revision"] as? Int) == Self.emailLock.withLock({ Self.emailRevision }) ? 200 : 409
+            body = Self.learningJSON
+        case ("PUT", "/v1/email/learning"):
+            let values = requestJSON()
+            Self.emailLock.withLock { Self.learningPaused = values["paused"] as? Bool ?? false }
+            statusCode = 200
+            body = Self.learningJSON
+        case ("GET", "/v1/email/drafts/\(Self.emailDraftID)/revisions"):
+            statusCode = 200
+            body = "{\"items\":[\(Self.emailDraftJSON)],\"next_cursor\":null}"
+        case ("GET", "/v1/email/accounts"):
+            statusCode = 200
+            body = Self.emailAccountsJSON
+        case ("GET", "/v1/email/threads"):
+            statusCode = 200
+            body = "{\"items\":[\(Self.emailThreadJSON)],\"next_cursor\":null}"
+        case ("GET", "/v1/email/threads/\(Self.emailThreadID)"):
+            statusCode = 200
+            body = Self.emailThreadJSON
+        case ("POST", "/v1/email/refresh"):
+            statusCode = 202
+            body = "{\"operation_id\":\"\(Self.emailThreadID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"replayed\":false}"
+        case ("POST", "/v1/email/feedback"):
+            statusCode = 200
+            body = "{\"feedback_id\":\"\(Self.emailThreadID)\",\"thread\":\(Self.emailThreadJSON)}"
+        case ("DELETE", "/v1/email/feedback/\(Self.emailThreadID)"):
+            statusCode = 200
+            body = Self.emailThreadJSON
+        case ("GET", "/v1/email/drafts/\(Self.emailDraftID)"):
+            statusCode = 200
+            body = Self.emailDraftJSON
+        case ("PUT", "/v1/email/drafts/\(Self.emailDraftID)"):
+            let values = requestJSON()
+            Self.emailLock.lock()
+            if let value = values["body"] as? String { Self.emailBody = value }
+            Self.emailRevision += 1
+            Self.emailLock.unlock()
+            statusCode = 200
+            body = Self.emailDraftJSON
+        case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/send-proposal"):
+            Self.emailLock.lock()
+            Self.emailStatus = "awaiting_approval"
+            Self.emailLock.unlock()
+            statusCode = 202
+            body = "{\"draft\":\(Self.emailDraftJSON),\"run_id\":\"\(Self.emailRunID)\",\"status\":\"WAITING_FOR_APPROVAL\",\"approval_id\":\"\(Self.emailApprovalID)\"}"
+        case ("GET", "/v1/runs/\(Self.emailRunID)"):
+            statusCode = 200
+            let status = Self.emailLock.withLock { Self.emailStatus == "sent" ? "COMPLETED" : "WAITING_FOR_APPROVAL" }
+            body = """
+                {"id":"\(Self.emailRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","parent_run_id":null,"status":"\(status)","step_count":1,"model_call_count":0,"tool_call_count":1,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+                """
+        case ("GET", "/v1/approvals/\(Self.emailApprovalID)"):
+            statusCode = 200
+            body = Self.emailApprovalJSON
+        case ("POST", "/v1/approvals/\(Self.emailApprovalID)/resolve"):
+            let values = requestJSON()
+            Self.emailLock.lock()
+            Self.emailStatus = values["decision"] as? String == "approve_once" ? "sent" : "ready"
+            Self.emailLock.unlock()
+            statusCode = 200
+            body = Self.emailApprovalJSON
         case ("GET", "/v1/sessions"):
             statusCode = 200
             body = """
@@ -180,6 +260,51 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    private func requestJSON() -> [String: Any] {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(buffer, count: count)
+            }
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    }
+
+    private static let emailThreadID = "00000000-0000-0000-0000-000000000801"
+    private static let emailDraftID = "00000000-0000-0000-0000-000000000802"
+    private static let emailRunID = "00000000-0000-0000-0000-000000000803"
+    private static let emailApprovalID = "00000000-0000-0000-0000-000000000804"
+    private static var learningJSON: String {
+        "{\"paused\":\(emailLock.withLock { learningPaused }),\"profile_revision\":1,\"excluded_sources\":0,\"style_examples\":8,\"history_processed\":42,\"history_complete\":false}"
+    }
+    private static let emailAccountsJSON = """
+        {"items":[{"id":"work","label":"Work","email_address":"owner@work.example","status":"ready","last_synced_at":"2026-09-11T00:00:00Z","history_complete":false,"history_processed":42,"read_server_id":"gmail_work_read","send_server_id":"gmail_work_send"}],"next_cursor":null}
+        """
+    private static var emailDraftJSON: String {
+        let (body, revision, status) = emailLock.withLock { (emailBody, emailRevision, emailStatus) }
+        let escapedBody = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+        return """
+            {"id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
+            """
+    }
+    private static var emailThreadJSON: String {
+        """
+        {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
+        """
+    }
+    private static var emailApprovalJSON: String {
+        let (body, sent) = emailLock.withLock { (emailBody, emailStatus == "sent") }
+        let escapedBody = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+        return """
+            {"id":"\(emailApprovalID)","run_id":"\(emailRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"\(sent ? "APPROVED" : "PENDING")","tool_name":"mcp.gmail_work_send.send_message","action_summary":"Send the exact reply","arguments":{"thread_id":"provider-thread","to":"alex@example.test","cc":null,"bcc":null,"subject":"Re: Board agenda","body":\(escapedBody)},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+            """
+    }
 
     private static let firstSessionJSON = """
         {"id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Historical chat","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":null}

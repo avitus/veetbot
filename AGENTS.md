@@ -77,6 +77,7 @@ validates the floor, and no trailer means lane A.
 | The persona surface, nominations, and curated promotion | `persona-surface.md` |
 | The memory read API and the native memory browser | `memory-read-api-and-browser.md` |
 | The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
+| Client modes, foreground email, priority/style learning, drafts and semantic mail memories | `email-experience.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | The device channel and SMS through the owner's iPhone | `device-channel-and-sms.md` |
 | The WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
@@ -93,9 +94,9 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
-  18 through 25 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082). Milestone 21 is limited to adaptive
+  18 through 26 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
-  the owner's iPhone, and 25 to the WhatsApp business surface. Model routing and the plan's remaining roadmap items
+  the owner's iPhone, 25 to the WhatsApp business surface, and 26 to the approved client modes and adaptive email experience. Model routing and the plan's remaining roadmap items
   are not authorized. The grouped summary with each in-progress milestone's open items is `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
@@ -193,7 +194,6 @@ End every coding assignment with a report covering:
 - Known limitations
 - Deviations from the engineering plan
 - ADRs created or proposed
-
 ## Do not
 
 - No implementation work in a documentation-only assignment; never edit `archive/`, `site/`, or `dist/`.
