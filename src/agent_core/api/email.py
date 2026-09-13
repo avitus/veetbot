@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
@@ -54,6 +55,8 @@ class ResetLearningRequest(BaseModel):
 async def boundary[T](operation: Awaitable[T]) -> T:
     try:
         return await operation
+    except EmailFeedbackTargetError:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="email request is malformed") from exc
 

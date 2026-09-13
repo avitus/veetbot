@@ -15,3 +15,7 @@ class SessionMetadataValidationError(ValueError):
 
 class BrowserLoginURLValidationError(ValueError):
     """A login URL is invalid or outside the owned profile's exact origins."""
+
+
+class EmailFeedbackTargetError(ValueError):
+    """Owner feedback does not identify one supported person or content topic."""

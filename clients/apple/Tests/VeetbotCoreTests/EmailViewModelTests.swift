@@ -1327,6 +1327,54 @@ import Testing
         #expect(requests.snapshot.allSatisfy { $0.httpMethod == "GET" })
     }
 
+    /// Missing, ambiguous and stale topic selections must never send an invalid feedback command.
+    @Test(arguments: ["", "Unlisted topic"], [false, true])
+    func testTopicFeedbackRequiresAnAvailableSelection(targetValue: String, hasTopics: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let thread = hasTopics
+            ? threadJSON().replacingOccurrences(of: "\"senders\":", with: "\"topics\":[\"Board\",\"Hiring\"],\"senders\":")
+            : threadJSON()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("/feedback") {
+                return (400, Self.error("malformed_request", "The HTTP request is not supported."))
+            }
+            return (200, thread)
+        }
+        await model.openThread(threadID)
+        await model.giveFeedback(target: .topic, judgment: "important", targetValue: targetValue)
+        #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
+        #expect(model.draftError == "Choose an available content topic, or apply feedback to This thread.")
+    }
+
+    /// Sends exactly the server topic the owner selected and names it in the reversible acknowledgment.
+    @Test(arguments: ["important", "less_important"])
+    func testTopicFeedbackSendsSelectedTopic(judgment: String) async throws {
+        let requests = EmailRequestRecorder()
+        let thread = threadJSON().replacingOccurrences(of: "\"senders\":", with: "\"topics\":[\"Board\",\"Hiring\"],\"senders\":")
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("/feedback") {
+                return (200, "{\"feedback_id\":\"\(self.threadID)\",\"thread\":\(thread)}")
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            return (200, thread)
+        }
+        await model.openThread(threadID)
+        await model.giveFeedback(target: .topic, judgment: judgment, targetValue: "Board")
+        let command = try #require(requests.snapshot.first { $0.httpMethod == "POST" })
+        let body = try Self.archiveRequestBody(command)
+        #expect(body["target"] as? String == "topic")
+        #expect(body["target_value"] as? String == "Board")
+        #expect(body["judgment"] as? String == judgment)
+        #expect(body["expected_revision"] as? Int == 1)
+        #expect(model.feedbackMessage == "Marked Board as \(judgment.replacingOccurrences(of: "_", with: " ")).")
+        #expect(model.feedbackID == threadID)
+        #expect(model.draftError == nil)
+    }
+
     @Test func testFeedbackAcknowledgesJudgmentAndScope() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("/feedback") {

@@ -470,10 +470,17 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(lessImportant.isEnabled)
         target.click()
         app.menuItems["This kind of content"].click()
-        let topic = app.textFields["Content topic"]
-        XCTAssertEqual(topic.value as? String, "")
+        let topic = app.popUpButtons["email.feedback-topic"]
+        XCTAssertFalse(important.isEnabled, "Content feedback requires an explicit topic")
+        XCTAssertFalse(lessImportant.isEnabled)
+        XCTAssertTrue(topic.waitForExistence(timeout: 5))
+        XCTAssertEqual(topic.value as? String, "Choose a topic")
         topic.click()
-        topic.typeText("Board planning")
+        app.menuItems["Board planning"].click()
+        XCTAssertTrue(important.isEnabled)
+        XCTAssertTrue(lessImportant.isEnabled)
+        important.click()
+        XCTAssertTrue(app.staticTexts["Marked Board planning as important."].waitForExistence(timeout: 5))
         target.click()
         app.menuItems["This person"].click()
         XCTAssertEqual(app.popUpButtons["email.feedback-person"].value as? String, "Choose a person")
@@ -483,6 +490,10 @@ final class ConversationNavigationUITests: XCTestCase {
         app.menuItems["This thread"].click()
         XCTAssertTrue(important.isEnabled)
         XCTAssertTrue(lessImportant.isEnabled)
+        target.click()
+        app.menuItems["This kind of content"].click()
+        XCTAssertEqual(topic.value as? String, "Choose a topic")
+        XCTAssertFalse(important.isEnabled)
     }
 
     /// Reproduces the default CI window and keeps mode, reply and Chat controls inside its bounds.

@@ -405,7 +405,7 @@ private struct EmailArchiveButton: View {
 }
 
 private struct EmailThreadScreen: View {
-    private enum Field: Hashable { case to, cc, bcc, subject, body, topic, feedback, refinement }
+    private enum Field: Hashable { case to, cc, bcc, subject, body, feedback, refinement }
     @ObservedObject var model: EmailViewModel
     let discussInChat: () async -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -614,7 +614,19 @@ private struct EmailThreadScreen: View {
                 }
                 .accessibilityIdentifier("email.feedback-person")
             } else if target == .topic {
-                TextField("Content topic", text: $targetValue).focused($focusedField, equals: .topic)
+                let topics = model.thread?.feedbackTopics ?? []
+                Picker("Content topic", selection: $targetValue) {
+                    Text("Choose a topic").tag("")
+                    ForEach(topics, id: \.self) { topic in Text(topic).tag(topic) }
+                }
+                .accessibilityIdentifier("email.feedback-topic")
+                .onChange(of: topics) { values in
+                    if !values.contains(targetValue) { targetValue = "" }
+                }
+                if topics.isEmpty {
+                    Text("No content topics are available yet. You can apply feedback to This thread.")
+                        .appFont(.caption).foregroundColor(.secondary)
+                }
             }
             TextField("Explain what matters (optional)", text: $explanation).focused($focusedField, equals: .feedback)
                 .textFieldStyle(.roundedBorder)
@@ -636,6 +648,7 @@ private struct EmailThreadScreen: View {
                 .accessibilityIdentifier("email.feedback-less-important")
             }.buttonStyle(.bordered)
                 .disabled(target == .person && targetValue.isEmpty)
+                .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
             Divider()
             Text("Does this thread need a reply?").appFont(.caption).foregroundColor(.secondary)
             HStack {

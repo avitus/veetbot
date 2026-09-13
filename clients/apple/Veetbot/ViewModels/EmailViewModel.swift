@@ -598,6 +598,11 @@ public final class EmailViewModel: ObservableObject {
 
     public func giveFeedback(target: EmailFeedbackTarget, judgment: String, explanation: String? = nil, targetValue: String? = nil) async {
         guard let thread, let api = makeAPIClient(), !isPerformingAction else { return }
+        if target == .topic, !thread.feedbackTopics.contains(targetValue ?? "") {
+            draftActionError = "Choose an available content topic, or apply feedback to This thread."
+            return
+        }
+        draftActionError = nil
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
@@ -609,7 +614,9 @@ public final class EmailViewModel: ObservableObject {
             switch judgment {
             case "needs_reply": feedbackMessage = "This thread needs a reply."
             case "no_reply_needed": feedbackMessage = "This thread needs no reply."
-            default: feedbackMessage = "Marked \(target.title.lowercased()) as \(judgment.replacingOccurrences(of: "_", with: " "))."
+            default:
+                let scope = target == .topic ? (targetValue ?? target.title.lowercased()) : target.title.lowercased()
+                feedbackMessage = "Marked \(scope) as \(judgment.replacingOccurrences(of: "_", with: " "))."
             }
             await reload(preserveOrder: true)
             if selectedThreadID == thread.id { await openThread(thread.id, refreshOnly: true) }
