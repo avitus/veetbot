@@ -75,9 +75,14 @@ advertising archive support, the checkbox on each row and in thread detail
 means **Archive in Gmail**. Checking it removes `INBOX` from that conversation
 in its originating account; unchecking an archived conversation explicitly
 moves it back to the same account's Inbox. The clearly labelled gesture supplies
-single-action owner consent under ADR-0095. Keep the row and previous checked
-state while the operation is pending; show failures or uncertain outcomes and
-change the state only after confirmation. Preserve draft edits, unread state,
+single-action owner consent under ADR-0095. Remove the row immediately while
+the archive request and durable operation finish asynchronously. Normal progress
+and successful completion are silent; other rows remain actionable. Keep the
+last confirmed mailbox state separate from this optimistic presentation, retain
+draft edits and selected detail, and restore the row with an actionable error
+if admission, status retrieval, or execution fails or the outcome is uncertain.
+Projection refreshes must not resurrect a pending row; reopening Email resumes
+status reads without another archive request. Preserve unread state,
 other labels, and importance feedback. New correspondence is assessed again.
 After a confirmed reply, the thread leaves Needs reply unless another
 unanswered request remains.

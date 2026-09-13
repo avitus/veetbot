@@ -45,9 +45,14 @@ unknown earlier set of Gmail labels.
    write. A potentially dispatched non-idempotent invocation is not retried
    automatically. A fresh authorized read can reconcile observed Inbox state;
    absence of confirmation remains visible rather than being called success.
-5. Update the visible archive state only after confirmed provider success or a
-   fresh read establishing the requested state. Pending or failed operations
-   do not hide the row. Restore adds only `INBOX`; archive removes only
+5. Keep confirmed mailbox state authoritative, but remove an archived row from
+   the inbox immediately while admission and execution finish asynchronously.
+   The owner requested this presentation change on 2026-09-13. Normal progress
+   and success stay silent; failures, unreadable status and uncertain outcomes
+   restore the row with an actionable error. Preserve the row's position and
+   draft edits, keep other rows actionable, and resume pending status reads
+   after returning to Email without admitting another write.
+   Restore adds only `INBOX`; archive removes only
    `INBOX`. Neither changes unread state, other labels, importance feedback,
    or draft contents. New correspondence remains eligible for attention.
 6. Separate mailbox-label changes from source-content changes. Label-only

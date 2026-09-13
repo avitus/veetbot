@@ -312,8 +312,14 @@ coverage lives in the scrollable Email learning
 pane. Only the active mode contributes toolbar actions.
 The mounted navigation panes fit the available window height so mode controls
 remain reachable in the default Mac window as well as larger windows.
-Mark handled remains available beside every inbox row and at the top of the
-reading column; its confirmed state can be reversed with Mark unhandled.
+Archive in Gmail is available beside each inbox row and in thread detail on
+supported accounts. Checking it removes the row immediately while the server
+archives the conversation asynchronously. Normal progress and success stay
+silent; a failure or uncertain outcome restores the row with an error. The
+client retains confirmed mailbox state, row order and unsaved replies, and
+keeps other rows actionable. Pending rows stay hidden through refreshes and
+status checks resume when Email reopens. An archived conversation found in
+Other mail can be moved back to its originating account's Inbox.
 
 The reading column separates the attention summary, original conversation and
 reply composer. Why this matters and Improve priorities expand on demand, while

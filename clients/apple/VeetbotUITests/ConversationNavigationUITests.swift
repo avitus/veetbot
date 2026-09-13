@@ -39,7 +39,7 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
-    /// Archives a row without opening it, then finds its confirmed state in Other mail.
+    /// Removes a row immediately without progress messages, then finds its confirmed state in Other mail.
     func testEmailCanBeCheckedOffFromInboxWithoutOpeningThread() {
         let mode = app.buttons["mode.email"]
         XCTAssertTrue(mode.waitForExistence(timeout: 10))
@@ -56,15 +56,9 @@ final class ConversationNavigationUITests: XCTestCase {
         check.tap()
         #endif
         let progress = app.staticTexts["email.archive.status.00000000-0000-0000-0000-000000000801"]
-        XCTAssertTrue(progress.waitForExistence(timeout: 5))
-        #if os(macOS)
-        XCTAssertEqual(progress.value as? String, "Archiving in Gmail…")
-        #else
-        XCTAssertEqual(progress.label, "Archiving in Gmail…")
-        #endif
-        XCTAssertFalse(check.isEnabled)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: check)
-        waitForExpectations(timeout: 5)
+        // A predicate expectation waits one second before its first snapshot, racing a one-second deadline.
+        XCTAssertFalse(check.exists, "Archiving must remove the row as soon as the tap finishes")
+        XCTAssertFalse(progress.exists)
         XCTAssertFalse(app.buttons["email.handled.detail"].exists)
         #if os(macOS)
         let other = app.radioButtons["Other mail"]
@@ -78,7 +72,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(check.label, "Move to Inbox")
     }
 
-    /// A failed Gmail operation leaves the original row available with an explicit retryable outcome.
+    /// A failed Gmail operation restores the optimistically removed row with an explicit retryable outcome.
     func testEmailArchiveFailurePreservesInboxRow() {
         app.terminate()
         app.launchArguments.append("--ui-testing-email-archive-failure")
@@ -97,6 +91,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         action.tap()
         #endif
+        XCTAssertFalse(action.exists, "The row must disappear before the asynchronous failure arrives")
         let status = app.staticTexts["email.archive.status.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         #if os(macOS)
