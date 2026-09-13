@@ -305,6 +305,22 @@ preferences, applies the calibrated threshold, and orders qualifying threads.
 Record the factors and input/profile revisions so decisions can be explained
 and reproduced. Version model prompts and feature schemas too.
 
+Assess current attention against the server's explicit current time, resolving
+relative event dates against the original message date. A passed meeting or
+expired reminder alone supplies neither current importance nor reply need.
+The versioned assessment may record a source-supported, timezone-aware
+`attention_expires_at` only when **all** attention and reply relevance ends at
+that time. Uncertain dates, unresolved requests, overdue obligations, follow-up
+work and lasting informational value do not acquire an automatic expiry merely
+because a due date passed. There is no blanket two-week message cutoff.
+
+Apply that expiry when projecting lists, thread detail and automatic draft
+eligibility, before explicit owner feedback. Expiry does not change Gmail,
+erase history, revise source identity or discard existing drafts. It needs no
+new model call on an unchanged poll. Source changes replace the old assessment;
+prompt/schema revision changes re-assess cached mail in the existing bounded
+foreground slices, so pre-expiry assessments are not cached indefinitely.
+
 Explicit owner preferences dominate inferred patterns. A thread-only judgment
 immediately changes that thread and contributes limited evidence to broader
 preferences; it does not become an unconditional sender rule. Person/topic

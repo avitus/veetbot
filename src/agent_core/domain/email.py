@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from agent_core.domain.email_semantics import EmailSemanticFact
 
@@ -153,6 +153,7 @@ class EmailThread(EmailValue):
     source_fingerprint: str = ""
     profile_revision: int = 0
     assessment_version: str = ""
+    attention_expires_at: AwareDatetime | None = None
     topics: list[str] = Field(default_factory=list)
     dismissed_revision: int | None = None
     last_accessed_at: datetime
@@ -266,6 +267,14 @@ class EmailAssessment(EmailValue):
     urgency: float = Field(ge=0, le=1)
     needs_reply: bool
     bulk: bool
+    attention_expires_at: AwareDatetime | None = Field(
+        default=None,
+        description=(
+            "Source-supported time, with timezone, when ALL current attention and reply "
+            "relevance ends (for example a meeting-only invitation). Null for unresolved "
+            "obligations, lasting informational value, or an uncertain event time."
+        ),
+    )
     reply_blocked_reason: str | None = Field(default=None, max_length=1000)
     supported_evidence: list[str] = Field(default_factory=list, max_length=10)
     relationship_memory_ids: list[str] = Field(default_factory=list, max_length=20)
@@ -328,9 +337,19 @@ def feedback_matches(feedback: EmailFeedback, thread: EmailThread) -> bool:
     return bool(set(feedback.target_values) & set(candidates))
 
 
-def apply_feedback(thread: EmailThread, feedback: list[EmailFeedback]) -> EmailThread:
-    """Rebuild from source assessment plus surviving explicit owner evidence."""
+def apply_feedback(
+    thread: EmailThread, feedback: list[EmailFeedback], *, now: datetime
+) -> EmailThread:
+    """Expire dated attention, then apply surviving explicit owner evidence."""
     selected = thread
+    if thread.attention_expires_at is not None and thread.attention_expires_at <= now:
+        selected = selected.model_copy(
+            update={
+                "priority": 0.0,
+                "needs_reply": False,
+                "reason": "The dated event no longer needs attention.",
+            }
+        )
     for item in sorted(feedback, key=lambda value: (value.created_at, str(value.id))):
         if not feedback_matches(item, thread):
             continue

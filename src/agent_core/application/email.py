@@ -272,7 +272,7 @@ class EmailExperienceService:
                 ):
                     continue
                 reconciled = await self._reconcile_archive_in(uow, principal, stored)
-                threads.append(apply_feedback(reconciled, feedback))
+                threads.append(apply_feedback(reconciled, feedback, now=self.clock.now()))
         eligible: list[EmailThread] = []
         for thread in threads:
             if (
@@ -317,7 +317,9 @@ class EmailExperienceService:
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )
-            selected = apply_feedback(thread, await self._feedback(uow.email, principal))
+            selected = apply_feedback(
+                thread, await self._feedback(uow.email, principal), now=self.clock.now()
+            )
             result = selected.model_dump(mode="json")
             draft = (
                 None
@@ -361,7 +363,9 @@ class EmailExperienceService:
                 return {
                     "feedback_id": replay.payload["feedback_id"],
                     "thread": thread_summary(
-                        apply_feedback(thread, await self._feedback(uow.email, principal))
+                        apply_feedback(
+                            thread, await self._feedback(uow.email, principal), now=self.clock.now()
+                        )
                     ),
                 }
             if expected_revision is not None and thread.revision != expected_revision:
@@ -412,7 +416,9 @@ class EmailExperienceService:
             return {
                 "feedback_id": str(item.id),
                 "thread": thread_summary(
-                    apply_feedback(thread, await self._feedback(uow.email, principal))
+                    apply_feedback(
+                        thread, await self._feedback(uow.email, principal), now=self.clock.now()
+                    )
                 ),
             }
 
@@ -436,7 +442,9 @@ class EmailExperienceService:
                 await self._bump_profile(uow.email, principal)
             thread = await self._thread(uow.email, principal, item.thread_id)
             return thread_summary(
-                apply_feedback(thread, await self._feedback(uow.email, principal))
+                apply_feedback(
+                    thread, await self._feedback(uow.email, principal), now=self.clock.now()
+                )
             )
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:
@@ -2127,6 +2135,19 @@ class EmailExperienceService:
                     raise ValueError("email assessment feature is invalid")
                 return float(value)
 
+            expiry_value = assessment.get("attention_expires_at")
+            expires_at = None
+            if expiry_value is not None:
+                if isinstance(expiry_value, datetime):
+                    expires_at = expiry_value
+                elif isinstance(expiry_value, str):
+                    expires_at = datetime.fromisoformat(expiry_value)
+                else:
+                    raise ValueError("email attention expiry is invalid")
+                if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+                    raise ValueError("email attention expiry requires a timezone")
+                expires_at = expires_at.astimezone(UTC)
+
             content = score("content_importance")
             relationship = score("relationship_importance")
             senders = set(addresses(thread.senders))
@@ -2175,13 +2196,16 @@ class EmailExperienceService:
                     "reply_blocked_reason": assessment.get("reply_blocked_reason"),
                     "profile_revision": state.profile_revision,
                     "assessment_version": EMAIL_POLICY_VERSION,
+                    "attention_expires_at": expires_at,
                 }
             )
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )
             await self._put_data(uow.email, principal, "assessment", str(thread.id), assessment)
-            return apply_feedback(thread, await self._feedback(uow.email, principal))
+            return apply_feedback(
+                thread, await self._feedback(uow.email, principal), now=self.clock.now()
+            )
 
     async def save_generated_draft(
         self,

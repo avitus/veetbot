@@ -791,7 +791,7 @@ class _TaskIO:
         async with c.uow_factory() as uow:
             feedback = await self.service._feedback(uow.email, c.principal)
             candidates = [
-                apply_feedback(EmailThread.model_validate(row.payload), feedback)
+                apply_feedback(EmailThread.model_validate(row.payload), feedback, now=c.clock.now())
                 async for row in records(uow.email, c.principal, "thread")
             ]
             assessments = {
@@ -969,6 +969,7 @@ class _TaskIO:
                     "priority": 0,
                     "needs_reply": False,
                     "assessment_version": "",
+                    "attention_expires_at": None,
                     "summary": "Assessment pending"
                     if messages
                     else "Conversation removed from the account",
@@ -1115,7 +1116,7 @@ class _TaskIO:
             if c.checkpoint.provider_pin is None
             else c.checkpoint.provider_pin.registry_version
         )
-        return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:email-assessment@1"
+        return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:email-assessment@2"
 
     async def assess(self, thread: EmailThread, learning: dict[str, Any]) -> None:
         async with self.context.uow_factory() as uow:
@@ -1163,7 +1164,17 @@ class _TaskIO:
         }
         next_cursor = len(segments) if was_complete else selected_index + 1
         assessment = await self.model(
-            "Assess this conversation for the owner's short high-precision attention list. "
+            f"Current assessment time: {self.context.clock.now().isoformat()}. "
+            "Assess this conversation for the owner's short high-precision attention list now. "
+            "Compare meeting/event dates with the current assessment time; resolve relative "
+            "dates against the original message sent_at, never the import time. Passed "
+            "meeting invitations and expired reminders are not currently important merely "
+            "because their sender or subject is important. Set attention_expires_at to a "
+            "source-supported timestamp with timezone when ALL attention/reply relevance "
+            "ends, including a past timestamp for an already-passed event. Set it to null "
+            "if timing is ambiguous or any unresolved request, follow-up, overdue obligation, "
+            "or lasting informational value remains; a due date alone is not an expiry. "
+            "Do not exclude mail solely because it is older than two weeks. "
             "Prioritize substantive requests and supported relationships: regular reply "
             "partners, collaborators, portfolio or prospective-investment founders or CEOs, "
             "fellow board members, and venture investors. A title or signature alone proves "
@@ -1199,6 +1210,7 @@ class _TaskIO:
                 content_importance=0,
                 urgency=0,
                 needs_reply=False,
+                attention_expires_at=None,
                 supported_evidence=[],
             )
         value.update(

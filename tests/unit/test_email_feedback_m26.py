@@ -101,4 +101,4 @@ def test_person_feedback_ignores_malformed_senders(senders: list[str], expected:
         target_values=["alex@example.test"],
         created_at=NOW,
     )
-    assert apply_feedback(thread, [feedback]).priority == expected
+    assert apply_feedback(thread, [feedback], now=NOW).priority == expected
