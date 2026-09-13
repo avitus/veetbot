@@ -41,6 +41,13 @@ from agent_core.ports.browser_profiles import (
 from agent_core.ports.browser_sessions import BrowserAuthenticationControlPlane
 from agent_core.ports.determinism import Clock, IdFactory
 
+LOGIN_REDIRECT_MESSAGE = (
+    "The website redirected the login page to an origin this website access "
+    "does not allow, for example from a bare domain to its www address. Start "
+    "over with the address the site actually uses, or list the extra origin "
+    "under Advanced settings."
+)
+
 
 class _BrowserUnitOfWork(Protocol):
     browser_profiles: BrowserProfileRepository
@@ -350,6 +357,10 @@ class BrowserProfileManagementService:
                         "tool.browser.provider_unavailable",
                         retryable=True,
                     ) from exc
+                except BrowserProviderError as exc:
+                    if exc.reason_code == "tool.browser.url_disallowed":
+                        raise BrowserLoginURLValidationError(LOGIN_REDIRECT_MESSAGE) from exc
+                    raise
                 now = self._clock.now()
                 record = BrowserAuthenticationRecord(
                     id=launched.id,

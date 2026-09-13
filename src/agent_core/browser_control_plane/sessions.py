@@ -298,9 +298,17 @@ class HostedProfileSessionService:
                     interactive=True,
                 )
                 await runtime.navigate(login_url)
-            except Exception:
-                await runtime.close()
+            except BrowserProviderError:
+                with suppress(Exception):
+                    await runtime.close()
                 raise
+            except Exception as exc:
+                with suppress(Exception):
+                    await runtime.close()
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable",
+                    retryable=True,
+                ) from exc
             self._ceremonies[ceremony_id] = _CeremonyState(
                 id=ceremony_id,
                 profile_id=profile_id,

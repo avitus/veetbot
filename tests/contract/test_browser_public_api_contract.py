@@ -579,3 +579,69 @@ async def test_browser_profile_and_grant_collections_use_stable_page_shapes() ->
 
 async def _ready() -> bool:
     return True
+
+
+async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_request() -> None:
+    """A site that redirects to an unlisted origin gets an actionable 400, not a 500."""
+
+    clock, uow_factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
+    provider_requests: list[httpx.Request] = []
+    redirect_blocked = [True]
+
+    def provider_response(request: httpx.Request) -> httpx.Response:
+        provider_requests.append(request)
+        if redirect_blocked[0]:
+            # The isolated runtime refused the site's redirect to an unlisted origin.
+            return httpx.Response(409, json={"error": {"code": "tool.browser.url_disallowed"}})
+        return httpx.Response(
+            201,
+            json={
+                "id": str(AUTHENTICATION_ID),
+                "profile_id": str(PROFILE_ID),
+                "status": "authentication_required",
+                "expires_at": (NOW + timedelta(minutes=5)).isoformat(),
+                "launch_url": "https://login.example.test/authentication#capability=one-time",
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(provider_response)) as provider:
+        profiles = BrowserProfileManagementService(
+            uow_factory=cast(BrowserUnitOfWorkFactory, uow_factory),
+            lifecycle=InMemoryBrowserProfileControlPlane(),
+            authentications=HostedBrowserSessionControlPlane(
+                base_url="https://login.example.test",
+                credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+                client=provider,
+            ),
+            clock=clock,
+            ids=SequenceIdFactory([PROFILE_ID]),
+        )
+        created = await profiles.create(owner, ("https://duolingo.com",))
+        services = SimpleNamespace(browser_profiles=profiles)
+        app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+        path = f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies"
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://127.0.0.1",
+        ) as client:
+            rejected = await client.post(path, json={"login_url": "https://duolingo.com/"})
+            redirect_blocked[0] = False
+            retried = await client.post(path, json={"login_url": "https://duolingo.com/"})
+
+    assert rejected.status_code == 400
+    error = rejected.json()["error"]
+    assert error["code"] == "malformed_request"
+    assert "redirect" in error["message"]
+    assert "www" in error["message"]
+    assert error["details"] == {}
+    assert error["request_id"] == str(PROFILE_ID)
+    assert "duolingo" not in rejected.text
+    assert retried.status_code == 201
+    assert retried.json()["launch_url"] is not None
+    assert len(provider_requests) == 2
+    async with uow_factory() as uow:
+        profile = await uow.browser_profiles.get(PROFILE_ID, owner)
+        assert profile.generation == created.generation
+        records = await uow.browser_authentications.list(owner, profile_id=PROFILE_ID)
+        assert [record.id for record in records] == [AUTHENTICATION_ID]

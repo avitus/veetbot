@@ -42,6 +42,7 @@ class FakeSessionRuntime:
     actions: list[BrowserAction] = field(default_factory=list)
     observe_started: asyncio.Event | None = None
     observe_release: asyncio.Event | None = None
+    navigate_error: Exception | None = None
 
     async def start(
         self,
@@ -55,6 +56,8 @@ class FakeSessionRuntime:
         self.interactive = interactive
 
     async def navigate(self, url: str) -> BrowserObservation:
+        if self.navigate_error is not None:
+            raise self.navigate_error
         return BrowserObservation(url=url, revision="revision-1", text="safe observation")
 
     async def observe(self) -> BrowserObservation:
@@ -92,6 +95,8 @@ class FakeSessionRuntime:
 
 def services(
     tmp_path: Path,
+    *,
+    first_navigate_error: Exception | None = None,
 ) -> tuple[
     HostedProfileLifecycleService,
     HostedProfileSessionService,
@@ -108,7 +113,9 @@ def services(
 
     def runtime_factory(tenant_id: str) -> FakeSessionRuntime:
         assert tenant_id == principal().tenant_id
-        runtime = FakeSessionRuntime()
+        runtime = FakeSessionRuntime(
+            navigate_error=first_navigate_error if not runtimes else None,
+        )
         runtimes.append(runtime)
         return runtime
 
@@ -370,3 +377,52 @@ async def test_expired_authentication_is_retained_for_bounded_idempotency(
     times[0] += timedelta(minutes=5, seconds=1)
     with pytest.raises(ConflictError):
         await sessions.authentication_status(ceremony.id, principal())
+
+
+@pytest.mark.parametrize(
+    ("launch_error", "expected_reason", "expected_retryable"),
+    [
+        (
+            BrowserProviderError("tool.browser.url_disallowed", retryable=False),
+            "tool.browser.url_disallowed",
+            False,
+        ),
+        (
+            RuntimeError("Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://example.org/"),
+            "tool.browser.provider_unavailable",
+            True,
+        ),
+    ],
+)
+async def test_authentication_launch_navigation_failure_is_stable_and_discards_runtime(
+    tmp_path: Path,
+    launch_error: Exception,
+    expected_reason: str,
+    expected_retryable: bool,
+) -> None:
+    """A refused redirect or a lost browser leaves no raw text and no dead ceremony."""
+
+    lifecycle, sessions, runtimes, _times = services(tmp_path, first_navigate_error=launch_error)
+    await provision(lifecycle)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await sessions.begin_authentication(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            login_url="https://example.org/login",
+        )
+    retried = await sessions.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+
+    assert raised.value.reason_code == expected_reason
+    assert raised.value.retryable is expected_retryable
+    assert "ERR_TUNNEL" not in str(raised.value)
+    assert runtimes[0].closed is True
+    assert retried.launch_url is not None
+    assert len(runtimes) == 2
+    assert runtimes[1].closed is False

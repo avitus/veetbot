@@ -13,6 +13,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserProviderError,
     normalize_browser_origin,
 )
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
@@ -115,7 +116,15 @@ class HostedPlaywrightSessionRuntime:
         self._started = True
 
     async def navigate(self, url: str) -> BrowserObservation:
-        return await self._runtime.navigate(url)
+        try:
+            return await self._runtime.navigate(url)
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
 
     async def observe(self) -> BrowserObservation:
         return await self._runtime.observe()

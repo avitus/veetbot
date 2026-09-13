@@ -25,6 +25,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.errors import BrowserLoginURLValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
@@ -527,3 +528,46 @@ async def test_authentication_admission_lock_wait_is_bounded() -> None:
     authentication.release.set()
     await asyncio.wait_for(first, timeout=1)
     assert authentication.begin_calls == 1
+
+
+async def test_authentication_redirect_outside_allowed_origins_is_a_login_error() -> None:
+    """The runtime's refusal of a redirect reads as a fixable login-URL problem."""
+
+    class RedirectBlockedControlPlane(FakeAuthenticationControlPlane):
+        async def begin_authentication(
+            self,
+            profile_id: UUID,
+            owner: Principal,
+            provider_ref: str,
+            *,
+            login_url: str,
+        ) -> BrowserAuthenticationView:
+            del profile_id, owner, provider_ref, login_url
+            raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+
+    uow = FakeUnitOfWorkFactory()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=RedirectBlockedControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    created = await service.create(subject, ("https://duolingo.com",))
+
+    with pytest.raises(BrowserLoginURLValidationError) as raised:
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://duolingo.com/",
+        )
+
+    message = str(raised.value)
+    assert "redirect" in message
+    assert "www" in message
+    assert "duolingo" not in message
+    unchanged = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    assert unchanged.generation == created.generation
+    assert unchanged.status == created.status
+    assert await uow.uow.browser_authentications.list(subject, profile_id=PROFILE_ID) == []

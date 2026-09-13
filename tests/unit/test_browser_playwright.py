@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
+from playwright.async_api import Error as PlaywrightError
 
 from agent_core.adapters.browser.playwright import (
     PlaywrightBrowserProvider,
@@ -224,3 +227,57 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
     assert runtime._page is None
     assert runtime._revision is None
     assert runtime._elements == {}
+
+
+@dataclass
+class FakeNavigationRequest:
+    url: str
+
+    def is_navigation_request(self) -> bool:
+        return True
+
+
+class FakeRedirectingPage:
+    """Report the navigation requests Chromium emits, then fail like a refused tunnel."""
+
+    def __init__(self, hops: list[str]) -> None:
+        self.hops = hops
+        self.handlers: dict[str, list[Callable[[Any], None]]] = {}
+
+    def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        del wait_until, timeout
+        for hop in (url, *self.hops):
+            for handler in self.handlers.get("request", ()):
+                handler(FakeNavigationRequest(hop))
+        raise PlaywrightError(f"Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at {url}")
+
+
+@pytest.mark.parametrize(
+    ("hops", "expected_reason", "expected_retryable"),
+    [
+        (["https://www.duolingo.com/"], "tool.browser.url_disallowed", False),
+        ([], "tool.browser.provider_unavailable", True),
+    ],
+)
+async def test_playwright_runtime_classifies_failed_navigation_by_origin_policy(
+    hops: list[str],
+    expected_reason: str,
+    expected_retryable: bool,
+) -> None:
+    """A redirect the egress policy refuses is a policy outcome, not a crash."""
+
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://duolingo.com",)
+    page = FakeRedirectingPage(hops)
+    runtime._attach_page(page)  # type: ignore[arg-type]
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await runtime.navigate("https://duolingo.com/")
+
+    assert raised.value.reason_code == expected_reason
+    assert raised.value.retryable is expected_retryable
+    assert "ERR_TUNNEL" not in str(raised.value)
+    assert "duolingo" not in str(raised.value)

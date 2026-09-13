@@ -470,6 +470,18 @@ URL or provider diagnostics. Scope and profile ownership are checked first;
 rejection starts no provider operation and leaves the profile available for a
 corrected retry.
 
+A site can still redirect the launch navigation to an origin the profile does
+not list, most often from a bare hostname to its `www` subdomain. Chromium
+follows that redirect without consulting the runtime's request interception, so
+the deny-first egress layer refuses the hop. The isolated runtime records the
+disallowed navigation request, reports the launch as
+`tool.browser.url_disallowed`, and discards the browser; any other launch
+navigation failure is `tool.browser.provider_unavailable`. Neither carries raw
+browser text. The application turns the disallowed redirect into the same
+`400 malformed_request` with a fixed message that names the bare-versus-`www`
+case and Advanced settings, creates no ceremony record, and leaves the profile
+available for a corrected retry.
+
 The native Website Access surface requires one Website URL: a home page or a
 login page. An omitted scheme defaults to HTTPS. The client derives the primary
 allowed origin from that URL and opens the full URL, preserving its path, query,
