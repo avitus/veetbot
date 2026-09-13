@@ -227,7 +227,8 @@ public struct EmailModeView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem {
+            // Remove inactive items themselves so the other mode inherits no empty toolbar slots.
+            ToolbarItemGroup {
                 if activeMode == .email {
                     Button {
                         showingLearning = true
@@ -236,11 +237,6 @@ public struct EmailModeView: View {
                     }
                     .accessibilityLabel("Email learning").help("Email learning")
                     .accessibilityIdentifier("email.learning")
-
-                }
-            }
-            ToolbarItem {
-                if activeMode == .email {
                     Button {
                         Task { await model.refresh() }
                     } label: {
@@ -249,10 +245,8 @@ public struct EmailModeView: View {
                     .disabled(model.isRefreshing || model.unavailable)
                     .accessibilityLabel("Refresh email").help("Refresh email")
                     .accessibilityIdentifier("email.refresh")
-
                 }
             }
-
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("email.inbox")

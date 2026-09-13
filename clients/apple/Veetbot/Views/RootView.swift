@@ -379,7 +379,8 @@ private struct SessionSidebar: View {
         }
         .toolbar {
             #if os(macOS)
-                ToolbarItem(placement: .automatic) {
+                // Global actions belong in the window's trailing toolbar, independent of sidebar width.
+                ToolbarItemGroup(placement: .primaryAction) {
                     if activeMode == .chat {
                         Button(action: openSettings) {
                             Image(systemName: "gearshape")
@@ -387,10 +388,6 @@ private struct SessionSidebar: View {
                         }
                         .accessibilityLabel("Settings")
                         .accessibilityIdentifier("sidebar.settings")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
                         Button {
                             showingMemoryBrowser = true
                         } label: {
@@ -399,10 +396,6 @@ private struct SessionSidebar: View {
                         }
                         .accessibilityLabel("Memory")
                         .accessibilityIdentifier("sidebar.memory")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
                         Button {
                             showingPersonaEditor = true
                         } label: {
@@ -411,10 +404,6 @@ private struct SessionSidebar: View {
                         }
                         .accessibilityLabel("Persona")
                         .accessibilityIdentifier("sidebar.persona")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
                         Button {
                             showingScheduleBrowser = true
                         } label: {

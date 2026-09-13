@@ -122,6 +122,9 @@ final class ConversationNavigationUITests: XCTestCase {
     private func checkEmailReadingFlow() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable, "Chat settings must be visible before switching modes")
+        #endif
         activate(emailMode)
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
@@ -157,6 +160,9 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(macOS)
         XCTAssertTrue(app.buttons["sidebar.settings"].isHittable,
                       "Chat must restore its toolbar after leaving Email's split view")
+        for identifier in ["sidebar.memory", "sidebar.persona", "sidebar.schedules"] {
+            XCTAssertTrue(app.buttons[identifier].isHittable, "Global Chat actions must fit in the window toolbar")
+        }
         XCTAssertFalse(app.buttons["email.learning"].isHittable)
         XCTAssertFalse(app.buttons["email.refresh"].isHittable)
         #endif
