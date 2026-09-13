@@ -33,11 +33,7 @@ public struct EmailModeView: View {
     public var body: some View {
         Group {
             #if os(macOS)
-            if #available(macOS 13, *) {
-                NavigationStack { macSplit }
-            } else {
-                NavigationView { macSplit }
-            }
+            macSplit
             #else
             if #available(iOS 16, macOS 13, *) {
                 if directSelection {
@@ -92,7 +88,7 @@ public struct EmailModeView: View {
     }
 
     #if os(macOS)
-    /// The surrounding navigation container scopes toolbars independently of the mounted Chat tree.
+    /// Uses a native divider while the shared root owns the Mac window toolbar.
     private var macSplit: some View {
         HSplitView {
             inbox
@@ -225,7 +221,6 @@ public struct EmailModeView: View {
         .navigationTitle("Email")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
             // Remove inactive items themselves so the other mode inherits no empty toolbar slots.
             ToolbarItemGroup {
@@ -237,17 +232,11 @@ public struct EmailModeView: View {
                     }
                     .accessibilityLabel("Email learning").help("Email learning")
                     .accessibilityIdentifier("email.learning")
-                    Button {
-                        Task { await model.refresh() }
-                    } label: {
-                        if model.isRefreshing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
-                    }
-                    .disabled(model.isRefreshing || model.unavailable)
-                    .accessibilityLabel("Refresh email").help("Refresh email")
-                    .accessibilityIdentifier("email.refresh")
+                    EmailRefreshButton(model: model)
                 }
             }
         }
+        #endif
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("email.inbox")
     }
@@ -925,7 +914,23 @@ private struct EmailEmptyState: View {
     }
 }
 
-private struct EmailLearningScreen: View {
+/// Observes refresh state directly even when the window toolbar is owned by the app coordinator's view.
+struct EmailRefreshButton: View {
+    @ObservedObject var model: EmailViewModel
+
+    var body: some View {
+        Button {
+            Task { await model.refresh() }
+        } label: {
+            if model.isRefreshing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+        }
+        .disabled(model.isRefreshing || model.unavailable)
+        .accessibilityLabel("Refresh email").help("Refresh email")
+        .accessibilityIdentifier("email.refresh")
+    }
+}
+
+struct EmailLearningScreen: View {
     @ObservedObject var model: EmailViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var resetScope: String?

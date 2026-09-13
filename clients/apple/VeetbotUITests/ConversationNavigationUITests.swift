@@ -132,6 +132,11 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["sidebar.settings"].isHittable, "The hidden Chat toolbar must not leak into Email")
         XCTAssertTrue(app.buttons["email.learning"].isHittable)
         XCTAssertTrue(app.buttons["email.refresh"].isHittable)
+        #if os(macOS)
+        activate(app.buttons["email.learning"])
+        XCTAssertTrue(app.staticTexts["Email learning"].waitForExistence(timeout: 5))
+        activate(app.buttons["Done"])
+        #endif
         attachEmailScreenshot("Priority inbox")
         activate(row)
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))

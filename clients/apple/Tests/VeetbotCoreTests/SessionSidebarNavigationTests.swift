@@ -26,7 +26,13 @@ import Testing
             contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
             encoding: .utf8
         )
-        let toolbarStart = try #require(source.range(of: ".toolbar {"))
+        let sidebarStart = try #require(source.range(of: "private struct SessionSidebar: View"))
+        let toolbarStart = try #require(
+            source.range(
+                of: "#if os(iOS)\n        .toolbar {",
+                range: sidebarStart.upperBound ..< source.endIndex
+            )
+        )
         let firstSheet = try #require(
             source.range(
                 of: ".sheet(isPresented: $showingMemoryBrowser)",
@@ -34,14 +40,8 @@ import Testing
             )
         )
         let toolbar = source[toolbarStart.lowerBound ..< firstSheet.lowerBound]
-        let macStart = try #require(toolbar.range(of: "#if os(macOS)"))
-        let iosStart = try #require(
-            toolbar.range(of: "#else", range: macStart.upperBound ..< toolbar.endIndex)
-        )
-        let iosEnd = try #require(
-            toolbar.range(of: "#endif", range: iosStart.upperBound ..< toolbar.endIndex)
-        )
-        let iosToolbar = toolbar[iosStart.upperBound ..< iosEnd.lowerBound]
+        let iosEnd = try #require(toolbar.range(of: "#endif"))
+        let iosToolbar = toolbar[..<iosEnd.lowerBound]
 
         #expect(iosToolbar.contains("Menu"))
         #expect(iosToolbar.contains("ellipsis.circle"))
