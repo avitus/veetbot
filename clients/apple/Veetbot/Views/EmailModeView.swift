@@ -32,6 +32,17 @@ public struct EmailModeView: View {
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
+            #if os(macOS)
+            HSplitView {
+                inbox
+                    .frame(minWidth: 280, idealWidth: 340, maxWidth: 560)
+                    .frame(height: macColumnHeight)
+                detail
+                    .frame(minWidth: 360, maxWidth: .infinity)
+                    .frame(height: macColumnHeight)
+                    .layoutPriority(1)
+            }
+            #else
             if #available(iOS 16, macOS 13, *) {
                 if directSelection {
                     NavigationSplitView {
@@ -62,6 +73,7 @@ public struct EmailModeView: View {
                     detail.frame(height: macColumnHeight)
                 }
             }
+            #endif
         }
         .tint(EmailSurface.accent)
         .sheet(isPresented: Binding(get: { model.review != nil }, set: { if !$0 { model.closeReview() } })) {
@@ -100,6 +112,7 @@ public struct EmailModeView: View {
     private var inbox: some View {
         VStack(spacing: 0) {
             inboxHeader
+                .fixedSize(horizontal: false, vertical: true)
             Divider()
             List {
                 if model.unavailable {
@@ -138,14 +151,6 @@ public struct EmailModeView: View {
                 } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil {
                     emptyInbox.emailHideSeparator()
                 }
-                if !model.items.isEmpty {
-                    Text("Check a conversation to archive it in Gmail.")
-                        .appFont(.caption).foregroundColor(.secondary).emailHideSeparator()
-                    if model.accounts.contains(where: { $0.archiveSupported != true }) {
-                        Text("Gmail archiving is unavailable for accounts without archive support. Email browsing remains available.")
-                            .appFont(.caption).foregroundColor(.secondary).emailHideSeparator()
-                    }
-                }
                 ForEach(model.items) { thread in
                     HStack(spacing: 8) {
                         threadRow(thread)
@@ -154,7 +159,7 @@ public struct EmailModeView: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .listRowBackground(
                         thread.id == model.selectedThreadID ? EmailSurface.accent.opacity(0.10) : Color.clear)
                 }
@@ -171,6 +176,12 @@ public struct EmailModeView: View {
                 Divider()
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 12) {
+                        Text("Check a conversation to archive it in Gmail.")
+                            .appFont(.caption).foregroundColor(.secondary)
+                        if visibleAccounts.contains(where: { $0.archiveSupported != true }) {
+                            Text("Gmail archiving is unavailable for accounts without archive support. Email browsing remains available.")
+                                .appFont(.caption).foregroundColor(.secondary)
+                        }
                         ForEach(visibleAccounts) { account in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(account.label).appFont(.callout, weight: .semibold)
@@ -195,7 +206,7 @@ public struct EmailModeView: View {
                     )
                     .appFont(.caption).foregroundColor(mailboxNeedsAttention ? .orange : .secondary)
                 }
-                .padding(16)
+                .padding(.horizontal, 12).padding(.vertical, 10)
                 .accessibilityIdentifier("email.mailbox-status")
             }
         }
@@ -237,18 +248,18 @@ public struct EmailModeView: View {
     }
 
     private var inboxHeader: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(model.listView == "priority" ? "Your priorities" : "Other mail")
-                        .appFont(.title2, weight: .bold)
-                    Text(
-                        model.listView == "priority"
-                            ? "What needs your attention, across your accounts." : "Find what deserves a closer look."
-                    )
-                    .appFont(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Picker("Accounts", selection: Binding(get: { model.selectedAccountID }, set: { model.setAccount($0) }))
+                {
+                    Text("All accounts").tag(String?.none)
+                    ForEach(model.accounts) { account in Text(account.label).tag(Optional(account.id)) }
                 }
-                Spacer(minLength: 0)
+                .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
+                .accessibilityIdentifier("email.accounts")
+                Spacer(minLength: 8)
+                Text("\(model.items.count) \(model.items.count == 1 ? "thread" : "threads")")
+                    .appFont(.caption).foregroundColor(.secondary).fixedSize()
             }
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundColor(.secondary)
@@ -263,26 +274,14 @@ public struct EmailModeView: View {
                     }
                     .buttonStyle(.plain).foregroundColor(.secondary).accessibilityLabel("Clear search")
                 }
-            }.appFont(.callout).padding(10).background(Color.primary.opacity(0.045))
+            }.appFont(.callout).padding(8).background(Color.primary.opacity(0.045))
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             Picker("Mail view", selection: Binding(get: { model.listView }, set: { model.setListView($0) })) {
                 Text("Important").tag("priority")
                 Text("Other mail").tag("other")
             }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Mail view")
                 .accessibilityIdentifier("email.mail-view")
-            HStack {
-                Picker("Accounts", selection: Binding(get: { model.selectedAccountID }, set: { model.setAccount($0) }))
-                {
-                    Text("All accounts").tag(String?.none)
-                    ForEach(model.accounts) { account in Text(account.label).tag(Optional(account.id)) }
-                }
-                .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
-                .accessibilityIdentifier("email.accounts")
-                Spacer(minLength: 8)
-                Text("\(model.items.count) \(model.items.count == 1 ? "thread" : "threads")")
-                    .appFont(.caption).foregroundColor(.secondary)
-            }
-        }.padding(20)
+        }.padding(12)
     }
 
     private var mailboxNeedsAttention: Bool {
@@ -337,27 +336,28 @@ public struct EmailModeView: View {
 
     /// Separates sender, account, subject and attention state so a thread can be scanned before opening.
     private func threadLabel(_ thread: EmailThreadView) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 10) {
-                EmailAvatar(sender: thread.senders.first ?? "?")
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(thread.senders.joined(separator: ", ")).appFont(.callout, weight: .semibold).lineLimit(1)
-                    Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
-                        .appFont(.caption).foregroundColor(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(thread.senders.joined(separator: ", ")).appFont(.callout, weight: .semibold).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(thread.updatedAt, format: .dateTime.month(.abbreviated).day())
-                    .appFont(.caption).foregroundColor(.secondary)
+                    .appFont(.caption).foregroundColor(.secondary).fixedSize()
             }
-            Text(thread.subject.isEmpty ? "No subject" : thread.subject).appFont(.headline).lineLimit(2)
-            Text(thread.summary).appFont(.callout).foregroundColor(.secondary).lineLimit(2)
-            EmailThreadStatus(thread: thread)
+            Text(thread.subject.isEmpty ? "No subject" : thread.subject)
+                .appFont(.callout, weight: .medium).lineLimit(1)
+            Text(thread.summary).appFont(.caption).foregroundColor(.secondary).lineLimit(1)
+            HStack(spacing: 6) {
+                Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
+                    .appFont(.caption).foregroundColor(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+                EmailThreadStatus(thread: thread)
+            }
             if !thread.complete {
                 Label("Partial thread", systemImage: "exclamationmark.circle").appFont(.caption).foregroundColor(
                     .orange)
             }
         }
-        .padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        .padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
 }
 

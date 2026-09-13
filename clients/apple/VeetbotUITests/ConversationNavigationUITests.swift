@@ -496,6 +496,52 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(important.isEnabled)
     }
 
+    /// Checks usable mail space with a full priority page at a normal desktop window size.
+    func testEmailSidebarShowsFivePrioritiesWithoutScrolling() {
+        launchFullEmailInbox()
+        let window = app.windows.firstMatch
+        let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        let fifth = app.buttons["email.thread.00000000-0000-0000-0000-000000000805"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertLessThan(first.frame.minY - window.frame.minY, 230,
+                          "Mail should begin near the top, below compact controls")
+        XCTAssertTrue(fifth.isHittable, "All five initial priorities should be visible without scrolling")
+        XCTAssertTrue(window.frame.contains(fifth.frame), "The fifth row must be fully visible")
+        attachEmailScreenshot("Compact priority inbox with five threads")
+    }
+
+    /// Drags the actual divider and verifies both columns and the selected thread survive mode switching.
+    func testEmailSidebarResizesWithItsDivider() {
+        launchFullEmailInbox()
+        let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.click()
+        let search = app.textFields["email.search"]
+        let originalWidth = search.frame.width
+        let divider = app.splitters.firstMatch
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
+                      "Dragging the divider must widen the email list")
+        let resizedWidth = search.frame.width
+        XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
+        app.buttons["mode.chat"].click()
+        app.buttons["mode.email"].click()
+        XCTAssertEqual(search.frame.width, resizedWidth, accuracy: 3)
+        XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
+        attachEmailScreenshot("Resized priority inbox")
+    }
+
+    private func launchFullEmailInbox() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-email-full-inbox")
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1200,900"
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.email"].waitForExistence(timeout: 10))
+        app.buttons["mode.email"].click()
+    }
+
     /// Reproduces the default CI window and keeps mode, reply and Chat controls inside its bounds.
     func testEmailReadingAtDefaultMacWindowSize() {
         let initialWindow = app.windows.firstMatch

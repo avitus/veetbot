@@ -294,11 +294,21 @@ preserving errors from editing, feedback or send actions.
 Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
-The inbox keeps search, Important / Other mail and account filtering together
-above the thread list. Rows distinguish correspondent, account, subject,
-attention summary and reply state. A compact mailbox-status disclosure retains
+The inbox keeps search, Important / Other mail and account filtering in a compact
+header above the thread list, without a repeated title or introductory copy.
+Mac uses a native draggable split divider: the inbox can grow from 280 to 560
+points while retaining at least 360 points for reading. Its width and selected
+thread survive Chat / Email switching. Compact iPhone navigation and regular
+iPad navigation retain their platform layouts.
+Rows distinguish correspondent, subject, a one-line attention summary, account
+and reply state; full text stays available in the reading column. The five
+initial priorities fit without scrolling in a 1200 by 900 Mac window at the
+default text size. Larger accessibility text can expand rows naturally.
+A compact mailbox-status disclosure retains
 per-account freshness; incomplete scans and account failures remain visible in
-its collapsed label. Historical coverage lives in the scrollable Email learning
+its collapsed label. Archive guidance lives inside that disclosure and each
+checkbox retains its explicit Archive in Gmail label and help. Historical
+coverage lives in the scrollable Email learning
 pane. Only the active mode contributes toolbar actions.
 The mounted navigation panes fit the available window height so mode controls
 remain reachable in the default Mac window as well as larger windows.
@@ -312,7 +322,8 @@ the conversation. From and To stay visible; Cc, Bcc and subject expand together
 and initially open when copy recipients are present. Draft options collect save,
 history, writing-example endorsement and discard. Review & Send remains the
 primary composer action and opens a separate, scrollable exact-message review.
-Native interaction coverage checks the reply shortcut, optional feedback,
+Native interaction coverage checks the five-row inbox, divider dragging and
+width preservation across mode changes, the reply shortcut, optional feedback,
 recipient-field discovery and separation of Chat and Email toolbar actions in
 light and dark appearance. Email uses adaptive surfaces and text accents while
 filled action buttons retain contrasting text.

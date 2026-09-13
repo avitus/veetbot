@@ -1,6 +1,10 @@
 import Combine
 import Foundation
 import Testing
+#if os(macOS)
+import AppKit
+import SwiftUI
+#endif
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct EmailViewModelTests {
@@ -8,6 +12,71 @@ import Testing
     private let draftID = UUID(uuidString: "00000000-0000-0000-0000-000000000802")!
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
+
+    #if os(macOS)
+    /// Renders real AppKit list geometry without desktop automation or private mailbox data.
+    @Test func testEmailInboxRenderedLayout() async throws {
+        let rows = (1...5).map { index in
+            threadJSON().replacingOccurrences(of: threadID.uuidString,
+                with: "00000000-0000-0000-0000-00000000080\(index)")
+        }.joined(separator: ",")
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            return (200, "{\"items\":[\(rows)],\"next_cursor\":null}")
+        }
+        await model.reload()
+        let host = NSHostingView(rootView: EmailModeView(model: model, viewportHeight: 800, discussInChat: {}))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        host.layoutSubtreeIfNeeded()
+        func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+            if let match = view as? T { return match }
+            return view.subviews.lazy.compactMap { descendant(type, in: $0) }.first
+        }
+        defer {
+            window.contentView = nil
+            model.resetConnection()
+        }
+        func snapshot(_ name: String) throws {
+            guard let directory = ProcessInfo.processInfo.environment["VEETBOT_LAYOUT_SNAPSHOTS"],
+                  let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(
+                to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
+        }
+        #expect(model.items.count == 5)
+        let table = try #require(descendant(NSTableView.self, in: host))
+        let scroll = try #require(table.enclosingScrollView)
+        #expect(host.convert(scroll.bounds, from: scroll).minY < 150,
+                "Inbox controls must leave mail near the top of the available content")
+        #expect(table.visibleRect.contains(table.rect(ofRow: table.numberOfRows - 1)),
+                "Five priorities must fit completely without scrolling at the default text size")
+        try snapshot("email-sidebar-default")
+        let originalWidth = scroll.frame.width
+        let split = try #require(descendant(NSSplitView.self, in: host))
+        split.setPosition(500, ofDividerAt: 0)
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        host.layoutSubtreeIfNeeded()
+        #expect(scroll.frame.width > originalWidth + 80, "The list must follow its divider to a useful wider width")
+        #expect(scroll.frame.width <= 560)
+        try snapshot("email-sidebar-wide")
+        window.setContentSize(NSSize(width: 780, height: 500))
+        host.rootView = EmailModeView(model: model, viewportHeight: 500, discussInChat: {})
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        host.layoutSubtreeIfNeeded()
+        #expect(scroll.frame.width >= 280, "A small window must retain usable inbox controls")
+        #expect(scroll.frame.width <= host.bounds.width - 360,
+                "Resizing the window must preserve room to read the selected email")
+        #expect(host.bounds.contains(host.convert(scroll.bounds, from: scroll)))
+        try snapshot("email-sidebar-small-window")
+    }
+    #endif
 
     /// A clearly labelled archive gesture must reach the originating thread's remote command.
     @Test(arguments: ["personal", "work"])

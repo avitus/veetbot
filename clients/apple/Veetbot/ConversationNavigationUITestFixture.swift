@@ -119,7 +119,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
             let handled = Self.emailLock.withLock { Self.emailHandled || Self.emailArchived }
             let included = view == "all" || (view == "other" ? handled : !handled)
-            body = "{\"items\":[\(included ? Self.emailThreadJSON : "")],\"next_cursor\":null}"
+            let items = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
+                ? Self.fullInboxJSON : (included ? Self.emailThreadJSON : "")
+            body = "{\"items\":[\(items)],\"next_cursor\":null}"
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
             let values = requestJSON()
             Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
@@ -313,6 +315,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
 
     private static let emailThreadID = "00000000-0000-0000-0000-000000000801"
+    /// Five synthetic priorities exercise real list geometry without using private mail.
+    private static var fullInboxJSON: String {
+        let subjects = ["Board agenda", "Design review for the autumn release", "Friday planning notes",
+                        "Updated project timeline", "Travel details for next week"]
+        return subjects.enumerated().map { index, subject in
+            emailThreadJSON
+                .replacingOccurrences(of: "\"id\":\"\(emailThreadID)\"",
+                                      with: "\"id\":\"00000000-0000-0000-0000-00000000080\(index + 1)\"")
+                .replacingOccurrences(of: "\"subject\":\"Board agenda\"", with: "\"subject\":\"\(subject)\"")
+        }.joined(separator: ",")
+    }
     private static let emailDraftID = "00000000-0000-0000-0000-000000000802"
     private static let emailRunID = "00000000-0000-0000-0000-000000000803"
     private static let emailApprovalID = "00000000-0000-0000-0000-000000000804"
