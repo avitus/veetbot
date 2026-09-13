@@ -33,14 +33,10 @@ public struct EmailModeView: View {
     public var body: some View {
         Group {
             #if os(macOS)
-            HSplitView {
-                inbox
-                    .frame(minWidth: 280, idealWidth: 340, maxWidth: 560)
-                    .frame(height: macColumnHeight)
-                detail
-                    .frame(minWidth: 360, maxWidth: .infinity)
-                    .frame(height: macColumnHeight)
-                    .layoutPriority(1)
+            if #available(macOS 13, *) {
+                NavigationStack { macSplit }
+            } else {
+                NavigationView { macSplit }
             }
             #else
             if #available(iOS 16, macOS 13, *) {
@@ -94,6 +90,21 @@ public struct EmailModeView: View {
     private var detail: some View {
         EmailThreadScreen(model: model, discussInChat: discussInChat).id(model.selectedThreadID)
     }
+
+    #if os(macOS)
+    /// The surrounding navigation container scopes toolbars independently of the mounted Chat tree.
+    private var macSplit: some View {
+        HSplitView {
+            inbox
+                .frame(minWidth: 280, idealWidth: 340, maxWidth: 560)
+                .frame(height: macColumnHeight)
+            detail
+                .frame(minWidth: 360, maxWidth: .infinity)
+                .frame(height: macColumnHeight)
+                .layoutPriority(1)
+        }
+    }
+    #endif
 
     /// Bounds AppKit split-view columns without imposing a fixed height on compact iOS navigation.
     private var macColumnHeight: CGFloat? {

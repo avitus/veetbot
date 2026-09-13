@@ -309,7 +309,9 @@ per-account freshness; incomplete scans and account failures remain visible in
 its collapsed label. Archive guidance lives inside that disclosure and each
 checkbox retains its explicit Archive in Gmail label and help. Historical
 coverage lives in the scrollable Email learning
-pane. Only the active mode contributes toolbar actions.
+pane. Only the active mode contributes toolbar actions. The Mac split view
+retains its own navigation container so Email's toolbar cannot displace Chat's
+Settings and other actions after a mode switch.
 The mounted navigation panes fit the available window height so mode controls
 remain reachable in the default Mac window as well as larger windows.
 Archive in Gmail is available beside each inbox row and in thread detail on

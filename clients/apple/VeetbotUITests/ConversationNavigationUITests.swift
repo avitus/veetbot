@@ -127,6 +127,8 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(app.textFields["email.search"].exists)
         XCTAssertFalse(app.buttons["sidebar.settings"].isHittable, "The hidden Chat toolbar must not leak into Email")
+        XCTAssertTrue(app.buttons["email.learning"].isHittable)
+        XCTAssertTrue(app.buttons["email.refresh"].isHittable)
         attachEmailScreenshot("Priority inbox")
         activate(row)
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
@@ -153,7 +155,10 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["mode.chat"])
         XCTAssertFalse(app.textFields["email.search"].isHittable, "Mail search belongs to Email mode")
         #if os(macOS)
-        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable)
+        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable,
+                      "Chat must restore its toolbar after leaving Email's split view")
+        XCTAssertFalse(app.buttons["email.learning"].isHittable)
+        XCTAssertFalse(app.buttons["email.refresh"].isHittable)
         #endif
     }
 
