@@ -15,6 +15,13 @@ title: Changelog
 - The rejected attempt creates no ceremony record and leaves the profile
   available for a corrected retry.
 
+## 2026-09-13 — Immediate email archiving
+
+- Checking Archive in Gmail removes the email immediately while archiving
+  finishes in the background. Routine progress and success messages are silent.
+- Other emails remain actionable; failed or uncertain archives return to the
+  list with an error. Refreshes preserve pending removal and unsaved replies.
+
 ## 2026-09-12 — Faster local verification
 
 - `make check` overlaps two independent jobs, and local static tests use the

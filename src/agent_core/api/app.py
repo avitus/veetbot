@@ -24,6 +24,7 @@ from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddl
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
     BrowserLoginURLValidationError,
+    EmailFeedbackTargetError,
     MemoryCursorError,
     SessionMessageCursorError,
     SessionMetadataValidationError,
@@ -528,6 +529,20 @@ def create_app(
             code="malformed_request",
             status=API_ERROR_STATUS["malformed_request"],
             message=str(exc) or "The request is malformed.",
+        )
+
+    @app.exception_handler(EmailFeedbackTargetError)
+    async def email_feedback_target_error(
+        request: Request, exc: EmailFeedbackTargetError
+    ) -> JSONResponse:
+        # This guidance is fixed; neither submitted values nor mail content cross the boundary.
+        return _error_response(
+            request,
+            code="malformed_request",
+            status=API_ERROR_STATUS["malformed_request"],
+            message=(
+                "Choose an available person or content topic, or apply feedback to This thread."
+            ),
         )
 
     @app.exception_handler(PayloadTooLargeError)

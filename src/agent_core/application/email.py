@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalStatus
@@ -375,10 +376,14 @@ class EmailExperienceService:
             if target_value is not None:
                 target_value = addresses([target_value])[0] if target == "person" else target_value
                 if target_value not in values:
-                    raise ValueError("feedback target is not supported by this thread")
+                    raise EmailFeedbackTargetError(
+                        "feedback target is not supported by this thread"
+                    )
                 values = [target_value]
             if len(values) != 1:
-                raise ValueError("choose the specific person or topic for this feedback")
+                raise EmailFeedbackTargetError(
+                    "choose the specific person or topic for this feedback"
+                )
             item = EmailFeedback(
                 id=self.ids.new_id(),
                 thread_id=thread.id,

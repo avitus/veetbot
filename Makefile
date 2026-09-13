@@ -97,6 +97,8 @@ test-apple-ui:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingKeepsFeedbackOptionalAndReplyReachable \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingInDarkAppearance \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingAtDefaultMacWindowSize \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarShowsFivePrioritiesWithoutScrolling \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarResizesWithItsDivider \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM= || exit $$?; \

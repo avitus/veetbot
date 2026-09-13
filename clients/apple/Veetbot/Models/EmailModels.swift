@@ -80,6 +80,8 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public let accountID: String
     public let subject: String
     public let senders: [String]
+    /// Server-assessed content categories; older responses may omit this field.
+    public let topics: [String]?
     public let updatedAt: Date
     public let revision: Int
     /// The source revision the owner handled; later source revisions reopen the thread.
@@ -103,8 +105,16 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     /// Only the server's confirmed mailbox projection determines the checkbox state.
     public var isArchived: Bool { inInbox == false }
 
+    /// Preserve exact server values while hiding empty or duplicate picker entries.
+    public var feedbackTopics: [String] {
+        var seen = Set<String>()
+        return (topics ?? []).filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && seen.insert($0).inserted
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, subject, senders, revision, summary, reason, priority, complete, messages, draft
+        case id, subject, senders, topics, revision, summary, reason, priority, complete, messages, draft
         case accountID = "account_id"
         case updatedAt = "updated_at"
         case needsReply = "needs_reply"
