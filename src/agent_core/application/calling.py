@@ -231,8 +231,6 @@ class CallService:
             )
         count = 0
         for receipt in receipts:
-            if str(receipt.payload.get("retry_at", "")) > self.clock.now().isoformat():
-                continue
             response = await self._provider(
                 "bland_read", "provider_get_call", {"provider_call_id": receipt.key}
             )
@@ -322,7 +320,9 @@ class CallService:
                             "provider_call_id": call.provider_call_id,
                         },
                     )
-                if terminal and self.notifications:
+                notification_time = self.clock.now()
+                notification_expiry = datetime.fromisoformat(call.created_at) + RETENTION
+                if terminal and self.notifications and notification_time < notification_expiry:
                     notification_id = uuid5(
                         NAMESPACE_URL,
                         json.dumps(
@@ -349,9 +349,9 @@ class CallService:
                                 call_id=UUID(receipt.key),
                             ),
                             priority=10,
-                            next_attempt_at=self.clock.now(),
-                            created_at=self.clock.now(),
-                            expires_at=datetime.fromisoformat(call.created_at) + RETENTION,
+                            next_attempt_at=notification_time,
+                            created_at=notification_time,
+                            expires_at=notification_expiry,
                         )
                     )
                 count += int(previous is None)

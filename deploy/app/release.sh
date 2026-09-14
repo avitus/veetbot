@@ -362,12 +362,16 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
     done
     [[ "$(environment_flag "$calling_env" AUTH_TOKEN)" == "0" ]] || fail "calling roles must not contain an owner bearer"
     calling_path_setting=BLAND_API_KEY_FILE
+    calling_credential_owner=veetbot
     if [[ "$calling_unit" == "veetbot-call-ingress" ]]; then
       calling_path_setting=BLAND_WEBHOOK_SECRET_FILE
+      calling_credential_owner=veetbot-call-ingress
       [[ "$(environment_flag "$calling_env" BLAND_API_KEY_FILE)" == "0" ]] || fail "calling ingress must not contain the provider credential path"
     fi
     calling_path="$(environment_flag "$calling_env" "$calling_path_setting")"
     [[ "$calling_path" == /* && -f "$calling_path" && ! -L "$calling_path" ]] || fail "calling role private credential file is missing or invalid"
+    [[ "$(stat -c '%U:%a' -- "$calling_path" 2>/dev/null)" == "$calling_credential_owner:600" ]] || fail "calling role private credential file is missing or invalid"
+    [[ "$(getfacl -cp -- "$calling_path" 2>/dev/null)" == $'user::rw-\ngroup::---\nother::---' ]] || fail "calling role private credential file is missing or invalid"
   done
 fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"

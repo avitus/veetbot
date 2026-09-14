@@ -90,6 +90,22 @@ write_stub uv '
   [[ "${VEETBOT_TEST_FAIL_UV:-0}" != 1 ]]
 '
 write_stub flock 'exit 0'
+write_stub stat '
+  file="${!#}"
+  owner=veetbot
+  if [[ "$file" == *bland-signing ]]; then owner=veetbot-call-ingress; fi
+  if [[ "${VEETBOT_TEST_BAD_CALL_OWNER:-}" == "$file" ]]; then owner=unrelated; fi
+  mode="$(/usr/bin/stat -c %a "$file" 2>/dev/null || /usr/bin/stat -f %Lp "$file")"
+  printf "%s:%s\n" "$owner" "$mode"
+'
+write_stub getfacl '
+  file="${!#}"
+  if [[ "${VEETBOT_TEST_BAD_CALL_ACL:-}" == "$file" ]]; then
+    printf "user::rw-\nuser:unrelated:r--\ngroup::---\nmask::r--\nother::---\n"
+  else
+    printf "user::rw-\ngroup::---\nother::---\n"
+  fi
+'
 write_stub mv '
   if [[ "${1:-}" == -Tf ]]; then
     shift
@@ -648,6 +664,7 @@ cp "$ENV_FILE" "$call_env"
 printf '%s\n' 'AGENT_CALL_ENABLED=1' 'AGENT_CALL_INGRESS_ENABLED=1' 'AGENT_CALL_NOTIFICATIONS_ENABLED=0' \
   "BLAND_CONFIGURATION_FILE=$TEST_ROOT/calls.json" >>"$call_env"
 touch "$TEST_ROOT/calls.json" "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"
+chmod 0600 "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"
 for role in worker ingress; do
   printf '%s\n' 'AGENT_CALL_ENABLED=1' 'AGENT_CALL_INGRESS_ENABLED=1' \
     'AGENT_CALL_NOTIFICATIONS_ENABLED=0' "BLAND_CONFIGURATION_FILE=$TEST_ROOT/calls.json" \
@@ -657,6 +674,33 @@ for role in worker ingress; do
 done
 printf 'BLAND_API_KEY_FILE=%s\n' "$TEST_ROOT/bland-key" >>"$TEST_ROOT/call-worker.env"
 printf 'BLAND_WEBHOOK_SECRET_FILE=%s\n' "$TEST_ROOT/bland-signing" >>"$TEST_ROOT/call-ingress.env"
+# Refuse exposed credentials before starting services or promoting a release.
+invalid_index=0
+for private_file in "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"; do
+  for fault in mode owner acl; do
+    invalid_index=$((invalid_index + 1))
+    invalid_call_id="20260810-152300-000003$invalid_index"
+    make_stage "$invalid_call_id"
+    rm -f -- "$PROCESS_ROOT/4242/cwd"
+    ln -s "$DEPLOY_ROOT/releases/$invalid_call_id" "$PROCESS_ROOT/4242/cwd"
+    export VEETBOT_TEST_BAD_CALL_OWNER="" VEETBOT_TEST_BAD_CALL_ACL=""
+    case "$fault" in
+      mode) chmod 0644 "$private_file" ;;
+      owner) export VEETBOT_TEST_BAD_CALL_OWNER="$private_file" ;;
+      acl) export VEETBOT_TEST_BAD_CALL_ACL="$private_file" ;;
+    esac
+    : >"$LOG_FILE"
+    if VEETBOT_TEST_ENV_FILE="$call_env" run_release "$invalid_call_id" >"$TEST_ROOT/call-invalid.out" 2>&1; then
+      printf 'calling release accepted invalid credential %s\n' "$fault" >&2
+      exit 1
+    fi
+    grep -Fq 'calling role private credential file is missing or invalid' "$TEST_ROOT/call-invalid.out"
+    assert_log_lacks 'systemctl restart'
+    chmod 0600 "$private_file"
+    unset VEETBOT_TEST_BAD_CALL_OWNER VEETBOT_TEST_BAD_CALL_ACL
+  done
+done
+
 call_id="20260810-152300-0000027"
 make_stage "$call_id"
 for unit in call call-ingress; do

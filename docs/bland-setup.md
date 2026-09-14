@@ -93,6 +93,10 @@ and be mode 0600. Use a separate private directory it can traverse, for example
 secret directory. The reviewed public configuration may be readable by both
 roles. The Bland API key remains readable only by the application's `veetbot`
 user. The listener must not be able to read the application environment file.
+Install the host's `acl` package before enabling calling. Release preflight uses
+`stat` and `getfacl` to require non-symlink regular credential files, mode 0600,
+the exact service owner above, and only the base owner/group/other ACL entries.
+Additional ACL entries are rejected, including currently masked grants.
 
 Create distinct PostgreSQL login roles, with credentials set privately. Neither
 role may own the tables, inherit privileged memberships, be a superuser, or have

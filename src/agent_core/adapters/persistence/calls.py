@@ -86,7 +86,7 @@ class InMemoryCallStore:
                 and (active is None or record.payload.get("active") is active)
                 and (
                     due_at is None
-                    or "retry_at" not in record.payload
+                    or record.payload.get("retry_at") is None
                     or datetime.fromisoformat(str(record.payload["retry_at"])) <= due_at
                 )
             ),
@@ -95,6 +95,7 @@ class InMemoryCallStore:
         return [record.model_copy(deep=True) for record in selected[:limit]]
 
     async def put(self, record: CallRecord, *, expected_revision: int) -> CallRecord:
+        record = CallRecord.model_validate(record.model_dump())
         _validate_revision(record, expected_revision)
         key = (record.tenant_id, record.principal_id, record.kind, record.key)
         current = self._records.get(key)
@@ -171,6 +172,7 @@ class PostgresCallStore:
         return [call_record_to_domain(row) for row in rows]
 
     async def put(self, record: CallRecord, *, expected_revision: int) -> CallRecord:
+        record = CallRecord.model_validate(record.model_dump())
         _validate_revision(record, expected_revision)
         values = call_record_values(record)
         if expected_revision == 0:

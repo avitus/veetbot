@@ -195,6 +195,11 @@ role grants, signature verification, activation and rollback.
 `agent call-worker` polls durable receipts every ten seconds and scans one
 25-ID provider page per direction per minute. Receipts use capped exponential
 backoff up to one hour; due receipts are selected before the 25-record limit.
+Receipt retry timestamps are offset-aware and normalized to UTC at record
+creation, storage and hydration. Missing or null timestamps are immediately due.
+Malformed values fail closed; existing malformed rows require operator repair
+from verified receipt state with calling disabled before activation, rather than
+guessing a timestamp or replaying a dispatch.
 One thousand active receipts bound ingress admission. Erased-call tombstones
 are content-free and retained to prevent replay. Missing provider summaries or
 transcripts may be filled after completion; accepted source text and terminal

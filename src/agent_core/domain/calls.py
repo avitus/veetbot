@@ -71,6 +71,22 @@ class CallRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator("payload")
+    @classmethod
+    def validate_retry_time(cls, value: dict[str, object]) -> dict[str, object]:
+        retry_at = value.get("retry_at")
+        if retry_at is None:
+            return value
+        try:
+            if not isinstance(retry_at, str):
+                raise ValueError
+            parsed = datetime.fromisoformat(retry_at)
+            if parsed.utcoffset() is None:
+                raise ValueError
+        except ValueError:
+            raise ValueError("call record retry time requires an offset-aware timestamp") from None
+        return {**value, "retry_at": parsed.astimezone(UTC).isoformat()}
+
     @field_validator("created_at", "updated_at")
     @classmethod
     def require_aware(cls, value: datetime) -> datetime:

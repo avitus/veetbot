@@ -11,7 +11,8 @@ from uuid import UUID
 
 import pytest
 
-from agent_core.application.calling import CallService
+from agent_core.adapters.persistence.calls import InMemoryCallStore
+from agent_core.application.calling import RETENTION, CallService
 from agent_core.domain.errors import NotFoundError, RunCancelledError
 from agent_core.domain.mcp import MCPCallResult
 from tests.contract.support import NOW, memory_uow_factory, principal, tool_context
@@ -19,6 +20,45 @@ from tests.contract.test_bland_client_contract import CALL_ID, NUMBER, RECIPIENT
 from tests.gates.test_call_m27 import call_configuration
 
 SIGNING_FIXTURE = "fixture-webhook-secret"
+
+
+@pytest.mark.parametrize("remaining_seconds", [1, 60])
+async def test_notification_retention_boundary_does_not_abort_receipt(
+    monkeypatch: pytest.MonkeyPatch, remaining_seconds: int
+) -> None:
+    clock, factory = await memory_uow_factory()
+    expires_at = NOW + timedelta(seconds=remaining_seconds)
+
+    async def provider(server: str, name: str, args: dict[str, Any]) -> MCPCallResult:
+        if name == "provider_list_calls":
+            return MCPCallResult(structured={"provider_call_ids": [], "next_offset": None})
+        return MCPCallResult(
+            structured={**normalized_call(), "created_at": (expires_at - RETENTION).isoformat()}
+        )
+
+    original_put = InMemoryCallStore.put
+
+    async def delayed_put(self: Any, record: Any, *, expected_revision: int) -> Any:
+        if record.kind == "call":
+            clock.advance(timedelta(seconds=2))
+        return await original_put(self, record, expected_revision=expected_revision)
+
+    monkeypatch.setattr(InMemoryCallStore, "put", delayed_put)
+    service = CallService(
+        factory, clock, principal(), call_configuration(), provider, notifications=True
+    )
+    assert await service.receive(*signed_body(), SIGNING_FIXTURE)
+    assert await service.reconcile() == 1
+    async with factory() as uow:
+        receipt = await uow.calls.get(principal(), "receipt", CALL_ID)
+        alerts = await uow.notification_outbox.list(principal(), limit=10)
+    assert receipt is not None and receipt.payload["status"] == "received"
+    if remaining_seconds == 1:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].created_at == NOW + timedelta(seconds=2)
+        assert alerts[0].expires_at == expires_at
 
 
 async def test_completed_call_waits_for_late_summary_without_overwriting_transcript() -> None:

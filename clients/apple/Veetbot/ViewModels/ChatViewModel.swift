@@ -126,6 +126,7 @@ public final class ChatViewModel: ObservableObject {
     private let watchTasks = WatchTaskBox()
     private var loadedApprovalIDs: Set<UUID> = []
     private var selectionRequestID: UUID?
+    private var callResultRequestID: UUID?
     private var removedHistorySessionIDs: Set<UUID> = []
     private var deletingHistorySessionIDs: Set<UUID> = []
     private var historyReconciliationID: UUID?
@@ -206,6 +207,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        dismissCallResult()
         isConfigured = false
         connectionGeneration = UUID()
         composerText = ""
@@ -272,7 +274,10 @@ public final class ChatViewModel: ObservableObject {
         pushRegistrar?.requestPushRegistration()
     }
 
-    public func dismissCallResult() { callResult = nil }
+    public func dismissCallResult() {
+        callResultRequestID = nil
+        callResult = nil
+    }
 
     public func deleteCallResult() async {
         guard let api, let selected = callResult else { return }
@@ -293,13 +298,15 @@ public final class ChatViewModel: ObservableObject {
             guard let callID = payload.callID else { return }
             guard let api else { pendingNotificationPayload = payload; return }
             let generation = connectionGeneration
+            let requestID = UUID()
+            callResultRequestID = requestID
             do {
                 let result = try await api.callResult(callID)
-                guard generation == connectionGeneration else { return }
+                guard generation == connectionGeneration, callResultRequestID == requestID else { return }
                 callNotificationHandler?()
                 callResult = result
             } catch {
-                guard generation == connectionGeneration else { return }
+                guard generation == connectionGeneration, callResultRequestID == requestID else { return }
                 present(error)
             }
             return
@@ -1197,6 +1204,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func install(_ configuration: ConnectionConfiguration) async throws {
+        dismissCallResult()
         isReconfiguring = true
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
@@ -1224,7 +1232,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func clearInstalledConnection() {
-        callResult = nil
+        dismissCallResult()
         api = nil
         eventStream = nil
         baseURL = nil
