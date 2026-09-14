@@ -373,12 +373,13 @@ private struct EmailArchiveButton: View {
     let thread: EmailThreadView
     let accessibilityID: String
     var showsAvailability = false
+    var advancesSelection = false
 
     /// The labelled gesture authorizes one Gmail label change; only confirmed Inbox state checks the box.
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
             Button {
-                Task { await model.setThreadArchived(thread, archived: !thread.isArchived) }
+                Task { await model.setThreadArchived(thread, archived: !thread.isArchived, advanceSelection: advancesSelection) }
             } label: {
                 Label(thread.isArchived ? "Move to Inbox" : "Archive in Gmail",
                       systemImage: thread.isArchived ? "checkmark.square.fill" : "square")
@@ -514,7 +515,7 @@ private struct EmailThreadScreen: View {
             HStack {
                 EmailThreadStatus(thread: thread, draft: model.draft)
                 Spacer()
-                EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail", showsAvailability: true)
+                EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail", showsAvailability: true, advancesSelection: true)
                     .buttonStyle(.plain)
                 Menu {
                     Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }

@@ -80,6 +80,75 @@ import SwiftUI
     }
     #endif
 
+    /// Detail archiving advances in visible order before admission and retains edits if the write fails.
+    @Test(arguments: [0, 1, 2, 3, 4], ["failed", "completed"])
+    func testDetailArchiveAdvancesBeforeAdmission(selectedIndex: Int, outcome: String) async throws {
+        let admission = EmailArchiveResponseGate()
+        let nextRead = EmailArchiveResponseGate()
+        let requests = EmailRequestRecorder()
+        let ids = [threadID, UUID(), UUID()]
+        let onlyRow = selectedIndex == 3
+        let moveManually = selectedIndex == 4
+        let index = moveManually ? 0 : selectedIndex
+        let selected = onlyRow ? threadID : ids[index]
+        let next = onlyRow ? nil : ids[index == 2 ? 1 : index + 1]
+        let visible = onlyRow ? [threadID] : ids
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") {
+                return (202, self.operationJSON(status: "QUEUED")
+                    .replacingOccurrences(of: self.threadID.uuidString, with: selected.uuidString), admission)
+            }
+            let requested = requests.snapshot.contains { $0.httpMethod == "POST" }
+            let rows = visible.map { id in
+                self.archiveThreadJSON(inInbox: !(requested && id == selected && outcome == "completed"),
+                    status: requested && id == selected ? outcome : nil,
+                    draft: self.draftJSON())
+                    .replacingOccurrences(of: self.threadID.uuidString, with: id.uuidString)
+                    .replacingOccurrences(of: self.draftID.uuidString, with: id.uuidString)
+            }
+            if request.url!.path.hasSuffix("threads") {
+                let included = rows.enumerated().filter { !requested || outcome != "completed" || visible[$0.offset] != selected }.map(\.element)
+                return (200, "{\"items\":[\(included.joined(separator: ","))],\"next_cursor\":null}", nil)
+            }
+            let index = visible.firstIndex { request.url!.path.hasSuffix($0.uuidString) }!
+            return (200, rows[index], visible[index] == next ? nextRead : nil)
+        }
+        defer { admission.release(); nextRead.release(); model.resetConnection() }
+        await model.reload()
+        await model.openThread(selected)
+        model.changeEdit(\.body, to: "Keep this unsent draft")
+        let row = try #require(model.thread)
+        let archiving = Task { await model.setThreadArchived(row, archived: true, advanceSelection: true) }
+        try await waitForEmailTestCondition { admission.isWaiting }
+        #expect(model.selectedThreadID == next)
+        #expect(model.thread == nil)
+        #expect(model.draft == nil)
+        #expect(model.edits[selected]?.body == "Keep this unsent draft")
+        #expect(!model.items.contains { $0.id == selected })
+        let expectedSelection = moveManually ? ids[2] : next
+        if moveManually {
+            try await waitForEmailTestCondition { nextRead.isWaiting }
+            await model.openThread(ids[2])
+        }
+        nextRead.release()
+        if let next, !moveManually {
+            try await waitForEmailTestCondition { model.thread?.id == next }
+        } else {
+            #expect(!model.isLoadingThread)
+        }
+        admission.release()
+        await archiving.value
+        #expect(model.selectedThreadID == expectedSelection)
+        #expect(model.thread?.id == expectedSelection)
+        #expect(model.items.contains { $0.id == selected } == (outcome == "failed"))
+        if outcome == "failed" {
+            #expect(model.archiveMessage(for: try #require(model.items.first { $0.id == selected })) != nil)
+        }
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+    }
+
     /// A held admission response cannot delay removal, block the next row, or let a refresh resurrect it.
     @Test func testArchiveDisappearsBeforeAdmissionWithoutBlockingNextRow() async throws {
         let requests = EmailRequestRecorder()

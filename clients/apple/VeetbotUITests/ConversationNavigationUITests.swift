@@ -16,7 +16,7 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
-    /// Verifies confirmed Gmail archive and Inbox restoration without leaving the open thread.
+    /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
         XCTAssertTrue(action.waitForExistence(timeout: 5))
@@ -25,6 +25,19 @@ final class ConversationNavigationUITests: XCTestCase {
         action.click()
         #else
         action.tap()
+        #endif
+        XCTAssertFalse(action.exists, "Archiving the last visible email must clear its detail")
+        #if os(macOS)
+        app.radioButtons["Other mail"].click()
+        #else
+        app.buttons["Other mail"].tap()
+        #endif
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        row.click()
+        #else
+        row.tap()
         #endif
         let handled = NSPredicate(format: "label == %@ AND enabled == true", "Move to Inbox")
         expectation(for: handled, evaluatedWith: action)
@@ -37,6 +50,36 @@ final class ConversationNavigationUITests: XCTestCase {
         let unhandled = NSPredicate(format: "label == %@ AND enabled == true", "Archive in Gmail")
         expectation(for: unhandled, evaluatedWith: action)
         waitForExpectations(timeout: 5)
+    }
+
+    /// The detail checkbox replaces the archived message with the next conversation's actual content.
+    func testEmailDetailArchiveDisplaysNextConversation() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-email-archive-next")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        mode.click()
+        #else
+        mode.tap()
+        #endif
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        row.click()
+        #else
+        row.tap()
+        #endif
+        let action = app.buttons["email.handled.detail"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        #if os(macOS)
+        action.click()
+        #else
+        action.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Here is the next email to read."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Please review the agenda before Friday."].exists)
     }
 
     /// Removes a row immediately without progress messages, then finds its confirmed state in Other mail.

@@ -119,9 +119,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
             let handled = Self.emailLock.withLock { Self.emailHandled || Self.emailArchived }
             let included = view == "all" || (view == "other" ? handled : !handled)
-            let items = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
+            var items = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
                 ? Self.fullInboxJSON : (included ? Self.emailThreadJSON : "")
+            if view == "priority", ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-next") {
+                items += (items.isEmpty ? "" : ",") + Self.nextEmailThreadJSON
+            }
             body = "{\"items\":[\(items)],\"next_cursor\":null}"
+        case ("GET", "/v1/email/threads/00000000-0000-0000-0000-000000000899"):
+            statusCode = 200
+            body = Self.nextEmailThreadJSON
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
             let values = requestJSON()
             Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
@@ -315,6 +321,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
 
     private static let emailThreadID = "00000000-0000-0000-0000-000000000801"
+    /// A distinct conversation proves that detail archiving loads the next message's own content.
+    private static let nextEmailThreadJSON = """
+        {"id":"00000000-0000-0000-0000-000000000899","account_id":"work","subject":"Next conversation","senders":["sam@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"in_inbox":true,"summary":"Review the next conversation.","reason":"A separate request.","needs_reply":false,"draft_id":null,"session_id":null,"priority":0.9,"complete":true,"messages":[{"id":"next-message","account_id":"work","provider_message_id":"next-message","provider_thread_id":"next-thread","sender":"sam@example.test","to":["owner@work.example"],"cc":[],"subject":"Next conversation","body":"Here is the next email to read.","sent_at":"2026-09-11T00:00:00Z","label_ids":["INBOX"],"attachments":[],"direction":"received","complete":true}],"draft":null}
+        """
     /// Five synthetic priorities exercise real list geometry without using private mail.
     private static var fullInboxJSON: String {
         let subjects = ["Board agenda", "Design review for the autumn release", "Friday planning notes",

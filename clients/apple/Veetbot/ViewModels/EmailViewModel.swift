@@ -501,6 +501,7 @@ public final class EmailViewModel: ObservableObject {
     /// Clears thread presentation and its errors without discarding draft edits stored by draft ID.
     public func clearSelection() {
         selectionRequest = UUID()
+        isLoadingThread = false
         selectedThreadID = nil
         thread = nil
         draft = nil
@@ -854,7 +855,7 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Supplies one-action consent and retains the same request after an uncertain admission response.
-    public func setThreadArchived(_ thread: EmailThreadView, archived: Bool) async {
+    public func setThreadArchived(_ thread: EmailThreadView, archived: Bool, advanceSelection: Bool = false) async {
         guard let api = makeAPIClient(), !archiveSubmitting.contains(thread.id) else { return }
         guard archiveUnavailableReason(for: thread) == nil else {
             archiveErrors[thread.id] = archiveUnavailableReason(for: thread)
@@ -871,7 +872,26 @@ public final class EmailViewModel: ObservableObject {
         archiveReadErrors.remove(thread.id)
         archiveVersions[thread.id] = UUID()
         archiveSubmitting.insert(thread.id)
+        let visible = items
         if request.archived { archiveHiddenThreads.insert(thread.id) }
+        if advanceSelection, request.archived, selectedThreadID == thread.id {
+            let next: EmailThreadView?
+            if let index = visible.firstIndex(where: { $0.id == thread.id }) {
+                next = visible.dropFirst(index + 1).first ?? visible.prefix(index).last
+            } else { next = items.first }
+            clearSelection()
+            if let next {
+                selectedThreadID = next.id
+                isLoadingThread = true
+                let selection = selectionRequest
+                let foreground = active ? activation : nil
+                Task { [weak self] in
+                    guard let self, self.generation == connection,
+                          self.selectionRequest == selection else { return }
+                    await self.openThread(next.id, refreshOnly: true, activation: foreground)
+                }
+            }
+        }
         defer { if generation == connection { archiveSubmitting.remove(thread.id) } }
         do {
             let operation = try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)

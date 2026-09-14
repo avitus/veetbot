@@ -79,8 +79,14 @@ single-action owner consent under ADR-0095. Remove the row immediately while
 the archive request and durable operation finish asynchronously. Normal progress
 and successful completion are silent; other rows remain actionable. Keep the
 last confirmed mailbox state separate from this optimistic presentation, retain
-draft edits and selected detail, and restore the row with an actionable error
-if admission, status retrieval, or execution fails or the outcome is uncertain.
+draft edits, and restore the row with an actionable error if admission, status
+retrieval, or execution fails or the outcome is uncertain. Archiving from thread
+detail immediately clears that detail and opens the next visible conversation
+in the current list order, falling back to the previous conversation at the end
+of the list or an empty pane when none remain. Loading the next conversation
+does not wait for archive admission or completion. A later archive failure
+restores its row without replacing the owner's new selection. Row checkboxes
+and move-to-Inbox actions retain their existing selection behavior.
 Projection refreshes must not resurrect a pending row; reopening Email resumes
 status reads without another archive request. Preserve unread state,
 other labels, and importance feedback. New correspondence is assessed again.
