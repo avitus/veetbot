@@ -48,6 +48,10 @@ class ScriptedMCPClient:
     ) -> None:
         self.entered = False
 
+    async def force_close(self) -> None:
+        """Retire the fixture transport independently of an outstanding graceful exit."""
+        self.entered = False
+
     async def discover(self) -> MCPDiscovery:
         if not self.entered:
             raise MCPTransportError

@@ -1247,6 +1247,14 @@ clients can still settle independently. Expected disconnections then return
 their stable reason code, while unexpected failures propagate without retaining
 a fan-out permit.
 
+Runtime shutdown drains all retained exits concurrently for one connect-timeout
+window. It then calls the client port's `force_close` for unfinished transports
+before cancelling and awaiting their exit wrappers. The SDK force path cancels
+an AnyIO scope owned by the connection lifetime task, preserving the SDK's
+shielded, bounded stdio shutdown; it never natively cancels an owner during
+teardown. Failed forced cleanup remains owned for retry and surfaces a shutdown
+error instead of reporting successful closure.
+
 Mapping a remote tool declaration into a `ToolSpec` is where the untrusted
 input meets our type system, and every field is either derived or forced:
 

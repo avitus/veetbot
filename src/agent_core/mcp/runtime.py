@@ -167,7 +167,7 @@ class MCPRuntime:
         self._registration_owners: dict[_RegistrationKey, set[UUID]] = {}
         self._deferred_events: set[UUID] = set()
         self._pending_events: dict[UUID, list[tuple[str, dict[str, Any]]]] = {}
-        self._preparation_cleanup_tasks: set[asyncio.Task[bool | None]] = set()
+        self._preparation_cleanup_tasks: dict[asyncio.Task[bool | None], MCPClient] = {}
 
     def _lock(self, session_id: UUID) -> asyncio.Lock:
         lock = self._locks.get(session_id)
@@ -216,7 +216,8 @@ class MCPRuntime:
         return {}
 
     def _preparation_cleanup_finished(self, task: asyncio.Task[bool | None]) -> None:
-        self._preparation_cleanup_tasks.discard(task)
+        """Release the retained client only after its exit task has settled."""
+        self._preparation_cleanup_tasks.pop(task, None)
         with suppress(BaseException):
             task.result()
 
@@ -226,9 +227,43 @@ class MCPRuntime:
             async with asyncio.timeout(self._connect_timeout_seconds):
                 await asyncio.shield(cleanup)
         except BaseException:
-            self._preparation_cleanup_tasks.add(cleanup)
+            self._preparation_cleanup_tasks[cleanup] = client
             cleanup.add_done_callback(self._preparation_cleanup_finished)
             raise
+
+    async def _drain_preparation_cleanups(self) -> None:
+        """Bound graceful draining, then stop transports before cancelling exit wrappers."""
+        tasks = set(self._preparation_cleanup_tasks)
+        if not tasks:
+            return
+        done, pending = await asyncio.wait(tasks, timeout=self._connect_timeout_seconds)
+        for task in done:
+            self._preparation_cleanup_finished(task)
+        targets = [
+            (task, client)
+            for task in pending
+            if (client := self._preparation_cleanup_tasks.get(task)) is not None
+        ]
+        results = await asyncio.gather(
+            *(client.force_close() for _, client in targets), return_exceptions=True
+        )
+        errors: list[BaseException] = []
+        stopped: set[asyncio.Task[bool | None]] = set()
+        for (task, _client), result in zip(targets, results, strict=True):
+            if isinstance(result, BaseException):
+                errors.append(result)
+                continue
+            task.cancel()
+            stopped.add(task)
+        if stopped:
+            done, pending = await asyncio.wait(stopped, timeout=self._connect_timeout_seconds)
+            for task in done:
+                self._preparation_cleanup_finished(task)
+            if pending:
+                errors.append(TimeoutError("MCP exit wrappers did not settle after forced closure"))
+        if errors:
+            # Keep failed clients/tasks owned so another shutdown attempt can retry.
+            raise MCPTransportError from BaseExceptionGroup("MCP shutdown cleanup failures", errors)
 
     async def _prepare_server(
         self,
@@ -1007,7 +1042,5 @@ class MCPRuntime:
             self._maintenance_task = None
         # Include preparation locks so shutdown waits for unpublished clients to unwind.
         for session_id in set(self._sessions) | set(self._locks):
-            try:
-                await self.close_session(session_id)
-            except BaseException:
-                logger.exception("mcp_session_close_failed", extra={"session_id": str(session_id)})
+            await self.close_session(session_id)
+        await self._drain_preparation_cleanups()

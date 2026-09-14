@@ -146,6 +146,7 @@ async def _mailbox_factory(
             credential: SecretValue | None,
             environment: dict[str, str],
         ) -> ScriptedMCPClient:
+            """Create an independent transport using the shared mailbox response sequence."""
             client = super().__call__(config, credential, environment)
             # Only the provider response sequence is shared. Transport entry,
             # authentication and authored response failures keep their contracts.

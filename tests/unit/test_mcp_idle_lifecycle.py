@@ -32,6 +32,7 @@ class Factory:
     """Track actual connection lifetime while returning a harmless read result."""
 
     def __init__(self) -> None:
+        """Initialize client tracking, pinned discovery, and controllable call barriers."""
         self.clients: list[ScriptedMCPClient] = []
         self.discovery = _discovery()
         self.started = asyncio.Event()
@@ -41,10 +42,12 @@ class Factory:
     def __call__(
         self, config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
     ) -> ScriptedMCPClient:
+        """Create a tracked transport whose calls can be paused independently of discovery."""
         factory = self
 
         class Client(ScriptedMCPClient):
             async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPCallResult:
+                """Signal invocation entry and wait for the test to release its transport lease."""
                 factory.started.set()
                 await factory.release.wait()
                 return MCPCallResult(content=("ok",))
@@ -59,6 +62,7 @@ class Factory:
 
 
 def context(app: Composition, session_id: UUID) -> ToolExecutionContext:
+    """Bind a tool invocation context to the composition principal and selected session."""
     return replace(
         tool_context(),
         session_id=session_id,
@@ -68,6 +72,7 @@ def context(app: Composition, session_id: UUID) -> ToolExecutionContext:
 
 
 async def test_terminal_runs_release_transports_without_dropping_tool_pins() -> None:
+    """Check repeated completed runs close their clients while retaining session tool pins."""
     factory = Factory()
     script = FakeModelScript(turns=[ScriptedTurn(text="done")], on_exhausted="repeat_last")
     async with build(
@@ -86,6 +91,7 @@ async def test_terminal_runs_release_transports_without_dropping_tool_pins() -> 
 
 
 async def test_idle_release_reconnects_without_repinning_or_reviving_withdrawn_tools() -> None:
+    """Keep the original tool pin when idle reconnection discovers that its tool was removed."""
     factory = Factory()
     async with build(
         settings=_settings(),
@@ -107,6 +113,7 @@ async def test_idle_release_reconnects_without_repinning_or_reviving_withdrawn_t
 
 
 async def test_idle_sweep_does_not_close_an_active_call() -> None:
+    """Protect an in-flight call and restart its idle timeout when execution finishes."""
     factory = Factory()
     async with build(
         settings=_settings(),
@@ -136,6 +143,7 @@ async def test_idle_sweep_does_not_close_an_active_call() -> None:
 async def test_closed_session_is_reaped_in_the_worker_that_owns_its_connections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Observe durable API closure and reclaim the transports owned by another runtime."""
     factory = Factory()
     async with build(
         settings=_settings(),
@@ -156,6 +164,7 @@ async def test_closed_session_is_reaped_in_the_worker_that_owns_its_connections(
 async def test_idle_timer_uses_configured_timeout_without_foreground_activity(
     tmp_path: Path,
 ) -> None:
+    """Apply the configured idle timeout through maintenance without another user request."""
     overlay = tmp_path / "tools" / "limits.yaml"
     overlay.parent.mkdir()
     overlay.write_text("mcp:\n  idle_timeout_seconds: 1\n")
@@ -175,6 +184,7 @@ async def test_idle_timer_uses_configured_timeout_without_foreground_activity(
 async def test_reconnect_preserves_unchanged_tool_and_rejects_changed_schema(
     changed_schema: bool,
 ) -> None:
+    """Admit unchanged pinned tools while rejecting changed schemas and unpinned additions."""
     factory = Factory()
     async with build(
         settings=_settings(), mcp_servers=(_server("idle"),), mcp_client_factory=factory
@@ -200,6 +210,7 @@ async def test_reconnect_preserves_unchanged_tool_and_rejects_changed_schema(
 
 
 async def test_reconnect_does_not_reset_session_authentication_budget() -> None:
+    """Retain the one-refresh authentication limit and terminal denial across reconnections."""
     factory = ScriptedMCPClientFactory(
         {
             "idle": ScriptedMCPServer(
@@ -235,11 +246,13 @@ async def test_reconnect_does_not_reset_session_authentication_budget() -> None:
 async def test_shutdown_drains_a_session_still_being_prepared(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Drain interrupted session discovery without leaving clients or maintenance running."""
     factory = Factory()
     started, release = asyncio.Event(), asyncio.Event()
     discover = ScriptedMCPClient.discover
 
     async def blocked_discovery(client: ScriptedMCPClient) -> MCPDiscovery:
+        """Hold discovery until the test has started concurrent runtime shutdown."""
         started.set()
         await release.wait()
         return await discover(client)
@@ -263,10 +276,12 @@ async def test_shutdown_drains_a_session_still_being_prepared(
 async def test_transport_cleanup_failure_does_not_retain_sibling_connections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Continue reclaiming sibling transports when one client reports a cleanup failure."""
     factory = Factory()
     close = ScriptedMCPClient.__aexit__
 
     async def faulty_close(self: ScriptedMCPClient, *args: Any) -> None:
+        """Close normally, then inject a cleanup error for only the first tracked client."""
         await close(self, *args)
         if self is factory.clients[0]:
             raise RuntimeError("fixture cleanup failure")

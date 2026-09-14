@@ -8,9 +8,11 @@ import shlex
 import sys
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 import pytest
 from mcp import Client as ProtocolClient
+from mcp.client import stdio as mcp_stdio
 
 from agent_core.adapters.mcp.sdk import SDKMCPClient
 from agent_core.bootstrap import build
@@ -292,6 +294,159 @@ async def test_real_sdk_cancelled_close_caller_does_not_interrupt_teardown(
     assert client._owner is None
     assert client._stack is None
     assert client._client is None
+
+
+async def test_force_close_retires_owner_behind_delayed_exit_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed runtime wrapper cannot keep its independently owned transport alive."""
+    processes: list[Any] = []
+    original_spawn = mcp_stdio._create_platform_compatible_process
+
+    async def capture_process(*arguments: Any, **keywords: Any) -> Any:
+        """Retain the actual child handle to distinguish cleanup from abandoned tasks."""
+        process = await original_spawn(*arguments, **keywords)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(mcp_stdio, "_create_platform_compatible_process", capture_process)
+    client = stdio_client()
+    await client.__aenter__()
+    owner = client._owner
+    assert owner is not None
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed_exit() -> None:
+        """Model a retained cleanup wrapper that has not reached the SDK close yet."""
+        started.set()
+        await release.wait()
+        await client.__aexit__(None, None, None)
+
+    pending = asyncio.create_task(delayed_exit())
+    try:
+        await started.wait()
+        await asyncio.wait_for(client.force_close(), 10)
+        assert owner.done()
+        assert client._owner is None
+        assert client._client is None
+        assert client._stack is None
+        assert len(processes) == 1
+        assert processes[0].returncode is not None
+        await client.force_close()
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        with suppress(MCPTransportError):
+            await client.__aexit__(None, None, None)
+
+
+async def test_force_close_unwinds_a_blocked_sdk_exit_in_its_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forced cancellation must still execute the original SDK exit in the entering task."""
+    started, release, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_exit = ProtocolClient.__aexit__
+
+    async def blocked_exit(sdk_client: ProtocolClient, *arguments: Any) -> None:
+        """Pause teardown while retaining its real cleanup as an unconditional finalizer."""
+        started.set()
+        try:
+            await release.wait()
+        finally:
+            try:
+                await original_exit(sdk_client, *arguments)
+            finally:
+                exited.set()
+
+    # AsyncExitStack captures __aexit__ when entering, so replace it before connecting.
+    monkeypatch.setattr(ProtocolClient, "__aexit__", blocked_exit)
+    client = stdio_client()
+    await client.__aenter__()
+    owner = client._owner
+    assert owner is not None
+    pending = asyncio.create_task(client.__aexit__(None, None, None))
+    try:
+        await started.wait()
+        await asyncio.wait_for(client.force_close(), 10)
+        await asyncio.gather(pending, return_exceptions=True)
+        assert exited.is_set()
+        assert owner.done()
+        assert client._owner is None
+        assert client._client is None
+        assert client._stack is None
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        with suppress(MCPTransportError):
+            await client.__aexit__(None, None, None)
+
+
+async def test_force_close_respects_sdk_shield_while_stdio_process_is_stopping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forced closure must not interrupt the SDK's shielded subprocess termination."""
+    started, release, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_stop = mcp_stdio._stop_server_process
+
+    async def blocked_stop(process: Any) -> None:
+        """Wait inside the actual SDK shutdown shield before stopping the real child."""
+        started.set()
+        await release.wait()
+        await original_stop(process)
+        stopped.set()
+
+    monkeypatch.setattr(mcp_stdio, "_stop_server_process", blocked_stop)
+    client = stdio_client()
+    await client.__aenter__()
+    owner = client._owner
+    assert owner is not None
+    pending = asyncio.create_task(client.__aexit__(None, None, None))
+    forcing: asyncio.Task[None] | None = None
+    try:
+        await started.wait()
+        forcing = asyncio.create_task(client.force_close())
+        await asyncio.sleep(0)
+        assert not owner.done()
+        assert not forcing.done()
+        release.set()
+        await asyncio.wait_for(forcing, 10)
+        await asyncio.gather(pending, return_exceptions=True)
+        assert stopped.is_set()
+        assert owner.done()
+        assert client._owner is None
+        assert client._client is None
+        assert client._stack is None
+    finally:
+        release.set()
+        if forcing is not None:
+            await asyncio.gather(forcing, return_exceptions=True)
+        await asyncio.gather(pending, return_exceptions=True)
+        with suppress(MCPTransportError):
+            await client.__aexit__(None, None, None)
+
+
+async def test_force_close_before_owner_startup_is_repeatable() -> None:
+    """Closing an unused client or a just-created owner never starts an orphan transport."""
+    client = stdio_client()
+    await client.force_close()
+    await client.force_close()
+    opening = asyncio.create_task(client.__aenter__())
+    await asyncio.sleep(0)
+    owner = client._owner
+    assert owner is not None
+    try:
+        await asyncio.wait_for(client.force_close(), 10)
+        with pytest.raises(MCPTransportError):
+            await opening
+        await client.force_close()
+        assert owner.done()
+        assert client._owner is None
+        assert client._client is None
+        assert client._stack is None
+    finally:
+        await asyncio.gather(opening, return_exceptions=True)
+        with suppress(MCPTransportError):
+            await client.__aexit__(None, None, None)
 
 
 async def test_real_sdk_server_exit_is_a_transport_error_not_caller_cancellation(

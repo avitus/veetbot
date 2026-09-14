@@ -139,6 +139,8 @@ class SDKMCPClient:
         self._owner: asyncio.Task[BaseException | None] | None = None
         self._ready: asyncio.Future[None] | None = None
         self._shutdown: asyncio.Future[_ExitArguments] | None = None
+        self._abort_scope: anyio.CancelScope | None = None
+        self._force_close_requested = False
 
     async def __aenter__(self) -> Self:
         """Wait for the owner task to establish a usable SDK connection."""
@@ -152,6 +154,30 @@ class SDKMCPClient:
         traceback: TracebackType | None,
     ) -> None:
         await self._close(exc_type, exc, traceback)
+
+    async def force_close(self) -> None:
+        """Interrupt the owner while respecting the SDK's shielded transport teardown."""
+        owner = self._owner
+        if owner is None:
+            return
+        self._force_close_requested = True
+        if self._abort_scope is not None:
+            self._abort_scope.cancel()
+        try:
+            failure = await asyncio.shield(owner)
+        except asyncio.CancelledError as exc:
+            caller = asyncio.current_task()
+            if not owner.cancelled() or (caller is not None and caller.cancelling()):
+                raise
+            failure = exc
+        if self._owner is owner:
+            self._owner = None
+            self._ready = None
+            self._shutdown = None
+        if failure is not None and not isinstance(failure, asyncio.CancelledError):
+            if isinstance(failure, (MCPUnauthorizedError, MCPTransportError)):
+                raise failure
+            raise MCPTransportError from failure
 
     async def _headers(self) -> dict[str, str]:
         if self._config.auth_scheme is MCPAuthScheme.NONE:
@@ -218,6 +244,7 @@ class SDKMCPClient:
         """Keep transport and SDK cancellation scopes in a persistent owner task."""
         if self._owner is not None:
             raise RuntimeError("MCP client is already connected or closing")
+        self._force_close_requested = False
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[None] = loop.create_future()
         shutdown: asyncio.Future[_ExitArguments] = loop.create_future()
@@ -254,25 +281,35 @@ class SDKMCPClient:
         failure: BaseException | None = None
         exit_arguments: _ExitArguments = (None, None, None)
         try:
-            await self._open_owned()
-            ready.set_result(None)
-            exit_arguments = await shutdown
-        except BaseException as exc:
-            failure = exc
-        finally:
-            if not ready.done():
-                ready.set_exception(
-                    failure
-                    if isinstance(failure, (MCPUnauthorizedError, MCPTransportError))
-                    else MCPTransportError()
-                )
-                # A cancelled connection caller may no longer await this future.
-                ready.exception()
-            try:
-                await self._close_owned(*exit_arguments)
-            except BaseException as exc:
-                if failure is None:
+            # This scope precedes every SDK scope and exits after all of them. Its
+            # cancellation respects the SDK's shielded subprocess flush/kill/reap;
+            # native owner.cancel() during teardown would bypass those shields.
+            with anyio.CancelScope() as abort_scope:
+                self._abort_scope = abort_scope
+                try:
+                    if self._force_close_requested:
+                        raise asyncio.CancelledError
+                    await self._open_owned()
+                    ready.set_result(None)
+                    exit_arguments = await shutdown
+                except BaseException as exc:
                     failure = exc
+                finally:
+                    if not ready.done():
+                        ready.set_exception(
+                            failure
+                            if isinstance(failure, (MCPUnauthorizedError, MCPTransportError))
+                            else MCPTransportError()
+                        )
+                        # A cancelled startup caller may no longer await this future.
+                        ready.exception()
+                    try:
+                        await self._close_owned(*exit_arguments)
+                    except BaseException as exc:
+                        if failure is None:
+                            failure = exc
+        finally:
+            self._abort_scope = None
         return failure
 
     def _request_close(self, arguments: _ExitArguments) -> None:
