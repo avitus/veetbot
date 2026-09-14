@@ -281,8 +281,13 @@ import Testing
         #expect(toolStatuses == [.completed])
     }
 
-    @Test
-    func testSuccessiveCompletedSearchesRenderAsSingleActivity() {
+    @Test(arguments: [
+        ("web.search", "query", "query ", "10 Web.Searches Completed"),
+        ("web.fetch", "url", "https://example.com/page/", "10 Web.Fetches Completed"),
+    ])
+    func testSuccessiveCompletedWebCallsRenderAsSingleActivity(
+        name: String, argument: String, valuePrefix: String, summary: String
+    ) {
         let reducer = RunStateReducer()
         for index in 1...10 {
             reducer.reduce(
@@ -290,9 +295,9 @@ import Testing
                     id: index,
                     event: "tool.call.proposed",
                     data: [
-                        "call_id": .string("search-\(index)"),
-                        "name": .string("web.search"),
-                        "arguments": .object(["query": .string("query \(index)")]),
+                        "call_id": .string("call-\(index)"),
+                        "name": .string(name),
+                        "arguments": .object([argument: .string("\(valuePrefix)\(index)")]),
                     ]
                 )
             )
@@ -303,8 +308,8 @@ import Testing
                     id: index + 10,
                     event: "tool.call.completed",
                     data: [
-                        "call_id": .string("search-\(index)"),
-                        "name": .string("web.search"),
+                        "call_id": .string("call-\(index)"),
+                        "name": .string(name),
                         "result_item": .object([
                             "content": .array([
                                 .object([
@@ -323,13 +328,87 @@ import Testing
         #expect(reducer.tools.count == 10)
         #expect(reducer.activityTimeline.count == 1)
         guard case .toolBundle(let bundle) = reducer.activityTimeline[0] else {
-            Issue.record("expected completed searches to render as a bundle")
+            Issue.record("expected completed \(name) calls to render as a bundle")
             return
         }
-        #expect(bundle.summary == "10 Web.Searches Completed")
-        #expect(bundle.activities.map(\.callID) == (1...10).map { "search-\($0)" })
-        #expect(bundle.activities[9].arguments["query"]?.stringValue == "query 10")
+        #expect(bundle.summary == summary)
+        #expect(bundle.activities.map(\.callID) == (1...10).map { "call-\($0)" })
+        #expect(bundle.activities[9].arguments[argument]?.stringValue == "\(valuePrefix)10")
         #expect(bundle.activities[9].result?.content.first?.text == "result 10")
+    }
+
+    @Test
+    func testBriefingFetchesBundleMixedOutcomesWithoutLosingDetails() {
+        let reducer = RunStateReducer()
+        for index in 1...5 {
+            reducer.reduce(SSEFrame(
+                id: index,
+                event: "tool.call.proposed",
+                data: [
+                    "call_id": .string("fetch-\(index)"),
+                    "name": .string("web.fetch"),
+                    "arguments": .object(["url": .string("https://example.com/\(index)")]),
+                ]
+            ))
+        }
+        reducer.reduce(toolFrame(id: 6, callID: "fetch-1", name: "web.fetch", risk: .low))
+        reducer.reduce(failedToolOutcomeFrame(
+            id: 7, callID: "fetch-2", status: "unavailable",
+            reasonCode: "tool.web.provider_unavailable"
+        ))
+        reducer.reduce(toolFrame(id: 8, callID: "fetch-3", name: "web.fetch", risk: .high))
+        let failure = toolFrame(id: 9, event: "tool.call.failed", callID: "fetch-4", name: "web.fetch")
+        reducer.reduce(failure)
+        reducer.reduce(failure)
+        reducer.reduce(toolFrame(id: 10, callID: "fetch-5", name: "web.fetch"))
+
+        #expect(reducer.activityTimeline.count == 1)
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected mixed briefing fetches in one bundle")
+            return
+        }
+        #expect(bundle.summary == "5 Web.Fetches · 3 Completed · 1 Unavailable · 1 Failed")
+        #expect(bundle.activities.map(\.callID) == (1...5).map { "fetch-\($0)" })
+        #expect(bundle.activities.map(\.status) == [.completed, .unavailable, .completed, .failed, .completed])
+        #expect(bundle.activities[1].arguments["url"]?.stringValue == "https://example.com/2")
+        #expect(bundle.activities[1].result?.content.first?.text?.contains("tool.web.provider_unavailable") == true)
+        #expect(bundle.highestRisk == .high)
+    }
+
+    @Test
+    func testRejectedFetchAndCompletedErrorAreNotLabeledSuccessful() {
+        let reducer = RunStateReducer()
+        reducer.reduce(failedToolOutcomeFrame(
+            id: 1, callID: "rejected", status: "failed",
+            reasonCode: "tool.web.provider_rejected"
+        ))
+        reducer.reduce(toolFrame(
+            id: 2, callID: "error", name: "web.fetch", resultIsError: true
+        ))
+
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected rejected and error fetches in one bundle")
+            return
+        }
+        #expect(bundle.summary == "2 Web.Fetches · 1 Rejected · 1 Failed")
+        #expect(bundle.activities[1].result?.isError == true)
+        #expect(bundle.activities[1].presentationStatus == .failed)
+    }
+
+    @Test(arguments: ["tool.call.proposed", "tool.call.started", "tool.call.denied", "tool.call.uncertain"])
+    func testUnfinishedDeniedAndUncertainFetchesBreakBundles(event: String) {
+        let reducer = RunStateReducer()
+        reducer.reduce(toolFrame(id: 1, callID: "fetch-1", name: "web.fetch"))
+        reducer.reduce(toolFrame(id: 2, callID: "fetch-2", name: "web.fetch"))
+        reducer.reduce(toolFrame(id: 3, event: event, callID: "boundary", name: "web.fetch"))
+        reducer.reduce(toolFrame(id: 4, callID: "fetch-3", name: "web.fetch"))
+        reducer.reduce(toolFrame(id: 5, callID: "fetch-4", name: "web.fetch"))
+
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:fetch-1", "tool:boundary", "tool:fetch-3"])
+        guard case .tool = reducer.activityTimeline[1] else {
+            Issue.record("expected \(event) to remain standalone")
+            return
+        }
     }
 
     @Test
@@ -533,17 +612,17 @@ import Testing
         }
     }
 
-    @Test
-    func testApprovalBoundCompletedToolBreaksCompletedToolBundles() {
+    @Test(arguments: ["web.search", "web.fetch"])
+    func testApprovalBoundCompletedToolBreaksCompletedToolBundles(name: String) {
         let reducer = RunStateReducer()
-        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
-        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
+        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: name))
+        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: name))
         reducer.reduce(
             toolFrame(
                 id: 3,
                 event: "tool.call.proposed",
                 callID: "search-approved",
-                name: "web.search"
+                name: name
             )
         )
         let approval = ApprovalView(
@@ -551,7 +630,7 @@ import Testing
             runID: UUID(),
             sessionID: UUID(),
             status: .approved,
-            toolName: "web.search",
+            toolName: name,
             actionSummary: "Search the web",
             arguments: ["query": .string("approved query")],
             risk: "high",
@@ -563,9 +642,9 @@ import Testing
             decision: .approveOnce
         )
         reducer.mergeApproval(approval)
-        reducer.reduce(toolFrame(id: 4, callID: "search-approved", name: "web.search"))
-        reducer.reduce(toolFrame(id: 5, callID: "search-3", name: "web.search"))
-        reducer.reduce(toolFrame(id: 6, callID: "search-4", name: "web.search"))
+        reducer.reduce(toolFrame(id: 4, callID: "search-approved", name: name))
+        reducer.reduce(toolFrame(id: 5, callID: "search-3", name: name))
+        reducer.reduce(toolFrame(id: 6, callID: "search-4", name: name))
 
         #expect(
             reducer.activityTimeline.map(\.id) == [

@@ -47,8 +47,16 @@ public struct ToolActivity: Identifiable, Sendable {
     fileprivate var hasKnownName: Bool
 
     public var id: String { callID }
+    public var presentationStatus: ToolActivityStatus {
+        name == "web.fetch" && status == .completed && result?.isError == true
+            ? .failed : status
+    }
     fileprivate var isBundleCandidate: Bool {
-        hasKnownName && status == .completed && approvalID == nil && result?.isError != true
+        guard hasKnownName, approvalID == nil else { return false }
+        if name == "web.fetch" {
+            return [.completed, .rejected, .unavailable, .failed].contains(presentationStatus)
+        }
+        return status == .completed && result?.isError != true
     }
 }
 
@@ -74,7 +82,14 @@ public struct ToolActivityBundle: Identifiable, Sendable {
         }
     }
     public var summary: String {
-        "\(count) \(Self.pluralizedDisplayName(name)) Completed"
+        let title = "\(count) \(Self.pluralizedDisplayName(name))"
+        let statuses: [ToolActivityStatus] = [.completed, .rejected, .unavailable, .failed]
+        let outcomes = statuses.compactMap { status -> (Int, String)? in
+            let matchingCount = activities.filter { $0.presentationStatus == status }.count
+            return matchingCount > 0 ? (matchingCount, status.rawValue.capitalized) : nil
+        }
+        if outcomes.count == 1 { return "\(title) \(outcomes[0].1)" }
+        return ([title] + outcomes.map { "\($0.0) \($0.1)" }).joined(separator: " · ")
     }
 
     private static func riskRank(_ risk: RiskLevel) -> Int {
@@ -176,7 +191,7 @@ public final class RunStateReducer: ObservableObject {
                 return .tool(tools[index])
             }
         }
-        return bundleSuccessiveCompletedTools(activities)
+        return bundleSuccessiveTools(activities)
     }
 
     public func reset() {
@@ -538,7 +553,7 @@ public final class RunStateReducer: ObservableObject {
         update(&tools[index])
     }
 
-    private func bundleSuccessiveCompletedTools(
+    private func bundleSuccessiveTools(
         _ activities: [ConversationActivity]
     ) -> [ConversationActivity] {
         var bundled: [ConversationActivity] = []

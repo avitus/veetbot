@@ -251,6 +251,16 @@ horizontally rather than compressing their contents past readability. Messages
 and tool calls retain their first-seen event order as later status events update
 an existing tool card. Approval rule internals are intentionally not shown.
 
+Adjacent successful calls of the same tool, including `web.search` and
+`web.fetch`, collapse into one count-labelled activity bundle. Expanding it
+preserves access to each call's arguments, result, and risk. The bundle shows
+the highest individual risk. Fetch bundles also include rejected, unavailable,
+and failed calls, with outcome counts in the summary and each call's status
+and URL in its expanded row. An error result on a completed fetch is displayed
+as failed. Messages, different tools, approvals, queued or running calls,
+denials, and uncertain outcomes break the bundle. Other tools bundle only
+successful completions.
+
 Artifact metadata and bytes are fetched separately. The process-local content
 cache sends `If-None-Match` and reuses bytes on `304`, retains at most 32 MiB,
 and evicts least-recently-used values. It is cleared when the app leaves the

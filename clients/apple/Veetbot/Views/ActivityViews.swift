@@ -26,7 +26,7 @@ struct ToolActivityCard: View {
                         .foregroundColor(taxonomy.color)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(activity.name).appFont(.headline)
-                        Text(activity.status.rawValue.capitalized)
+                        Text(activity.presentationStatus.rawValue.capitalized)
                             .appFont(.caption)
                             .foregroundColor(taxonomy.color)
                     }
@@ -144,8 +144,13 @@ private struct BundledToolActivityRow: View {
             .padding(.top, 6)
         } label: {
             HStack {
-                Text(rowLabel)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rowLabel)
+                        .lineLimit(1)
+                    Text(activity.presentationStatus.rawValue.capitalized)
+                        .appFont(.caption)
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
                 if let risk = activity.risk {
                     let taxonomy = TaxonomyStyle(
@@ -161,6 +166,9 @@ private struct BundledToolActivityRow: View {
     private var rowLabel: String {
         if let query = activity.arguments["query"]?.stringValue, !query.isEmpty {
             return "\(index). \(query)"
+        }
+        if let url = activity.arguments["url"]?.stringValue, !url.isEmpty {
+            return "\(index). \(url)"
         }
         return "Call \(index)"
     }
