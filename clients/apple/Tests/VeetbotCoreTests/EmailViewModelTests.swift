@@ -1,6 +1,10 @@
 import Combine
 import Foundation
 import Testing
+#if os(macOS)
+import AppKit
+import SwiftUI
+#endif
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct EmailViewModelTests {
@@ -8,6 +12,159 @@ import Testing
     private let draftID = UUID(uuidString: "00000000-0000-0000-0000-000000000802")!
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
+
+    #if os(macOS)
+    /// Renders real AppKit list geometry without desktop automation or private mailbox data.
+    @Test func testEmailInboxRenderedLayout() async throws {
+        let rows = (1...5).map { index in
+            threadJSON().replacingOccurrences(of: threadID.uuidString,
+                with: "00000000-0000-0000-0000-00000000080\(index)")
+        }.joined(separator: ",")
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            return (200, "{\"items\":[\(rows)],\"next_cursor\":null}")
+        }
+        await model.reload()
+        let host = NSHostingView(rootView: EmailModeView(model: model, viewportHeight: 800, discussInChat: {}))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        host.layoutSubtreeIfNeeded()
+        /// Find the first matching AppKit descendant in the rendered email hierarchy.
+        func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+            if let match = view as? T { return match }
+            return view.subviews.lazy.compactMap { descendant(type, in: $0) }.first
+        }
+        defer {
+            window.contentView = nil
+            model.resetConnection()
+        }
+        /// Save the current rendered inbox as a fixture image for layout inspection.
+        func snapshot(_ name: String) throws {
+            guard let directory = ProcessInfo.processInfo.environment["VEETBOT_LAYOUT_SNAPSHOTS"],
+                  let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(
+                to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
+        }
+        #expect(model.items.count == 5)
+        let table = try #require(descendant(NSTableView.self, in: host))
+        let scroll = try #require(table.enclosingScrollView)
+        #expect(host.convert(scroll.bounds, from: scroll).minY < 150,
+                "Inbox controls must leave mail near the top of the available content")
+        #expect(table.visibleRect.contains(table.rect(ofRow: table.numberOfRows - 1)),
+                "Five priorities must fit completely without scrolling at the default text size")
+        try snapshot("email-sidebar-default")
+        let originalWidth = scroll.frame.width
+        let split = try #require(descendant(NSSplitView.self, in: host))
+        split.setPosition(500, ofDividerAt: 0)
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        host.layoutSubtreeIfNeeded()
+        #expect(scroll.frame.width > originalWidth + 80, "The list must follow its divider to a useful wider width")
+        #expect(scroll.frame.width <= 560)
+        try snapshot("email-sidebar-wide")
+        window.setContentSize(NSSize(width: 780, height: 500))
+        host.rootView = EmailModeView(model: model, viewportHeight: 500, discussInChat: {})
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        host.layoutSubtreeIfNeeded()
+        #expect(scroll.frame.width >= 280, "A small window must retain usable inbox controls")
+        #expect(scroll.frame.width <= host.bounds.width - 360,
+                "Resizing the window must preserve room to read the selected email")
+        #expect(host.bounds.contains(host.convert(scroll.bounds, from: scroll)))
+        try snapshot("email-sidebar-small-window")
+    }
+    #endif
+
+    /// A held admission response cannot delay removal, block the next row, or let a refresh resurrect it.
+    @Test func testArchiveDisappearsBeforeAdmissionWithoutBlockingNextRow() async throws {
+        let requests = EmailRequestRecorder()
+        let admission = EmailArchiveResponseGate()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") {
+                let first = request.url!.path.contains(self.threadID.uuidString)
+                let operation = self.operationJSON(status: "QUEUED")
+                    .replacingOccurrences(of: self.threadID.uuidString, with: first ? self.threadID.uuidString : otherID.uuidString)
+                return (202, operation, first ? admission : nil)
+            }
+            let first = self.archiveThreadJSON(inInbox: true, draft: self.draftJSON())
+            let other = first.replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString)
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(first),\(other)],\"next_cursor\":null}", nil)
+            }
+            let requested = requests.snapshot.contains { $0.url!.path == request.url!.path + "/archive" }
+            let value = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil, draft: self.draftJSON())
+            return (200, request.url!.path.contains(otherID.uuidString)
+                ? value.replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString) : value, nil)
+        }
+        defer { admission.release(); model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep my unsent reply")
+        let first = try #require(model.items.first)
+        let next = try #require(model.items.last)
+        let archiving = Task { await model.setThreadArchived(first, archived: true) }
+        try await waitForEmailTestCondition { admission.isWaiting }
+        #expect(model.items.map(\.id) == [otherID])
+        #expect(model.archiveMessage(for: first) == nil)
+        #expect(model.thread?.inInbox == true)
+        #expect(model.currentEdit?.body == "Keep my unsent reply")
+        #expect(model.canArchive(next))
+        await model.reload(preserveOrder: true)
+        #expect(model.items.map(\.id) == [otherID])
+        await model.setThreadArchived(next, archived: true)
+        #expect(model.items.isEmpty)
+        admission.release()
+        await archiving.value
+        #expect(model.items.isEmpty)
+        #expect(model.archiveMessage(for: try #require(model.thread)) == nil)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2)
+    }
+
+    /// Optimistic removal is reversible for failed, uncertain and unreadable outcomes, without losing edits.
+    @Test(arguments: ["completed", "failed", "uncertain", "unreadable"])
+    func testBackgroundArchiveRestoresOnlyUnconfirmedOutcomes(outcome: String) async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let row = self.archiveThreadJSON(inInbox: !(requested && outcome == "completed"),
+                status: requested ? outcome : nil, draft: self.draftJSON())
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(requested && outcome == "completed" ? "" : row)],\"next_cursor\":null}", nil)
+            }
+            if requested && outcome == "unreadable" {
+                return (400, Self.error("malformed_request", "Could not check Gmail status."), statusRead)
+            }
+            return (200, row, requested ? statusRead : nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My draft survives")
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        #expect(model.items.isEmpty)
+        #expect(model.archiveMessage(for: try #require(model.thread)) == nil)
+        statusRead.release()
+        await archiving.value
+        #expect(model.items.count == (outcome == "completed" ? 0 : 1))
+        #expect((model.archiveMessage(for: try #require(model.thread)) == nil) == (outcome == "completed"))
+        #expect(model.currentEdit?.body == "My draft survives")
+        #expect(model.selectedThreadID == threadID)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+    }
 
     /// A clearly labelled archive gesture must reach the originating thread's remote command.
     @Test(arguments: ["personal", "work"])
@@ -112,7 +269,7 @@ import Testing
         #expect(commands.allSatisfy { $0.url!.path.hasSuffix("archive") })
     }
 
-    /// A completed foreground poll removes the archived row without a second mutation or losing edits.
+    /// A recovered pending row stays hidden while foreground polling resumes without a second mutation.
     @Test func testArchivePendingProjectionRecoversAcrossVisits() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -129,10 +286,12 @@ import Testing
         }
         defer { model.resetConnection() }
         await model.reload()
-        let pending = try #require(model.items.first)
+        let pending = try JSONDecoder.server.decode(EmailThreadView.self,
+            from: Data(archiveThreadJSON(inInbox: true, status: "pending").utf8))
         #expect(!pending.isArchived)
         #expect(!model.canArchive(pending))
-        #expect(model.archiveMessage(for: pending) == "Archiving in Gmail…")
+        #expect(model.items.isEmpty)
+        #expect(model.archiveMessage(for: pending) == nil)
         model.setActive(true)
         try await waitForEmailTestCondition {
             requests.snapshot.contains { $0.url!.path == "/v1/email/threads/\(threadID.uuidString)" }
@@ -160,8 +319,8 @@ import Testing
         await model.checkArchiveStatus(threadID)
         let thread = try #require(model.thread)
         #expect(!thread.isArchived)
-        #expect(model.items.count == 1)
-        #expect(model.archiveMessage(for: thread) != nil)
+        #expect(model.items.count == (status == "pending" ? 0 : 1))
+        #expect((model.archiveMessage(for: thread) == nil) == (status == "pending"))
         #expect(model.canArchive(thread) == (status == "failed"))
         #expect(model.currentEdit?.body == "Keep this draft while Gmail recovers")
         #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
@@ -243,10 +402,12 @@ import Testing
         await model.reload()
         await model.checkArchiveStatus(threadID)
         #expect(model.archiveErrors[threadID] != nil)
-        await model.checkArchiveStatus(threadID)
+        #expect(model.items.count == 1)
         let pending = try #require(model.items.first)
+        await model.checkArchiveStatus(threadID)
         #expect(model.archiveErrors[threadID] == nil)
-        #expect(model.archiveMessage(for: pending) == "Archiving in Gmail…")
+        #expect(model.archiveMessage(for: pending) == nil)
+        #expect(model.items.isEmpty)
         #expect(!pending.isArchived)
         #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
     }
@@ -384,14 +545,16 @@ import Testing
         }
         defer { model.resetConnection() }
         await model.reload()
+        await model.openThread(threadID)
         let row = try #require(model.items.first)
         let first = Task { await model.setThreadArchived(row, archived: true) }
         try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path.hasSuffix("archive") } }
         await model.setThreadArchived(row, archived: false)
         await first.value
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
-        #expect(model.items.first?.archiveOperation?.targetArchived == true)
-        #expect(model.items.first?.inInbox == true)
+        #expect(model.items.isEmpty)
+        #expect(model.thread?.archiveOperation?.targetArchived == true)
+        #expect(model.thread?.inInbox == true)
     }
 
     /// Archiving one row cannot discard the body read for a different selected conversation.
@@ -750,6 +913,65 @@ import Testing
         #expect(count > 0)
         try await Task.sleep(nanoseconds: 40_000_000)
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == count)
+    }
+
+    /// Resume automatic admission after the pause expires and clear it on connection replacement.
+    @Test func testBudgetPauseExpiresAndConnectionResetClearsItsState() async throws {
+        let requests = EmailRequestRecorder()
+        var current = Date(timeIntervalSince1970: 1_789_344_000)
+        let model = try makeModel(refreshNanoseconds: 10_000_000, now: { current }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                return (402, Self.error("budget_exceeded", "Budget paused."))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        try await waitForEmailTestCondition { model.budgetRetryAt != nil && !model.isRefreshing }
+        #expect(model.budgetPauseMessage == "Budget paused.")
+        #expect(model.errorMessage == nil)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        current = try #require(model.budgetRetryAt).addingTimeInterval(1)
+        try await waitForEmailTestCondition {
+            requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2 && !model.isRefreshing
+        }
+        model.setActive(false)
+        model.resetConnection()
+        #expect(model.budgetPauseMessage == nil)
+        #expect(model.budgetRetryAt == nil)
+    }
+
+    /// Keep budget pauses across mode visits while allowing an explicit refresh to recover.
+    @Test func testBudgetCeilingStopsTimerAcrossVisitsAndManualRefreshRecovers() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(refreshNanoseconds: 10_000_000) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                if requests.snapshot.filter({ $0.httpMethod == "POST" }).count == 1 {
+                    return (402, "{\"error\":{\"code\":\"budget_exceeded\",\"message\":\"Automatic email work has reached its cost ceiling.\",\"details\":{\"reason\":\"email_aggregate_cost\",\"retry_at\":\"2099-01-01T00:00:00+00:00\"},\"request_id\":\"budget-test\"}}")
+                }
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        model.setActive(false)
+        model.setActive(true)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        #expect(model.items.count == 1, "cached mail stays available during the pause")
+        await model.refresh()
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2)
+        #expect(model.errorMessage == nil)
     }
 
     @Test func testForegroundReturnStartsOneLoopAndVisibleCadenceRepeats() async throws {
@@ -1327,6 +1549,54 @@ import Testing
         #expect(requests.snapshot.allSatisfy { $0.httpMethod == "GET" })
     }
 
+    /// Missing, ambiguous and stale topic selections must never send an invalid feedback command.
+    @Test(arguments: ["", "Unlisted topic"], [false, true])
+    func testTopicFeedbackRequiresAnAvailableSelection(targetValue: String, hasTopics: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let thread = hasTopics
+            ? threadJSON().replacingOccurrences(of: "\"senders\":", with: "\"topics\":[\"Board\",\"Hiring\"],\"senders\":")
+            : threadJSON()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("/feedback") {
+                return (400, Self.error("malformed_request", "The HTTP request is not supported."))
+            }
+            return (200, thread)
+        }
+        await model.openThread(threadID)
+        await model.giveFeedback(target: .topic, judgment: "important", targetValue: targetValue)
+        #expect(!requests.snapshot.contains { $0.httpMethod == "POST" })
+        #expect(model.draftError == "Choose an available content topic, or apply feedback to This thread.")
+    }
+
+    /// Sends exactly the server topic the owner selected and names it in the reversible acknowledgment.
+    @Test(arguments: ["important", "less_important"])
+    func testTopicFeedbackSendsSelectedTopic(judgment: String) async throws {
+        let requests = EmailRequestRecorder()
+        let thread = threadJSON().replacingOccurrences(of: "\"senders\":", with: "\"topics\":[\"Board\",\"Hiring\"],\"senders\":")
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("/feedback") {
+                return (200, "{\"feedback_id\":\"\(self.threadID)\",\"thread\":\(thread)}")
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(thread)],\"next_cursor\":null}") }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            return (200, thread)
+        }
+        await model.openThread(threadID)
+        await model.giveFeedback(target: .topic, judgment: judgment, targetValue: "Board")
+        let command = try #require(requests.snapshot.first { $0.httpMethod == "POST" })
+        let body = try Self.archiveRequestBody(command)
+        #expect(body["target"] as? String == "topic")
+        #expect(body["target_value"] as? String == "Board")
+        #expect(body["judgment"] as? String == judgment)
+        #expect(body["expected_revision"] as? Int == 1)
+        #expect(model.feedbackMessage == "Marked Board as \(judgment.replacingOccurrences(of: "_", with: " ")).")
+        #expect(model.feedbackID == threadID)
+        #expect(model.draftError == nil)
+    }
+
     @Test func testFeedbackAcknowledgesJudgmentAndScope() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("/feedback") {
@@ -1444,6 +1714,7 @@ import Testing
     /// Isolates each model's URLSession route and allows real transport errors from its handler.
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
+        now: @escaping () -> Date = Date.init,
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
@@ -1454,7 +1725,7 @@ import Testing
             configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
-        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds)
+        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now)
     }
 
     private static let accountsJSON = """

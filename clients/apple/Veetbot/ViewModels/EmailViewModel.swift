@@ -34,7 +34,8 @@ public final class AppCoordinator: ObservableObject {
 @MainActor
 public final class EmailViewModel: ObservableObject {
     @Published public private(set) var accounts: [EmailAccountView] = []
-    @Published public private(set) var items: [EmailThreadView] = []
+    @Published private var inboxItems: [EmailThreadView] = []
+    @Published private var archiveHiddenThreads: Set<UUID> = []
     @Published public private(set) var thread: EmailThreadView?
     @Published public private(set) var draft: EmailDraftView?
     @Published public private(set) var edits: [UUID: EmailDraftEdit] = [:]
@@ -48,6 +49,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var isPerformingAction = false
     @Published public private(set) var unavailable = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var budgetPauseMessage: String?
+    @Published public private(set) var budgetRetryAt: Date?
     @Published private var draftActionError: String?
     @Published private var threadReadError: String?
     @Published public private(set) var feedbackMessage: String?
@@ -69,6 +72,7 @@ public final class EmailViewModel: ObservableObject {
     public var authenticationFailure: ((Error) -> Void)?
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let refreshNanoseconds: UInt64
+    private let now: () -> Date
     private var active = false
     private var activation = UUID()
     private var generation = UUID()
@@ -102,12 +106,15 @@ public final class EmailViewModel: ObservableObject {
     private var archiveStates: [UUID: ArchiveMailboxState] = [:]
     private var archiveReadErrors: Set<UUID> = []
 
+    /// Inject the API factory, refresh cadence, and clock used for foreground budget pauses.
     public init(
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
-        refreshNanoseconds: UInt64 = 60_000_000_000
+        refreshNanoseconds: UInt64 = 60_000_000_000,
+        now: @escaping () -> Date = Date.init
     ) {
         self.makeAPIClient = makeAPIClient
         self.refreshNanoseconds = refreshNanoseconds
+        self.now = now
     }
 
     deinit {
@@ -116,6 +123,11 @@ public final class EmailViewModel: ObservableObject {
         autosaveTask?.cancel()
         searchTask?.cancel()
         archiveTasks.values.forEach { $0.cancel() }
+    }
+
+    /// Keeps pending rows in their original positions for rollback without presenting them as archived.
+    public var items: [EmailThreadView] {
+        inboxItems.filter { !archiveHiddenThreads.contains($0.id) || archiveErrors[$0.id] != nil }
     }
 
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
@@ -165,6 +177,7 @@ public final class EmailViewModel: ObservableObject {
         archiveRequests = [:]
         archiveErrors = [:]
         archiveSubmitting = []
+        archiveHiddenThreads = []
         archiveUnsupportedAccounts = []
         archiveUnavailableThreads = []
         archiveReadErrors = []
@@ -172,7 +185,7 @@ public final class EmailViewModel: ObservableObject {
         archiveStates = [:]
         active = false
         accounts = []
-        items = []
+        inboxItems = []
         thread = nil
         draft = nil
         edits = [:]
@@ -194,6 +207,8 @@ public final class EmailViewModel: ObservableObject {
         revisions = []
         refreshKey = nil
         refreshFailure = nil
+        budgetPauseMessage = nil
+        budgetRetryAt = nil
         saveKeys = [:]
         sendKeys = [:]
         isLoading = false
@@ -247,10 +262,10 @@ public final class EmailViewModel: ObservableObject {
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         let requestID = UUID()
         listRequest = requestID
-        let visibleCount = preserveOrder ? max(5, items.count) : 5
+        let visibleCount = preserveOrder ? max(5, inboxItems.count) : 5
         isLoading = !preserveOrder
         if !preserveOrder {
-            items = []
+            inboxItems = []
             nextCursor = nil
             hasMore = false
             pendingNewItems = nil
@@ -272,20 +287,20 @@ public final class EmailViewModel: ObservableObject {
             seenCursors = []
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             hasMore = nextCursor != nil
-            if preserveOrder && !items.isEmpty {
-                let oldIDs = Set(items.map(\.id))
+            if preserveOrder && !inboxItems.isEmpty {
+                let oldIDs = Set(inboxItems.map(\.id))
                 let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
                 if !additions.isEmpty {
                     pendingNewItems = loadedThreads
                     newImportantCount = additions.count
                     let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                    items = items.compactMap { current[$0.id] }
+                    inboxItems = inboxItems.compactMap { current[$0.id] }
                 } else {
                     let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                    items = items.compactMap { current[$0.id] }
+                    inboxItems = inboxItems.compactMap { current[$0.id] }
                 }
             } else {
-                items = loadedThreads
+                inboxItems = loadedThreads
                 pendingNewItems = nil
                 newImportantCount = 0
             }
@@ -294,7 +309,7 @@ public final class EmailViewModel: ObservableObject {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             if isUnavailable(error) {
                 unavailable = true
-                items = []
+                inboxItems = []
                 accounts = []
             } else { report(error, readAccess: true) }
         }
@@ -318,8 +333,9 @@ public final class EmailViewModel: ObservableObject {
         return Page(items: rows, nextCursor: cursor)
     }
 
+    /// Apply the queued inbox ordering only after the owner chooses to reveal new items.
     public func showNewItems() {
-        if let pendingNewItems { items = pendingNewItems }
+        if let pendingNewItems { inboxItems = pendingNewItems }
         pendingNewItems = nil
         newImportantCount = 0
     }
@@ -327,6 +343,7 @@ public final class EmailViewModel: ObservableObject {
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
     public func loadMore() async {
         let connection = generation
+        let mailboxVersions = archiveVersions
         let foreground = active ? activation : nil
         guard acceptsRead(connection: connection, activation: foreground), !isLoading,
               let cursor = nextCursor, let api = makeAPIClient() else { return }
@@ -339,8 +356,10 @@ public final class EmailViewModel: ObservableObject {
                 text: searchText, limit: 5, cursor: cursor
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
-            var ids = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
+            var ids = Set(inboxItems.map(\.id))
+            let loaded = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
+            inboxItems.append(contentsOf: loaded.filter { ids.insert($0.id).inserted })
+            for value in loaded { observeArchive(value) }
             nextCursor = nil
             hasMore = false
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
@@ -353,14 +372,18 @@ public final class EmailViewModel: ObservableObject {
 
     /// Admits one foreground refresh and ignores results after its connection or visibility expires.
     public func refresh() async {
-        await refresh(activation: activation)
+        await refresh(activation: activation, manual: true)
     }
 
     /// Keeps admission ownership distinct from a later visit while retaining uncertain admission keys.
-    private func refresh(activation foreground: UUID) async {
+    private func refresh(activation foreground: UUID, manual: Bool = false) async {
         let connection = generation
         guard acceptsRead(connection: connection, activation: foreground), !unavailable, !isRefreshing,
               let api = makeAPIClient() else { return }
+        if !manual, let budgetRetryAt, budgetRetryAt > now() {
+            await reload(preserveOrder: true, activation: foreground)
+            return
+        }
         isRefreshing = true
         let key = refreshKey ?? UUID().uuidString
         refreshKey = key
@@ -369,6 +392,8 @@ public final class EmailViewModel: ObservableObject {
             let operation = try await api.refreshEmail(idempotencyKey: key)
             guard acceptsRead(connection: connection, activation: foreground) else { return }
             refreshKey = nil
+            budgetPauseMessage = nil
+            budgetRetryAt = nil
             recordRefreshStatus(operation.status)
             await reload(preserveOrder: true, activation: foreground)
             guard acceptsRead(connection: connection, activation: foreground) else { return }
@@ -377,6 +402,7 @@ public final class EmailViewModel: ObservableObject {
         } catch {
             guard acceptsRead(connection: connection, activation: foreground) else { return }
             if isUnavailable(error) { unavailable = true }
+            else if recordBudgetPause(error) { refreshKey = nil }
             else { recordRefreshFailure(error) }
         }
     }
@@ -417,6 +443,28 @@ public final class EmailViewModel: ObservableObject {
     private func acceptsRead(connection: UUID, activation foreground: UUID?) -> Bool {
         generation == connection && !Task.isCancelled
             && (foreground == nil || (active && foreground == activation))
+    }
+
+    /// Budget refusal is a persistent pause, not a transient refresh error.
+    private func recordBudgetPause(_ error: Error) -> Bool {
+        guard case HTTPTransportError.api(let failure) = error,
+              failure.statusCode == 402, failure.code == .budgetExceeded else { return false }
+        let current = now()
+        let formatter = ISO8601DateFormatter()
+        let raw = failure.details.values["retry_at"]?.stringValue
+        var retry = raw.flatMap { formatter.date(from: $0) }
+        if retry == nil {
+            formatter.formatOptions.insert(.withFractionalSeconds)
+            retry = raw.flatMap { formatter.date(from: $0) }
+        }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let fallback = utc.startOfDay(for: current).addingTimeInterval(86_400)
+        budgetRetryAt = max(retry ?? fallback, current.addingTimeInterval(60))
+        budgetPauseMessage = failure.message
+        refreshFailure = nil
+        errorMessage = nil
+        return true
     }
 
     /// Retains refresh failures across successful cache reads until an operation completes.
@@ -596,8 +644,14 @@ public final class EmailViewModel: ObservableObject {
         _ = await saveDraft(conflict.id)
     }
 
+    /// Validate the chosen feedback scope, persist it, and refresh the current thread projection.
     public func giveFeedback(target: EmailFeedbackTarget, judgment: String, explanation: String? = nil, targetValue: String? = nil) async {
         guard let thread, let api = makeAPIClient(), !isPerformingAction else { return }
+        if target == .topic, !thread.feedbackTopics.contains(targetValue ?? "") {
+            draftActionError = "Choose an available content topic, or apply feedback to This thread."
+            return
+        }
+        draftActionError = nil
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
@@ -609,7 +663,9 @@ public final class EmailViewModel: ObservableObject {
             switch judgment {
             case "needs_reply": feedbackMessage = "This thread needs a reply."
             case "no_reply_needed": feedbackMessage = "This thread needs no reply."
-            default: feedbackMessage = "Marked \(target.title.lowercased()) as \(judgment.replacingOccurrences(of: "_", with: " "))."
+            default:
+                let scope = target == .topic ? (targetValue ?? target.title.lowercased()) : target.title.lowercased()
+                feedbackMessage = "Marked \(scope) as \(judgment.replacingOccurrences(of: "_", with: " "))."
             }
             await reload(preserveOrder: true)
             if selectedThreadID == thread.id { await openThread(thread.id, refreshOnly: true) }
@@ -785,10 +841,10 @@ public final class EmailViewModel: ObservableObject {
     /// Describes this mailbox action without replacing unrelated refresh, editing or send errors.
     public func archiveMessage(for thread: EmailThreadView) -> String? {
         if let error = archiveErrors[thread.id] { return error }
-        if archiveSubmitting.contains(thread.id) { return "Requesting the Gmail change…" }
+        if archiveSubmitting.contains(thread.id) { return nil }
         guard let operation = thread.archiveOperation else { return nil }
         switch operation.status {
-        case "pending": return operation.targetArchived ? "Archiving in Gmail…" : "Moving to Inbox…"
+        case "pending": return nil
         case "failed": return operation.error ?? "Gmail could not complete this action. Try again."
         case "uncertain": return "Outcome not confirmed. Check Gmail; recorded status may update after a later email refresh."
         case "completed": return nil
@@ -814,6 +870,7 @@ public final class EmailViewModel: ObservableObject {
         archiveReadErrors.remove(thread.id)
         archiveVersions[thread.id] = UUID()
         archiveSubmitting.insert(thread.id)
+        if request.archived { archiveHiddenThreads.insert(thread.id) }
         defer { if generation == connection { archiveSubmitting.remove(thread.id) } }
         do {
             let operation = try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)
@@ -821,9 +878,9 @@ public final class EmailViewModel: ObservableObject {
             archiveRequests[thread.id]?.operationID = operation.operationID
             let pending = EmailArchiveOperation(operationID: operation.operationID, runID: operation.runID,
                 targetArchived: request.archived, status: "pending", error: nil)
-            if let index = items.firstIndex(where: { $0.id == thread.id }) { items[index].archiveOperation = pending }
+            if let index = inboxItems.firstIndex(where: { $0.id == thread.id }) { inboxItems[index].archiveOperation = pending }
             if self.thread?.id == thread.id { self.thread?.archiveOperation = pending }
-            let current = self.thread?.id == thread.id ? self.thread : items.first { $0.id == thread.id }
+            let current = self.thread?.id == thread.id ? self.thread : inboxItems.first { $0.id == thread.id }
             archiveStates[thread.id] = ArchiveMailboxState(inInbox: current?.inInbox ?? thread.inInbox,
                 operation: pending, dismissedRevision: current?.dismissedRevision ?? thread.dismissedRevision)
             archiveVersions[thread.id] = UUID()
@@ -878,8 +935,8 @@ public final class EmailViewModel: ObservableObject {
         archiveVersions[value.id] = UUID()
         archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox, operation: value.archiveOperation,
             dismissedRevision: value.dismissedRevision)
-        if let index = items.firstIndex(where: { $0.id == value.id }), value.revision >= items[index].revision {
-            items[index] = value
+        if let index = inboxItems.firstIndex(where: { $0.id == value.id }), value.revision >= inboxItems[index].revision {
+            inboxItems[index] = value
         }
         if thread?.id == value.id, let revision = thread?.revision, value.revision >= revision {
             thread = value
@@ -920,12 +977,15 @@ public final class EmailViewModel: ObservableObject {
     private func observeArchive(_ value: EmailThreadView) {
         guard acceptsArchiveOperation(value), let operation = value.archiveOperation else { return }
         if operation.status == "completed" || operation.status == "failed" || operation.status == "uncertain" {
+            archiveHiddenThreads.remove(value.id)
             archiveRequests[value.id] = nil
             archiveErrors[value.id] = nil
             archiveReadErrors.remove(value.id)
             archiveTasks[value.id]?.cancel()
             archiveTasks[value.id] = nil
-        } else if active, archiveTasks[value.id] == nil {
+        } else {
+            if operation.targetArchived { archiveHiddenThreads.insert(value.id) }
+            guard active, archiveTasks[value.id] == nil else { return }
             let connection = generation
             let foreground = activation
             archiveTasks[value.id] = Task { [weak self] in

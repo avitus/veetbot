@@ -72,6 +72,13 @@ the unused profile. Start over provides the same recovery for a closed,
 reloaded, or expired one-time link. The installed version and build number are
 shown under Data & Privacy; this recovery release is 0.1.1 (2).
 
+In Email feedback, **This kind of content** offers the topics identified on the
+selected thread. Choose a topic before marking it Important or Less important;
+the confirmation names that topic and offers Undo. If no topics are available,
+the view explains that feedback can still apply to **This thread**. Older
+servers that omit topics remain readable. Missing or unsupported feedback
+targets return selection guidance without echoing private content.
+
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its
 wire, transport, reducer, SSE, and local-history tests:

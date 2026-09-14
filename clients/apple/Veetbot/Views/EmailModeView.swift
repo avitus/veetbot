@@ -32,6 +32,9 @@ public struct EmailModeView: View {
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
+            #if os(macOS)
+            macSplit
+            #else
             if #available(iOS 16, macOS 13, *) {
                 if directSelection {
                     NavigationSplitView {
@@ -62,6 +65,7 @@ public struct EmailModeView: View {
                     detail.frame(height: macColumnHeight)
                 }
             }
+            #endif
         }
         .tint(EmailSurface.accent)
         .sheet(isPresented: Binding(get: { model.review != nil }, set: { if !$0 { model.closeReview() } })) {
@@ -83,6 +87,21 @@ public struct EmailModeView: View {
         EmailThreadScreen(model: model, discussInChat: discussInChat).id(model.selectedThreadID)
     }
 
+    #if os(macOS)
+    /// Uses a native divider while the shared root owns the Mac window toolbar.
+    private var macSplit: some View {
+        HSplitView {
+            inbox
+                .frame(minWidth: 280, idealWidth: 340, maxWidth: 560)
+                .frame(height: macColumnHeight)
+            detail
+                .frame(minWidth: 360, maxWidth: .infinity)
+                .frame(height: macColumnHeight)
+                .layoutPriority(1)
+        }
+    }
+    #endif
+
     /// Bounds AppKit split-view columns without imposing a fixed height on compact iOS navigation.
     private var macColumnHeight: CGFloat? {
         #if os(macOS)
@@ -100,6 +119,7 @@ public struct EmailModeView: View {
     private var inbox: some View {
         VStack(spacing: 0) {
             inboxHeader
+                .fixedSize(horizontal: false, vertical: true)
             Divider()
             List {
                 if model.unavailable {
@@ -121,6 +141,18 @@ public struct EmailModeView: View {
                         .buttonStyle(.bordered)
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
+                if let pause = model.budgetPauseMessage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Automatic email work is paused", systemImage: "pause.circle").appFont(.headline)
+                        Text(pause).appFont(.callout).foregroundColor(.secondary)
+                        if let retryAt = model.budgetRetryAt {
+                            Text("Next automatic check: \(retryAt.formatted(date: .abbreviated, time: .shortened))")
+                                .appFont(.caption).foregroundColor(.secondary)
+                        }
+                        Button("Check again") { Task { await model.refresh() } }
+                            .buttonStyle(.bordered)
+                    }.padding(.vertical, 12).emailHideSeparator()
+                }
                 if model.newImportantCount > 0 {
                     Button {
                         model.showNewItems()
@@ -135,16 +167,8 @@ public struct EmailModeView: View {
                 if model.isLoading && model.items.isEmpty {
                     ProgressView("Finding your mail…").padding(.vertical, 32)
                         .frame(maxWidth: .infinity).emailHideSeparator()
-                } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil {
+                } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil && model.budgetPauseMessage == nil {
                     emptyInbox.emailHideSeparator()
-                }
-                if !model.items.isEmpty {
-                    Text("Check a conversation to archive it in Gmail.")
-                        .appFont(.caption).foregroundColor(.secondary).emailHideSeparator()
-                    if model.accounts.contains(where: { $0.archiveSupported != true }) {
-                        Text("Gmail archiving is unavailable for accounts without archive support. Email browsing remains available.")
-                            .appFont(.caption).foregroundColor(.secondary).emailHideSeparator()
-                    }
                 }
                 ForEach(model.items) { thread in
                     HStack(spacing: 8) {
@@ -154,7 +178,7 @@ public struct EmailModeView: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .listRowBackground(
                         thread.id == model.selectedThreadID ? EmailSurface.accent.opacity(0.10) : Color.clear)
                 }
@@ -171,6 +195,12 @@ public struct EmailModeView: View {
                 Divider()
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 12) {
+                        Text("Check a conversation to archive it in Gmail.")
+                            .appFont(.caption).foregroundColor(.secondary)
+                        if visibleAccounts.contains(where: { $0.archiveSupported != true }) {
+                            Text("Gmail archiving is unavailable for accounts without archive support. Email browsing remains available.")
+                                .appFont(.caption).foregroundColor(.secondary)
+                        }
                         ForEach(visibleAccounts) { account in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(account.label).appFont(.callout, weight: .semibold)
@@ -195,7 +225,7 @@ public struct EmailModeView: View {
                     )
                     .appFont(.caption).foregroundColor(mailboxNeedsAttention ? .orange : .secondary)
                 }
-                .padding(16)
+                .padding(.horizontal, 12).padding(.vertical, 10)
                 .accessibilityIdentifier("email.mailbox-status")
             }
         }
@@ -203,9 +233,9 @@ public struct EmailModeView: View {
         .navigationTitle("Email")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
-            ToolbarItem {
+            // Remove inactive items themselves so the other mode inherits no empty toolbar slots.
+            ToolbarItemGroup {
                 if activeMode == .email {
                     Button {
                         showingLearning = true
@@ -214,41 +244,29 @@ public struct EmailModeView: View {
                     }
                     .accessibilityLabel("Email learning").help("Email learning")
                     .accessibilityIdentifier("email.learning")
-
+                    EmailRefreshButton(model: model)
                 }
             }
-            ToolbarItem {
-                if activeMode == .email {
-                    Button {
-                        Task { await model.refresh() }
-                    } label: {
-                        if model.isRefreshing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
-                    }
-                    .disabled(model.isRefreshing || model.unavailable)
-                    .accessibilityLabel("Refresh email").help("Refresh email")
-                    .accessibilityIdentifier("email.refresh")
-
-                }
-            }
-
         }
+        #endif
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("email.inbox")
     }
 
+    /// Present account and inbox controls above the priority rows.
     private var inboxHeader: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(model.listView == "priority" ? "Your priorities" : "Other mail")
-                        .appFont(.title2, weight: .bold)
-                    Text(
-                        model.listView == "priority"
-                            ? "What needs your attention, across your accounts." : "Find what deserves a closer look."
-                    )
-                    .appFont(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Picker("Accounts", selection: Binding(get: { model.selectedAccountID }, set: { model.setAccount($0) }))
+                {
+                    Text("All accounts").tag(String?.none)
+                    ForEach(model.accounts) { account in Text(account.label).tag(Optional(account.id)) }
                 }
-                Spacer(minLength: 0)
+                .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
+                .accessibilityIdentifier("email.accounts")
+                Spacer(minLength: 8)
+                Text("\(model.items.count) \(model.items.count == 1 ? "thread" : "threads")")
+                    .appFont(.caption).foregroundColor(.secondary).fixedSize()
             }
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundColor(.secondary)
@@ -263,26 +281,14 @@ public struct EmailModeView: View {
                     }
                     .buttonStyle(.plain).foregroundColor(.secondary).accessibilityLabel("Clear search")
                 }
-            }.appFont(.callout).padding(10).background(Color.primary.opacity(0.045))
+            }.appFont(.callout).padding(8).background(Color.primary.opacity(0.045))
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             Picker("Mail view", selection: Binding(get: { model.listView }, set: { model.setListView($0) })) {
                 Text("Important").tag("priority")
                 Text("Other mail").tag("other")
             }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Mail view")
                 .accessibilityIdentifier("email.mail-view")
-            HStack {
-                Picker("Accounts", selection: Binding(get: { model.selectedAccountID }, set: { model.setAccount($0) }))
-                {
-                    Text("All accounts").tag(String?.none)
-                    ForEach(model.accounts) { account in Text(account.label).tag(Optional(account.id)) }
-                }
-                .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
-                .accessibilityIdentifier("email.accounts")
-                Spacer(minLength: 8)
-                Text("\(model.items.count) \(model.items.count == 1 ? "thread" : "threads")")
-                    .appFont(.caption).foregroundColor(.secondary)
-            }
-        }.padding(20)
+        }.padding(12)
     }
 
     private var mailboxNeedsAttention: Bool {
@@ -337,27 +343,28 @@ public struct EmailModeView: View {
 
     /// Separates sender, account, subject and attention state so a thread can be scanned before opening.
     private func threadLabel(_ thread: EmailThreadView) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 10) {
-                EmailAvatar(sender: thread.senders.first ?? "?")
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(thread.senders.joined(separator: ", ")).appFont(.callout, weight: .semibold).lineLimit(1)
-                    Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
-                        .appFont(.caption).foregroundColor(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(thread.senders.joined(separator: ", ")).appFont(.callout, weight: .semibold).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(thread.updatedAt, format: .dateTime.month(.abbreviated).day())
-                    .appFont(.caption).foregroundColor(.secondary)
+                    .appFont(.caption).foregroundColor(.secondary).fixedSize()
             }
-            Text(thread.subject.isEmpty ? "No subject" : thread.subject).appFont(.headline).lineLimit(2)
-            Text(thread.summary).appFont(.callout).foregroundColor(.secondary).lineLimit(2)
-            EmailThreadStatus(thread: thread)
+            Text(thread.subject.isEmpty ? "No subject" : thread.subject)
+                .appFont(.callout, weight: .medium).lineLimit(1)
+            Text(thread.summary).appFont(.caption).foregroundColor(.secondary).lineLimit(1)
+            HStack(spacing: 6) {
+                Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
+                    .appFont(.caption).foregroundColor(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+                EmailThreadStatus(thread: thread)
+            }
             if !thread.complete {
                 Label("Partial thread", systemImage: "exclamationmark.circle").appFont(.caption).foregroundColor(
                     .orange)
             }
         }
-        .padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        .padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
 }
 
@@ -405,7 +412,7 @@ private struct EmailArchiveButton: View {
 }
 
 private struct EmailThreadScreen: View {
-    private enum Field: Hashable { case to, cc, bcc, subject, body, topic, feedback, refinement }
+    private enum Field: Hashable { case to, cc, bcc, subject, body, feedback, refinement }
     @ObservedObject var model: EmailViewModel
     let discussInChat: () async -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -601,6 +608,7 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Offer explicit importance feedback with supported person and topic targets.
     private var feedback: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Apply to", selection: $target) {
@@ -614,7 +622,19 @@ private struct EmailThreadScreen: View {
                 }
                 .accessibilityIdentifier("email.feedback-person")
             } else if target == .topic {
-                TextField("Content topic", text: $targetValue).focused($focusedField, equals: .topic)
+                let topics = model.thread?.feedbackTopics ?? []
+                Picker("Content topic", selection: $targetValue) {
+                    Text("Choose a topic").tag("")
+                    ForEach(topics, id: \.self) { topic in Text(topic).tag(topic) }
+                }
+                .accessibilityIdentifier("email.feedback-topic")
+                .onChange(of: topics) { values in
+                    if !values.contains(targetValue) { targetValue = "" }
+                }
+                if topics.isEmpty {
+                    Text("No content topics are available yet. You can apply feedback to This thread.")
+                        .appFont(.caption).foregroundColor(.secondary)
+                }
             }
             TextField("Explain what matters (optional)", text: $explanation).focused($focusedField, equals: .feedback)
                 .textFieldStyle(.roundedBorder)
@@ -636,6 +656,7 @@ private struct EmailThreadScreen: View {
                 .accessibilityIdentifier("email.feedback-less-important")
             }.buttonStyle(.bordered)
                 .disabled(target == .person && targetValue.isEmpty)
+                .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
             Divider()
             Text("Does this thread need a reply?").appFont(.caption).foregroundColor(.secondary)
             HStack {
@@ -907,7 +928,24 @@ private struct EmailEmptyState: View {
     }
 }
 
-private struct EmailLearningScreen: View {
+/// Observes refresh state directly even when the window toolbar is owned by the app coordinator's view.
+struct EmailRefreshButton: View {
+    @ObservedObject var model: EmailViewModel
+
+    /// Present the manual refresh action and its loading state.
+    var body: some View {
+        Button {
+            Task { await model.refresh() }
+        } label: {
+            if model.isRefreshing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+        }
+        .disabled(model.isRefreshing || model.unavailable)
+        .accessibilityLabel("Refresh email").help("Refresh email")
+        .accessibilityIdentifier("email.refresh")
+    }
+}
+
+struct EmailLearningScreen: View {
     @ObservedObject var model: EmailViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var resetScope: String?
@@ -924,7 +962,7 @@ private struct EmailLearningScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(
-                        "Veetbot analyzes received and Sent email, including older correspondence, to learn what matters, your writing style, and useful memories shared with Chat and both accounts. Selected email content is processed by Veetbot's hosted models. This updates your assistant's preferences without fine-tuning a model."
+                        "Veetbot automatically analyzes received and Sent email from the latest 90 days to learn what matters, your writing style, and useful memories shared with Chat and both accounts. Selected email content is processed by Veetbot's hosted models. This updates your assistant's preferences without fine-tuning a model."
                     )
                     .appFont(.caption).foregroundColor(.secondary)
                     .accessibilityIdentifier("email.learning-disclosure")
@@ -936,8 +974,8 @@ private struct EmailLearningScreen: View {
                         .appFont(.caption).foregroundColor(.secondary)
                         Text(
                             learning.historyComplete
-                                ? "Accessible mail retrieved; analysis continues as needed."
-                                : "Historical retrieval is incomplete."
+                                ? "The 90-day window has been retrieved; analysis continues as needed."
+                                : "Retrieval of the latest 90 days is incomplete. Older history is paused."
                         )
                         .appFont(.caption).foregroundColor(.secondary)
                         Button(learning.paused ? "Resume learning" : "Pause learning") {
@@ -965,8 +1003,8 @@ private struct EmailLearningScreen: View {
                                             .appFont(.callout)
                                         Text(
                                             account.historyComplete
-                                                ? "Accessible mail retrieved; analysis continues as needed."
-                                                : "More history remains. Learning continues while Email is active."
+                                                ? "The 90-day window has been retrieved; analysis continues as needed."
+                                                : "More of the 90-day window remains. Older history is paused."
                                         )
                                         .appFont(.caption).foregroundColor(.secondary)
                                     }

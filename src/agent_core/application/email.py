@@ -18,11 +18,13 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
+    EMAIL_HISTORY_DAYS,
     EMAIL_POLICY_VERSION,
     EMAIL_SLICE_RESERVATION,
     EmailAccount,
@@ -256,6 +258,7 @@ class EmailExperienceService:
         cursor: str | None = None,
         limit: int = 5,
     ) -> dict[str, object]:
+        """List scoped email summaries after archive reconciliation, expiry, and owner feedback."""
         require_scope(principal, "email.read")
         if not 1 <= limit <= 100 or (cursor is not None and not cursor.isdecimal()):
             raise ValueError("email page is malformed")
@@ -271,7 +274,7 @@ class EmailExperienceService:
                 ):
                     continue
                 reconciled = await self._reconcile_archive_in(uow, principal, stored)
-                threads.append(apply_feedback(reconciled, feedback))
+                threads.append(apply_feedback(reconciled, feedback, now=self.clock.now()))
         eligible: list[EmailThread] = []
         for thread in threads:
             if (
@@ -307,6 +310,7 @@ class EmailExperienceService:
         }
 
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]:
+        """Read a scoped thread with its current attention state and draft projection."""
         require_scope(principal, "email.read")
         await self.expire_cache(principal)
         async with self.uow_factory() as uow, uow.email.lock(principal):
@@ -316,7 +320,9 @@ class EmailExperienceService:
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )
-            selected = apply_feedback(thread, await self._feedback(uow.email, principal))
+            selected = apply_feedback(
+                thread, await self._feedback(uow.email, principal), now=self.clock.now()
+            )
             result = selected.model_dump(mode="json")
             draft = (
                 None
@@ -340,6 +346,7 @@ class EmailExperienceService:
         expected_revision: int | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
+        """Persist replay-safe owner feedback for one supported thread, person, or topic."""
         require_scope(principal, "email.write")
         now = self.clock.now()
         encoded = json.dumps(
@@ -360,7 +367,9 @@ class EmailExperienceService:
                 return {
                     "feedback_id": replay.payload["feedback_id"],
                     "thread": thread_summary(
-                        apply_feedback(thread, await self._feedback(uow.email, principal))
+                        apply_feedback(
+                            thread, await self._feedback(uow.email, principal), now=self.clock.now()
+                        )
                     ),
                 }
             if expected_revision is not None and thread.revision != expected_revision:
@@ -375,10 +384,14 @@ class EmailExperienceService:
             if target_value is not None:
                 target_value = addresses([target_value])[0] if target == "person" else target_value
                 if target_value not in values:
-                    raise ValueError("feedback target is not supported by this thread")
+                    raise EmailFeedbackTargetError(
+                        "feedback target is not supported by this thread"
+                    )
                 values = [target_value]
             if len(values) != 1:
-                raise ValueError("choose the specific person or topic for this feedback")
+                raise EmailFeedbackTargetError(
+                    "choose the specific person or topic for this feedback"
+                )
             item = EmailFeedback(
                 id=self.ids.new_id(),
                 thread_id=thread.id,
@@ -407,11 +420,14 @@ class EmailExperienceService:
             return {
                 "feedback_id": str(item.id),
                 "thread": thread_summary(
-                    apply_feedback(thread, await self._feedback(uow.email, principal))
+                    apply_feedback(
+                        thread, await self._feedback(uow.email, principal), now=self.clock.now()
+                    )
                 ),
             }
 
     async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]:
+        """Undo one feedback record and rebuild the thread projection from surviving evidence."""
         require_scope(principal, "email.write")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             item = await read_value(
@@ -431,7 +447,9 @@ class EmailExperienceService:
                 await self._bump_profile(uow.email, principal)
             thread = await self._thread(uow.email, principal, item.thread_id)
             return thread_summary(
-                apply_feedback(thread, await self._feedback(uow.email, principal))
+                apply_feedback(
+                    thread, await self._feedback(uow.email, principal), now=self.clock.now()
+                )
             )
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:
@@ -738,24 +756,72 @@ class EmailExperienceService:
     async def _check_budget(self, store: EmailStore, principal: Principal, amount: Decimal) -> None:
         """Count settled usage and unresolved reservations against both windows."""
         now = self.clock.now().astimezone(UTC)
-        daily = Decimal("0")
-        monthly = Decimal("0")
+        daily_spent = Decimal("0")
+        monthly_spent = Decimal("0")
+        reserved = Decimal("0")
+        settled: list[tuple[datetime, Decimal]] = []
+        spent_by_day: dict[str, Decimal] = {}
         async for record in task_records(store, principal, created_since=now - timedelta(days=30)):
             task = EmailTask.model_validate(record.payload)
-            cost = task.reservation if task.settled_cost is None else task.settled_cost
-            if task.settled_cost is None or task.created_at.astimezone(UTC).date() == now.date():
-                daily += cost
-            if task.settled_cost is None or task.created_at >= now - timedelta(days=30):
-                monthly += cost
+            if task.settled_cost is None:
+                reserved += task.reservation
+            else:
+                created = task.created_at.astimezone(UTC)
+                settled.append((created, task.settled_cost))
+                day = created.date().isoformat()
+                spent_by_day[day] = spent_by_day.get(day, Decimal("0")) + task.settled_cost
+                monthly_spent += task.settled_cost
+                if created.date() == now.date():
+                    daily_spent += task.settled_cost
         if (
-            daily + amount > self.budget_limits.daily_cost
-            or monthly + amount > self.budget_limits.monthly_cost
+            daily_spent + reserved + amount <= self.budget_limits.daily_cost
+            and monthly_spent + reserved + amount <= self.budget_limits.monthly_cost
         ):
-            raise BudgetExceededError(
-                "email_aggregate_cost",
-                "Automatic email work has reached its cost ceiling; "
-                "cached mail and editing remain available.",
-            )
+            return
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Do not promise that midnight renews a rolling-month or unresolved hold.
+        candidates = sorted(
+            {
+                midnight,
+                *(created + timedelta(days=30, microseconds=1) for created, _ in settled),
+            }
+        )
+        retry_at = now + timedelta(hours=1)
+        settled.sort()
+        monthly = monthly_spent
+        expired = 0
+        for candidate in candidates:
+            if candidate <= now:
+                continue
+            daily = spent_by_day.get(candidate.date().isoformat(), Decimal("0"))
+            while expired < len(settled) and settled[expired][0] < candidate - timedelta(days=30):
+                monthly -= settled[expired][1]
+                expired += 1
+            if (
+                daily + reserved + amount <= self.budget_limits.daily_cost
+                and monthly + reserved + amount <= self.budget_limits.monthly_cost
+            ):
+                retry_at = candidate
+                break
+        raise BudgetExceededError(
+            "email_aggregate_cost",
+            f"Automatic email work is paused. Today: ${daily_spent:.2f} spent, "
+            f"${reserved:.2f} reserved, ${self.budget_limits.daily_cost:.2f} limit. "
+            f"Rolling 30 days: ${monthly_spent:.2f} spent, "
+            f"${self.budget_limits.monthly_cost:.2f} limit. "
+            f"The next batch needs ${amount:.2f} available. "
+            "Cached mail and editing remain available.",
+            details={
+                "daily_spent": str(daily_spent),
+                "daily_reserved": str(reserved),
+                "daily_limit": str(self.budget_limits.daily_cost),
+                "monthly_spent": str(monthly_spent),
+                "monthly_reserved": str(reserved),
+                "monthly_limit": str(self.budget_limits.monthly_cost),
+                "next_reservation": str(amount),
+                "retry_at": retry_at.isoformat(),
+            },
+        )
 
     async def submit_task(
         self,
@@ -1608,6 +1674,7 @@ class EmailExperienceService:
     async def learning_context(
         self, principal: Principal, thread: EmailThread | None
     ) -> dict[str, object]:
+        """Assemble bounded owner evidence and a fingerprint of assessment-relevant inputs."""
         async with self.uow_factory() as uow:
             state = await self._learning_state(uow.email, principal)
             feedback = await self._feedback(uow.email, principal)
@@ -1641,7 +1708,7 @@ class EmailExperienceService:
             ),
             reverse=True,
         )
-        return {
+        result: dict[str, object] = {
             "profile_revision": state.profile_revision,
             "paused": state.paused,
             "owner_feedback": [
@@ -1664,6 +1731,21 @@ class EmailExperienceService:
                 "facts and decisions remain specific to their source thread."
             ),
         }
+        relevant = {
+            "owner_feedback": result["owner_feedback"],
+            "shared_memories": result["shared_memories"],
+            "relationships": sorted(
+                (
+                    json.dumps(item, sort_keys=True)
+                    for item in relationships
+                    if correspondents.intersection(cast(list[str], item["recipients"]))
+                ),
+            ),
+        }
+        result["assessment_context"] = hashlib.sha256(
+            json.dumps(relevant, sort_keys=True).encode()
+        ).hexdigest()
+        return result
 
     async def _archive_observed_in(
         self,
@@ -1899,7 +1981,9 @@ class EmailExperienceService:
                     and previous.in_inbox == in_inbox
                     and previous.archive_operation == archive_operation
                 ):
-                    await self._learn_history(uow.email, principal, previous)
+                    await self._learn_history(
+                        uow.email, principal, previous, automatic=run is not None
+                    )
                     return previous
                 # Keep legacy label-bearing fingerprints stable: assessments and
                 # semantic evidence are keyed to that existing content identity.
@@ -1977,12 +2061,18 @@ class EmailExperienceService:
                     ),
                 },
             )
-            await self._learn_history(uow.email, principal, thread)
+            await self._learn_history(uow.email, principal, thread, automatic=run is not None)
             return thread
 
     async def _learn_history(
-        self, store: EmailStore, principal: Principal, thread: EmailThread
+        self,
+        store: EmailStore,
+        principal: Principal,
+        thread: EmailThread,
+        *,
+        automatic: bool = False,
     ) -> None:
+        """Learn eligible owner-authored Sent evidence without duplicating source contributions."""
         state = await self._learning_state(store, principal)
         if state.paused:
             return
@@ -2012,7 +2102,11 @@ class EmailExperienceService:
         changed = False
         for message in thread.messages:
             if (
-                message.direction != "sent"
+                (
+                    automatic
+                    and message.sent_at < self.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
+                )
+                or message.direction != "sent"
                 or not message.complete
                 or not owned.intersection(addresses([message.sender]))
             ):
@@ -2106,6 +2200,7 @@ class EmailExperienceService:
         run: Run | None = None,
         lease: WorkerLease | None = None,
     ) -> EmailThread:
+        """Validate and save features against the current source and owner-profile revisions."""
         async with self.uow_factory() as uow, uow.email.lock(principal):
             await self._fence(uow, run, lease)
             thread = await self._thread(uow.email, principal, thread_id)
@@ -2117,10 +2212,24 @@ class EmailExperienceService:
                 raise ConflictError("email source or learning changed during assessment")
 
             def score(name: str) -> float:
+                """Validate one normalized importance feature before saving the assessment."""
                 value = assessment.get(name, 0)
                 if not isinstance(value, (int, float)) or not 0 <= value <= 1:
                     raise ValueError("email assessment feature is invalid")
                 return float(value)
+
+            expiry_value = assessment.get("attention_expires_at")
+            expires_at = None
+            if expiry_value is not None:
+                if isinstance(expiry_value, datetime):
+                    expires_at = expiry_value
+                elif isinstance(expiry_value, str):
+                    expires_at = datetime.fromisoformat(expiry_value)
+                else:
+                    raise ValueError("email attention expiry is invalid")
+                if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+                    raise ValueError("email attention expiry requires a timezone")
+                expires_at = expires_at.astimezone(UTC)
 
             content = score("content_importance")
             relationship = score("relationship_importance")
@@ -2170,13 +2279,16 @@ class EmailExperienceService:
                     "reply_blocked_reason": assessment.get("reply_blocked_reason"),
                     "profile_revision": state.profile_revision,
                     "assessment_version": EMAIL_POLICY_VERSION,
+                    "attention_expires_at": expires_at,
                 }
             )
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )
             await self._put_data(uow.email, principal, "assessment", str(thread.id), assessment)
-            return apply_feedback(thread, await self._feedback(uow.email, principal))
+            return apply_feedback(
+                thread, await self._feedback(uow.email, principal), now=self.clock.now()
+            )
 
     async def save_generated_draft(
         self,

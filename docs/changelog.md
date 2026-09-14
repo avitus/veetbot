@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-13 — Website Access redirect failures are actionable
+
+- A website that redirects the login page to an origin the profile does not
+  list, such as a bare domain redirecting to its `www` address, now returns a
+  `400 malformed_request` that explains the fix instead of a `500` internal
+  error. The isolated browser runtime reports the refused redirect as
+  `tool.browser.url_disallowed` and other launch navigation failures as
+  `tool.browser.provider_unavailable`; no raw browser text leaves the service.
+- The rejected attempt creates no ceremony record and leaves the profile
+  available for a corrected retry.
+
+## 2026-09-13 — Immediate email archiving
+
+- Checking Archive in Gmail removes the email immediately while archiving
+  finishes in the background. Routine progress and success messages are silent.
+- Other emails remain actionable; failed or uncertain archives return to the
+  list with an error. Refreshes preserve pending removal and unsaved replies.
+
 ## 2026-09-12 — Faster local verification
 
 - `make check` overlaps two independent jobs, and local static tests use the

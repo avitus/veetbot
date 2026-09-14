@@ -71,6 +71,7 @@ public struct RootView: View {
     #endif
     #if os(macOS)
     @StateObject private var settingsWindowPresenter = SettingsWindowPresenter()
+    @State private var showingEmailLearning = false
     #endif
 
     public init(model: ChatViewModel) {
@@ -203,6 +204,53 @@ public struct RootView: View {
             }
         }
         .environment(\.activeClientMode, coordinator.mode)
+        #if os(macOS)
+        // One window-level owner prevents the hidden navigation tree from replacing active controls.
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if coordinator.mode == .chat {
+                    Button(action: presentSettings) {
+                        Image(systemName: "gearshape")
+                            .foregroundColor(AppTheme.orange)
+                    }
+                    .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("sidebar.settings")
+                    Button {
+                        showingGlobalMemory = true
+                    } label: {
+                        Image(systemName: "brain.head.profile")
+                            .foregroundColor(AppTheme.turquoise)
+                    }
+                    .accessibilityLabel("Memory")
+                    .accessibilityIdentifier("sidebar.memory")
+                    Button {
+                        showingGlobalPersona = true
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                            .foregroundColor(AppTheme.turquoise)
+                    }
+                    .accessibilityLabel("Persona")
+                    .accessibilityIdentifier("sidebar.persona")
+                    Button {
+                        showingGlobalSchedules = true
+                    } label: {
+                        Image(systemName: "calendar")
+                            .foregroundColor(AppTheme.orange)
+                    }
+                    .accessibilityLabel("Schedules")
+                    .accessibilityIdentifier("sidebar.schedules")
+                } else {
+                    Button { showingEmailLearning = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Email learning").help("Email learning")
+                    .accessibilityIdentifier("email.learning")
+                    EmailRefreshButton(model: coordinator.email)
+                }
+            }
+        }
+        .sheet(isPresented: $showingEmailLearning) { EmailLearningScreen(model: coordinator.email) }
+        #endif
     }
 
     private func updateEmailActivity() {
@@ -345,7 +393,7 @@ private struct SessionSidebar: View {
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
 
-    /// Presents session navigation and contributes global toolbar actions only while Chat is active.
+    /// Presents session navigation and the iOS Chat overflow menu.
     var body: some View {
         Group {
             if #available(iOS 16.0, macOS 13.0, *) {
@@ -377,97 +425,49 @@ private struct SessionSidebar: View {
                 "This permanently deletes the conversation and its associated data from the server and all synchronized devices. This cannot be undone."
             )
         }
+        #if os(iOS)
         .toolbar {
-            #if os(macOS)
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
-                        Button(action: openSettings) {
-                            Image(systemName: "gearshape")
-                                .foregroundColor(AppTheme.orange)
-                        }
-                        .accessibilityLabel("Settings")
-                        .accessibilityIdentifier("sidebar.settings")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
+            ToolbarItem(placement: .automatic) {
+                if activeMode == .chat {
+                    Menu {
                         Button {
                             showingMemoryBrowser = true
                         } label: {
-                            Image(systemName: "brain.head.profile")
-                                .foregroundColor(AppTheme.turquoise)
+                            Label("Memory", systemImage: "brain.head.profile")
                         }
-                        .accessibilityLabel("Memory")
                         .accessibilityIdentifier("sidebar.memory")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
-                        Button {
-                            showingPersonaEditor = true
-                        } label: {
-                            Image(systemName: "person.crop.circle")
-                                .foregroundColor(AppTheme.turquoise)
-                        }
-                        .accessibilityLabel("Persona")
-                        .accessibilityIdentifier("sidebar.persona")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
+
                         Button {
                             showingScheduleBrowser = true
                         } label: {
-                            Image(systemName: "calendar")
-                                .foregroundColor(AppTheme.orange)
+                            Label("Schedules", systemImage: "calendar")
                         }
-                        .accessibilityLabel("Schedules")
                         .accessibilityIdentifier("sidebar.schedules")
-                    }
-                }
-            #else
-                ToolbarItem(placement: .automatic) {
-                    if activeMode == .chat {
-                        Menu {
-                            Button {
-                                showingMemoryBrowser = true
-                            } label: {
-                                Label("Memory", systemImage: "brain.head.profile")
-                            }
-                            .accessibilityIdentifier("sidebar.memory")
 
-                            Button {
-                                showingScheduleBrowser = true
-                            } label: {
-                                Label("Schedules", systemImage: "calendar")
-                            }
-                            .accessibilityIdentifier("sidebar.schedules")
-
-                            Button {
-                                showingPersonaEditor = true
-                            } label: {
-                                Label("Persona", systemImage: "person.crop.circle")
-                            }
-                            .accessibilityIdentifier("sidebar.persona")
-
-                            Divider()
-
-                            Button(action: openSettings) {
-                                Label("Settings", systemImage: "gearshape")
-                            }
-                            .accessibilityIdentifier("sidebar.settings")
+                        Button {
+                            showingPersonaEditor = true
                         } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .frame(minWidth: 44, minHeight: 44)
+                            Label("Persona", systemImage: "person.crop.circle")
                         }
-                        .accessibilityLabel("More")
-                        .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
-                        .accessibilityIdentifier("sidebar.more")
-                    }
-                }
-            #endif
+                        .accessibilityIdentifier("sidebar.persona")
 
+                        Divider()
+
+                        Button(action: openSettings) {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        .accessibilityIdentifier("sidebar.settings")
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("More")
+                    .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
+                    .accessibilityIdentifier("sidebar.more")
+                }
+            }
         }
+        #endif
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
         }

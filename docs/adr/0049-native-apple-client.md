@@ -63,7 +63,8 @@ pretending SwiftData is available there.
    count-labelled activity bundle. Every invocation, argument, and result stays
    available inside the expanded bundle, along with its individual risk; the
    collapsed bundle presents the highest risk among its calls. Messages,
-   different tools, approvals, and non-success outcomes break the bundle.
+   different tools, approvals, and non-success outcomes break the bundle,
+   except for the owner-requested fetch presentation refinement below.
 9. **Execute native tests under full Xcode in hosted CI.** Command Line Tools may
    compile a Swift Testing bundle without running its tests. The repository's
    `make test-apple` target therefore refuses that environment and selects full
@@ -72,6 +73,19 @@ pretending SwiftData is available there.
    that exercises conversation navigation without external credentials.
    CircleCI runs both targets on a pinned Xcode macOS executor. Server release
    packaging depends on that job, so native-client regressions block delivery.
+
+## Fetch presentation refinement (2026-09-14)
+
+The owner requested consolidation of the briefing's adjacent `web.fetch`
+calls even when successful fetches alternate with unavailable or failed
+fetches. A fetch bundle may therefore contain completed, rejected, unavailable,
+and failed calls. An error result on a completed fetch is presented as failed.
+Its collapsed summary enumerates the outcomes, and each expanded row retains
+its status, URL, arguments, result, and risk. Queued or running calls,
+approval-bound calls, denials, and uncertain outcomes remain standalone
+boundaries. Other tools retain their existing successful-completion rule.
+This changes presentation only, without changing execution, retry, policy,
+or the durable event history.
 
 ## Consequences
 

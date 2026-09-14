@@ -176,7 +176,7 @@ rate_limited                429  reserved; see "Limits" below
 shape now is free; discovering after release that clients cannot
 distinguish it from `conflict` is not.
 
-### Two codes carry `details`, and the rest carry nothing
+### Three codes carry `details`, and the rest carry nothing
 
 ```json
 {
@@ -208,9 +208,17 @@ conflict   approval_already_resolved  approval_id, decision
 ```
 
 `tool_validation_error` carries `{"tool_name": ..., "errors": [...]}`
-where `errors` is the validator's path-and-message list. No other code
-carries a populated `details` in version 0.1, and adding one is a minor
-version change.
+where `errors` is the validator's path-and-message list. Together with the
+automatic-email `budget_exceeded` case below, these are the only codes with
+populated `details`; adding another is a minor version change.
+
+Milestone 26 adds typed automatic-email budget details under ADR-0096:
+`budget_exceeded` with `reason: email_aggregate_cost` carries decimal-string
+`daily_spent`, `daily_reserved`, `daily_limit`, `monthly_spent`,
+`monthly_reserved`, `monthly_limit`, and `next_reservation`, plus an ISO-8601 `retry_at` for the next
+admission check. It is not a promise of replenishment: new spending or unresolved
+provider accounting may keep admission closed. Other budget failures retain
+their existing empty details. These responses remain private and non-cacheable.
 
 ## Request identifiers, and their relationship to traces
 

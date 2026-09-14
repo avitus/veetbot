@@ -212,4 +212,5 @@ nav:
       - ADR-0093 Independent memory model policy: adr/0093-independent-memory-model-policy.md
       - ADR-0094 Context authority at run boundaries: adr/0094-context-authority-at-run-boundaries.md
       - ADR-0095 Owner-requested Gmail archive: adr/0095-owner-requested-gmail-archive.md
+      - ADR-0096 Ninety-day email catch-up: adr/0096-bounded-email-catch-up.md
   - Changelog: changelog.md

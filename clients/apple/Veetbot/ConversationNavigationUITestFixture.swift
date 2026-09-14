@@ -119,7 +119,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
             let handled = Self.emailLock.withLock { Self.emailHandled || Self.emailArchived }
             let included = view == "all" || (view == "other" ? handled : !handled)
-            body = "{\"items\":[\(included ? Self.emailThreadJSON : "")],\"next_cursor\":null}"
+            let items = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
+                ? Self.fullInboxJSON : (included ? Self.emailThreadJSON : "")
+            body = "{\"items\":[\(items)],\"next_cursor\":null}"
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
             let values = requestJSON()
             Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
@@ -313,6 +315,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
 
     private static let emailThreadID = "00000000-0000-0000-0000-000000000801"
+    /// Five synthetic priorities exercise real list geometry without using private mail.
+    private static var fullInboxJSON: String {
+        let subjects = ["Board agenda", "Design review for the autumn release", "Friday planning notes",
+                        "Updated project timeline", "Travel details for next week"]
+        return subjects.enumerated().map { index, subject in
+            emailThreadJSON
+                .replacingOccurrences(of: "\"id\":\"\(emailThreadID)\"",
+                                      with: "\"id\":\"00000000-0000-0000-0000-00000000080\(index + 1)\"")
+                .replacingOccurrences(of: "\"subject\":\"Board agenda\"", with: "\"subject\":\"\(subject)\"")
+        }.joined(separator: ",")
+    }
     private static let emailDraftID = "00000000-0000-0000-0000-000000000802"
     private static let emailRunID = "00000000-0000-0000-0000-000000000803"
     private static let emailApprovalID = "00000000-0000-0000-0000-000000000804"
@@ -341,7 +354,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             archiveOperation = "{\"operation_id\":\"\(emailThreadID)\",\"run_id\":\"\(emailRunID)\",\"target_archived\":\(target),\"status\":\"\(status)\",\"error\":null}"
         } else { archiveOperation = "null" }
         return """
-        {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
+        {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","topics":["Board planning","Hiring"],"senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
         """.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"dismissed_revision\":\(dismissedRevision),\"in_inbox\":\(!archived),\"archive_operation\":\(archiveOperation),\"revision\":1,\"summary\"")
     }
     private static var emailApprovalJSON: String {

@@ -20,6 +20,7 @@ from playwright.async_api import (
     ElementHandle,
     Page,
     Playwright,
+    Request,
     Route,
     StorageState,
     async_playwright,
@@ -76,6 +77,7 @@ class PythonPlaywrightRuntime:
     """Own a headless Chromium process and one non-persistent browser context."""
 
     def __init__(self) -> None:
+        """Initialize the scoped state used by this adapter."""
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -84,6 +86,7 @@ class PythonPlaywrightRuntime:
         self._allowed_origins: tuple[str, ...] = ()
         self._revision: str | None = None
         self._elements: dict[str, ElementHandle] = {}
+        self._disallowed_navigation = False
 
     async def start(
         self,
@@ -93,6 +96,7 @@ class PythonPlaywrightRuntime:
         storage_state: dict[str, object] | None = None,
         interactive: bool = False,
     ) -> None:
+        """Launch the isolated browser context with origin interception and audited egress."""
         if self._browser is not None:
             return
         # Authentication uses screenshots and synthetic input, both supported
@@ -118,10 +122,24 @@ class PythonPlaywrightRuntime:
             storage_state=(None if storage_state is None else cast(StorageState, storage_state)),
         )
         await self._context.route("**/*", self._route)
-        self._page = await self._context.new_page()
-        self._page.on("dialog", self._dismiss_dialog)
-        self._page.on("download", self._cancel_download)
+        self._attach_page(await self._context.new_page())
         self._context.on("page", self._close_popup)
+
+    def _attach_page(self, page: Page) -> None:
+        """Install request tracking and page guards before navigation begins."""
+        page.on("dialog", self._dismiss_dialog)
+        page.on("download", self._cancel_download)
+        # Chromium follows redirects without consulting the route handler, so a
+        # redirect hop outside the origin policy is visible only as a request.
+        page.on("request", self._track_navigation)
+        self._page = page
+
+    def _track_navigation(self, request: Request) -> None:
+        """Remember refused navigation origins for stable browser failure classification."""
+        if request.is_navigation_request() and not _origin_allowed(
+            request.url, self._allowed_origins
+        ):
+            self._disallowed_navigation = True
 
     async def _route(self, route: Route) -> None:
         if _origin_allowed(route.request.url, self._allowed_origins):
@@ -145,8 +163,18 @@ class PythonPlaywrightRuntime:
         return self._page
 
     async def navigate(self, url: str) -> BrowserObservation:
+        """Navigate within the bound origin policy and preserve stable failure codes."""
         page = self._current_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+        self._disallowed_navigation = False
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+        except PlaywrightError as exc:
+            if self._disallowed_navigation:
+                raise BrowserProviderError("tool.browser.url_disallowed", retryable=False) from exc
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
         return await self._observation(page)
 
     async def observe(self) -> BrowserObservation:
@@ -304,6 +332,7 @@ class PythonPlaywrightRuntime:
             await page.keyboard.press(event.key)
 
     async def close(self) -> None:
+        """Release the browser and proxy resources owned by this session."""
         try:
             if self._context is not None:
                 with suppress(Exception):
@@ -325,6 +354,7 @@ class PythonPlaywrightRuntime:
             self._temporary_home = None
             self._revision = None
             self._elements = {}
+            self._disallowed_navigation = False
 
 
 def _default_role(tag: str, input_type: str | None) -> str:

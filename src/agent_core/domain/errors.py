@@ -92,9 +92,13 @@ class WorkerFencedError(ConflictError):
 class BudgetExceededError(AgentCoreError):
     """A configured run limit was reached before more work began."""
 
-    def __init__(self, reason: str, message: str) -> None:
+    def __init__(
+        self, reason: str, message: str, *, details: dict[str, object] | None = None
+    ) -> None:
+        """Retain the budget reason and optional typed accounting details for API projection."""
         super().__init__(message)
         self.reason = reason
+        self.details = details or {}
 
 
 class DeadlineExceeded(AgentCoreError):  # noqa: N818 - normative taxonomy name

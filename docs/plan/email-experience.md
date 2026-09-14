@@ -29,7 +29,7 @@ The owner's confirmed requirements are:
 | Retrieval | Start when Email mode opens and refresh automatically while it is active. |
 | Attention | Keep the priority list short and optimize for a very high signal-to-noise ratio. |
 | Drafts | Prepare a response when relevant; edit and send inside Veetbot; explicitly approve every send. |
-| Learning | Use historical received and Sent email as extensively as practical, with no fixed age cutoff. |
+| Learning | Use received and Sent email within the latest ninety days for now (ADR-0096). |
 | Memory | Share useful learning and memories across both accounts and Chat. |
 | Important relationships | Regular reply partners, close collaborators, portfolio founders/CEOs, founders/CEOs of prospective investments, fellow portfolio board members, and venture investors. |
 
@@ -75,9 +75,14 @@ advertising archive support, the checkbox on each row and in thread detail
 means **Archive in Gmail**. Checking it removes `INBOX` from that conversation
 in its originating account; unchecking an archived conversation explicitly
 moves it back to the same account's Inbox. The clearly labelled gesture supplies
-single-action owner consent under ADR-0095. Keep the row and previous checked
-state while the operation is pending; show failures or uncertain outcomes and
-change the state only after confirmation. Preserve draft edits, unread state,
+single-action owner consent under ADR-0095. Remove the row immediately while
+the archive request and durable operation finish asynchronously. Normal progress
+and successful completion are silent; other rows remain actionable. Keep the
+last confirmed mailbox state separate from this optimistic presentation, retain
+draft edits and selected detail, and restore the row with an actionable error
+if admission, status retrieval, or execution fails or the outcome is uncertain.
+Projection refreshes must not resurrect a pending row; reopening Email resumes
+status reads without another archive request. Preserve unread state,
 other labels, and importance feedback. New correspondence is assessed again.
 After a confirmed reply, the thread leaves Needs reply unless another
 unanswered request remains.
@@ -185,28 +190,40 @@ name. A changed default/capability binding creates a fresh operational session
 for new work while retaining the immutable binding on old history. It must not
 reinterpret existing source receipts or send through another Google identity.
 
-Refresh the current inbox first, including older messages still in the inbox.
+Refresh current inbox threads within the latest ninety days first (ADR-0096).
 The first display may be partial while pagination completes; report that state
 and keep useful results visible. Invalidate assessments when the source or a
 relevant feedback/profile/model revision changes. Rerank affected existing mail
 immediately after learning changes, even if Gmail has not changed. A poll with
 unchanged sources and already-current assessment versions does no new model
-work; unfinished historical analysis can still resume. Style changes affect
+work; unfinished eligible historical analysis can still resume. Reuse completed
+features when the relevant owner feedback, correspondent evidence and shared
+memories are unchanged, even if the global profile revision advanced. Rescore
+them deterministically under the current profile. Writing examples are supplied
+to drafting only; style churn does not cause importance model calls. Style changes affect
 new or explicitly regenerated drafts, never overwrite edited drafts. Extractor
 upgrades use governed replay with deduplication, not recurring re-extraction.
 
 ### Historical reach
 
-Process both Inbox/archive and Sent history: recent 90 days first, then the
-preceding year, then progressively older windows to the accessible mailbox's
-beginning. These are processing priorities, not age exclusions. Spam and Trash
-are excluded from automatic learning initially. Include a clear coverage view
+Process Inbox/archive and Sent history within the latest **90 days only** for
+now, as the owner authorized in ADR-0096. Older historical windows are deferred.
+Discard old discovery cursors once when adopting this policy, preserving cached
+mail and source receipts. Advance the discovery cutoff when no Inbox or history
+query pagination is active; an active traversal retains its query-bound cutoff.
+Completed coverage stays complete as that window narrows, while later Inbox
+resynchronization searches use the refreshed cutoff. Preserve cached source
+identities and learning across those updates. Apply the current ninety-day boundary
+to automatic assessment and learning even for already-cached mail and mixed-age threads.
+Older context may remain readable but must not enter automatic model assessment
+or drafting; a partial recent view cannot authorize a complete-context draft.
+Spam and Trash remain excluded from automatic learning. Include a clear coverage view
 showing processed date ranges, discovered/processed counts, exclusions, and
 whether further history remains.
 
 Use cheap structured metadata first to discover interaction patterns and select
 useful source messages. Read relevant current threads and diverse historical
-Sent examples next. Maintain forward progress through older history so a busy
+Sent examples next. Maintain forward progress through eligible history so a busy
 inbox cannot permanently starve it. Metadata-only coverage is not reported as
 semantic understanding of all mail. Within available budgets, continue body
 analysis over remaining eligible history rather than silently ending after a
@@ -252,7 +269,11 @@ the originating reservation. A finite reservation is not renewed by retry.
 
 Meter every model stage through the existing gateway. Lower applicable runtime
 or principal limits prevail. Show a pause reason when a ceiling is reached;
-cached browsing, editing, and feedback remain available. Measure mailbox volume,
+cached browsing, editing, and feedback remain available. Return spent and
+reserved amounts, both limits and a next budget-check time. Clients retain one
+pause across foreground visits, continue cached projection reads, and suppress
+automatic admission until that time; manual refresh can explicitly recheck.
+Connection replacement clears the pause. Measure mailbox volume,
 throughput and cost before changing these approved limits or any existing spend
 ceiling. The numbers are reviewable configuration defaults, not permission to
 spend outside the approved implementation and evaluation scope. “Maximum learning” means broad, resumable evidence use,
@@ -299,6 +320,22 @@ versioned selection layer combines those features with owner rules and learned
 preferences, applies the calibrated threshold, and orders qualifying threads.
 Record the factors and input/profile revisions so decisions can be explained
 and reproduced. Version model prompts and feature schemas too.
+
+Assess current attention against the server's explicit current time, resolving
+relative event dates against the original message date. A passed meeting or
+expired reminder alone supplies neither current importance nor reply need.
+The versioned assessment may record a source-supported, timezone-aware
+`attention_expires_at` only when **all** attention and reply relevance ends at
+that time. Uncertain dates, unresolved requests, overdue obligations, follow-up
+work and lasting informational value do not acquire an automatic expiry merely
+because a due date passed. There is no blanket two-week message cutoff.
+
+Apply that expiry when projecting lists, thread detail and automatic draft
+eligibility, before explicit owner feedback. Expiry does not change Gmail,
+erase history, revise source identity or discard existing drafts. It needs no
+new model call on an unchanged poll. Source changes replace the old assessment;
+prompt/schema revision changes re-assess cached mail in the existing bounded
+foreground slices, so pre-expiry assessments are not cached indefinitely.
 
 Explicit owner preferences dominate inferred patterns. A thread-only judgment
 immediately changes that thread and contributes limited evidence to broader
@@ -749,7 +786,7 @@ retry coverage.
 | Modes are presentation | Switching preserves Chat, memory/persona identity, drafts, active streaming, and selections; thread handoff reuses an ordinary session. |
 | Active-only retrieval | Entry/foreground/timer refresh works; hidden/background clients admit no new slices; multi-device requests coalesce; in-flight work finishes within bounds; aggregate reservations survive concurrency/recovery and cannot renew limits per batch. |
 | Complete and honest source state | Pagination/change replay/cursor expiry/revocation/partial account failures are correct; no false fully-current claim. |
-| Historical power | Progress eventually reaches arbitrarily old eligible history under repeated available active slices; import restarts/duplicates do not double-count evidence. |
+| Historical power | Progress covers the permitted ninety-day window under repeated available active slices; older history remains paused, and import restarts/duplicates do not double-count evidence. |
 | Learning | Person/topic/thread feedback have distinct effects; Chat and Email use the same profile; corrections/undo/reset remove prior influence and rerank already-loaded mail on another device. |
 | Relevant drafts | Auto-draft only when a reply is appropriate; no duplicate proposal, overwrite of edits, already-answered reply, or attachment hallucination. |
 | Multi-device editing | Revision conflicts preserve both edits; stale source requires review; saves are visible on another client. |
@@ -890,7 +927,7 @@ Private quality and owner-smoke evidence cannot be replaced by synthetic tests.
    `gate.email.experience_sync_contract`. **M26.**
 7. **Synchronization recovery.** Projection updates and cursors commit consistently; duplicate or reordered observations, pagination, cursor expiry, deletions, revocation and partial account failure preserve accurate recoverable source state. Registered as
    `gate.email.experience_sync_recovery`. **M26.**
-8. **Historical progress.** Active bounded slices resume through recent and arbitrarily old eligible history without starvation, duplicate evidence or claiming metadata-only coverage as semantic understanding. Registered as
+8. **Historical progress.** Active bounded slices resume through eligible history within the latest ninety days (ADR-0096) without starvation, duplicate evidence or claiming metadata-only coverage as semantic understanding. Older history remains paused. Registered as
    `gate.email.experience_history_progress`. **M26.**
 9. **Governed task execution.** Typed deterministic ingestion uses ordinary durable worker leases, checkpoints, cancellation, policy and budgets without direct API-handler Gmail calls, fabricated owner messages or model-selected pagination. Registered as
    `gate.email.experience_governed_tasks`. **M26.**

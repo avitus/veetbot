@@ -16,6 +16,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserProviderError,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 
@@ -181,3 +182,33 @@ async def test_hosted_runtime_accepts_additional_playwright_storage_state_keys()
 
     assert low_level.started is not None
     assert low_level.started[2]["future_playwright_field"] == {"version": 2}
+
+
+async def test_hosted_runtime_normalizes_low_level_navigation_failures() -> None:
+    """Raw Playwright failures become stable codes; policy outcomes pass through."""
+
+    class FailingNavigationRuntime(FakeStatefulRuntime):
+        error: Exception = RuntimeError("provider-private-diagnostic")
+
+        async def navigate(self, url: str) -> BrowserObservation:
+            """Simulate the browser navigation result needed by this failure-path regression."""
+            del url
+            raise self.error
+
+    low_level = FailingNavigationRuntime()
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(BrowserProviderError) as unavailable:
+        await runtime.navigate("https://example.org/login")
+    low_level.error = BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+    with pytest.raises(BrowserProviderError) as disallowed:
+        await runtime.navigate("https://example.org/login")
+
+    assert unavailable.value.reason_code == "tool.browser.provider_unavailable"
+    assert unavailable.value.retryable is True
+    assert "provider-private-diagnostic" not in str(unavailable.value)
+    assert disallowed.value is low_level.error

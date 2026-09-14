@@ -274,6 +274,7 @@ class HostedProfileSessionService:
         *,
         login_url: str,
     ) -> BrowserAuthenticationView:
+        """Start one scoped login ceremony and preserve safe navigation failures."""
         metadata = await self._owned_metadata(profile_id, principal, provider_ref)
         if metadata.revoked:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
@@ -298,9 +299,17 @@ class HostedProfileSessionService:
                     interactive=True,
                 )
                 await runtime.navigate(login_url)
-            except Exception:
-                await runtime.close()
+            except BrowserProviderError:
+                with suppress(Exception):
+                    await runtime.close()
                 raise
+            except Exception as exc:
+                with suppress(Exception):
+                    await runtime.close()
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable",
+                    retryable=True,
+                ) from exc
             self._ceremonies[ceremony_id] = _CeremonyState(
                 id=ceremony_id,
                 profile_id=profile_id,

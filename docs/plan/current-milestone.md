@@ -64,7 +64,8 @@ title: Current Milestone
   design and thirty-two gates. Twenty-seven backend and native acceptance checks
   are bound; four private quality gates and integrated release evidence remain
   pending, and the milestone remains in progress. Aggregate automatic
-  email budgets are USD 20/day and USD 200/rolling thirty days.
+  email budgets are USD 20/day and USD 200/rolling thirty days. ADR-0096 limits
+  automatic historical analysis to the latest ninety days for now.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening

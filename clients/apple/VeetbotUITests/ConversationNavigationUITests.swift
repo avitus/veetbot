@@ -39,7 +39,7 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
-    /// Archives a row without opening it, then finds its confirmed state in Other mail.
+    /// Removes a row immediately without progress messages, then finds its confirmed state in Other mail.
     func testEmailCanBeCheckedOffFromInboxWithoutOpeningThread() {
         let mode = app.buttons["mode.email"]
         XCTAssertTrue(mode.waitForExistence(timeout: 10))
@@ -56,15 +56,9 @@ final class ConversationNavigationUITests: XCTestCase {
         check.tap()
         #endif
         let progress = app.staticTexts["email.archive.status.00000000-0000-0000-0000-000000000801"]
-        XCTAssertTrue(progress.waitForExistence(timeout: 5))
-        #if os(macOS)
-        XCTAssertEqual(progress.value as? String, "Archiving in Gmail…")
-        #else
-        XCTAssertEqual(progress.label, "Archiving in Gmail…")
-        #endif
-        XCTAssertFalse(check.isEnabled)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: check)
-        waitForExpectations(timeout: 5)
+        // A predicate expectation waits one second before its first snapshot, racing a one-second deadline.
+        XCTAssertFalse(check.exists, "Archiving must remove the row as soon as the tap finishes")
+        XCTAssertFalse(progress.exists)
         XCTAssertFalse(app.buttons["email.handled.detail"].exists)
         #if os(macOS)
         let other = app.radioButtons["Other mail"]
@@ -78,7 +72,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(check.label, "Move to Inbox")
     }
 
-    /// A failed Gmail operation leaves the original row available with an explicit retryable outcome.
+    /// A failed Gmail operation restores the optimistically removed row with an explicit retryable outcome.
     func testEmailArchiveFailurePreservesInboxRow() {
         app.terminate()
         app.launchArguments.append("--ui-testing-email-archive-failure")
@@ -97,6 +91,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         action.tap()
         #endif
+        XCTAssertFalse(action.exists, "The row must disappear before the asynchronous failure arrives")
         let status = app.staticTexts["email.archive.status.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         #if os(macOS)
@@ -127,11 +122,21 @@ final class ConversationNavigationUITests: XCTestCase {
     private func checkEmailReadingFlow() {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable, "Chat settings must be visible before switching modes")
+        #endif
         activate(emailMode)
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(app.textFields["email.search"].exists)
         XCTAssertFalse(app.buttons["sidebar.settings"].isHittable, "The hidden Chat toolbar must not leak into Email")
+        XCTAssertTrue(app.buttons["email.learning"].isHittable)
+        XCTAssertTrue(app.buttons["email.refresh"].isHittable)
+        #if os(macOS)
+        activate(app.buttons["email.learning"])
+        XCTAssertTrue(app.staticTexts["Email learning"].waitForExistence(timeout: 5))
+        activate(app.buttons["Done"])
+        #endif
         attachEmailScreenshot("Priority inbox")
         activate(row)
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
@@ -158,7 +163,13 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["mode.chat"])
         XCTAssertFalse(app.textFields["email.search"].isHittable, "Mail search belongs to Email mode")
         #if os(macOS)
-        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable)
+        XCTAssertTrue(app.buttons["sidebar.settings"].isHittable,
+                      "Chat must restore its toolbar after leaving Email's split view")
+        for identifier in ["sidebar.memory", "sidebar.persona", "sidebar.schedules"] {
+            XCTAssertTrue(app.buttons[identifier].isHittable, "Global Chat actions must fit in the window toolbar")
+        }
+        XCTAssertFalse(app.buttons["email.learning"].isHittable)
+        XCTAssertFalse(app.buttons["email.refresh"].isHittable)
         #endif
     }
 
@@ -470,10 +481,17 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(lessImportant.isEnabled)
         target.click()
         app.menuItems["This kind of content"].click()
-        let topic = app.textFields["Content topic"]
-        XCTAssertEqual(topic.value as? String, "")
+        let topic = app.popUpButtons["email.feedback-topic"]
+        XCTAssertFalse(important.isEnabled, "Content feedback requires an explicit topic")
+        XCTAssertFalse(lessImportant.isEnabled)
+        XCTAssertTrue(topic.waitForExistence(timeout: 5))
+        XCTAssertEqual(topic.value as? String, "Choose a topic")
         topic.click()
-        topic.typeText("Board planning")
+        app.menuItems["Board planning"].click()
+        XCTAssertTrue(important.isEnabled)
+        XCTAssertTrue(lessImportant.isEnabled)
+        important.click()
+        XCTAssertTrue(app.staticTexts["Marked Board planning as important."].waitForExistence(timeout: 5))
         target.click()
         app.menuItems["This person"].click()
         XCTAssertEqual(app.popUpButtons["email.feedback-person"].value as? String, "Choose a person")
@@ -483,6 +501,57 @@ final class ConversationNavigationUITests: XCTestCase {
         app.menuItems["This thread"].click()
         XCTAssertTrue(important.isEnabled)
         XCTAssertTrue(lessImportant.isEnabled)
+        target.click()
+        app.menuItems["This kind of content"].click()
+        XCTAssertEqual(topic.value as? String, "Choose a topic")
+        XCTAssertFalse(important.isEnabled)
+    }
+
+    /// Checks usable mail space with a full priority page at a normal desktop window size.
+    func testEmailSidebarShowsFivePrioritiesWithoutScrolling() {
+        launchFullEmailInbox()
+        let window = app.windows.firstMatch
+        let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        let fifth = app.buttons["email.thread.00000000-0000-0000-0000-000000000805"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertLessThan(first.frame.minY - window.frame.minY, 230,
+                          "Mail should begin near the top, below compact controls")
+        XCTAssertTrue(fifth.isHittable, "All five initial priorities should be visible without scrolling")
+        XCTAssertTrue(window.frame.contains(fifth.frame), "The fifth row must be fully visible")
+        attachEmailScreenshot("Compact priority inbox with five threads")
+    }
+
+    /// Drags the actual divider and verifies both columns and the selected thread survive mode switching.
+    func testEmailSidebarResizesWithItsDivider() {
+        launchFullEmailInbox()
+        let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.click()
+        let search = app.textFields["email.search"]
+        let originalWidth = search.frame.width
+        let divider = app.splitters.firstMatch
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
+                      "Dragging the divider must widen the email list")
+        let resizedWidth = search.frame.width
+        XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
+        app.buttons["mode.chat"].click()
+        app.buttons["mode.email"].click()
+        XCTAssertEqual(search.frame.width, resizedWidth, accuracy: 3)
+        XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
+        attachEmailScreenshot("Resized priority inbox")
+    }
+
+    /// Launch the five-priority email fixture in a deterministic Mac window.
+    private func launchFullEmailInbox() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-email-full-inbox")
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1200,900"
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.email"].waitForExistence(timeout: 10))
+        app.buttons["mode.email"].click()
     }
 
     /// Reproduces the default CI window and keeps mode, reply and Chat controls inside its bounds.
