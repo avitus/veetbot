@@ -4073,6 +4073,22 @@ sending, offline-authoritative edits, model routing and a general learned memory
 policy. PR creation, deployment and live sends retain explicit authorization
 boundaries; implementation approval is not authorization for those actions.
 
+### Milestone 27: Bland calling and public reception
+
+The owner approved this scope on 2026-09-11 under ADR-0097. Implement the
+[calling design](bland-calling.md): a curated public receptionist, individually
+approved outbound briefs, non-idempotent dispatch and cancellation, signed
+call-result intake, principal-bound records, thirty-day retention and erasure,
+owner reads and content-free call-result notifications. Public call records are
+external correspondence; this is an explicit storage exception without caller
+owner authority or changes to existing messaging-surface pairing requirements.
+
+Acceptance requires all fourteen gates, relevant local and PostgreSQL checks,
+authorized live inbound/outbound smoke and signed callback evidence, and final-head
+hosted review and authorized production delivery. The verified ceiling remains 12.
+Private in-call tools, automatic bookings or payments, transfers, SMS, campaigns
+and automatic call-derived memory remain excluded.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4093,7 +4109,7 @@ owner's current ranking, not a schedule.
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
-| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
+| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); other voice input and calendar remain deferred |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 | B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 25 |
 

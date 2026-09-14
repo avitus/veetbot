@@ -81,6 +81,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var connectionGeneration = UUID()
     @Published public private(set) var isReconfiguring = false
     public var currentAPIClient: VeetbotAPIClient? { api }
+    public var callNotificationHandler: (() -> Void)?
+    @Published public private(set) var callResult: CallResultViewData?
     public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
@@ -270,7 +272,38 @@ public final class ChatViewModel: ObservableObject {
         pushRegistrar?.requestPushRegistration()
     }
 
+    public func dismissCallResult() { callResult = nil }
+
+    public func deleteCallResult() async {
+        guard let api, let selected = callResult else { return }
+        let generation = connectionGeneration
+        do {
+            let erased = try await api.deleteCallResult(selected.callID)
+            guard generation == connectionGeneration, callResult?.callID == selected.callID else { return }
+            callResult = erased
+            resetSelectedSession()
+        } catch {
+            guard generation == connectionGeneration else { return }
+            present(error)
+        }
+    }
+
     public func openNotification(_ payload: NotificationPushPayload) async {
+        if payload.kind == .callFinished {
+            guard let callID = payload.callID else { return }
+            guard let api else { pendingNotificationPayload = payload; return }
+            let generation = connectionGeneration
+            do {
+                let result = try await api.callResult(callID)
+                guard generation == connectionGeneration else { return }
+                callNotificationHandler?()
+                callResult = result
+            } catch {
+                guard generation == connectionGeneration else { return }
+                present(error)
+            }
+            return
+        }
         if payload.kind == .deviceInvocation {
             await openDeviceInvocation(payload)
             return
@@ -1191,6 +1224,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func clearInstalledConnection() {
+        callResult = nil
         api = nil
         eventStream = nil
         baseURL = nil

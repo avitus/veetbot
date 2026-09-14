@@ -202,6 +202,19 @@ printf '%s\n' \
   >"$DEPLOY_ROOT/releases/20260810-152233-abcdef0/.release.env"
 VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy "$SURFACE_CONFIG"
 grep -Fq 'location = /webhooks/whatsapp' "$AVAILABLE"
+CALL_CONFIG="$TEST_ROOT/call.conf"
+printf '%s\n' 'server {' '  # VEETBOT_CALL_ROUTE_BEGIN' \
+  '  location = /webhooks/bland { proxy_pass http://127.0.0.1:8003; }' \
+  '  # VEETBOT_CALL_ROUTE_END' '}' >"$CALL_CONFIG"
+printf 'AGENT_CALL_INGRESS_ENABLED=0\n' >>"$DEPLOY_ROOT/current/.release.env"
+VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy "$CALL_CONFIG"
+if grep -Fq 'location = /webhooks/bland' "$AVAILABLE"; then
+  printf 'default-off Nginx deployment unexpectedly retained the Bland route\n' >&2
+  exit 1
+fi
+sed -i.bak 's/AGENT_CALL_INGRESS_ENABLED=0/AGENT_CALL_INGRESS_ENABLED=1/' "$DEPLOY_ROOT/current/.release.env"
+VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy "$CALL_CONFIG"
+grep -Fq 'location = /webhooks/bland' "$AVAILABLE"
 VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy \
   "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" \
   "$WEBSITE_ARCHIVE" "$WEBSITE_CHECKSUM"

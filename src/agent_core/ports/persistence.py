@@ -12,6 +12,7 @@ from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.calls import CallStore
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
 from agent_core.ports.devices import (
@@ -84,6 +85,7 @@ class RepositoryUnitOfWork(Protocol):
     traces: TraceStore
     personas: PersonaStore
     email: EmailStore
+    calls: CallStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository

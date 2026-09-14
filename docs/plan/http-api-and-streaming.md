@@ -2063,3 +2063,25 @@ vocabulary; ordinary run SSE remains the progress transport.
 revision as a bounded shared style example. It requires `email.write`, current
 mailbox authority and `expected_revision`; it returns the shared learning state,
 does not send or edit the draft, and does not unpause learning.
+
+
+## Milestone 27 call routes
+
+All owner call routes are absent unless calling is enabled and require the
+configured owner tenant/principal, exact scopes and `Cache-Control: private,
+no-store`. Public callers have no access to this API.
+
+| Method and route | Scope | Response |
+| --- | --- | --- |
+| `GET /v1/calls` | `call.read` | Local retained summaries; `limit` 1–25, default 10; UUID cursor in stable ID order |
+| `GET /v1/calls/{call_id}` | `call.read` | Attributed result and transcript, completeness flags, or erasure tombstone |
+| `POST /v1/calls/{call_id}/stop` | `call.cancel` | Owner-bound provider termination attempt, `confirmed` or `uncertain` |
+| `DELETE /v1/calls/{call_id}` | `call.delete` | Local erasure; `provider_deleted: false`; active call or run returns conflict |
+
+Malformed IDs or limits use the existing 400 validation envelope. Unknown and
+foreign calls return 404. There is no direct outbound-dispatch HTTP route:
+ordinary tool proposals and approvals bind the call brief. The separate signed
+`POST /webhooks/bland` listener returns 202 for accepted/deduplicated receipts,
+401 for invalid authentication or payload, 413 for an oversized body, 408 for a
+body timeout and 429 with `Retry-After: 60` for a full queue. It stores only a
+provider call ID before private reconciliation. See [bland-calling.md](bland-calling.md).

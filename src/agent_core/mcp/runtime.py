@@ -55,6 +55,16 @@ from agent_core.ports.tools import ToolRegistry
 _SKILL_CHARACTERS = re.compile(r"[^a-z0-9-]")
 _SKILL_HYPHENS = re.compile(r"-+")
 type _RegistrationKey = tuple[str, str, str]
+type CallInterceptor = Callable[
+    [
+        ToolExecutionContext,
+        str,
+        str,
+        dict[str, Any],
+        Callable[[dict[str, Any]], Awaitable[MCPCallResult]],
+    ],
+    Awaitable[MCPCallResult],
+]
 logger = logging.getLogger(__name__)
 _MAXIMUM_PARALLEL_PREPARATIONS = 8
 _MAXIMUM_PARALLEL_STDIO_PREPARATIONS = 2
@@ -143,6 +153,7 @@ class MCPRuntime:
         *,
         connect_timeout_seconds: float = 10,
         idle_timeout_seconds: float = 900,
+        call_interceptor: CallInterceptor | None = None,
     ) -> None:
         """Share bounded preparation capacity across this runtime's sessions."""
         if not isfinite(idle_timeout_seconds) or idle_timeout_seconds <= 0:
@@ -160,6 +171,7 @@ class MCPRuntime:
         self._connect_timeout_seconds = connect_timeout_seconds
         self._preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
+        self._call_interceptor = call_interceptor
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
         self._prepared: set[UUID] = set()
         self._locks: WeakValueDictionary[UUID, asyncio.Lock] = WeakValueDictionary()
@@ -524,10 +536,30 @@ class MCPRuntime:
         connection = self._connection(context.session_id, spec.server_id)
         if connection.config.tenant_id != context.tenant_id:
             raise MCPUnavailableError("tool.server_unreachable")
+
+        async def operation() -> MCPCallResult:
+            if spec.server_id in {"bland_read", "bland_call"}:
+                if self._call_interceptor is None:
+                    return MCPCallResult(
+                        content=("bland.platform_required",),
+                        is_error=True,
+                        structured={"effect_status": "not_applied"},
+                    )
+                return await self._call_interceptor(
+                    context,
+                    spec.server_id,
+                    remote_name,
+                    arguments,
+                    lambda values: self._connected_client(connection).call_tool(
+                        remote_name, values
+                    ),
+                )
+            return await self._connected_client(connection).call_tool(remote_name, arguments)
+
         return await self._invoke(
             connection,
             spec,
-            lambda: self._connected_client(connection).call_tool(remote_name, arguments),
+            operation,
             remote_name=remote_name,
         )
 

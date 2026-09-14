@@ -5,7 +5,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -506,3 +506,19 @@ class EmailService(Protocol):
     async def endorse_style(
         self, principal: Principal, draft_id: UUID, expected_revision: int
     ) -> EmailLearningState: ...
+
+
+class CallingService(Protocol):
+    async def list_calls(
+        self, principal: Principal, *, limit: int = 10, cursor: str | None = None
+    ) -> dict[str, Any]: ...
+
+    async def get_call(self, principal: Principal, call_id: str) -> dict[str, Any]: ...
+
+    async def stop(self, principal: Principal, call_id: str) -> dict[str, Any]: ...
+
+    async def delete(self, principal: Principal, call_id: str) -> dict[str, Any]: ...
+
+
+class CallIngressService(Protocol):
+    async def receive(self, body: bytes, signature: str, secret: str) -> bool: ...

@@ -6,6 +6,38 @@ import UserNotifications
 
 @Suite(.serialized) @MainActor struct ChatViewModelTests {
     @Test
+    func testDeletingCallClearsDerivedChatPresentation() async throws {
+        let callID = UUID()
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            }
+            if request.url?.path.lowercased() == "/v1/calls/\(callID.uuidString.lowercased())" {
+                let body = request.httpMethod == "DELETE"
+                    ? "{\"call_id\":\"\(callID)\",\"erased\":true,\"provider_deleted\":false}"
+                    : "{\"call_id\":\"\(callID)\",\"summary\":\"Private call summary\"}"
+                return try response(for: request, statusCode: 200, body: body)
+            }
+            Issue.record("Unexpected call result request")
+            return try response(for: request, statusCode: 500, body: "{}")
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let message = try JSONDecoder().decode(SessionMessageView.self, from: Data(
+            #"{"sequence":1,"role":"assistant","content":[{"type":"text","text":"Private call summary"}]}"#.utf8
+        ))
+        model.runState.restore(messages: [message])
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "call_finished", "title": "New call result",
+            "call_id": callID.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+        await model.openNotification(payload)
+        #expect(model.callResult?.summary == "Private call summary")
+        await model.deleteCallResult()
+        #expect(model.callResult?.erased == true)
+        #expect(model.runState.timeline.isEmpty)
+    }
+
+    @Test
     func testDeniedNotificationPermissionDoesNotPresentARepeatedAppError() throws {
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

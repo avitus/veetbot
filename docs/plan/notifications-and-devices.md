@@ -974,3 +974,22 @@ content, tokens, or the key.
    Milestone 24 lands the `capabilities` half (ADR-0081).
 5. Actionable lock-screen approval is a new authorization layer, not a
    notification feature, and needs its own ADR.
+
+
+## Milestone 27 call results
+
+The owner-approved [bland-calling.md](bland-calling.md) adds the closed
+`call_finished` kind. Only the calling reconciliation service produces it,
+in the transaction that accepts a terminal, number-verified call record.
+The fixed title is `New call result`; the only subject identifier is `call_id`.
+No caller number, name, transcript, summary, run identity, or status enters the
+push payload. Its deterministic owner/account/call deduplication key yields one
+outbox entry. The notification expires with the call's thirty-day retention.
+`AGENT_CALL_NOTIFICATIONS_ENABLED` defaults to false and requires the notification
+API. Ordinary device mute preferences and authenticated owner inbox reads apply.
+
+The Apple client opens an authenticated `GET /v1/calls/{call_id}` detail sheet,
+including erased-record tombstones. This is independent of run deep links and
+does not impersonate a completed owner run. It stores call content only in
+presentation memory and clears it on connection replacement. The dedicated
+notification carries no authority to place calls or to act on caller claims.

@@ -94,6 +94,7 @@ def test_notification_and_device_vocabularies_are_closed() -> None:
         "ops_recovered",
         "test",
         "device_invocation",
+        "call_finished",
     }
     assert {item.value for item in NotificationStatus} == {
         "pending",
@@ -138,6 +139,7 @@ def test_apple_and_server_notification_contract_cannot_drift() -> None:
         "opsRecovered": NotificationKind.OPS_RECOVERED,
         "test": NotificationKind.TEST,
         "deviceInvocation": NotificationKind.DEVICE_INVOCATION,
+        "callFinished": NotificationKind.CALL_FINISHED,
     }
 
     assert {swift_cases[name]: title for name, title in swift_titles.items()} == dict(
@@ -293,6 +295,7 @@ def test_notification_payload_is_content_free() -> None:
         "schedule_context",
         "invocation_id",
         "device_id",
+        "call_id",
         "notification_id",
         "signal",
         "severity",

@@ -133,6 +133,31 @@ if grep -Fq '# VEETBOT_WHATSAPP_ROUTE_BEGIN' "$SOURCE_CONFIG"; then
   CANDIDATE_CONFIG="$RENDERED_CONFIG"
 fi
 
+if grep -Fq '# VEETBOT_CALL_ROUTE_BEGIN' "$CANDIDATE_CONFIG"; then
+  ACTIVE_RELEASE_ENV="$DEPLOY_ROOT/current/.release.env"
+  [[ -f "$ACTIVE_RELEASE_ENV" ]] || fail "active release identity is missing: $ACTIVE_RELEASE_ENV"
+  CALL_INGRESS_ENABLED="$(awk -F= '
+    $1 == "AGENT_CALL_INGRESS_ENABLED" { value = $2; found += 1 }
+    END { if (found == 1) print value; else exit 1 }
+  ' "$ACTIVE_RELEASE_ENV")" || fail "active release has no singular calling routing flag"
+  [[ "$CALL_INGRESS_ENABLED" =~ ^[01]$ ]] || fail "active release calling routing flag must be 0 or 1"
+  marker_counts="$(awk '
+    /# VEETBOT_CALL_ROUTE_BEGIN/ { begin += 1 }
+    /# VEETBOT_CALL_ROUTE_END/ { end += 1 }
+    END { print begin + 0, end + 0 }
+  ' "$CANDIDATE_CONFIG")"
+  [[ "$marker_counts" == "1 1" ]] || fail "repository Nginx configuration must contain one calling route block"
+  CALL_RENDERED_CONFIG="$SOURCE_CONFIG.calls.rendered.conf"
+  awk -v enabled="$CALL_INGRESS_ENABLED" '
+    /# VEETBOT_CALL_ROUTE_BEGIN/ { inside = 1; next }
+    /# VEETBOT_CALL_ROUTE_END/ { inside = 0; next }
+    enabled == 1 || !inside { print }
+  ' "$CANDIDATE_CONFIG" >"$CALL_RENDERED_CONFIG"
+  if [[ -n "$RENDERED_CONFIG" ]]; then rm -f -- "$RENDERED_CONFIG"; fi
+  RENDERED_CONFIG="$CALL_RENDERED_CONFIG"
+  CANDIDATE_CONFIG="$RENDERED_CONFIG"
+fi
+
 sudo install -d -m 0755 "$(dirname "$AVAILABLE")" "$(dirname "$ENABLED")" "$BACKUP_DIR"
 BACKUP=""
 ENABLED_TARGET=""

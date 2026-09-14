@@ -133,6 +133,11 @@ public struct ChatView: View {
             composer
         }
         .navigationTitle(activeMode == .chat ? "Conversation" : "Email")
+        .sheet(item: Binding(get: { model.callResult }, set: { if $0 == nil { model.dismissCallResult() } })) { result in
+            CallResultSheet(result: result, close: model.dismissCallResult) {
+                Task { await model.deleteCallResult() }
+            }
+        }
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)
         }

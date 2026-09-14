@@ -7,12 +7,13 @@ import json
 import re
 from copy import deepcopy
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_core.adapters.persistence import call_erasure
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     CheckpointRow,
@@ -242,17 +243,32 @@ def source_tool(name: object, server: str | None) -> bool:
     )
 
 
-def derived_payload(payload: dict[str, Any], event_type: str) -> dict[str, Any]:
+def derived_payload(
+    payload: dict[str, Any], event_type: str, marker: str = _ERASED
+) -> dict[str, Any]:
+    if marker == call_erasure.MARKER:
+        return cast(dict[str, Any], call_erasure.erase_derived(payload))
     copied = deepcopy(payload)
     if event_type == "assistant.message.completed":
         message = copied.get("message")
         if isinstance(message, dict):
-            message["content"] = [{"type": "text", "text": _ERASED}]
+            message["content"] = [{"type": "text", "text": marker}]
         if "content" in copied:
-            copied["content"] = _ERASED
+            copied["content"] = marker
     elif event_type == "run.completed" and "final_message" in copied:
-        copied["final_message"] = _ERASED
+        copied["final_message"] = marker
     return copied
+
+
+def _erasure_operations(calling: bool) -> tuple[Any, Any, Any, Any]:
+    if calling:
+        return (
+            call_erasure.read_server,
+            call_erasure.source_tool,
+            call_erasure.erase_result,
+            call_erasure.source_present,
+        )
+    return read_server, source_tool, erase_result, source_present
 
 
 async def erase_postgres_source(
@@ -262,7 +278,10 @@ async def erase_postgres_source(
     thread_id: str,
     message_ids: frozenset[str],
     erased_at: datetime,
+    *,
+    calling: bool = False,
 ) -> dict[str, int]:
+    read_server, source_tool, erase_result, source_present = _erasure_operations(calling)
     # The application appends the separate immutable erasure audit event.
     owned = list(
         (
@@ -313,6 +332,14 @@ async def erase_postgres_source(
         }
         for sid in affected_sessions
     }
+    if calling:
+        # Later turns may paraphrase a call without retaining its source identifier.
+        for row in event_rows:
+            source_ids = source_sequences.get(row.session_id)
+            if source_ids and row.sequence >= min(source_ids) and row.actor_type != "principal":
+                source_ids.add(row.sequence)
+                if row.run_id is not None:
+                    affected_runs.add(row.run_id)
     protected = {
         str(identifier)
         for identifier in (
@@ -407,7 +434,7 @@ async def erase_postgres_source(
     )
     if active is not None:
         raise ConflictError(
-            "associated runs must settle before email source erasure",
+            "associated runs must settle before correspondence source erasure",
             reason="active_run_exists",
             details={"run_id": str(active)},
         )
@@ -431,7 +458,9 @@ async def erase_postgres_source(
             and row.run_id in affected_runs
             and row.actor_type != "principal"
         ):
-            payload = derived_payload(row.payload, row.event_type)
+            payload = derived_payload(
+                row.payload, row.event_type, "[call source erased]" if calling else _ERASED
+            )
         if payload is not None and payload != row.payload:
             row.payload = payload
     invocations = list(
@@ -444,6 +473,21 @@ async def erase_postgres_source(
         ).all()
     )
     for invocation in invocations:
+        if calling and invocation.run_id in affected_runs:
+            for field in (
+                "raw_arguments",
+                "arguments",
+                "result_item",
+                "structured_result",
+                "outcome",
+            ):
+                setattr(
+                    invocation,
+                    field,
+                    call_erasure.erase_derived({field: getattr(invocation, field)})[field],
+                )
+            counts["invocations"] += 1
+            continue
         if not source_tool(invocation.tool_name, servers.get(invocation.session_id)):
             continue
         changed = False
@@ -486,7 +530,9 @@ async def erase_postgres_source(
             source_event = by_sequence.get(history.sequence)
             if source_event is None or source_event.actor_type == "principal":
                 continue
-            if history.sequence in source_sequences.get(sid, set()):
+            if calling and source_event.run_id in affected_runs:
+                history.item = call_erasure.erase_derived(history.item)
+            elif history.sequence in source_sequences.get(sid, set()):
                 history.item = erase_result(
                     history.item, thread_id, message_ids, account_id=account_id
                 )
@@ -505,7 +551,9 @@ async def erase_postgres_source(
             ).all()
         )
         for episode in episodes:
-            if set(episode.source_event_ids).intersection(sequences):
+            if set(episode.source_event_ids).intersection(
+                source_sequences.get(sid, set()) if calling else sequences
+            ):
                 await session.delete(episode)
                 counts["episodes"] += 1
     artifacts = list(
@@ -537,7 +585,10 @@ def erase_memory_source_locked(
     thread_id: str,
     message_ids: frozenset[str],
     erased_at: datetime,
+    *,
+    calling: bool = False,
 ) -> dict[str, int]:
+    read_server, source_tool, erase_result, source_present = _erasure_operations(calling)
     servers = {
         sid: read_server(row.metadata, account_id)
         for sid, row in repository._sessions._sessions.items()
@@ -566,6 +617,13 @@ def erase_memory_source_locked(
         }
         for sid in affected_sessions
     }
+    if calling:
+        for sid in affected_sessions:
+            for event in repository._events._events.get(sid, []):
+                if event.sequence >= min(sequences[sid]) and event.actor_type != "principal":
+                    sequences[sid].add(event.sequence)
+                    if event.run_id is not None:
+                        affected_runs.add(event.run_id)
     protected = {
         str(memory.id)
         for memory in repository._memories._records.values()
@@ -617,7 +675,7 @@ def erase_memory_source_locked(
     ]
     if active:
         raise ConflictError(
-            "associated runs must settle before email source erasure",
+            "associated runs must settle before correspondence source erasure",
             reason="active_run_exists",
             details={"run_id": str(active[0].id)},
         )
@@ -642,7 +700,9 @@ def erase_memory_source_locked(
                 and event.run_id in affected_runs
                 and event.actor_type != "principal"
             ):
-                payload = derived_payload(event.payload, event.event_type)
+                payload = derived_payload(
+                    event.payload, event.event_type, "[call source erased]" if calling else _ERASED
+                )
             replacement = (
                 event.model_copy(update={"payload": payload}, deep=True)
                 if payload is not None
@@ -653,6 +713,19 @@ def erase_memory_source_locked(
                 repository._events._derived[event.derivation_key] = replacement
         repository._events._events[sid] = updated
     for key, invocation in list(repository._invocations._invocations.items()):
+        if calling and invocation.run_id in affected_runs:
+            value = invocation.model_dump(mode="json")
+            for field in (
+                "raw_arguments",
+                "normalized_arguments",
+                "result_item",
+                "structured_result",
+                "outcome",
+            ):
+                value[field] = call_erasure.erase_derived({field: value[field]})[field]
+            repository._invocations._invocations[key] = type(invocation).model_validate(value)
+            counts["invocations"] += 1
+            continue
         if invocation.session_id not in servers or not source_tool(
             invocation.tool_name, servers.get(invocation.session_id)
         ):

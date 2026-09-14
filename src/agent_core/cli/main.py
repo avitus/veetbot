@@ -25,6 +25,7 @@ from agent_core import __version__
 from agent_core.api import create_app
 from agent_core.bootstrap import (
     build,
+    build_call_worker,
     build_notification_worker,
     build_schedule_worker,
     build_surface_worker,
@@ -593,6 +594,47 @@ async def _create_session() -> UUID:
             {},
         )
         return session.id
+
+
+@app.command("call-worker")
+def call_worker_command() -> None:
+    """Reconcile retained calls; this role cannot start a call."""
+
+    async def run() -> None:
+        async with build_call_worker() as composition:
+            assert composition.worker is not None
+            await _run_worker_service(composition.worker)
+
+    try:
+        asyncio.run(run())
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command("call-ingress")
+def call_ingress_command() -> None:
+    """Receive signed Bland callbacks on a dedicated loopback listener."""
+
+    async def run() -> None:
+        async with build_call_worker(ingress=True) as composition:
+            assert composition.webhook_app is not None
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    composition.webhook_app,
+                    host=composition.bind_host,
+                    port=composition.bind_port,
+                    log_config=None,
+                    access_log=False,
+                )
+            )
+            await server.serve()
+
+    try:
+        asyncio.run(run())
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
 
 async def _serve_worker(role: WorkerRole) -> None:

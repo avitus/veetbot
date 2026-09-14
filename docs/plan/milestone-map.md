@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 29 subject specifications declare 470 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 479
-declarations, 476 registry entries once the 3 aliases are subtracted.
+The 30 subject specifications declare 484 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 493
+declarations, 490 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1556,6 +1556,27 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 32  gate.email.experience_release_evidence                   case    26
 ```
 
+### Bland calling
+
+[bland-calling.md](bland-calling.md) declares fourteen Milestone 27 gates.
+
+```text
+1 gate.call.default_off case 27
+2 gate.call.tool_separation case 27
+3 gate.call.approval_binding case 27
+4 gate.call.dispatch_recovery case 27
+5 gate.call.cancellation case 27
+6 gate.call.provider_boundary case 27
+7 gate.call.public_isolation case 27
+8 gate.call.callback_authentication case 27
+9 gate.call.durable_receipts case 27
+10 gate.call.repository_isolation case 27
+11 gate.call.retention_erasure case 27
+12 gate.call.notifications case 27
+13 gate.call.admission_bounds case 27
+14 gate.call.live_release case 27
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1649,6 +1670,7 @@ milestone  new gates  cumulative  the earliest of them
 26                32         476  shared client modes, active email sync,
                                   feedback, style, drafts, approved sends,
                                   shared semantic memory and lifecycle
+27                14         490  Bland calling and public correspondence intake
 ```
 
 Two facts fall out of the table and both are worth stating rather than

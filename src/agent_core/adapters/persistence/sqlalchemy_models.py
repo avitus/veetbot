@@ -1284,7 +1284,7 @@ class DeviceRow(Base):
             "jsonb_typeof(muted_kinds) = 'array' AND muted_kinds <@ "
             '\'["approval_requested","question_asked","run_failed",'
             '"schedule_run_finished","schedule_occurrence_skipped",'
-            '"ops_alert","ops_recovered","test","device_invocation"]\'::jsonb',
+            '"ops_alert","ops_recovered","test","device_invocation","call_finished"]\'::jsonb',
             name="device_muted_kinds_closed",
         ),
         CheckConstraint(
@@ -1556,7 +1556,7 @@ class NotificationOutboxRow(Base):
         CheckConstraint(
             "kind IN ('approval_requested','question_asked','run_failed',"
             "'schedule_run_finished','schedule_occurrence_skipped','ops_alert',"
-            "'ops_recovered','test','device_invocation')",
+            "'ops_recovered','test','device_invocation','call_finished')",
             name="notification_kind_closed",
         ),
         CheckConstraint(
@@ -1815,6 +1815,26 @@ class EmailRecordRow(Base):
         CheckConstraint("revision > 0", name="email_record_revision_positive"),
         CheckConstraint("jsonb_typeof(payload) = 'object'", name="email_record_payload_object"),
         Index("ix_email_records_owner_updated", "tenant_id", "principal_id", "updated_at"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(Text(collation="C"), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CallRecordRow(Base):
+    """Principal-scoped call, dispatch, receipt or reconciliation record."""
+
+    __tablename__ = "call_records"
+    __table_args__ = (
+        CheckConstraint("revision > 0", name="call_record_revision_positive"),
+        CheckConstraint("jsonb_typeof(payload) = 'object'", name="call_record_payload_object"),
+        Index("ix_call_records_owner_updated", "tenant_id", "principal_id", "updated_at"),
     )
 
     tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)

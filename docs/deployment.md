@@ -986,3 +986,18 @@ deployment, or high availability. Loss of the Droplet may mean unrecoverable
 data loss. The API binds port 8000 only on loopback, so remote clients must use
 the Nginx TLS hostname. A firewall is still recommended to contain any unrelated
 service that is accidentally bound to a public interface.
+
+
+## Optional Bland calling services
+
+[Bland setup](bland-setup.md) defines the private configuration, distinct database
+roles, separate ingress Linux user and required live verification. The release
+script leaves both roles disabled by default. When enabled it validates matching
+owner/profile bindings, installs `veetbot-call.service` and optionally
+`veetbot-call-ingress.service`, then starts them after promotion. The proxy adds
+only the exact `/webhooks/bland` route when the active release enables intake.
+Verify both units independently alongside the normal public release probes.
+Before rolling back across calling support, stop both calling units and restore
+the target release's environment and proxy flags; only restart roles that exist
+in that release. Do not downgrade the call migration to roll back code: preserve
+correspondence and erasure tombstones, following the normal expand-only policy.
