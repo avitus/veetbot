@@ -79,6 +79,7 @@ public final class EmailViewModel: ObservableObject {
     private var generation = UUID()
     private var listRequest = UUID()
     private var selectionRequest = UUID()
+    private var threadRead: (id: UUID, activation: UUID?)?
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var refreshTask: Task<Void, Never>?
@@ -169,6 +170,7 @@ public final class EmailViewModel: ObservableObject {
         activation = UUID()
         listRequest = UUID()
         selectionRequest = UUID()
+        threadRead = nil
         refreshTask?.cancel()
         operationTask?.cancel()
         autosaveTask?.cancel()
@@ -501,6 +503,7 @@ public final class EmailViewModel: ObservableObject {
     /// Clears thread presentation and its errors without discarding draft edits stored by draft ID.
     public func clearSelection() {
         selectionRequest = UUID()
+        threadRead = nil
         isLoadingThread = false
         selectedThreadID = nil
         thread = nil
@@ -526,6 +529,8 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         let mailboxVersions = archiveVersions
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
+        if refreshOnly, approvalID == nil, thread == nil,
+           threadRead?.id == id, threadRead?.activation == foreground { return }
         if !refreshOnly {
             clearSelection()
             selectedThreadID = id
@@ -533,13 +538,20 @@ public final class EmailViewModel: ObservableObject {
         guard selectedThreadID == id else { return }
         let requestID = UUID()
         selectionRequest = requestID
+        threadRead = (id, foreground)
         isLoadingThread = thread == nil
-        defer { if selectionRequest == requestID { isLoadingThread = false } }
+        defer {
+            if selectionRequest == requestID {
+                threadRead = nil
+                isLoadingThread = false
+            }
+        }
         do {
             let response = try await api.emailThread(id)
             guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
             let result = preservingArchiveState(response, since: mailboxVersions)
             thread = result
+            isLoadingThread = false
             observeArchive(result)
             if let returnedDraft = result.draft { mergeDraft(returnedDraft) }
             else if let draftID = result.draftID {

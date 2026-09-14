@@ -145,6 +145,45 @@ def draft_body_fingerprint(body: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
+def retained_thread(thread: EmailThread, cutoff: datetime) -> EmailThread:
+    """Expire only this conversation, before a read can renew its access time."""
+    if thread.last_accessed_at > cutoff or not any(message.body for message in thread.messages):
+        return thread
+    return thread.model_copy(
+        update={
+            "messages": [
+                message.model_copy(update={"body": "", "complete": False})
+                for message in thread.messages
+            ],
+            "complete": False,
+            "source_fingerprint": "",
+            "assessment_version": "",
+        }
+    )
+
+
+def draft_expired(draft: EmailDraft, cutoff: datetime) -> bool:
+    """Unsent owner edits remain retained regardless of age."""
+    return (
+        draft.status in {EmailDraftStatus.SENT, EmailDraftStatus.DISCARDED}
+        and draft.updated_at <= cutoff
+    )
+
+
+def expired_body(record: EmailRecord, cutoff: datetime) -> EmailThread | EmailDraft | None:
+    """Return a replacement only when this stored body needs retention cleanup."""
+    if record.kind == "thread":
+        thread = EmailThread.model_validate(record.payload)
+        retained = retained_thread(thread, cutoff)
+        return None if retained is thread else retained
+    draft = EmailDraft.model_validate(record.payload)
+    return (
+        draft.model_copy(update={"body": ""})
+        if draft.body and draft_expired(draft, cutoff)
+        else None
+    )
+
+
 class EmailExperienceService:
     """Coordinate owner-scoped mail projections, governed tasks, and feedback."""
 
@@ -264,7 +303,7 @@ class EmailExperienceService:
         require_scope(principal, "email.read")
         if not 1 <= limit <= 100 or (cursor is not None and not cursor.isdecimal()):
             raise ValueError("email page is malformed")
-        async with self.uow_factory() as uow, uow.email.lock(principal):
+        async with self.uow_factory() as uow:
             feedback = await self._feedback(uow.email, principal)
             threads = []
             async for row in records(uow.email, principal, "thread"):
@@ -275,10 +314,22 @@ class EmailExperienceService:
                     not in principal.scopes
                 ):
                     continue
-                reconciled = await self._reconcile_archive_in(uow, principal, stored)
-                threads.append(apply_feedback(reconciled, feedback, now=self.clock.now()))
+                threads.append(stored)
         eligible: list[EmailThread] = []
         for thread in threads:
+            if (
+                thread.archive_operation is not None
+                and thread.archive_operation.status == "pending"
+            ):
+                async with self.uow_factory() as uow, uow.email.lock(principal):
+                    # Re-read after acquiring the mutation lock; the scan is only a snapshot.
+                    current = await read_value(
+                        uow.email, principal, "thread", str(thread.id), EmailThread
+                    )
+                    if current is None:
+                        continue
+                    thread = await self._reconcile_archive_in(uow, principal, current)
+            thread = apply_feedback(thread, feedback, now=self.clock.now())
             if (
                 thread.account_id not in self.account_servers
                 or f"mcp.{self.account_servers[thread.account_id]['read']}.use"
@@ -314,9 +365,9 @@ class EmailExperienceService:
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]:
         """Read a scoped thread with its current attention state and draft projection."""
         require_scope(principal, "email.read")
-        await self.expire_cache(principal)
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)
+            thread = retained_thread(thread, self.clock.now() - timedelta(days=30))
             thread = await self._reconcile_archive_in(uow, principal, thread)
             thread = thread.model_copy(update={"last_accessed_at": self.clock.now()})
             await save_value(
@@ -329,9 +380,7 @@ class EmailExperienceService:
             draft = (
                 None
                 if thread.draft_id is None
-                else await read_value(
-                    uow.email, principal, "draft", str(thread.draft_id), EmailDraft
-                )
+                else await self._retained_draft(uow.email, principal, thread.draft_id)
             )
             result["draft"] = None if draft is None else draft.model_dump(mode="json")
             return result
@@ -463,9 +512,24 @@ class EmailExperienceService:
 
     async def draft(self, principal: Principal, draft_id: UUID) -> EmailDraft:
         require_scope(principal, "email.read")
-        await self.expire_cache(principal)
-        async with self.uow_factory() as uow:
-            return await self._draft(uow.email, principal, draft_id)
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            draft = await self._retained_draft(uow.email, principal, draft_id)
+            if draft is None:
+                raise NotFoundError("email draft not found")
+            return draft
+
+    async def _retained_draft(
+        self, store: EmailStore, principal: Principal, draft_id: UUID
+    ) -> EmailDraft | None:
+        """Apply retention to one authorized draft without visiting other mail."""
+        draft = await read_value(store, principal, "draft", str(draft_id), EmailDraft)
+        if draft is None:
+            return None
+        self._authorize_account(principal, draft.account_id)
+        if draft.body and draft_expired(draft, self.clock.now() - timedelta(days=30)):
+            draft = draft.model_copy(update={"body": ""})
+            await save_value(store, principal, "draft", str(draft.id), draft, self.clock.now())
+        return draft
 
     async def _archive_draft(
         self, store: EmailStore, principal: Principal, draft: EmailDraft, *, conflict: bool = False
@@ -649,9 +713,10 @@ class EmailExperienceService:
 
     async def draft_revisions(self, principal: Principal, draft_id: UUID) -> dict[str, object]:
         require_scope(principal, "email.read")
-        await self.expire_cache(principal)
         async with self.uow_factory() as uow:
-            await self._draft(uow.email, principal, draft_id)
+            draft = await self._draft(uow.email, principal, draft_id)
+            if draft_expired(draft, self.clock.now() - timedelta(days=30)):
+                return {"items": [], "next_cursor": None}
             revisions = [
                 row.payload
                 async for row in records(uow.email, principal, "draft_revision")
@@ -2661,53 +2726,50 @@ class EmailExperienceService:
             "pending_artifacts": remaining.get("pending_artifacts", 0),
         }
 
+    async def _cache_records(self, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:
+        """Page maintenance scans without retaining a transaction or mutation lock."""
+        after: str | None = None
+        while True:
+            async with self.uow_factory() as uow:
+                page = await uow.email.list(principal, kind, after=after, limit=100)
+            if not page:
+                return
+            for row in page:
+                yield row
+            after = page[-1].key
+
     async def expire_cache(self, principal: Principal) -> int:
-        """Retention only: no retrieval, inference, or new work admission."""
+        """Scan outside the lock; recheck each candidate in a short mutation transaction."""
         cutoff = self.clock.now() - timedelta(days=30)
         removed = 0
-        async with self.uow_factory() as uow, uow.email.lock(principal):
-            for row in [row async for row in records(uow.email, principal, "thread")]:
-                thread = EmailThread.model_validate(row.payload)
-                if thread.last_accessed_at > cutoff or not any(
-                    message.body for message in thread.messages
+        expired: set[str] = set()
+        for kind in ("thread", "draft"):
+            async for row in self._cache_records(principal, kind):
+                if kind == "draft" and draft_expired(
+                    EmailDraft.model_validate(row.payload), cutoff
                 ):
+                    expired.add(row.key)
+                if expired_body(row, cutoff) is None:
                     continue
-                thread = thread.model_copy(
-                    update={
-                        "messages": [
-                            message.model_copy(update={"body": "", "complete": False})
-                            for message in thread.messages
-                        ],
-                        "complete": False,
-                        "source_fingerprint": "",
-                        "assessment_version": "",
-                    }
+                async with self.uow_factory() as uow, uow.email.lock(principal):
+                    current = await uow.email.get(principal, kind, row.key)
+                    replacement = None if current is None else expired_body(current, cutoff)
+                    if replacement is not None:
+                        await save_value(
+                            uow.email, principal, kind, row.key, replacement, self.clock.now()
+                        )
+                        removed += 1
+        async for row in self._cache_records(principal, "draft_revision"):
+            if str(row.payload["id"]) not in expired:
+                continue
+            async with self.uow_factory() as uow, uow.email.lock(principal):
+                draft = await read_value(
+                    uow.email, principal, "draft", str(row.payload["id"]), EmailDraft
                 )
-                await save_value(uow.email, principal, "thread", row.key, thread, self.clock.now())
-                removed += 1
-            expired: set[str] = set()
-            for row in [row async for row in records(uow.email, principal, "draft")]:
-                draft = EmailDraft.model_validate(row.payload)
-                if (
-                    draft.status not in {EmailDraftStatus.SENT, EmailDraftStatus.DISCARDED}
-                    or draft.updated_at > cutoff
-                ):
-                    continue
-                expired.add(str(draft.id))
-                if draft.body:
-                    await save_value(
-                        uow.email,
-                        principal,
-                        "draft",
-                        row.key,
-                        draft.model_copy(update={"body": ""}),
-                        self.clock.now(),
-                    )
-                    removed += 1
-            for row in [row async for row in records(uow.email, principal, "draft_revision")]:
-                if str(row.payload["id"]) in expired:
+                current = await uow.email.get(principal, "draft_revision", row.key)
+                if draft is not None and draft_expired(draft, cutoff) and current is not None:
                     await uow.email.delete(
-                        principal, "draft_revision", row.key, expected_revision=row.revision
+                        principal, "draft_revision", row.key, expected_revision=current.revision
                     )
                     removed += 1
         return removed

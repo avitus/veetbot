@@ -301,6 +301,9 @@ refresh. Cancellation and responses from an old connection do not become
 visible connection errors. Refresh failures survive successful cached reads
 until a refresh completes; a recovered thread read clears its own error while
 preserving errors from editing, feedback or send actions.
+Messages appear as soon as the thread response arrives, even when an older
+server requires a separate draft read. Foreground polling reuses a pending initial
+thread read from the same activation instead of replacing it with another request.
 Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
@@ -333,6 +336,10 @@ client retains confirmed mailbox state, row order and unsaved replies, and
 keeps other rows actionable. Pending rows stay hidden through refreshes and
 status checks resume when Email reopens. An archived conversation found in
 Other mail can be moved back to its originating account's Inbox.
+Archiving from the reading pane clears it immediately and opens the next visible
+conversation, or the previous one when archiving the last row. With no remaining
+rows, the pane becomes empty. Loading the successor does not wait for archive
+admission or completion, and a later archive failure does not replace the new selection.
 
 The reading column separates the attention summary, original conversation and
 reply composer. Why this matters and Improve priorities expand on demand, while

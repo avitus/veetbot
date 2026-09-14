@@ -150,6 +150,13 @@ operation, thread, draft and approval reads. Returning to Email starts a new
 activation; results from an earlier activation cannot update the newly opened view.
 A successful thread read clears an earlier read error without clearing an
 unresolved draft-edit or send error.
+Thread detail reads apply retention only to the requested conversation and its
+draft. They do not sweep unrelated threads, drafts or draft histories. Inbox
+scans do not hold the principal mutation lock; pending archive reconciliation
+re-reads its one target under a short lock before applying an outcome. Clients
+reuse an in-flight initial thread read during foreground polling within the same
+activation, and display received messages without waiting for a separate draft
+response. Archive navigation clears the old content before loading its successor.
 An account awaiting its first update is shown as waiting; a recorded failure
 remains distinct even when that account has never completed synchronization.
 
@@ -1010,6 +1017,13 @@ call is made inside either lock. PostgreSQL supplies rollback; the ordinary
 in-memory unit of work retains its documented deterministic, non-transactional
 scope. Immutable draft and feedback histories use independently keyed records,
 not destructive rewriting of a prior revision's content.
+
+The existing maintenance worker performs mailbox-wide body retention. It scans
+in pages of at most 100 records outside the mutation lock, then re-reads each
+expired candidate in a separate short locked transaction before erasing it.
+Draft-history deletion also rechecks the current parent draft's retention state.
+Foreground reads still enforce the thirty-day rule on their requested content,
+so a delayed maintenance sweep cannot expose or renew an expired body.
 
 ### Source-content erasure mechanism
 
