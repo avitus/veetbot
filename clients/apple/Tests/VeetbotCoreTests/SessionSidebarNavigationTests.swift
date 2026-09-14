@@ -16,6 +16,7 @@ import Testing
         #expect(SessionSidebarDestination.session(sessionID) == .session(sessionID))
     }
 
+    /// Keep global navigation actions available through the accessible iOS overflow menu.
     @Test
     func testIOSSidebarUsesAnExplicitAccessibleOverflowMenu() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)

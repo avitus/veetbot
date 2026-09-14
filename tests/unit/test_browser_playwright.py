@@ -234,6 +234,7 @@ class FakeNavigationRequest:
     url: str
 
     def is_navigation_request(self) -> bool:
+        """Identify the fake request as a top-level navigation hop."""
         return True
 
 
@@ -241,13 +242,16 @@ class FakeRedirectingPage:
     """Report the navigation requests Chromium emits, then fail like a refused tunnel."""
 
     def __init__(self, hops: list[str]) -> None:
+        """Initialize the fake navigation event state for this regression."""
         self.hops = hops
         self.handlers: dict[str, list[Callable[[Any], None]]] = {}
 
     def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        """Capture browser event callbacks for deterministic navigation simulation."""
         self.handlers.setdefault(event, []).append(handler)
 
     async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        """Simulate redirect events and the configured navigation outcome."""
         del wait_until, timeout
         for hop in (url, *self.hops):
             for handler in self.handlers.get("request", ()):

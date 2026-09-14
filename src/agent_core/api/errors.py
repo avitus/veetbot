@@ -102,6 +102,7 @@ def mapping_for(exc: BaseException) -> ErrorMapping:
 
 
 def details_for(exc: BaseException, code: str) -> dict[str, object]:
+    """Project typed domain failures into their public, structured API details."""
     if isinstance(exc, domain_errors.BudgetExceededError) and exc.details:
         return {"reason": exc.reason, **exc.details}
     if code == "conflict" and isinstance(exc, domain_errors.ConflictError):

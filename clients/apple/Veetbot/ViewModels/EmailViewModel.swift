@@ -106,6 +106,7 @@ public final class EmailViewModel: ObservableObject {
     private var archiveStates: [UUID: ArchiveMailboxState] = [:]
     private var archiveReadErrors: Set<UUID> = []
 
+    /// Inject the API factory, refresh cadence, and clock used for foreground budget pauses.
     public init(
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
         refreshNanoseconds: UInt64 = 60_000_000_000,
@@ -332,6 +333,7 @@ public final class EmailViewModel: ObservableObject {
         return Page(items: rows, nextCursor: cursor)
     }
 
+    /// Apply the queued inbox ordering only after the owner chooses to reveal new items.
     public func showNewItems() {
         if let pendingNewItems { inboxItems = pendingNewItems }
         pendingNewItems = nil
@@ -642,6 +644,7 @@ public final class EmailViewModel: ObservableObject {
         _ = await saveDraft(conflict.id)
     }
 
+    /// Validate the chosen feedback scope, persist it, and refresh the current thread projection.
     public func giveFeedback(target: EmailFeedbackTarget, judgment: String, explanation: String? = nil, targetValue: String? = nil) async {
         guard let thread, let api = makeAPIClient(), !isPerformingAction else { return }
         if target == .topic, !thread.feedbackTopics.contains(targetValue ?? "") {

@@ -191,6 +191,7 @@ async def test_hosted_runtime_normalizes_low_level_navigation_failures() -> None
         error: Exception = RuntimeError("provider-private-diagnostic")
 
         async def navigate(self, url: str) -> BrowserObservation:
+            """Simulate the browser navigation result needed by this failure-path regression."""
             del url
             raise self.error
 

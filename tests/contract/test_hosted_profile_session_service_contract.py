@@ -56,6 +56,7 @@ class FakeSessionRuntime:
         self.interactive = interactive
 
     async def navigate(self, url: str) -> BrowserObservation:
+        """Simulate the browser navigation result needed by this failure-path regression."""
         if self.navigate_error is not None:
             raise self.navigate_error
         return BrowserObservation(url=url, revision="revision-1", text="safe observation")
@@ -103,6 +104,7 @@ def services(
     list[FakeSessionRuntime],
     list[datetime],
 ]:
+    """Build isolated hosted-session fixtures for the shared authentication contract."""
     keyring = StaticProfileKeyring(
         {"key-v1": hashlib.sha256(b"synthetic-session-key").digest()},
         current_version="key-v1",
@@ -112,6 +114,7 @@ def services(
     times = [NOW]
 
     def runtime_factory(tenant_id: str) -> FakeSessionRuntime:
+        """Create and retain a fake browser runtime for lifecycle assertions."""
         assert tenant_id == principal().tenant_id
         runtime = FakeSessionRuntime(
             navigate_error=first_navigate_error if not runtimes else None,

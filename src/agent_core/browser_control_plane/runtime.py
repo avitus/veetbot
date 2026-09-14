@@ -116,6 +116,7 @@ class HostedPlaywrightSessionRuntime:
         self._started = True
 
     async def navigate(self, url: str) -> BrowserObservation:
+        """Navigate within the bound origin policy and preserve stable failure codes."""
         try:
             return await self._runtime.navigate(url)
         except BrowserProviderError:

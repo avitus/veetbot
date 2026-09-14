@@ -53,6 +53,7 @@ class ResetLearningRequest(BaseModel):
 
 
 async def boundary[T](operation: Awaitable[T]) -> T:
+    """Map malformed email values to HTTP errors while preserving typed target failures."""
     try:
         return await operation
     except EmailFeedbackTargetError:

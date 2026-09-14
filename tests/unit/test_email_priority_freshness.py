@@ -18,6 +18,7 @@ from tests.gates.test_email_runtime_m26 import _assessment_turn, _current_mail_f
 
 
 def assessment(expires_at: str | None) -> dict[str, Any]:
+    """Build grounded importance features with optional attention expiry overrides."""
     return {
         "summary": "Meeting invitation",
         "reason": "Please confirm attendance",
@@ -37,6 +38,7 @@ async def test_meeting_attention_expires_without_mailbox_changes(
     expired_on_arrival: bool,
     needs_reply: bool,
 ) -> None:
+    """Expire time-bounded attention during projection without changing the source mailbox."""
     async with email_client() as (app, client):
         service = await prepare(app)
         clock = FixedClock(datetime(2026, 9, 13, 17, tzinfo=UTC))
@@ -82,6 +84,7 @@ async def test_meeting_attention_expires_without_mailbox_changes(
 
 
 async def test_old_unresolved_request_remains_eligible_without_event_expiry() -> None:
+    """Retain an old unresolved request when no supported attention expiry exists."""
     async with email_client() as (app, _):
         service = await prepare(app)
         service.clock = FixedClock(datetime(2026, 9, 13, tzinfo=UTC))
@@ -93,6 +96,7 @@ async def test_old_unresolved_request_remains_eligible_without_event_expiry() ->
 
 
 async def test_expiry_preserves_explicit_feedback_and_undo_restores_expiry() -> None:
+    """Let owner feedback override expiry and restore expiry when that feedback is undone."""
     async with email_client() as (app, _):
         service = await prepare(app)
         service.clock = FixedClock(datetime(2026, 9, 13, tzinfo=UTC))
@@ -113,6 +117,7 @@ async def test_expiry_preserves_explicit_feedback_and_undo_restores_expiry() -> 
 
 @pytest.mark.parametrize("expiry", ["2026-09-13T10:00:00", "not-a-date", 123])
 async def test_malformed_expiry_cannot_mutate_assessment(expiry: object) -> None:
+    """Reject malformed or naive expiry values before stored assessment state changes."""
     async with email_client() as (app, _):
         service = await prepare(app)
         thread = await service.import_thread(app.principal, "work", observation(), uuid4())
@@ -127,6 +132,7 @@ async def test_malformed_expiry_cannot_mutate_assessment(expiry: object) -> None
 
 
 async def test_assessment_receives_trusted_current_time_separate_from_message_date() -> None:
+    """Supply trusted assessment time separately from the original correspondence date."""
     from dataclasses import replace
 
     now = datetime(2026, 9, 13, 17, tzinfo=UTC)
@@ -149,6 +155,7 @@ async def test_assessment_receives_trusted_current_time_separate_from_message_da
 async def test_expired_model_result_never_surfaces_or_auto_drafts_and_poll_is_cached(
     needs_reply: bool,
 ) -> None:
+    """Suppress expired attention and drafting without repeating unchanged model assessment."""
     import json
     from dataclasses import replace
 
@@ -174,6 +181,7 @@ async def test_expired_model_result_never_surfaces_or_auto_drafts_and_poll_is_ca
 
 
 async def test_legacy_cached_assessment_is_replaced_once_on_foreground_refresh() -> None:
+    """Upgrade a legacy assessment once under the current prompt and then reuse it."""
     import json
     from dataclasses import replace
 

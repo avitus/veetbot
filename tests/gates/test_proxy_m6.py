@@ -113,3 +113,38 @@ async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
 
     assert dialed is False
     assert bytes(writer.data).startswith(b"HTTP/1.1 502 Bad Gateway")
+
+
+async def test_https_redirect_connect_is_refused_before_upstream_dial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An HTTPS redirect to an unlisted www host cannot open a proxy tunnel."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(
+        b"CONNECT www.allowed.example:443 HTTP/1.1\r\nHost: www.allowed.example:443\r\n\r\n"
+    )
+    reader.feed_eof()
+    writer = _Writer()
+    dialed = False
+
+    async def resolved(host: str, port: int) -> tuple[str, ...]:
+        """Supply a public address so refusal depends on the exact hostname policy."""
+        assert (host, port) == ("www.allowed.example", 443)
+        return ("93.184.216.34",)
+
+    async def open_connection(_host: str, _port: int) -> tuple[asyncio.StreamReader, Any]:
+        """Record any attempt to tunnel to the disallowed redirect target."""
+        nonlocal dialed
+        dialed = True
+        raise AssertionError("refused HTTPS redirect reached the upstream dial boundary")
+
+    monkeypatch.setattr(proxy, "_resolved", resolved)
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    await proxy._handle(
+        reader,
+        writer,  # type: ignore[arg-type]
+        ("allowlist", (("allowed.example", frozenset({443})),)),
+    )
+    assert bytes(writer.data).startswith(b"HTTP/1.1 403 Forbidden")
+    assert dialed is False
+    assert writer.closed is True

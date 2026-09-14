@@ -33,6 +33,7 @@ import SwiftUI
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 200_000_000)
         host.layoutSubtreeIfNeeded()
+        /// Find the first matching AppKit descendant in the rendered email hierarchy.
         func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
             if let match = view as? T { return match }
             return view.subviews.lazy.compactMap { descendant(type, in: $0) }.first
@@ -41,6 +42,7 @@ import SwiftUI
             window.contentView = nil
             model.resetConnection()
         }
+        /// Save the current rendered inbox as a fixture image for layout inspection.
         func snapshot(_ name: String) throws {
             guard let directory = ProcessInfo.processInfo.environment["VEETBOT_LAYOUT_SNAPSHOTS"],
                   let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
@@ -913,6 +915,7 @@ import SwiftUI
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == count)
     }
 
+    /// Resume automatic admission after the pause expires and clear it on connection replacement.
     @Test func testBudgetPauseExpiresAndConnectionResetClearsItsState() async throws {
         let requests = EmailRequestRecorder()
         var current = Date(timeIntervalSince1970: 1_789_344_000)
@@ -940,6 +943,7 @@ import SwiftUI
         #expect(model.budgetRetryAt == nil)
     }
 
+    /// Keep budget pauses across mode visits while allowing an explicit refresh to recover.
     @Test func testBudgetCeilingStopsTimerAcrossVisitsAndManualRefreshRecovers() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel(refreshNanoseconds: 10_000_000) { request in

@@ -542,6 +542,7 @@ async def test_authentication_redirect_outside_allowed_origins_is_a_login_error(
             *,
             login_url: str,
         ) -> BrowserAuthenticationView:
+            """Simulate a refused authentication launch for safe error-mapping assertions."""
             del profile_id, owner, provider_ref, login_url
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
 

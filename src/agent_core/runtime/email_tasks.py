@@ -354,6 +354,7 @@ class _TaskIO:
         return value
 
     async def _register_sources(self, account_id: str, value: dict[str, Any]) -> None:
+        """Register complete source receipts, excluding older automatic-refresh messages."""
         sequence, tool_name = value.get("source_event_sequence"), value.get("source_tool_name")
         if not isinstance(sequence, int) or not isinstance(tool_name, str):
             return
@@ -388,6 +389,7 @@ class _TaskIO:
     async def _register_body(
         self, account_id: str, provider_id: str, header: dict[str, Any], body: dict[str, Any]
     ) -> None:
+        """Register an eligible body passage with its original headers and source provenance."""
         if self.task.kind == "refresh" and not self._recent(header):
             return
         if not body.get("body") or not header.get("headers_complete"):
@@ -434,6 +436,7 @@ class _TaskIO:
             await save_value(uow.email, c.principal, kind, key, value, c.clock.now())
 
     async def _state(self, account_id: str) -> tuple[EmailAccount, EmailSyncState]:
+        """Load discovery state, migrate legacy cursors, and advance idle rolling-window bounds."""
         c = self.context
         async with c.uow_factory() as uow:
             account = await read_value(uow.email, c.principal, "account", account_id, EmailAccount)
@@ -458,9 +461,25 @@ class _TaskIO:
                 history_policy=EMAIL_HISTORY_POLICY,
                 history_since=int((c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)).timestamp()),
             )
+        elif not (
+            account.inbox_cursor
+            or account.history_cursor
+            or sync.inbox_page_open
+            or sync.history_page_open
+            or sync.inbox_pending
+            or sync.history_pending
+        ):
+            cutoff = int((c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)).timestamp())
+            if cutoff > sync.history_since:
+                sync.history_since = cutoff
+                sync.anchor = c.clock.now().date().isoformat()
+                sync.inbox_next = sync.history_next = None
+                # Completed discovery already covers this narrower window. New
+                # mail arrives through history deltas; do not rescan every poll.
         return account, sync
 
     def _recent(self, message: dict[str, Any]) -> bool:
+        """Check provider message time against the current automatic-email history boundary."""
         try:
             sent_at = datetime.fromtimestamp(int(message["internal_date"]) / 1000, tz=UTC)
         except (KeyError, ValueError, TypeError, OverflowError):
@@ -483,6 +502,7 @@ class _TaskIO:
         progress_override: dict[str, Any] | None = None,
         read_limit: int = 10,
     ) -> tuple[dict[str, Any] | None, bool]:
+        """Read a bounded thread window while retaining resumable page and body progress."""
         c = self.context
         progress_key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         async with c.uow_factory() as uow:
@@ -623,6 +643,7 @@ class _TaskIO:
         return result, pending
 
     async def _window_analyzed(self, account_id: str, provider_id: str) -> bool:
+        """Check whether eligible cached passages have completed analysis for this window."""
         key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         c = self.context
         async with c.uow_factory() as uow:
@@ -679,6 +700,7 @@ class _TaskIO:
         return not pending
 
     async def refresh(self) -> None:
+        """Advance bounded discovery, assessment, and eligible automatic drafts."""
         c = self.context
         for account_id in self.task.account_ids:
             account, sync = await self._state(account_id)
@@ -982,6 +1004,7 @@ class _TaskIO:
         return account, sync
 
     async def _remove_message(self, account_id: str, provider_id: str, message_id: str) -> None:
+        """Remove a deleted source message and invalidate its cached assessment and evidence."""
         c = self.context
         key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
@@ -1051,6 +1074,7 @@ class _TaskIO:
     async def _history(
         self, account: EmailAccount, sync: EmailSyncState
     ) -> tuple[EmailAccount, EmailSyncState]:
+        """Advance one query-bound history page and checkpoint completed source imports."""
         if account.history_window > 0:
             return account.model_copy(update={"history_complete": True}), sync
         query = f"after:{sync.history_since}"
@@ -1149,6 +1173,7 @@ class _TaskIO:
         return value
 
     def _model_revision(self) -> str:
+        """Identify the pinned provider, registry, and assessment prompt revision."""
         c = self.context
         registry = (
             "unrouted"
@@ -1158,6 +1183,7 @@ class _TaskIO:
         return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:email-assessment@3"
 
     async def assess(self, thread: EmailThread, learning: dict[str, Any]) -> None:
+        """Reuse current evidence or assess the next eligible passage through the governed model."""
         async with self.context.uow_factory() as uow:
             prior = await uow.email.get(self.context.principal, "assessment", str(thread.id))
         previous = {} if prior is None else prior.payload
@@ -1301,6 +1327,7 @@ class _TaskIO:
             await self._form_semantics(thread, facts)
 
     async def _form_semantics(self, thread: EmailThread, facts: list[EmailSemanticFact]) -> None:
+        """Form eligible correspondence memories from exact, recent message evidence."""
         for message in thread.messages:
             if message.sent_at < self.context.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS):
                 continue

@@ -50,6 +50,7 @@ async def test_typed_task_hook_runs_before_pending_tool_recovery(tmp_path: Path)
 
 
 async def test_refresh_uses_governed_mailbox_reads_without_owner_prompt_or_model() -> None:
+    """Verify foreground ingestion uses governed MCP reads without fabricating owner input."""
     from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
     from agent_core.domain.mcp import MCPCallResult, ScriptedMCPResponse, ScriptedMCPServer
     from tests.gates.test_email_m18 import _email_settings, _generated_gmail_discovery
@@ -1564,6 +1565,7 @@ async def test_invalid_json_mailbox_result_preserves_account_and_draft(
 
 @pytest.mark.parametrize("missing", ["id", "from", "internal_date"])
 async def test_invalid_memory_source_fields_do_not_interrupt_mailbox_viewing(missing: str) -> None:
+    """Keep mail readable when malformed semantic source metadata cannot be registered."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from uuid import UUID

@@ -295,6 +295,7 @@ class BrowserProfileManagementService:
         *,
         login_url: str,
     ) -> BrowserAuthenticationView:
+        """Start one scoped login ceremony and preserve safe navigation failures."""
         require_scope(principal, "browser.profile.write")
         launched: BrowserAuthenticationView | None = None
         try:

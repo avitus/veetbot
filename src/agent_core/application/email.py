@@ -258,6 +258,7 @@ class EmailExperienceService:
         cursor: str | None = None,
         limit: int = 5,
     ) -> dict[str, object]:
+        """List scoped email summaries after archive reconciliation, expiry, and owner feedback."""
         require_scope(principal, "email.read")
         if not 1 <= limit <= 100 or (cursor is not None and not cursor.isdecimal()):
             raise ValueError("email page is malformed")
@@ -309,6 +310,7 @@ class EmailExperienceService:
         }
 
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]:
+        """Read a scoped thread with its current attention state and draft projection."""
         require_scope(principal, "email.read")
         await self.expire_cache(principal)
         async with self.uow_factory() as uow, uow.email.lock(principal):
@@ -344,6 +346,7 @@ class EmailExperienceService:
         expected_revision: int | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
+        """Persist replay-safe owner feedback for one supported thread, person, or topic."""
         require_scope(principal, "email.write")
         now = self.clock.now()
         encoded = json.dumps(
@@ -424,6 +427,7 @@ class EmailExperienceService:
             }
 
     async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]:
+        """Undo one feedback record and rebuild the thread projection from surviving evidence."""
         require_scope(principal, "email.write")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             item = await read_value(
@@ -1670,6 +1674,7 @@ class EmailExperienceService:
     async def learning_context(
         self, principal: Principal, thread: EmailThread | None
     ) -> dict[str, object]:
+        """Assemble bounded owner evidence and a fingerprint of assessment-relevant inputs."""
         async with self.uow_factory() as uow:
             state = await self._learning_state(uow.email, principal)
             feedback = await self._feedback(uow.email, principal)
@@ -2067,6 +2072,7 @@ class EmailExperienceService:
         *,
         automatic: bool = False,
     ) -> None:
+        """Learn eligible owner-authored Sent evidence without duplicating source contributions."""
         state = await self._learning_state(store, principal)
         if state.paused:
             return
@@ -2194,6 +2200,7 @@ class EmailExperienceService:
         run: Run | None = None,
         lease: WorkerLease | None = None,
     ) -> EmailThread:
+        """Validate and save features against the current source and owner-profile revisions."""
         async with self.uow_factory() as uow, uow.email.lock(principal):
             await self._fence(uow, run, lease)
             thread = await self._thread(uow.email, principal, thread_id)

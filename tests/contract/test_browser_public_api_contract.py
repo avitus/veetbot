@@ -590,6 +590,7 @@ async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_req
     redirect_blocked = [True]
 
     def provider_response(request: httpx.Request) -> httpx.Response:
+        """Return the requested fake provider outcome at the public browser API boundary."""
         provider_requests.append(request)
         if redirect_blocked[0]:
             # The isolated runtime refused the site's redirect to an unlisted origin.

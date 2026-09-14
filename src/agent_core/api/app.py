@@ -473,6 +473,7 @@ def create_app(
     new_request_id: Callable[[], str],
     readiness_probe: Callable[[], Awaitable[bool]],
 ) -> FastAPI:
+    """Compose authenticated API routes, request boundaries, and public error handlers."""
     app = FastAPI(
         title="Agent Core API",
         version="0.1",
@@ -536,6 +537,7 @@ def create_app(
         request: Request, exc: EmailFeedbackTargetError
     ) -> JSONResponse:
         # This guidance is fixed; neither submitted values nor mail content cross the boundary.
+        """Return an actionable target-selection error without echoing email content."""
         return _error_response(
             request,
             code="malformed_request",

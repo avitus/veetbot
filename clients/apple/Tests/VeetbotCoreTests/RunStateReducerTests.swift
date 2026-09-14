@@ -53,6 +53,7 @@ import Testing
         #expect(reducer.failure?.userFacingMessage == "The run ended because budget exceeded.")
     }
 
+    /// Keep the structured run failure visible inside the conversation surface.
     @Test
     func testChatRendersTheStructuredRunFailureInTheConversation() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
@@ -281,6 +282,7 @@ import Testing
         #expect(toolStatuses == [.completed])
     }
 
+    /// Group adjacent completed web calls while retaining each call and its arguments.
     @Test(arguments: [
         ("web.search", "query", "query ", "10 Web.Searches Completed"),
         ("web.fetch", "url", "https://example.com/page/", "10 Web.Fetches Completed"),
@@ -337,6 +339,7 @@ import Testing
         #expect(bundle.activities[9].result?.content.first?.text == "result 10")
     }
 
+    /// Summarize mixed fetch outcomes while preserving individual failures and risk.
     @Test
     func testBriefingFetchesBundleMixedOutcomesWithoutLosingDetails() {
         let reducer = RunStateReducer()
@@ -375,6 +378,7 @@ import Testing
         #expect(bundle.highestRisk == .high)
     }
 
+    /// Present provider rejection and error results as unsuccessful bundle outcomes.
     @Test
     func testRejectedFetchAndCompletedErrorAreNotLabeledSuccessful() {
         let reducer = RunStateReducer()
@@ -395,6 +399,7 @@ import Testing
         #expect(bundle.activities[1].presentationStatus == .failed)
     }
 
+    /// Keep active, denied, and uncertain fetches outside terminal activity bundles.
     @Test(arguments: ["tool.call.proposed", "tool.call.started", "tool.call.denied", "tool.call.uncertain"])
     func testUnfinishedDeniedAndUncertainFetchesBreakBundles(event: String) {
         let reducer = RunStateReducer()
@@ -612,6 +617,7 @@ import Testing
         }
     }
 
+    /// Preserve the individual card for calls carrying an approval reference.
     @Test(arguments: ["web.search", "web.fetch"])
     func testApprovalBoundCompletedToolBreaksCompletedToolBundles(name: String) {
         let reducer = RunStateReducer()

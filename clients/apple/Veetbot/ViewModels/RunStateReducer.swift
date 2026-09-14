@@ -553,6 +553,7 @@ public final class RunStateReducer: ObservableObject {
         update(&tools[index])
     }
 
+    /// Group adjacent eligible tool outcomes without crossing approval or unfinished-call boundaries.
     private func bundleSuccessiveTools(
         _ activities: [ConversationActivity]
     ) -> [ConversationActivity] {

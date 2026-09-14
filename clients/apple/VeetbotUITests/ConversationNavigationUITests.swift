@@ -544,6 +544,7 @@ final class ConversationNavigationUITests: XCTestCase {
         attachEmailScreenshot("Resized priority inbox")
     }
 
+    /// Launch the five-priority email fixture in a deterministic Mac window.
     private func launchFullEmailInbox() {
         app.terminate()
         app.launchArguments.append("--ui-testing-email-full-inbox")

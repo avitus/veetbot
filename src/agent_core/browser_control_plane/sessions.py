@@ -274,6 +274,7 @@ class HostedProfileSessionService:
         *,
         login_url: str,
     ) -> BrowserAuthenticationView:
+        """Start one scoped login ceremony and preserve safe navigation failures."""
         metadata = await self._owned_metadata(profile_id, principal, provider_ref)
         if metadata.revoked:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)

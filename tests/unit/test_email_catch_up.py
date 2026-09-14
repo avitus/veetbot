@@ -30,16 +30,19 @@ NOW = datetime(2026, 9, 14, 5, tzinfo=UTC)
 
 @pytest.mark.parametrize("legacy_window", [0, 1, 2])
 async def test_history_never_continues_beyond_ninety_days(legacy_window: int) -> None:
+    """Replace legacy discovery cursors with the owner-authorized ninety-day query."""
     base = await _unchanged_mailbox()
     queries: list[dict[str, Any]] = []
 
     def factory(
         config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
     ) -> ScriptedMCPClient:
+        """Wrap the scripted mailbox client for the scenario-specific observations below."""
         client = base(config, credential, environment)
         original = client.call_tool
 
         async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Intercept this scenario's mailbox operation and delegate other calls."""
             if name == "search_threads":
                 queries.append(arguments)
             return await original(name, arguments)
@@ -93,6 +96,7 @@ async def test_history_never_continues_beyond_ninety_days(legacy_window: int) ->
 
 
 async def test_cached_old_mail_is_not_automatically_assessed_or_removed() -> None:
+    """Retain cached old mail without spending model calls on automatic assessment."""
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         clock=FixedClock(NOW),
@@ -114,6 +118,7 @@ async def test_cached_old_mail_is_not_automatically_assessed_or_removed() -> Non
 
 @pytest.mark.parametrize("relevant", [False, True])
 async def test_profile_churn_reassesses_only_changed_correspondent_evidence(relevant: bool) -> None:
+    """Reassess relevant evidence changes while ignoring unrelated profile and style churn."""
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         clock=FixedClock(NOW),
@@ -166,6 +171,7 @@ async def test_profile_churn_reassesses_only_changed_correspondent_evidence(rele
 
 
 async def test_email_ceiling_returns_accounting_and_next_check_without_admitting_work() -> None:
+    """Expose budget accounting and a retry time before any over-budget task is admitted."""
     async with email_client() as (app, client):
         service = await prepare(app)
         service.clock = FixedClock(NOW)
@@ -200,6 +206,7 @@ async def test_email_ceiling_returns_accounting_and_next_check_without_admitting
 async def test_monthly_ceiling_and_unknown_usage_do_not_promise_midnight_reset(
     unresolved: bool,
 ) -> None:
+    """Keep rolling usage and unresolved reservations distinct from daily replenishment."""
     async with email_client() as (app, client):
         service = await prepare(app)
         service.clock = FixedClock(NOW)
@@ -228,6 +235,7 @@ async def test_monthly_ceiling_and_unknown_usage_do_not_promise_midnight_reset(
 
 
 async def test_mixed_age_thread_assesses_only_recent_passages_and_cannot_auto_draft() -> None:
+    """Exclude old passages from automatic learning and refuse drafts with incomplete context."""
     base = await _current_mail_factory()
     page = _page()
     old = dict(page["messages"][0])
@@ -246,10 +254,12 @@ async def test_mixed_age_thread_assesses_only_recent_passages_and_cannot_auto_dr
     def factory(
         config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
     ) -> ScriptedMCPClient:
+        """Wrap the scripted mailbox client for the scenario-specific observations below."""
         client = base(config, credential, environment)
         original = client.call_tool
 
         async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Intercept this scenario's mailbox operation and delegate other calls."""
             if name == "get_thread_page":
                 return MCPCallResult(content=(json.dumps(page),), structured=page)
             return await original(name, arguments)
@@ -275,3 +285,141 @@ async def test_mixed_age_thread_assesses_only_recent_passages_and_cannot_auto_dr
             sources = await uow.email.list(app.principal, "semantic_source")
             assert len(sources) == 1
             assert await uow.email.list(app.principal, "style") == []
+
+
+@pytest.mark.parametrize("discovery", ["inbox", "history", "complete"])
+async def test_idle_discovery_advances_rolling_cutoff_without_restarting_completed_history(
+    discovery: str,
+) -> None:
+    """Fresh searches use today's bound while covered history and cached evidence survive."""
+    base = await _unchanged_mailbox()
+    queries: list[dict[str, Any]] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        """Record query bounds while returning an unchanged mailbox."""
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Capture discovery requests without replacing the governed MCP path."""
+            if name == "search_threads":
+                queries.append(arguments)
+            return await original(name, arguments)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=clock,
+        mcp_client_factory=factory,
+    ) as app:
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email,
+                app.principal,
+                "account",
+                "default",
+                EmailAccount(
+                    id="default",
+                    label="Mail",
+                    history_id="101",
+                    inbox_complete=discovery != "inbox",
+                    history_complete=discovery != "history",
+                    history_window=0 if discovery == "history" else 1,
+                    history_processed=501,
+                ),
+                NOW,
+            )
+            await save_value(
+                uow.email,
+                app.principal,
+                "sync",
+                "default",
+                EmailSyncState(
+                    anchor=NOW.date().isoformat(),
+                    history_policy="email-history@2:90d",
+                    history_since=int((NOW - timedelta(days=90)).timestamp()),
+                ),
+                NOW,
+            )
+            await app.services.email._put_data(
+                uow.email,
+                app.principal,
+                "relationship",
+                "cached-evidence",
+                {"recipients": ["colleague@example.test"], "sent_at": NOW.isoformat()},
+            )
+        clock.advance(timedelta(days=7))
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        cutoff = int((clock.now() - timedelta(days=90)).timestamp())
+        assert len(queries) == (0 if discovery == "complete" else 1)
+        assert all(f"after:{cutoff}" in query["query"] for query in queries)
+        async with app.uow_factory() as uow:
+            sync = await uow.email.get(app.principal, "sync", "default")
+            account = await uow.email.get(app.principal, "account", "default")
+            evidence = await uow.email.get(app.principal, "relationship", "cached-evidence")
+        assert sync is not None and sync.payload["history_since"] == cutoff
+        assert account is not None and account.payload["history_processed"] == 501
+        assert evidence is not None
+
+
+@pytest.mark.parametrize(
+    "pending", ["inbox_cursor", "history_cursor", "inbox_page_open", "history_page_open"]
+)
+async def test_active_discovery_keeps_query_bound_cutoff_until_pagination_finishes(
+    pending: str,
+) -> None:
+    """A page token retains its original query, then the next idle slice advances the bound."""
+    base = await _unchanged_mailbox()
+    queries: list[dict[str, Any]] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        """Record discovery requests against an empty provider page."""
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Keep the provider response stable while observing continuation arguments."""
+            if name == "search_threads":
+                queries.append(arguments)
+            return await original(name, arguments)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    old_cutoff = int((NOW - timedelta(days=97)).timestamp())
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(NOW),
+        mcp_client_factory=factory,
+    ) as app:
+        account = EmailAccount(id="default", label="Mail", history_id="101")
+        sync = EmailSyncState(history_policy="email-history@2:90d", history_since=old_cutoff)
+        if pending.endswith("cursor"):
+            account = account.model_copy(update={pending: "query-bound-page"})
+        else:
+            setattr(sync, pending, True)
+        async with app.uow_factory() as uow:
+            await save_value(uow.email, app.principal, "account", "default", account, NOW)
+            await save_value(uow.email, app.principal, "sync", "default", sync, NOW)
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        assert all(f"after:{old_cutoff}" in query["query"] for query in queries)
+        if pending.endswith("cursor"):
+            assert any(query.get("page_token") == "query-bound-page" for query in queries)
+        async with app.uow_factory() as uow:
+            row = await uow.email.get(app.principal, "sync", "default")
+        assert row is not None and row.payload["history_since"] == old_cutoff
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            row = await uow.email.get(app.principal, "sync", "default")
+        assert row is not None
+        assert row.payload["history_since"] == int((NOW - timedelta(days=90)).timestamp())

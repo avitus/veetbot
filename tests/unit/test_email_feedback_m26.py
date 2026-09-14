@@ -17,6 +17,7 @@ from tests.gates.test_email_experience_m26 import email_client, seed_mail
 async def test_topic_feedback_validation_explains_selection_without_echoing_content(
     topics: list[str], target_value: str | None
 ) -> None:
+    """Return safe selection guidance when topic feedback lacks a supported target."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
         thread = thread.model_copy(update={"topics": topics})
@@ -48,6 +49,7 @@ async def test_topic_feedback_validation_explains_selection_without_echoing_cont
 async def test_selected_topic_feedback_applies_replays_and_undoes(
     judgment: str, priority: float
 ) -> None:
+    """Apply exact-topic feedback once and restore the prior projection on undo."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
         thread = thread.model_copy(update={"topics": ["Board", "Hiring"]})
@@ -84,6 +86,7 @@ async def test_selected_topic_feedback_applies_replays_and_undoes(
     "senders,expected", [(["invalid", "Alex <alex@example.test>"], 1.0), (["invalid"], 0.0)]
 )
 def test_person_feedback_ignores_malformed_senders(senders: list[str], expected: float) -> None:
+    """Keep malformed sender strings outside the selectable person-feedback targets."""
     thread = EmailThread(
         id=UUID(int=1),
         account_id="work",

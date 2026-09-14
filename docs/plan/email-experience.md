@@ -209,8 +209,12 @@ upgrades use governed replay with deduplication, not recurring re-extraction.
 Process Inbox/archive and Sent history within the latest **90 days only** for
 now, as the owner authorized in ADR-0096. Older historical windows are deferred.
 Discard old discovery cursors once when adopting this policy, preserving cached
-mail and source receipts. Apply the current ninety-day boundary to automatic
-assessment and learning even for already-cached mail and mixed-age threads.
+mail and source receipts. Advance the discovery cutoff when no Inbox or history
+query pagination is active; an active traversal retains its query-bound cutoff.
+Completed coverage stays complete as that window narrows, while later Inbox
+resynchronization searches use the refreshed cutoff. Preserve cached source
+identities and learning across those updates. Apply the current ninety-day boundary
+to automatic assessment and learning even for already-cached mail and mixed-age threads.
 Older context may remain readable but must not enter automatic model assessment
 or drafting; a partial recent view cannot authorize a complete-context draft.
 Spam and Trash remain excluded from automatic learning. Include a clear coverage view

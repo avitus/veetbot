@@ -77,6 +77,7 @@ class PythonPlaywrightRuntime:
     """Own a headless Chromium process and one non-persistent browser context."""
 
     def __init__(self) -> None:
+        """Initialize the scoped state used by this adapter."""
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -95,6 +96,7 @@ class PythonPlaywrightRuntime:
         storage_state: dict[str, object] | None = None,
         interactive: bool = False,
     ) -> None:
+        """Launch the isolated browser context with origin interception and audited egress."""
         if self._browser is not None:
             return
         # Authentication uses screenshots and synthetic input, both supported
@@ -124,6 +126,7 @@ class PythonPlaywrightRuntime:
         self._context.on("page", self._close_popup)
 
     def _attach_page(self, page: Page) -> None:
+        """Install request tracking and page guards before navigation begins."""
         page.on("dialog", self._dismiss_dialog)
         page.on("download", self._cancel_download)
         # Chromium follows redirects without consulting the route handler, so a
@@ -132,6 +135,7 @@ class PythonPlaywrightRuntime:
         self._page = page
 
     def _track_navigation(self, request: Request) -> None:
+        """Remember refused navigation origins for stable browser failure classification."""
         if request.is_navigation_request() and not _origin_allowed(
             request.url, self._allowed_origins
         ):
@@ -159,6 +163,7 @@ class PythonPlaywrightRuntime:
         return self._page
 
     async def navigate(self, url: str) -> BrowserObservation:
+        """Navigate within the bound origin policy and preserve stable failure codes."""
         page = self._current_page()
         self._disallowed_navigation = False
         try:
@@ -327,6 +332,7 @@ class PythonPlaywrightRuntime:
             await page.keyboard.press(event.key)
 
     async def close(self) -> None:
+        """Release the browser and proxy resources owned by this session."""
         try:
             if self._context is not None:
                 with suppress(Exception):
