@@ -2212,6 +2212,7 @@ class EmailExperienceService:
                 raise ConflictError("email source or learning changed during assessment")
 
             def score(name: str) -> float:
+                """Validate one normalized importance feature before saving the assessment."""
                 value = assessment.get(name, 0)
                 if not isinstance(value, (int, float)) or not 0 <= value <= 1:
                     raise ValueError("email assessment feature is invalid")

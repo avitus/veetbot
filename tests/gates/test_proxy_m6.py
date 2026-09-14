@@ -12,25 +12,31 @@ from agent_core.execution import proxy
 
 class _Writer:
     def __init__(self) -> None:
+        """Capture proxy output and connection closure without creating a socket."""
         self.data = bytearray()
         self.closed = False
 
     def write(self, data: bytes) -> None:
+        """Append the bytes the proxy sends to this fake connection."""
         self.data.extend(data)
 
     async def drain(self) -> None:
+        """Complete the fake output flush without network I/O."""
         return None
 
     def close(self) -> None:
+        """Record that the proxy closed this connection."""
         self.closed = True
 
     def is_closing(self) -> bool:
+        """Expose the connection state used by proxy error cleanup."""
         return self.closed
 
 
 async def test_plaintext_proxy_closes_after_one_audited_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Forward only one allowed HTTP request and close before a pipelined disallowed request."""
     client_reader = asyncio.StreamReader()
     client_reader.feed_data(
         b"GET http://allowed.example:8080/first HTTP/1.1\r\n"
@@ -47,10 +53,12 @@ async def test_plaintext_proxy_closes_after_one_audited_request(
     audited: list[tuple[str, int]] = []
 
     async def resolved(host: str, port: int) -> tuple[str, ...]:
+        """Supply a deterministic address for the allowed plaintext proxy request."""
         del host, port
         return ("192.0.2.10",)
 
     async def open_connection(host: str, port: int) -> tuple[asyncio.StreamReader, Any]:
+        """Return the scripted upstream while preserving the proxy dial boundary."""
         del host, port
         return upstream_reader, upstream_writer
 
@@ -92,6 +100,7 @@ async def test_plaintext_proxy_closes_after_one_audited_request(
 async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
     monkeypatch: pytest.MonkeyPatch, raw_request: bytes
 ) -> None:
+    """Reject unsupported or ambiguous HTTP framing before contacting an upstream."""
     reader = asyncio.StreamReader()
     reader.feed_data(raw_request)
     reader.feed_eof()
@@ -99,6 +108,7 @@ async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
     dialed = False
 
     async def open_connection(_host: str, _port: int) -> tuple[asyncio.StreamReader, Any]:
+        """Record and reject an upstream dial attempted for invalid request framing."""
         nonlocal dialed
         dialed = True
         raise AssertionError("invalid proxy request reached the dial boundary")

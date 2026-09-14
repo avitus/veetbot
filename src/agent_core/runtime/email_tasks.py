@@ -811,6 +811,7 @@ class _TaskIO:
         revision = int(str(learning.get("profile_revision", 0)))
 
         def assessment_current(thread: EmailThread) -> bool:
+            """Require matching source, model, policy, profile, and completed analysis."""
             prior = assessments.get(str(thread.id))
             return (
                 thread.assessment_version == EMAIL_POLICY_VERSION
@@ -822,6 +823,7 @@ class _TaskIO:
             )
 
         def assessment_order(thread: EmailThread) -> tuple[float, float, str]:
+            """Prioritize the oldest unfinished assessments with deterministic tie breaking."""
             prior = assessments.get(str(thread.id))
             return (
                 float("-inf") if prior is None else prior.updated_at.timestamp(),

@@ -253,6 +253,7 @@ public struct EmailModeView: View {
         .accessibilityIdentifier("email.inbox")
     }
 
+    /// Present account and inbox controls above the priority rows.
     private var inboxHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -607,6 +608,7 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Offer explicit importance feedback with supported person and topic targets.
     private var feedback: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Apply to", selection: $target) {
@@ -930,6 +932,7 @@ private struct EmailEmptyState: View {
 struct EmailRefreshButton: View {
     @ObservedObject var model: EmailViewModel
 
+    /// Present the manual refresh action and its loading state.
     var body: some View {
         Button {
             Task { await model.refresh() }

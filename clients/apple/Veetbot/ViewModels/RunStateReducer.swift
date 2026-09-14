@@ -47,10 +47,12 @@ public struct ToolActivity: Identifiable, Sendable {
     fileprivate var hasKnownName: Bool
 
     public var id: String { callID }
+    /// Present error-bearing completed fetches as failed without rewriting their wire status.
     public var presentationStatus: ToolActivityStatus {
         name == "web.fetch" && status == .completed && result?.isError == true
             ? .failed : status
     }
+    /// Select terminal tool outcomes that can be grouped without hiding approval state.
     fileprivate var isBundleCandidate: Bool {
         guard hasKnownName, approvalID == nil else { return false }
         if name == "web.fetch" {
@@ -81,6 +83,7 @@ public struct ToolActivityBundle: Identifiable, Sendable {
             Self.riskRank($0) < Self.riskRank($1)
         }
     }
+    /// Describe the bundle count and each represented outcome.
     public var summary: String {
         let title = "\(count) \(Self.pluralizedDisplayName(name))"
         let statuses: [ToolActivityStatus] = [.completed, .rejected, .unavailable, .failed]
@@ -179,6 +182,7 @@ public final class RunStateReducer: ObservableObject {
 
     public var isRunActive: Bool { runStatus?.isActive == true }
     public var needsApprovalIDs: [UUID] { Array(pendingApprovalIDs) }
+    /// Interleave messages and tool activity, then group eligible adjacent tool outcomes.
     public var activityTimeline: [ConversationActivity] {
         let activities = activityOrder.compactMap { reference in
             switch reference {

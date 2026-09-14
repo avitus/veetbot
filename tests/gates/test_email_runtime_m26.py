@@ -56,6 +56,7 @@ async def test_refresh_uses_governed_mailbox_reads_without_owner_prompt_or_model
     from tests.gates.test_email_m18 import _email_settings, _generated_gmail_discovery
 
     def response(name: str, value: dict[str, Any]) -> ScriptedMCPResponse:
+        """Return the scripted MCP response for governed foreground email ingestion."""
         import json
 
         return ScriptedMCPResponse(

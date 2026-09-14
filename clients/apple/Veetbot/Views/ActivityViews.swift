@@ -16,6 +16,7 @@ struct ToolActivityCard: View {
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
+    /// Present the individual tool status, risk, result, and available approval controls.
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
@@ -75,6 +76,7 @@ struct ToolActivityBundleCard: View {
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
+    /// Present an expandable group of terminal tool outcomes.
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
@@ -124,6 +126,7 @@ private struct BundledToolActivityRow: View {
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
+    /// Present one bundled tool result with its own outcome and risk label.
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 8) {
@@ -163,6 +166,7 @@ private struct BundledToolActivityRow: View {
         }
     }
 
+    /// Identify a bundled web call by query or URL before falling back to its ordinal.
     private var rowLabel: String {
         if let query = activity.arguments["query"]?.stringValue, !query.isEmpty {
             return "\(index). \(query)"
