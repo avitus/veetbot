@@ -582,7 +582,7 @@ async def _ready() -> bool:
 
 
 async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_request() -> None:
-    """A site that redirects to an unlisted origin gets an actionable 400, not a 500."""
+    """A refused document redirect gets guidance without the removed CDN settings."""
 
     clock, uow_factory = await memory_uow_factory()
     owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
@@ -635,6 +635,7 @@ async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_req
     assert error["code"] == "malformed_request"
     assert "redirect" in error["message"]
     assert "www" in error["message"]
+    assert "Advanced settings" not in error["message"]
     assert error["details"] == {}
     assert error["request_id"] == str(PROFILE_ID)
     assert "duolingo" not in rejected.text

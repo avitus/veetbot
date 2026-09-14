@@ -50,7 +50,6 @@ public struct ConnectionSettingsView: View {
     @State private var token = ""
     @State private var isSaving = false
     @State private var websiteURL = ""
-    @State private var websiteAdditionalOrigins = ""
 
     public init(
         model: ChatViewModel,
@@ -192,23 +191,6 @@ public struct ConnectionSettingsView: View {
                             .textInputAutocapitalization(.never)
                             .keyboardType(.URL)
                                 #endif
-                        }
-                        DisclosureGroup("Advanced settings") {
-                            settingsField(
-                                title: "Additional allowed origins (optional)",
-                                help:
-                                    "If the site redirects or needs other domains to load or sign in, list their exact HTTPS origins, separated by commas or new lines. The Website URL’s origin is already included."
-                            ) {
-                                TextField("https://static.example.com", text: $websiteAdditionalOrigins)
-                                    .textFieldStyle(.roundedBorder)
-                                    .accessibilityIdentifier("website-access.additional-origins")
-                                    #if os(iOS)
-                                .textContentType(.URL)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.URL)
-                                    #endif
-                            }
-                            .padding(.top, 8)
                         }
                         Text(
                             "Veetbot reuses your saved browser session. Sign in again when the website requires it; Veetbot does not save your password for automatic login."
@@ -552,8 +534,7 @@ public struct ConnectionSettingsView: View {
     private func addWebsiteAccess() {
         Task {
             await model.createWebsiteAccess(
-                websiteURL: websiteURL,
-                additionalOrigins: websiteAdditionalOrigins
+                websiteURL: websiteURL
             )
         }
     }
@@ -563,7 +544,6 @@ public struct ConnectionSettingsView: View {
             if accepted {
                 model.websiteAuthenticationLaunchOpened()
                 websiteURL = ""
-                websiteAdditionalOrigins = ""
             } else {
                 Task { await model.websiteAuthenticationLaunchFailed() }
             }

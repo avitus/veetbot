@@ -4736,6 +4736,10 @@ credential exposure to the model, or weakening external-write approvals.
   standing grant. Initial hard exclusions cannot use a standing grant.
 - URL, redirect, frame, popup, download, upload, private-network, and browser
   escape boundaries fail closed.
+- Website resources and embedded verification frames load automatically from
+  public HTTPS services; users do not configure CDN origins. Profile origins
+  bound top-level navigation and agent authority, while resource transport
+  retains HTTPS-only, public-address, and DNS-rebinding defenses (ADR-0098).
 - Possibly sent non-idempotent actions are uncertain and are never blindly
   retried.
 

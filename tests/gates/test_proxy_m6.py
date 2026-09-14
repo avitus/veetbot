@@ -7,7 +7,111 @@ from typing import Any
 
 import pytest
 
+from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
 from agent_core.execution import proxy
+
+
+async def test_browser_transport_is_enabled_only_by_trusted_composition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Browser resource transport is selected explicitly, never by worker policy."""
+    policies: list[tuple[Any, str]] = []
+    sentinel = object()
+
+    async def start(policy: Any, *, tenant_id: str) -> Any:
+        policies.append((policy, tenant_id))
+        return sentinel
+
+    monkeypatch.setattr(proxy, "_start_proxy", start)
+    navigation = EgressPolicy(
+        EgressMode.ALLOWLIST,
+        (EgressDestination("site.example", frozenset({443})),),
+    )
+    assert await proxy.start_browser_egress_proxy(navigation, tenant_id="tenant-a") is sentinel
+    assert policies == [(("browser_https", ()), "tenant-a")]
+    policies.clear()
+    await proxy.start_worker_egress_proxy(navigation, tenant_id="tenant-a")
+    assert policies == [(("allowlist", (("site.example", frozenset({443})),)), "tenant-a")]
+    with pytest.raises(ValueError):
+        await proxy.start_browser_egress_proxy(EgressPolicy(), tenant_id="tenant-a")
+
+
+async def test_browser_transport_refuses_plaintext_before_dns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An HTTPS resource redirect cannot downgrade to plaintext, even on port 443."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(
+        b"GET http://cdn.other.example:443/app.js HTTP/1.1\r\nHost: cdn.other.example:443\r\n\r\n"
+    )
+    reader.feed_eof()
+    writer = _Writer()
+
+    async def resolved(_host: str, _port: int) -> tuple[str, ...]:
+        raise AssertionError("plaintext request reached DNS")
+
+    monkeypatch.setattr(proxy, "_resolved", resolved)
+    await proxy._handle(reader, writer, ("browser_https", ()))  # type: ignore[arg-type]
+    assert bytes(writer.data).startswith(b"HTTP/1.1 403")
+
+
+@pytest.mark.parametrize(
+    ("target", "addresses", "allowed"),
+    [
+        ("cdn.other.example:443", ("93.184.216.34",), True),
+        ("cdn.other.example:443", ("127.0.0.1",), False),
+        ("cdn.other.example:443", ("93.184.216.34", "10.0.0.1"), False),
+        ("cdn.other.example:443", ("169.254.169.254",), False),
+        ("cdn.other.example:443", ("::ffff:127.0.0.1",), False),
+        ("cdn.other.example:443", (), False),
+        ("cdn.other.example:80", ("93.184.216.34",), False),
+        ("127.0.0.1:443", ("93.184.216.34",), False),
+        ("localhost:443", ("93.184.216.34",), False),
+        ("metadata.internal:443", ("93.184.216.34",), False),
+    ],
+)
+async def test_browser_resource_proxy_checks_public_addresses_before_dial(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    addresses: tuple[str, ...],
+    allowed: bool,
+) -> None:
+    """The browser-only transport admits CDNs but pins every dial to public DNS."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode())
+    reader.feed_eof()
+    writer = _Writer()
+    dials: list[tuple[str, int]] = []
+
+    async def resolved(_host: str, _port: int) -> tuple[str, ...]:
+        return addresses
+
+    async def open_connection(host: str, port: int) -> tuple[asyncio.StreamReader, Any]:
+        dials.append((host, port))
+        upstream = asyncio.StreamReader()
+        upstream.feed_eof()
+        return upstream, _Writer()
+
+    monkeypatch.setattr(proxy, "_resolved", resolved)
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+
+    await proxy._handle(reader, writer, ("browser_https", ()))  # type: ignore[arg-type]
+
+    assert bool(dials) is allowed
+    if allowed:
+        assert dials == [(addresses[0], 443)]
+        assert bytes(writer.data).startswith(b"HTTP/1.1 200")
+    else:
+        assert bytes(writer.data).startswith(b"HTTP/1.1 403")
+
+
+def test_sandbox_configuration_cannot_select_browser_resource_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only trusted browser composition may enable public-resource transport."""
+    monkeypatch.setenv("AGENT_EGRESS_POLICY", '{"mode":"browser_https","destinations":[]}')
+    with pytest.raises(ValueError):
+        proxy._policy()
 
 
 class _Writer:

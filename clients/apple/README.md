@@ -49,11 +49,11 @@ Website Access creates and lists dedicated browser profiles from one Website URL
 Enter a homepage such as `example.com` or a full login link such as
 `https://www.example.com/login?next=%2Fhome`. HTTPS is added when omitted. The app
 derives the primary allowed origin and opens the full URL in the isolated browser.
-Under Advanced settings, optionally add exact HTTPS origins as a comma- or
-newline-separated list for redirects, scripts, styles, images, or sign-in.
-Bare and `www` hostnames are distinct origins; redirects between them need both.
-Unlisted origins remain blocked, which can leave a site blank when its required
-scripts are served elsewhere. The app opens the
+The isolated browser automatically loads the site's public HTTPS scripts,
+styles, images, fonts, APIs, and embedded verification frames, including those
+hosted on CDNs. No additional domain configuration is required, including for
+existing profiles. Top-level navigation remains scoped to the profile's website
+origins, and private-network access is blocked. The app opens the
 server-provided isolated login ceremony only after a separate Continue in web
 browser action, where the user enters website
 credentials directly; usernames, passwords, passkeys, MFA values, cookies, and

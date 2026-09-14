@@ -106,3 +106,4 @@ implementation without one.
 - [ADR-0095 — Owner-requested Gmail archive from Email mode (Proposed)](0095-owner-requested-gmail-archive.md)
 - [ADR-0096 — Ninety-day automatic email catch-up and cost recovery (Accepted)](0096-bounded-email-catch-up.md)
 - [ADR-0097 — Bland calling and a public receptionist (Accepted; Milestone 27)](0097-bland-calling-and-public-receptionist.md)
+- [ADR-0098 — Automatic website resources without CDN configuration (Proposed)](0098-automatic-browser-site-resources.md)

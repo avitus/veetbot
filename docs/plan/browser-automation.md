@@ -109,8 +109,10 @@ surface to bind one principal-owned `READY` profile by opaque UUID. The server
 stores that UUID under a reserved, non-model-visible metadata key only after a
 tenant/principal-scoped repository read; ordinary client metadata cannot set or
 override it. A URL cannot authorize its own origin. The bound
-domain policy validates the initial URL, every redirect, the final URL, popup,
-iframe, and resource navigation according to provider enforcement rules.
+domain policy validates the initial URL, every top-level redirect, the final
+URL, and popups. Page resources and embedded frames may load from public HTTPS
+services under the separate resource transport boundary in ADR-0098; their
+origins never become profile navigation or standing-grant authority.
 
 When hosted composition resolves profiles per session, the frozen context plan
 advertises the three browser tools only if that trusted reserved metadata contains
@@ -125,7 +127,11 @@ its own classified contract. Cross-origin popups are closed and reported.
 The ephemeral provider also refuses typing into password fields or controls
 whose autocomplete semantics identify a current password, new password, or
 one-time code. Opaque references bind stable element handles rather than
-selectors that could retarget after DOM reordering.
+selectors that could retarget after DOM reordering. Observation reads bounded
+metadata from each captured handle in one browser call, avoiding repeated
+selector resolution and excessive round trips while a login form is changing.
+At most eight elements are inspected concurrently; results preserve snapshot
+order and retain the existing visibility, state, and revision checks.
 
 ## Profiles and authentication
 
@@ -233,11 +239,15 @@ Two placements implement the same port:
 
 The ephemeral adapter launches a non-persistent headless Chromium child process
 with a temporary home, scrubbed environment, downloads and service workers
-disabled, popup closure, request interception, and the audited worker egress
-proxy. Both layers enforce an exact public-HTTPS origin set; the proxy performs
-DNS resolution and blocks loopback, link-local, private, metadata, and
-single-label destinations. This adapter holds no durable authentication state
-and is not the hosted-profile topology.
+disabled, popup closure, request interception, and the audited browser egress
+proxy. Main-frame request interception enforces the exact navigation origins
+before every document request and redirect. Resources and embedded frames load
+automatically over public HTTPS. The dedicated browser proxy accepts only
+CONNECT to valid public DNS hostnames on port 443, checks all resolved addresses,
+and dials a checked address. It blocks plaintext HTTP, IP literals, loopback,
+link-local, private, metadata, and single-label destinations. The sandbox and
+ordinary worker proxy retain their exact allowlists. This adapter holds no
+durable authentication state and is not the hosted-profile topology.
 
 The hosted-profile provider additionally runs in OS/container isolation with
 resource limits, no host filesystem access, and encrypted profile storage.
@@ -472,24 +482,26 @@ corrected retry.
 
 A site can still redirect the launch navigation to an origin the profile does
 not list, most often from a bare hostname to its `www` subdomain. Chromium
-follows that redirect without consulting the runtime's request interception, so
-the deny-first egress layer refuses the hop. The isolated runtime records the
-disallowed navigation request, reports the launch as
+does not consult Playwright's route handler for each redirect, so the runtime
+uses Chromium request-stage document interception to refuse each disallowed hop
+before dispatch, even when that host previously served a page resource. The
+isolated runtime records the disallowed navigation request, reports the launch as
 `tool.browser.url_disallowed`, and discards the browser; any other launch
 navigation failure is `tool.browser.provider_unavailable`. Neither carries raw
 browser text. The application turns the disallowed redirect into the same
 `400 malformed_request` with a fixed message that names the bare-versus-`www`
-case and Advanced settings, creates no ceremony record, and leaves the profile
-available for a corrected retry.
+case and asks for the website's final address, creates no ceremony record, and
+leaves the profile available for a corrected retry.
 
 The native Website Access surface requires one Website URL: a home page or a
 login page. An omitted scheme defaults to HTTPS. The client derives the primary
 allowed origin from that URL and opens the full URL, preserving its path, query,
-and fragment. Advanced settings optionally accepts additional explicit origins
-as a comma- or newline-separated list. A site that redirects or serves required
-scripts, stylesheets, images, or sign-in controls from other origins needs those
-origins listed too; the client does not infer or automatically grant them. The
-same exact-origin allowlist continues to govern navigation and resource loading.
+and fragment. Website scripts, stylesheets, images, fonts, cross-origin APIs, and
+embedded verification frames load automatically without CDN configuration. This resource
+permission also applies when an existing profile is reused. A resource origin
+cannot authorize top-level navigation or an agent action; every document
+redirect is checked before dispatch. Ordinary browser cookie and CORS rules,
+private-network denial, and user-only authentication remain in force.
 
 `POST /v1/sessions` also accepts an optional `browser_profile_id` from a trusted
 authenticated client surface. Supplying it requires `browser.profile.read`; the
