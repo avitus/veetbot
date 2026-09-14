@@ -13,10 +13,14 @@ import pytest
 from mcp import Client as ProtocolClient
 
 from agent_core.adapters.mcp.sdk import SDKMCPClient
+from agent_core.bootstrap import build
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import MCPTransportError
 from agent_core.domain.mcp import MCPAuthScheme, MCPServerConfig, MCPTransport
+from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.runs import RunStatus
 from agent_core.mcp.configuration import build_stdio_environment
+from tests.integration.m2_support import memory_settings
 
 
 def stdio_client() -> SDKMCPClient:
@@ -34,6 +38,61 @@ def stdio_client() -> SDKMCPClient:
     )
     credential = SecretValue("initial-fixture-value")
     return SDKMCPClient(config, credential, build_stdio_environment(config, credential))
+
+
+async def test_completed_runs_release_real_sdk_transports_without_accumulation() -> None:
+    """Completed runs retire their actual stdio contexts before another session opens."""
+    server = Path(__file__).resolve().parents[1] / "fixtures/mcp_stdio_environment_server.py"
+    configs = tuple(
+        MCPServerConfig(
+            tenant_id="local",
+            server_id=f"lifecycle_{index}",
+            transport=MCPTransport.STDIO,
+            endpoint=shlex.join([sys.executable, str(server)]),
+            operator_configured=True,
+        )
+        for index in range(2)
+    )
+    clients: list[SDKMCPClient] = []
+    owners: list[asyncio.Task[BaseException | None]] = []
+
+    class TrackedClient(SDKMCPClient):
+        async def __aenter__(self) -> TrackedClient:
+            """Observe real, running lifetime tasks before completion clears their handles."""
+            await super().__aenter__()
+            assert self._owner is not None and not self._owner.done()
+            assert self._client is not None
+            owners.append(self._owner)
+            return self
+
+    def factory(
+        config: MCPServerConfig,
+        credential: SecretValue | None,
+        environment: dict[str, str],
+    ) -> TrackedClient:
+        """Track actual SDK clients without substituting their transports or cleanup."""
+        client = TrackedClient(config, credential, environment)
+        clients.append(client)
+        return client
+
+    async with build(
+        settings=memory_settings(),
+        script=FakeModelScript(
+            turns=[ScriptedTurn(text="Hello.")],
+            on_exhausted="repeat_last",
+        ),
+        mcp_servers=configs,
+        mcp_client_factory=factory,
+        sequential_ids=True,
+    ) as composition:
+        for index in range(3):
+            run_id = await composition.runs.submit("Return a short greeting.")
+            run = await composition.runs.get(run_id)
+            assert run.status is RunStatus.COMPLETED
+            assert len(clients) == len(owners) == 2 * (index + 1)
+            assert all(owner.done() for owner in owners)
+            assert all(client._owner is None for client in clients)
+            assert all(client._client is None and client._stack is None for client in clients)
 
 
 async def test_real_sdk_connection_survives_preparation_task_and_closes_in_another() -> None:

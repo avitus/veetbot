@@ -1042,6 +1042,21 @@ remaining run budget)`, and it is the effective value that lands in
 responding slowly, and a tool cannot extend it by declaring a large
 `timeout_seconds`, because the run deadline is always in the minimum.
 
+Each API and worker process checks its own connections at most every thirty
+seconds (or the configured idle timeout, if shorter). An unused connection
+closes after `idle_timeout_seconds`; an in-flight call holds a transport lease
+through invocation and authentication recovery, and resets the idle clock when
+it finishes. The same sweep observes durable session closure or deletion by
+another process and discards that session's local registrations.
+
+Run teardown releases its session's transports promptly, including suspension,
+without discarding the pinned catalog or the once-per-session authentication
+ladder. The next call reconnects with freshly resolved credentials and compares
+discovery with the original pin: added tools stay unadvertised, and removed or
+changed declarations return `tool.withdrawn`. Reconnection does not reset a
+terminal unavailability decision. Shutdown drains in-progress preparation and
+closes every transport through its SDK owner task.
+
 ### Authentication, and what the reference resolves to
 
 `credential_ref` says where the secret is. Nothing yet says what to do with

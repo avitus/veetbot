@@ -8,9 +8,12 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from datetime import datetime
+from math import isfinite
 from typing import Any
 from uuid import UUID
+from weakref import WeakValueDictionary
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.credentials import CredentialRef, SecretValue
@@ -31,6 +34,7 @@ from agent_core.domain.mcp import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
+from agent_core.domain.sessions import SessionStatus
 from agent_core.domain.skills import CatalogEntry, SkillManifest, SkillSource
 from agent_core.domain.tools import (
     ToolExecutionContext,
@@ -72,9 +76,14 @@ _GMAIL_FAILURE_CODES = frozenset(
 class _Connection:
     session_id: UUID
     config: MCPServerConfig
-    client: MCPClient
+    client: MCPClient | None
     discovery: MCPDiscovery
     report: MCPMappingReport
+    last_used_at: datetime
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    withdrawn_tools: frozenset[str] = frozenset()
+    available_resources: frozenset[str] | None = None
+    closed: bool = False
     reauthentication_attempted: bool = False
     unavailable_reason: str | None = None
 
@@ -133,8 +142,15 @@ class MCPRuntime:
         ids: IdFactory,
         *,
         connect_timeout_seconds: float = 10,
+        idle_timeout_seconds: float = 900,
     ) -> None:
         """Share bounded preparation capacity across this runtime's sessions."""
+        if not isfinite(idle_timeout_seconds) or idle_timeout_seconds <= 0:
+            raise ValueError("MCP idle timeout must be finite and positive")
+        self._idle_timeout_seconds = idle_timeout_seconds
+        self._maintenance_task: asyncio.Task[None] | None = None
+        self._principals: dict[UUID, Principal] = {}
+        self._closing = False
         self._uow_factory = uow_factory
         self._registry = registry
         self._clients = clients
@@ -146,7 +162,7 @@ class MCPRuntime:
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
         self._prepared: set[UUID] = set()
-        self._locks: dict[UUID, asyncio.Lock] = {}
+        self._locks: WeakValueDictionary[UUID, asyncio.Lock] = WeakValueDictionary()
         self._session_registrations: dict[UUID, set[_RegistrationKey]] = {}
         self._registration_owners: dict[_RegistrationKey, set[UUID]] = {}
         self._deferred_events: set[UUID] = set()
@@ -154,7 +170,11 @@ class MCPRuntime:
         self._preparation_cleanup_tasks: set[asyncio.Task[bool | None]] = set()
 
     def _lock(self, session_id: UUID) -> asyncio.Lock:
-        return self._locks.setdefault(session_id, asyncio.Lock())
+        lock = self._locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[session_id] = lock
+        return lock
 
     def _register(
         self,
@@ -284,6 +304,7 @@ class MCPRuntime:
                 client=entered,
                 discovery=discovery,
                 report=report,
+                last_used_at=self._clock.now(),
             )
 
     async def _close_prepared_connections(
@@ -294,13 +315,17 @@ class MCPRuntime:
             if not isinstance(result, _Connection):
                 continue
             with suppress(BaseException):
-                await self._close_preparation_client(result.client)
+                await self._release_connection(result)
 
     async def prepare(self, session_id: UUID, principal: Principal) -> None:
         """Discover servers concurrently, then register results in configured order."""
+        if self._closing:
+            raise MCPUnavailableError("tool.server_unreachable")
         if session_id in self._prepared:
             return
         async with self._lock(session_id):
+            if self._closing:
+                raise MCPUnavailableError("tool.server_unreachable")
             if session_id in self._prepared:
                 return
             async with self._uow_factory() as uow:
@@ -331,6 +356,8 @@ class MCPRuntime:
                 raise
             connections: dict[str, _Connection] = {}
             try:
+                if self._closing:
+                    raise MCPUnavailableError("tool.server_unreachable")
                 for result in prepared:
                     if isinstance(result, _DisconnectedServer):
                         await self._event(
@@ -384,12 +411,17 @@ class MCPRuntime:
                             "conflicts": [list(group) for group in report.conflicts],
                         },
                     )
+                if self._closing:
+                    raise MCPUnavailableError("tool.server_unreachable")
             except BaseException:
                 await self._close_prepared_connections(prepared)
                 self._unregister_session(session_id)
                 raise
             self._sessions[session_id] = connections
             self._prepared.add(session_id)
+            self._principals[session_id] = principal
+            if self._maintenance_task is None:
+                self._maintenance_task = asyncio.create_task(self._maintain_sessions())
 
     async def _record_catalog(self, connection: _Connection) -> None:
         config = connection.config
@@ -460,7 +492,8 @@ class MCPRuntime:
         return await self._invoke(
             connection,
             spec,
-            lambda: connection.client.call_tool(remote_name, arguments),
+            lambda: self._connected_client(connection).call_tool(remote_name, arguments),
+            remote_name=remote_name,
         )
 
     async def read_resource(
@@ -489,10 +522,78 @@ class MCPRuntime:
         return await self._invoke(
             connection,
             spec,
-            lambda: connection.client.read_resource(uri),
+            lambda: self._connected_client(connection).read_resource(uri),
+            resource_uri=uri,
         )
 
+    @staticmethod
+    def _connected_client(connection: _Connection) -> MCPClient:
+        if connection.client is None:
+            raise MCPTransportError
+        return connection.client
+
+    async def _reconnect(self, connection: _Connection) -> None:
+        """Refresh transport availability while retaining the original advertisement."""
+        replacement = await self._prepare_server(connection.session_id, connection.config)
+        if isinstance(replacement, _DisconnectedServer):
+            connection.unavailable_reason = replacement.reason_code
+            return
+        current = {tool.remote_name: tool.spec for tool in replacement.report.accepted}
+        connection.withdrawn_tools = frozenset(
+            tool.remote_name
+            for tool in connection.report.accepted
+            if tool.remote_name not in current
+            or tool.spec.model_dump(exclude={"version"})
+            != current[tool.remote_name].model_dump(exclude={"version"})
+        )
+        connection.available_resources = frozenset(
+            resource.uri for resource in replacement.discovery.resources
+        )
+        connection.client = replacement.client
+        if connection.report.catalog_hash != replacement.report.catalog_hash:
+            await self._event(
+                connection.session_id,
+                "mcp.catalog.changed",
+                {
+                    "server_id": connection.config.server_id,
+                    "old_catalog_hash": connection.report.catalog_hash,
+                    "new_catalog_hash": replacement.report.catalog_hash,
+                },
+            )
+
     async def _invoke(
+        self,
+        connection: _Connection,
+        spec: ToolSpec,
+        operation: Callable[[], Awaitable[MCPCallResult]],
+        *,
+        remote_name: str | None = None,
+        resource_uri: str | None = None,
+    ) -> ToolResult:
+        """Hold a transport lease through connection, invocation and auth recovery."""
+        async with connection.lock:
+            if connection.closed or self._closing:
+                return self._unavailable("tool.server_unreachable")
+            if connection.unavailable_reason is not None:
+                return self._unavailable(connection.unavailable_reason)
+            try:
+                if connection.client is None:
+                    await self._reconnect(connection)
+                if connection.unavailable_reason is not None:
+                    return self._unavailable(connection.unavailable_reason)
+                if remote_name in connection.withdrawn_tools or (
+                    resource_uri is not None
+                    and connection.available_resources is not None
+                    and resource_uri not in connection.available_resources
+                ):
+                    return self._unavailable("tool.withdrawn")
+                return await self._invoke_connected(connection, spec, operation)
+            finally:
+                connection.last_used_at = self._clock.now()
+                if connection.unavailable_reason is not None:
+                    await self._release_connection(connection)
+
+    async def _invoke_connected(
         self,
         connection: _Connection,
         spec: ToolSpec,
@@ -576,7 +677,7 @@ class MCPRuntime:
         connection.reauthentication_attempted = True
         try:
             credential = await self._credential(connection.config)
-            changed = await connection.client.reauthenticate(
+            changed = await self._connected_client(connection).reauthenticate(
                 credential,
                 self._environment(connection.config, credential),
             )
@@ -824,29 +925,88 @@ class MCPRuntime:
         for event_type, payload in self._pending_events.pop(session_id, []):
             await self._persist_event(session_id, event_type, payload)
 
-    async def close_session(self, session_id: UUID) -> None:
-        connections = self._sessions.pop(session_id, {})
-        self._prepared.discard(session_id)
-        self._locks.pop(session_id, None)
-        self._deferred_events.discard(session_id)
-        self._pending_events.pop(session_id, None)
-        try:
-            for connection in connections.values():
+    async def _release_connection(self, connection: _Connection) -> None:
+        """Drop credential-bearing clients through the SDK's owned cleanup path."""
+        client = connection.client
+        if client is not None:
+            try:
+                await self._close_preparation_client(client)
+            except Exception:
+                logger.exception(
+                    "mcp_connection_close_failed",
+                    extra={
+                        "session_id": str(connection.session_id),
+                        "server_id": connection.config.server_id,
+                    },
+                )
+            finally:
+                connection.client = None
+
+    async def release_session_transports(self, session_id: UUID) -> None:
+        """Release idle execution resources without forgetting session pins or auth state."""
+        async with self._lock(session_id):
+            for connection in self._sessions.get(session_id, {}).values():
+                async with connection.lock:
+                    await self._release_connection(connection)
+
+    async def sweep_idle(self) -> None:
+        """Reconcile remote session closure and close unused, unleased transports."""
+        for session_id, principal in list(self._principals.items()):
+            if session_id in self._deferred_events or self._lock(session_id).locked():
+                continue
+            async with self._uow_factory() as uow:
                 try:
-                    await connection.client.__aexit__(None, None, None)
-                except BaseException:
-                    logger.exception(
-                        "mcp_connection_close_failed",
-                        extra={
-                            "session_id": str(session_id),
-                            "server_id": connection.config.server_id,
-                        },
-                    )
-        finally:
+                    session = await uow.sessions.get(session_id, principal)
+                except NotFoundError:
+                    session = None
+            if session is None or session.status is not SessionStatus.ACTIVE:
+                await self.close_session(session_id)
+                continue
+            for connection in list(self._sessions.get(session_id, {}).values()):
+                if connection.lock.locked():
+                    continue
+                async with connection.lock:
+                    age = (self._clock.now() - connection.last_used_at).total_seconds()
+                    if age >= self._idle_timeout_seconds:
+                        await self._release_connection(connection)
+
+    async def _maintain_sessions(self) -> None:
+        """Own periodic cleanup in every API and worker process, including quiet workers."""
+        while True:
+            # Use real scheduling; advancing a deterministic Clock must not spin a task.
+            await asyncio.sleep(min(30, self._idle_timeout_seconds))
+            try:
+                await self.sweep_idle()
+            except Exception:
+                logger.exception("mcp_idle_cleanup_failed")
+
+    async def close_session(self, session_id: UUID) -> None:
+        """Forget a closed session only after its active calls release their leases."""
+        async with self._lock(session_id):
+            connections = self._sessions.get(session_id, {})
+            for connection in connections.values():
+                connection.closed = True
+            for connection in connections.values():
+                async with connection.lock:
+                    await self._release_connection(connection)
+            # Cancellation while draining must leave ownership available for another
+            # sweep or shutdown attempt, including clients waiting on active calls.
+            self._sessions.pop(session_id, None)
+            self._prepared.discard(session_id)
+            self._principals.pop(session_id, None)
+            self._deferred_events.discard(session_id)
+            self._pending_events.pop(session_id, None)
             self._unregister_session(session_id)
 
     async def close(self) -> None:
-        for session_id in list(self._sessions):
+        """Stop the sweeper before draining this process's connections."""
+        self._closing = True
+        if self._maintenance_task is not None:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
+        # Include preparation locks so shutdown waits for unpublished clients to unwind.
+        for session_id in set(self._sessions) | set(self._locks):
             try:
                 await self.close_session(session_id)
             except BaseException:

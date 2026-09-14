@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -134,7 +135,24 @@ async def _mailbox_factory(
     from agent_core.domain.mcp import MCPCallResult, ScriptedMCPResponse, ScriptedMCPServer
     from tests.gates.test_email_m18 import _generated_gmail_discovery
 
-    return ScriptedMCPClientFactory(
+    remaining: dict[str, deque[ScriptedMCPResponse]] = {}
+
+    class StatefulMailboxFactory(ScriptedMCPClientFactory):
+        """Remote mailbox changes survive reconnects and approval suspension."""
+
+        def __call__(
+            self,
+            config: MCPServerConfig,
+            credential: SecretValue | None,
+            environment: dict[str, str],
+        ) -> ScriptedMCPClient:
+            client = super().__call__(config, credential, environment)
+            # Only the provider response sequence is shared. Transport entry,
+            # authentication and authored response failures keep their contracts.
+            client._responses = remaining.setdefault(config.server_id, client._responses)
+            return client
+
+    return StatefulMailboxFactory(
         {
             "gmail_read": ScriptedMCPServer(
                 name="gmail_read",
