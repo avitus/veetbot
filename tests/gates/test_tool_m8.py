@@ -146,6 +146,11 @@ class _TrackedClient:
         if self.fail_close:
             raise RuntimeError("injected MCP close failure")
 
+    async def force_close(self) -> None:
+        """Retire fixture resources independently of an injected graceful-close failure."""
+        self.entered = False
+        self.closed = True
+
     async def discover(self) -> MCPDiscovery:
         if self.fail_discovery:
             raise RuntimeError("unexpected discovery failure")

@@ -162,6 +162,7 @@ class EmailExperienceService:
         catalogs: SkillCatalog | None = None,
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
         close_session: Callable[[UUID], Awaitable[None]] | None = None,
+        release_session_transports: Callable[[UUID], Awaitable[None]] | None = None,
         forget_source: Callable[[Principal, str, str, frozenset[str]], Awaitable[None]]
         | None = None,
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
@@ -183,6 +184,7 @@ class EmailExperienceService:
         self.catalogs = catalogs
         self.activate_session = activate_session
         self.close_session = close_session
+        self.release_session_transports = release_session_transports or close_session
         self.forget_source = forget_source
         self.cleanup_artifacts = cleanup_artifacts
         self.cancel_parked_run = cancel_parked_run
@@ -2353,6 +2355,7 @@ class EmailExperienceService:
             }:
                 raise ConflictError("finish the current draft action before regenerating")
             session = await self._session_in(uow, principal, thread)
+            new_session = session.id != thread.session_id
             state = await self._learning_state(uow.email, principal)
             draft = EmailDraft(
                 id=self.ids.new_id()
@@ -2390,8 +2393,14 @@ class EmailExperienceService:
                 thread.model_copy(update={"draft_id": draft.id, "session_id": session.id}),
                 self.clock.now(),
             )
-        if self.activate_session is not None:
-            await self.activate_session(session.id)
+        try:
+            if self.activate_session is not None:
+                await self.activate_session(session.id)
+        finally:
+            # Automatic drafts own a separate session, not the refresh run's.
+            # Keep its durable pins but release this otherwise unused roster.
+            if new_session and self.release_session_transports is not None:
+                await self.release_session_transports(session.id)
         return draft
 
     async def _fence(

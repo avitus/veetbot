@@ -1984,6 +1984,11 @@ async def _compose(
         raise ConfigurationError("MCP connect timeout must be numeric")
     if connect_timeout <= 0:
         raise ConfigurationError("MCP connect timeout must be positive")
+    idle_timeout = mcp_config.get("idle_timeout_seconds")
+    if not isinstance(idle_timeout, (int, float)) or isinstance(idle_timeout, bool):
+        raise ConfigurationError("MCP idle timeout must be numeric")
+    if idle_timeout <= 0:
+        raise ConfigurationError("MCP idle timeout must be positive")
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -2487,6 +2492,7 @@ async def _compose(
             clock,
             ids,
             connect_timeout_seconds=float(connect_timeout),
+            idle_timeout_seconds=float(idle_timeout),
         )
         skill_catalogs = SkillCatalogService(
             uow_factory,
@@ -2745,6 +2751,12 @@ async def _compose(
                 await delegation_joins.parent_parked(run_id, delegation_id)
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
+            try:
+                async with uow_factory() as uow:
+                    finished = await uow.runs.get(run_id, principal)
+                await mcp_runtime.release_session_transports(finished.session_id)
+            except Exception:
+                logger.exception("mcp_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
                 await public_services.email.settle(principal, run_id)
             except Exception:
@@ -3185,6 +3197,7 @@ async def _compose(
                 catalogs=skill_catalogs,
                 activate_session=mcp_runtime.activate_session,
                 close_session=close_session,
+                release_session_transports=mcp_runtime.release_session_transports,
                 forget_source=forget_email_source,
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,

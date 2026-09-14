@@ -559,7 +559,12 @@ dispatch, then release the worker's transports when the run becomes terminal,
 including failures awaiting cost reconciliation. Discard the matching ephemeral
 catalog cache so worker execution/recovery performs discovery normally. Durable
 sessions, pinned catalogs, events, and source receipts retain their existing
-lifecycle; draft and Chat session transports are unaffected.
+lifecycle. Saving an automatically generated draft can create a separate thread
+session with its own MCP roster. Release that new roster after activation,
+including activation failure, while retaining the durable session and its pinned
+catalog for later Email or Chat use. Saving into an existing thread session does
+not interrupt its transport. Ordinary run teardown and the MCP idle timeout
+also apply to draft and Chat sessions.
 
 Assessment and draft response schemas require all declared properties, including
 nested semantic facts, for strict structured output. Nullable values and empty

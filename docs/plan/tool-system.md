@@ -1042,6 +1042,21 @@ remaining run budget)`, and it is the effective value that lands in
 responding slowly, and a tool cannot extend it by declaring a large
 `timeout_seconds`, because the run deadline is always in the minimum.
 
+Each API and worker process checks its own connections at most every thirty
+seconds (or the configured idle timeout, if shorter). An unused connection
+closes after `idle_timeout_seconds`; an in-flight call holds a transport lease
+through invocation and authentication recovery, and resets the idle clock when
+it finishes. The same sweep observes durable session closure or deletion by
+another process and discards that session's local registrations.
+
+Run teardown releases its session's transports promptly, including suspension,
+without discarding the pinned catalog or the once-per-session authentication
+ladder. The next call reconnects with freshly resolved credentials and compares
+discovery with the original pin: added tools stay unadvertised, and removed or
+changed declarations return `tool.withdrawn`. Reconnection does not reset a
+terminal unavailability decision. Shutdown drains in-progress preparation and
+closes every transport through its SDK owner task.
+
 ### Authentication, and what the reference resolves to
 
 `credential_ref` says where the secret is. Nothing yet says what to do with
@@ -1231,6 +1246,14 @@ deadline detaches rather than cancels the cleanup task so cancellation-resistant
 clients can still settle independently. Expected disconnections then return
 their stable reason code, while unexpected failures propagate without retaining
 a fan-out permit.
+
+Runtime shutdown drains all retained exits concurrently for one connect-timeout
+window. It then calls the client port's `force_close` for unfinished transports
+before cancelling and awaiting their exit wrappers. The SDK force path cancels
+an AnyIO scope owned by the connection lifetime task, preserving the SDK's
+shielded, bounded stdio shutdown; it never natively cancels an owner during
+teardown. Failed forced cleanup remains owned for retry and surfaces a shutdown
+error instead of reporting successful closure.
 
 Mapping a remote tool declaration into a `ToolSpec` is where the untrusted
 input meets our type system, and every field is either derived or forced:
