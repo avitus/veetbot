@@ -490,6 +490,7 @@ def create_app(
 
     @app.exception_handler(AgentCoreError)
     async def domain_error(request: Request, exc: AgentCoreError) -> JSONResponse:
+        """Map domain failures to public error codes, details, and authentication headers."""
         mapping = mapping_for(exc)
         headers = {"WWW-Authenticate": "Bearer"} if mapping.status == 401 else None
         return _error_response(
@@ -509,6 +510,7 @@ def create_app(
         # `input`, or `ctx`, any of which can embed a submitted value.
         # `details` stays `{}`; populating it is a closed-vocabulary,
         # version-bump decision this handler does not make (rule 3).
+        """Report invalid field locations without exposing submitted values."""
         locations: list[str] = []
         for error in exc.errors():
             location = ".".join(str(part) for part in error["loc"])
@@ -525,6 +527,7 @@ def create_app(
 
     @app.exception_handler(MalformedRequestError)
     async def malformed_request_error(request: Request, exc: MalformedRequestError) -> JSONResponse:
+        """Return the stable malformed-request envelope for application validation failures."""
         return _error_response(
             request,
             code="malformed_request",
@@ -549,6 +552,7 @@ def create_app(
 
     @app.exception_handler(PayloadTooLargeError)
     async def payload_too_large(request: Request, exc: PayloadTooLargeError) -> JSONResponse:
+        """Report the request size limit without including any rejected body content."""
         del exc
         return _error_response(
             request,
@@ -559,6 +563,7 @@ def create_app(
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        """Normalize missing routes and unsupported HTTP requests into public errors."""
         code = "not_found" if exc.status_code == 404 else "malformed_request"
         status = 404 if exc.status_code == 404 else 400
         return _error_response(
@@ -573,6 +578,7 @@ def create_app(
     @app.exception_handler(Exception)
     async def internal_error(request: Request, exc: Exception) -> JSONResponse:
         # Exception text can contain private request or model content.
+        """Log only failure identity and return a content-free internal-error response."""
         logger.error(
             "api_request_failed",
             extra={"request_id": _request_id(request), "error_class": type(exc).__name__},
@@ -585,6 +591,7 @@ def create_app(
         )
 
     def secured(scope: str) -> object:
+        """Build the authentication dependency for one exact route scope."""
         return Depends(auth.require(scope))
 
     @app.post(
@@ -596,6 +603,7 @@ def create_app(
         body: CreateSessionRequest,
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> SessionView:
+        """Create a principal-owned session with the requested agent and browser binding."""
         try:
             return await services.sessions.create(
                 authenticated,
@@ -615,6 +623,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1)] = 50,
         cursor: str | None = None,
     ) -> Page[SessionView]:
+        """Page through the authenticated principal's session index."""
         try:
             return await services.sessions.list(authenticated, limit, cursor)
         except ValueError as exc:
@@ -628,6 +637,7 @@ def create_app(
         session_id: UUID,
         authenticated: Annotated[Principal, secured("session.read")],
     ) -> SessionView:
+        """Read one session after principal ownership checks."""
         return await services.sessions.get(authenticated, session_id)
 
     @app.delete(
@@ -639,6 +649,7 @@ def create_app(
         session_id: UUID,
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> Response:
+        """Delete the scoped session through the shared application service."""
         await services.sessions.delete(authenticated, session_id)
         return Response(status_code=204)
 
@@ -652,6 +663,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1)] = 100,
         cursor: str | None = None,
     ) -> Page[SessionMessageView]:
+        """Page through persisted messages from an owned session."""
         try:
             return await services.sessions.messages(
                 authenticated,
@@ -675,6 +687,7 @@ def create_app(
             Header(alias="Idempotency-Key", max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
         ] = None,
     ) -> Response:
+        """Submit an owner message through idempotent run admission."""
         result = await services.runs.submit(
             authenticated,
             session_id,
@@ -695,6 +708,7 @@ def create_app(
         run_id: UUID,
         authenticated: Annotated[Principal, secured("run.read")],
     ) -> RunView:
+        """Read the authenticated principal's durable run projection."""
         return await services.runs.get(authenticated, run_id)
 
     @app.get(
@@ -706,6 +720,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("run.read")],
         last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
     ) -> StreamingResponse:
+        """Validate stream access and replay position before sending any event bytes."""
         try:
             after = None if last_event_id is None else int(last_event_id)
         except ValueError as exc:
@@ -716,6 +731,7 @@ def create_app(
         await services.runs.get(authenticated, run_id)
 
         async def frames() -> AsyncIterator[bytes]:
+            """Emit events and idle heartbeats, cleaning up the stream on disconnect."""
             iterator = cast(
                 AsyncGenerator[StreamFrame, None],
                 services.runs.stream(authenticated, run_id, after).__aiter__(),
@@ -723,6 +739,7 @@ def create_app(
             pending: asyncio.Task[StreamFrame] | None = None
 
             async def next_frame() -> StreamFrame:
+                """Await one source event without restarting its iterator during a heartbeat."""
                 return await iterator.__anext__()
 
             try:
@@ -760,6 +777,7 @@ def create_app(
         run_id: UUID,
         authenticated: Annotated[Principal, secured("run.cancel")],
     ) -> Response:
+        """Request cancellation of an owned run through its lifecycle service."""
         result = await services.runs.cancel(authenticated, run_id)
         return JSONResponse(
             status_code=202 if result.accepted else 200,
@@ -776,6 +794,7 @@ def create_app(
         body: InputRequest,
         authenticated: Annotated[Principal, secured("run.write")],
     ) -> SubmitResult:
+        """Deliver a scoped answer to the run's pending user-input request."""
         return await services.runs.deliver_input(
             authenticated, run_id, body.content, body.question_id
         )
@@ -792,6 +811,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1)] = 50,
         cursor: str | None = None,
     ) -> Page[ApprovalView]:
+        """List approvals visible to the authenticated principal."""
         return await services.approvals.list(
             authenticated,
             ApprovalFilters(status=status, run_id=run_id, session_id=session_id),
@@ -807,6 +827,7 @@ def create_app(
         approval_id: UUID,
         authenticated: Annotated[Principal, secured("approval.read")],
     ) -> ApprovalView:
+        """Read one owned approval and its current decision state."""
         return await services.approvals.get(authenticated, approval_id)
 
     @app.post(
@@ -818,6 +839,7 @@ def create_app(
         body: ResolveApprovalRequest,
         authenticated: Annotated[Principal, secured("approval.resolve")],
     ) -> ApprovalView:
+        """Resolve the exact approval through the governed decision service."""
         return await services.approvals.resolve(
             authenticated, approval_id, body.decision, body.reason
         )
@@ -830,6 +852,7 @@ def create_app(
         artifact_id: UUID,
         authenticated: Annotated[Principal, secured("artifact.read")],
     ) -> ArtifactView:
+        """Read scoped artifact metadata without returning file content."""
         return await services.artifacts.get(authenticated, artifact_id)
 
     @app.get(
@@ -841,6 +864,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("artifact.read")],
         if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
     ) -> Response:
+        """Serve an owned artifact as bounded attachment content."""
         content = await services.artifacts.open_content(authenticated, artifact_id)
         artifact = content.artifact
         private_cache_headers = {
@@ -873,6 +897,7 @@ def create_app(
             Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
         ],
     ) -> BrowserProfileView:
+        """Create owned browser-profile metadata with the requested exact origins."""
         return await services.browser_profiles.create(
             authenticated,
             body.allowed_origins,
@@ -888,6 +913,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
     ) -> Page[BrowserProfileView]:
+        """List public metadata for the principal's browser profiles."""
         try:
             return await services.browser_profiles.list(authenticated, limit, cursor)
         except ValueError as exc:
@@ -901,6 +927,7 @@ def create_app(
         profile_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.read")],
     ) -> BrowserProfileView:
+        """Read one owned browser profile without exposing provider material."""
         return await services.browser_profiles.get(authenticated, profile_id)
 
     @app.post(
@@ -911,6 +938,7 @@ def create_app(
         profile_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserProfileView:
+        """Revoke the principal's profile through its lifecycle service."""
         return await services.browser_profiles.revoke(authenticated, profile_id)
 
     @app.delete(
@@ -922,6 +950,7 @@ def create_app(
         profile_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> Response:
+        """Delete an owned profile through the application control plane."""
         await services.browser_profiles.delete(authenticated, profile_id)
         return Response(status_code=204)
 
@@ -935,6 +964,7 @@ def create_app(
         body: BeginBrowserAuthenticationRequest,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserAuthenticationView:
+        """Create a scoped login ceremony and return its one-time launch response."""
         try:
             return await services.browser_profiles.begin_authentication(
                 authenticated,
@@ -952,6 +982,7 @@ def create_app(
         profile_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.read")],
     ) -> list[BrowserAuthenticationView]:
+        """List secret-free authentication ceremony metadata for an owned profile."""
         return await services.browser_profiles.list_authentications(
             authenticated,
             profile_id,
@@ -965,6 +996,7 @@ def create_app(
         authentication_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.read")],
     ) -> BrowserAuthenticationView:
+        """Read the current status of an owned authentication ceremony."""
         return await services.browser_profiles.authentication_status(
             authenticated,
             authentication_id,
@@ -978,6 +1010,7 @@ def create_app(
         authentication_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserAuthenticationView:
+        """Cancel an owned login ceremony through the browser control plane."""
         return await services.browser_profiles.cancel_authentication(
             authenticated,
             authentication_id,
@@ -996,6 +1029,7 @@ def create_app(
             Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
         ],
     ) -> BrowserGrantView:
+        """Create a scoped standing grant with explicit origin and operation restrictions."""
         return await services.browser_grants.create(
             authenticated,
             profile_id=body.profile_id,
@@ -1019,6 +1053,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
     ) -> Page[BrowserGrantView]:
+        """List standing browser grants under principal and optional profile scope."""
         try:
             return await services.browser_grants.list(
                 authenticated,
@@ -1037,6 +1072,7 @@ def create_app(
         grant_id: UUID,
         authenticated: Annotated[Principal, secured("browser.grant.read")],
     ) -> BrowserGrantView:
+        """Read one owned standing browser grant."""
         return await services.browser_grants.get(authenticated, grant_id)
 
     @app.post(
@@ -1047,6 +1083,7 @@ def create_app(
         grant_id: UUID,
         authenticated: Annotated[Principal, secured("browser.grant.write")],
     ) -> BrowserGrantView:
+        """Revoke the principal's standing browser authority for one grant."""
         return await services.browser_grants.revoke(authenticated, grant_id)
 
     @app.delete(
@@ -1058,6 +1095,7 @@ def create_app(
         grant_id: UUID,
         authenticated: Annotated[Principal, secured("browser.grant.write")],
     ) -> Response:
+        """Delete an owned standing browser grant through the application service."""
         await services.browser_grants.delete(authenticated, grant_id)
         return Response(status_code=204)
 
@@ -1079,6 +1117,7 @@ def create_app(
             ),
         ],
     ) -> Response:
+        """Admit an owned schedule with an idempotency key and finite execution settings."""
         result = await services.schedules.create(authenticated, body, idempotency_key)
         return JSONResponse(
             status_code=200 if result.replayed else 201,
@@ -1095,6 +1134,7 @@ def create_app(
         cursor: str | None = None,
         state: Annotated[list[ScheduleState] | None, Query()] = None,
     ) -> Page[ScheduleListItem]:
+        """Page through the principal's schedules with the requested state filter."""
         try:
             page = await services.schedules.list(
                 authenticated,
@@ -1117,6 +1157,7 @@ def create_app(
         schedule_id: UUID,
         authenticated: Annotated[Principal, secured("schedule.read")],
     ) -> ScheduleRecord:
+        """Read one owned schedule with its current revision."""
         return await services.schedules.get(authenticated, schedule_id)
 
     @schedule_router.patch(
@@ -1128,6 +1169,7 @@ def create_app(
         body: UpdateScheduleRequest,
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleRecord:
+        """Update an owned schedule under its expected revision."""
         return await services.schedules.update(
             authenticated,
             schedule_id,
@@ -1144,6 +1186,7 @@ def create_app(
         body: ExpectedScheduleRevisionRequest,
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleRecord:
+        """Pause future firing of an owned schedule at the expected revision."""
         return await services.schedules.pause(authenticated, schedule_id, body.expected_revision)
 
     @schedule_router.post(
@@ -1155,6 +1198,7 @@ def create_app(
         body: ExpectedScheduleRevisionRequest,
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleRecord:
+        """Resume an owned schedule through its governed lifecycle operation."""
         return await services.schedules.resume(authenticated, schedule_id, body.expected_revision)
 
     @schedule_router.delete(
@@ -1166,6 +1210,7 @@ def create_app(
         expected_revision: Annotated[int, Query(ge=1)],
         authenticated: Annotated[Principal, secured("schedule.cancel")],
     ) -> ScheduleRecord:
+        """Cancel future occurrences of an owned schedule at the expected revision."""
         return await services.schedules.cancel(authenticated, schedule_id, expected_revision)
 
     @schedule_router.get(
@@ -1178,6 +1223,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
     ) -> Page[ScheduleOccurrence]:
+        """Page through occurrence history for an owned schedule."""
         try:
             return await services.schedules.list_occurrences(
                 authenticated,
@@ -1200,6 +1246,7 @@ def create_app(
     async def list_surfaces(
         authenticated: Annotated[Principal, secured("surface.read")],
     ) -> list[DeviceView]:
+        """List inbound surfaces visible to the authenticated principal."""
         return await services.surfaces.list(authenticated)
 
     @surface_router.get(
@@ -1210,6 +1257,7 @@ def create_app(
         surface_id: UUID,
         authenticated: Annotated[Principal, secured("surface.read")],
     ) -> DeviceView:
+        """Read one inbound surface through principal-scoped access."""
         return await services.surfaces.get(authenticated, surface_id)
 
     @surface_router.post(
@@ -1230,6 +1278,7 @@ def create_app(
             ),
         ],
     ) -> Response:
+        """Issue an idempotent pairing code once in a non-cacheable response."""
         issued = await services.surfaces.issue_code(
             authenticated,
             surface_id,
@@ -1260,6 +1309,7 @@ def create_app(
         surface_id: UUID,
         authenticated: Annotated[Principal, secured("surface.read")],
     ) -> list[Pairing]:
+        """List the principal's pairings for an inbound surface."""
         return await services.surfaces.list_pairings(authenticated, surface_id)
 
     @surface_router.post(
@@ -1270,6 +1320,7 @@ def create_app(
         pairing_id: UUID,
         authenticated: Annotated[Principal, secured("surface.write")],
     ) -> Pairing:
+        """Revoke one owned inbound pairing and its granted authority."""
         return await services.surfaces.revoke_pairing(authenticated, pairing_id)
 
     @surface_router.delete(
@@ -1281,6 +1332,7 @@ def create_app(
         pairing_id: UUID,
         authenticated: Annotated[Principal, secured("surface.write")],
     ) -> Response:
+        """Delete one owned inbound pairing through the surface service."""
         await services.surfaces.delete_pairing(authenticated, pairing_id)
         return Response(status_code=204)
 
@@ -1305,6 +1357,7 @@ def create_app(
             ),
         ] = None,
     ) -> Response:
+        """Register or refresh a device for the authenticated principal."""
         result = await services.devices.register(
             authenticated,
             body.registration(),
@@ -1324,6 +1377,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
     ) -> Page[DeviceView]:
+        """Page through the principal's registered devices."""
         try:
             return await services.devices.list(authenticated, limit, cursor)
         except ValueError as exc:
@@ -1337,6 +1391,7 @@ def create_app(
         device_id: UUID,
         authenticated: Annotated[Principal, secured("device.read")],
     ) -> DeviceView:
+        """Read the public projection of one owned device."""
         return await services.devices.get(authenticated, device_id)
 
     @notification_router.post(
@@ -1347,6 +1402,7 @@ def create_app(
         device_id: UUID,
         authenticated: Annotated[Principal, secured("device.write")],
     ) -> DeviceView:
+        """Revoke an owned device through the device lifecycle service."""
         return await services.devices.revoke(authenticated, device_id)
 
     @notification_router.delete(
@@ -1358,6 +1414,7 @@ def create_app(
         device_id: UUID,
         authenticated: Annotated[Principal, secured("device.write")],
     ) -> Response:
+        """Delete an owned device through the shared application boundary."""
         await services.devices.delete(authenticated, device_id)
         return Response(status_code=204)
 
@@ -1377,6 +1434,7 @@ def create_app(
             ),
         ],
     ) -> Response:
+        """Admit a content-free device test notification with idempotent replay semantics."""
         result: TestNotificationResult = await services.devices.enqueue_test_notification(
             authenticated,
             device_id,
@@ -1396,6 +1454,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
     ) -> Page[NotificationInboxItem]:
+        """Page through the principal's notification inbox using a validated cursor."""
         try:
             return await services.notifications.list(authenticated, limit, cursor)
         except ValueError as exc:
@@ -1415,6 +1474,7 @@ def create_app(
         device_id: UUID,
         authenticated: Annotated[Principal, secured("device.read")],
     ) -> DeviceInvocationList:
+        """Return pending device invocations in a private, non-cacheable response."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return DeviceInvocationList(
             invocations=await services.devices.list_pending_invocations(authenticated, device_id)
@@ -1430,6 +1490,7 @@ def create_app(
         body: DeviceInvocationResultRequest,
         authenticated: Annotated[Principal, secured("device.write")],
     ) -> DeviceInvocationResultView:
+        """Record the terminal result of an invocation for the owned device."""
         return await services.devices.record_invocation_result(
             authenticated,
             device_id,
@@ -1447,6 +1508,7 @@ def create_app(
         body: DeviceMessageRequest,
         authenticated: Annotated[Principal, secured("device.write")],
     ) -> DeviceIngestResult:
+        """Admit a device-channel message through the scoped ingestion service."""
         return await services.device_ingest.ingest(
             authenticated,
             device_id,
@@ -1480,6 +1542,7 @@ def create_app(
         # A belief body is principal-scoped and sensitivity-bearing, so no
         # shared or on-disk cache may keep it; the artifact content route
         # carries the same header for the same reason.
+        """Page through the scoped, read-only memory projection with requested filters."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         # Pagination rule 3 clamps an oversized limit rather than rejecting
         # it; the domain query bounds `limit` at 200, so the clamp happens
@@ -1509,6 +1572,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("memory.read")],
         ceiling: Sensitivity,
     ) -> MemoryView:
+        """Read one memory through the principal's allowed retrieval ceiling."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
 
@@ -1527,6 +1591,7 @@ def create_app(
     ) -> PersonaView:
         # The persona is the owner's standing instruction text; no shared or
         # on-disk cache may keep it, exactly as a belief body.
+        """Read the principal's trusted persona surface."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.get(authenticated)
 
@@ -1539,6 +1604,7 @@ def create_app(
         response: Response,
         authenticated: Annotated[Principal, secured("persona.write")],
     ) -> PersonaView:
+        """Update trusted persona text under the expected revision and idempotency key."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.update(
             authenticated,
@@ -1562,6 +1628,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("persona.read")],
         limit: Annotated[int, Query(ge=1)] = 50,
     ) -> Page[PersonaView]:
+        """Read the principal's versioned persona history."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.history(authenticated, limit=min(limit, 200))
 
@@ -1574,6 +1641,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("persona.read")],
         state: PersonaNominationState | None = None,
     ) -> Page[PersonaNominationView]:
+        """List the principal's persona promotion candidates with an optional state filter."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.nominations(authenticated, state=state)
 
@@ -1586,6 +1654,7 @@ def create_app(
         response: Response,
         authenticated: Annotated[Principal, secured("persona.write")],
     ) -> PersonaView:
+        """Explicitly affirm a nomination through the trusted persona promotion service."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.affirm(authenticated, nomination_id)
 
@@ -1598,6 +1667,7 @@ def create_app(
         response: Response,
         authenticated: Annotated[Principal, secured("persona.write")],
     ) -> PersonaNominationView:
+        """Decline an owned persona nomination without promoting its content."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.decline(authenticated, nomination_id)
 
@@ -1606,12 +1676,14 @@ def create_app(
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:
+        """Return the process liveness signal without exposing operational detail."""
         if settings.release_id is not None:
             response.headers["X-Veetbot-Release"] = settings.release_id
         return {"status": "ok"}
 
     @app.get("/health/ready", openapi_extra={"required_scope": None})
     async def health_ready() -> Response:
+        """Run the readiness probe and expose only its availability result."""
         ready = await readiness_probe()
         return JSONResponse(
             status_code=200 if ready else 503,
