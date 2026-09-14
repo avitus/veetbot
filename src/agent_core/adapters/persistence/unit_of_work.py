@@ -15,6 +15,7 @@ from sqlalchemy.sql.functions import func
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.calls import CallStore
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
 from agent_core.ports.devices import (
@@ -104,6 +105,7 @@ class UnitOfWorkRepositories:
     traces: TraceStore
     personas: PersonaStore
     email: EmailStore
+    calls: CallStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
@@ -165,6 +167,7 @@ class MemoryUnitOfWork:
         self.traces = repositories.traces
         self.personas = repositories.personas
         self.email = repositories.email
+        self.calls = repositories.calls
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules
@@ -282,6 +285,7 @@ class PostgresUnitOfWork:
         self.traces = repositories.traces
         self.personas = repositories.personas
         self.email = repositories.email
+        self.calls = repositories.calls
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules

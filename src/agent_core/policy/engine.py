@@ -156,11 +156,14 @@ def evaluate_deterministic(
     )
     if (
         action.target.kind == "mcp"
-        and is_mutating_email_server_id(action.target.server_id)
+        and (
+            is_mutating_email_server_id(action.target.server_id)
+            or action.target.server_id == "bland_call"
+        )
         and _RANK[decision] < PolicyDecisionRank.REQUIRE_APPROVAL
     ):
-        # ADR-0071 forbids policy profiles from turning mailbox mutations or
-        # sends into standing allows. A future standing-grant design must own
+        # ADRs 0071 and 0097 forbid policy profiles from turning mailbox mutations,
+        # sends, or telephone calls into standing allows. A standing-grant design must own
         # any relaxation rather than hiding it in a profile.
         decision = PolicyDecisionType.REQUIRE_APPROVAL
     if (

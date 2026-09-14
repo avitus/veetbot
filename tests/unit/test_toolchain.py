@@ -111,6 +111,17 @@ def test_required_make_targets_exist() -> None:
     assert "docker compose ps --status healthy" not in text
 
 
+def test_apple_app_target_compiles_every_production_swift_source() -> None:
+    apple = ROOT / "clients" / "apple"
+    project = (apple / "Veetbot.xcodeproj" / "project.pbxproj").read_text(encoding="utf-8")
+    app_sources = project.split("/* Begin PBXSourcesBuildPhase section */", 1)[1].split(
+        "runOnlyForDeploymentPostprocessing", 1
+    )[0]
+    compiled_names = set(re.findall(r"/\* (\w+\.swift) in Sources \*/", app_sources))
+    source_names = {path.name for path in (apple / "Veetbot").rglob("*.swift")}
+    assert source_names <= compiled_names, sorted(source_names - compiled_names)
+
+
 def test_apple_target_declares_phone_and_tablet_orientations() -> None:
     project = (ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj").read_text(
         encoding="utf-8"
@@ -1168,6 +1179,7 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
         "src/agent_core",
         "src/gmail_mcp",
+        "src/bland_mcp",
     ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"
@@ -1670,13 +1682,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 26 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 27 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(27)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(28)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1699,7 +1711,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 27):
+    for milestone in range(12, 28):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

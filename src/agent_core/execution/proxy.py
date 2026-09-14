@@ -41,6 +41,28 @@ async def start_worker_egress_proxy(
         policy.mode.value,
         tuple((item.host, item.ports) for item in policy.destinations),
     )
+    return await _start_proxy(core_policy, tenant_id=tenant_id)
+
+
+async def start_browser_egress_proxy(
+    policy: EgressPolicy,
+    *,
+    tenant_id: str,
+) -> WorkerEgressProxy:
+    """Transport public HTTPS resources; the browser enforces document origins."""
+    if policy.mode.value != "allowlist" or not policy.destinations:
+        raise ValueError("browser transport requires a bound navigation policy")
+    for destination in policy.destinations:
+        validate_host_and_ports(destination.host, destination.ports)
+    return await _start_proxy(("browser_https", ()), tenant_id=tenant_id)
+
+
+async def _start_proxy(
+    core_policy: tuple[str, tuple[tuple[str, frozenset[int]], ...]],
+    *,
+    tenant_id: str,
+) -> WorkerEgressProxy:
+    """Bind one trusted process-local proxy with an immutable transport policy."""
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await _handle(reader, writer, core_policy, tenant_id=tenant_id)
@@ -64,6 +86,9 @@ def _policy() -> tuple[str, tuple[tuple[str, frozenset[int]], ...]]:
     loaded: object = json.loads(os.environ["AGENT_EGRESS_POLICY"])
     if not isinstance(loaded, dict):
         raise ValueError("egress policy must be a mapping")
+    mode = str(loaded.get("mode", "deny"))
+    if mode not in {"deny", "allowlist"}:
+        raise ValueError("unsupported serialized egress policy")
     destinations = loaded.get("destinations", [])
     if not isinstance(destinations, list):
         raise ValueError("egress destinations must be a list")
@@ -74,7 +99,23 @@ def _policy() -> tuple[str, tuple[tuple[str, frozenset[int]], ...]]:
     )
     for host, ports in parsed:
         validate_host_and_ports(host, ports)
-    return str(loaded.get("mode", "deny")), parsed
+    return mode, parsed
+
+
+def _browser_hostname(host: str) -> bool:
+    """Reject non-public hostname forms before DNS lookup, without URL diagnostics."""
+    try:
+        validate_host_and_ports(host, frozenset({443}))
+    except ValueError:
+        return False
+    normalized = host.lower().rstrip(".")
+    return (
+        len(normalized) <= 253
+        and "." in normalized
+        and "*" not in normalized
+        and not normalized.rsplit(".", 1)[1].isdigit()
+        and not normalized.endswith((".internal", ".local", ".localhost", ".home", ".lan"))
+    )
 
 
 async def _resolved(host: str, port: int) -> tuple[str, ...]:
@@ -191,8 +232,18 @@ async def _handle(
             upstream_header = b" ".join((method.encode(), path.encode(), version.encode()))
             upstream_header += b"\r\n" + b"".join(line + b"\r\n" for line in header_lines)
             upstream_header += b"\r\n"
-        addresses = await _resolved(host, port)
-        allowed, reason = evaluate_core(policy[0], policy[1], host, port, addresses)
+        if policy[0] == "browser_https":
+            if method.upper() != "CONNECT" or port != 443 or not _browser_hostname(host):
+                addresses: tuple[str, ...] = ()
+                allowed, reason = False, "browser_destination_denied"
+            else:
+                addresses = await _resolved(host, port)
+                allowed, reason = evaluate_core(
+                    "allowlist", ((host, frozenset({443})),), host, port, addresses
+                )
+        else:
+            addresses = await _resolved(host, port)
+            allowed, reason = evaluate_core(policy[0], policy[1], host, port, addresses)
         if tenant_id is None and run_id is None:
             _log(host, port, addresses, reason)
         else:

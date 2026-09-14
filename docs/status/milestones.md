@@ -212,6 +212,18 @@ remains Milestone 12. Remaining:
 - [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
 
+### Milestone 27 — Bland calling and public reception
+
+Approved on 2026-09-11 under ADR-0097. Local implementation includes twelve
+executable offline gate bindings, PostgreSQL contract evidence and 289 passing
+Apple package tests. The workstream remains in progress until live evidence passes.
+The owner number, reviewed public profile and private credentials are prepared;
+live routing is unchanged.
+
+- [ ] Apply and verify the prepared provider configuration during authorized activation
+- [ ] Verify provider-side admission controls and real signed-byte convention; authorize live test calls
+- [ ] Hosted CI, explicitly authorized CodeRabbit review and production delivery evidence
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -219,6 +231,7 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
+
 
 
 ## Deferred

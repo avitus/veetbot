@@ -434,3 +434,15 @@ Milestone 26 completes only when all thirty-two gates and approved quality
 requirements, relevant local/PostgreSQL/native lanes, authorized owner mailbox
 smoke, final-head hosted review and production delivery evidence pass. Until then
 its status remains in progress; the verified sequential ceiling stays at 12.
+
+## Milestone 27: Bland calling and public reception
+
+The owner approved [bland-calling.md](bland-calling.md) on 2026-09-11 under
+ADR-0097. Fourteen gates are registered. This independent workstream remains
+in progress; number setup and authorized live evidence are required for activation.
+
+Local code now implements the scoped tool rosters, approval-bound dispatch,
+public correspondence intake, retained owner results, erasure and call-result
+notifications. Twelve gates have executable offline bindings; provider admission
+and live release remain pending. [Setup](../bland-setup.md) covers the remaining
+owner configuration and external verification.

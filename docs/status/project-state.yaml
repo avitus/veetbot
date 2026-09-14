@@ -9,9 +9,9 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 26 are independently authorized parallel
+  # Milestones 16 through 27 are independently authorized parallel
   # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
-  # 0080, 0081, 0082, and 0092; their gates do not advance the verified
+  # 0080, 0081, 0082, 0092, and 0097; their gates do not advance the verified
   # ceiling past the sequential work through 15.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
@@ -46,6 +46,7 @@ project:
     - 24
     - 25
     - 26
+    - 27
 
 milestones:
   "0":
@@ -1397,6 +1398,66 @@ milestones:
           pending; no live mailbox, live model spend, test send, hosted review,
           pull request or production deployment was performed. Both Email mode
           activation and evaluated semantic formation remain default-off.
+
+  '27':
+    title: Bland calling and public reception
+    status: in_progress
+    authorized_on: '2026-09-11'
+    design: docs/plan/bland-calling.md
+    adr: docs/adr/0097-bland-calling-and-public-receptionist.md
+    gates_registered: 14
+    authorized_scope:
+    - public receptionist and individually approved outbound calls
+    - signed call-result intake, owner records, retention and content-free notifications
+    deferred_scope:
+    - private in-call tools, automatic commitments, transfers, SMS and call-derived memory
+    open_items:
+    - Apply and verify the prepared provider configuration during authorized activation
+    - Verify provider-side admission controls and real signed-byte convention; authorize live test calls
+    - Hosted CI, explicitly authorized CodeRabbit review and production delivery evidence
+    evidence:
+    - check: private account and receptionist preparation
+      outcome: prepared_not_activated
+      detail: >-
+        The owner selected an existing number and approved a message-taking-only
+        public profile. Provider credentials and a webhook signing secret are
+        stored privately outside the repository, with a rollback snapshot and
+        proposed replacement configuration. Provider plan limits were reviewed;
+        no additional single-call inbound cap is required. Live routing remains
+        unchanged and calling remains disabled pending activation evidence.
+    - check: calling red-green behavior and architecture checks
+      outcome: passed_locally
+      detail: >-
+        Red tests reproduced missing dispatch, rosters, receipts, owner routes,
+        notification support and private bootstrap, plus retry starvation,
+        terminal-state regression and derived-call erasure gaps. Focused suites
+        pass after implementation. Twelve gates have executable offline checks;
+        admission and live-release gates remain pending.
+    - check: PostgreSQL calling contract, erasure, concurrency and forced RLS
+      outcome: passed_locally
+      detail: >-
+        Five tests passed against the full migration graph in an isolated local
+        PostgreSQL database. A non-superuser probe verifies forced tenant RLS;
+        rollback removes uncommitted receipts, concurrent services dispatch once and
+        repeated signed delivery produces one call and notification. The broader
+        PostgreSQL suite passed after applying migrations to its isolated database.
+    - check: Apple package call notification and deletion coverage
+      outcome: passed_locally
+      detail: >-
+        make test-apple passed all 289 tests using full Xcode. The new call
+        notification parser rejects content-bearing payloads; authenticated call
+        deletion clears cached derived Chat presentation. A source-membership
+        regression reproduced the three missing call files in the Xcode app
+        target and passed after registering them. No live call was made.
+
+    - check: full repository verification
+      outcome: passed_locally
+      detail: >-
+        make check passed the static and contract partitions, lint, type
+        checks, deployment/rollback/proxy tests, strict documentation builds and
+        five website tests. Provider redaction fixes passed their focused
+        contract and the contract partition; no real Bland calls,
+        provider publication or production deployment were performed.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

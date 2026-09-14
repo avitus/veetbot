@@ -14,7 +14,7 @@ from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfi
 from agent_core.browser_control_plane.runtime import HostedPlaywrightSessionRuntime
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
-from agent_core.execution.proxy import start_worker_egress_proxy
+from agent_core.execution.proxy import start_browser_egress_proxy
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
         runtime_factory=lambda tenant_id: HostedPlaywrightSessionRuntime(
             tenant_id=tenant_id,
             runtime=PythonPlaywrightRuntime(),
-            proxy_factory=start_worker_egress_proxy,
+            proxy_factory=start_browser_egress_proxy,
         ),
         now=clock.now,
         process_secret=settings.session_secret.reveal().encode(),

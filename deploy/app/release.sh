@@ -8,6 +8,9 @@ ENV_FILE="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
 SCHEDULE_ENV_FILE="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
 NOTIFY_ENV_FILE="${VEETBOT_NOTIFY_ENV_FILE:-/etc/veetbot/veetbot-notify.env}"
 SURFACE_ENV_FILE="${VEETBOT_SURFACE_ENV_FILE:-/etc/veetbot/veetbot-surface.env}"
+CALL_ENV_FILE="${VEETBOT_CALL_ENV_FILE:-/etc/veetbot/veetbot-call.env}"
+CALL_INGRESS_ENV_FILE="${VEETBOT_CALL_INGRESS_ENV_FILE:-/etc/veetbot/veetbot-call-ingress.env}"
+CALL_UNITS=()
 BROWSER_CONTROL_CREDENTIAL_FILE="${VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE:-/etc/veetbot/secrets/browser-control-plane-credential}"
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
@@ -173,6 +176,8 @@ for required in \
   deploy/veetbot-schedule.env.example \
   deploy/veetbot-notify.env.example \
   deploy/veetbot-surface.env.example \
+  deploy/veetbot-call.env.example \
+  deploy/veetbot-call-ingress.env.example \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
   deploy/systemd/veetbot-async-worker.service \
@@ -181,6 +186,8 @@ for required in \
   deploy/systemd/veetbot-schedule.service \
   deploy/systemd/veetbot-notify.service \
   deploy/systemd/veetbot-surface.service \
+  deploy/systemd/veetbot-call.service \
+  deploy/systemd/veetbot-call-ingress.service \
   execution/sandbox.Dockerfile \
   scripts/check_schedule_database_permissions.py \
   scripts/check_production_deployment.py; do
@@ -335,6 +342,38 @@ if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
   fi
   UNITS=(veetbot-surface "${UNITS[@]}")
 fi
+for flag in AGENT_CALL_ENABLED AGENT_CALL_INGRESS_ENABLED AGENT_CALL_NOTIFICATIONS_ENABLED; do
+  [[ "${!flag:-0}" =~ ^[01]$ ]] || fail "$flag must be 0 or 1"
+done
+if [[ "${AGENT_CALL_ENABLED:-0}" == "0" && ( "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" || "${AGENT_CALL_NOTIFICATIONS_ENABLED:-0}" == "1" ) ]]; then
+  fail "calling ingress and notifications require calling to be enabled"
+fi
+printf 'AGENT_CALL_INGRESS_ENABLED=%s\n' "${AGENT_CALL_INGRESS_ENABLED:-0}" >>"$STAGE/.release.env"
+if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
+  CALL_UNITS=(veetbot-call)
+  if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then CALL_UNITS+=(veetbot-call-ingress); fi
+  for calling_unit in "${CALL_UNITS[@]}"; do
+    calling_env="$CALL_ENV_FILE"
+    if [[ "$calling_unit" == "veetbot-call-ingress" ]]; then calling_env="$CALL_INGRESS_ENV_FILE"; fi
+    [[ -f "$calling_env" ]] || fail "calling role environment is missing"
+    for binding in AGENT_CALL_ENABLED AGENT_CALL_INGRESS_ENABLED AGENT_CALL_NOTIFICATIONS_ENABLED \
+      AUTH_TENANT_ID AUTH_PRINCIPAL_ID BLAND_CONFIGURATION_FILE; do
+      [[ "$(environment_flag "$calling_env" "$binding")" == "$(environment_flag "$ENV_FILE" "$binding")" ]] || fail "calling role $binding must match the application environment"
+    done
+    [[ "$(environment_flag "$calling_env" AUTH_TOKEN)" == "0" ]] || fail "calling roles must not contain an owner bearer"
+    calling_path_setting=BLAND_API_KEY_FILE
+    calling_credential_owner=veetbot
+    if [[ "$calling_unit" == "veetbot-call-ingress" ]]; then
+      calling_path_setting=BLAND_WEBHOOK_SECRET_FILE
+      calling_credential_owner=veetbot-call-ingress
+      [[ "$(environment_flag "$calling_env" BLAND_API_KEY_FILE)" == "0" ]] || fail "calling ingress must not contain the provider credential path"
+    fi
+    calling_path="$(environment_flag "$calling_env" "$calling_path_setting")"
+    [[ "$calling_path" == /* && -f "$calling_path" && ! -L "$calling_path" ]] || fail "calling role private credential file is missing or invalid"
+    [[ "$(stat -c '%U:%a' -- "$calling_path" 2>/dev/null)" == "$calling_credential_owner:600" ]] || fail "calling role private credential file is missing or invalid"
+    [[ "$(getfacl -cp -- "$calling_path" 2>/dev/null)" == $'user::rw-\ngroup::---\nother::---' ]] || fail "calling role private credential file is missing or invalid"
+  done
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
@@ -387,6 +426,15 @@ if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
   sudo install -m 0644 "$STAGE/.veetbot-surface.service" \
     "$SYSTEMD_DIR/veetbot-surface.service"
 fi
+for calling_unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
+  calling_env="$CALL_ENV_FILE"
+  if [[ "$calling_unit" == "veetbot-call-ingress" ]]; then calling_env="$CALL_INGRESS_ENV_FILE"; fi
+  awk -v environment_file="$calling_env" '
+    /^EnvironmentFile=/ { print "EnvironmentFile=" environment_file; next }
+    { print }
+  ' "$STAGE/deploy/systemd/$calling_unit.service" >"$STAGE/.$calling_unit.service"
+  sudo install -m 0644 "$STAGE/.$calling_unit.service" "$SYSTEMD_DIR/$calling_unit.service"
+done
 sudo systemctl daemon-reload
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-schedule >/dev/null 2>&1 || true
@@ -398,6 +446,13 @@ if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-surface >/dev/null 2>&1 || true
 fi
 
+if [[ "${AGENT_CALL_ENABLED:-0}" == "0" ]]; then
+  sudo systemctl disable --now veetbot-call >/dev/null 2>&1 || true
+fi
+if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "0" ]]; then
+  sudo systemctl disable --now veetbot-call-ingress >/dev/null 2>&1 || true
+fi
+
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"
 rm -f -- "$NEXT_CURRENT"
 ln -s "$STAGE" "$NEXT_CURRENT"
@@ -406,6 +461,10 @@ PROMOTED=1
 docker tag "$RELEASE_IMAGE" "$PRODUCTION_IMAGE"
 sudo systemctl enable --now "${UNITS[@]}"
 sudo systemctl restart "${UNITS[@]}"
+for calling_unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
+  sudo systemctl enable --now "$calling_unit"
+  sudo systemctl restart "$calling_unit"
+done
 
 HEALTH_HEADERS="$(mktemp "$SHARED_DIR/health.XXXXXX")"
 healthy=0

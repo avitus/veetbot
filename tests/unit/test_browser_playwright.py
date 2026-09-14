@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from playwright.async_api import ElementHandle, Locator, Page
 from playwright.async_api import Error as PlaywrightError
 
 from agent_core.adapters.browser.playwright import (
@@ -20,6 +24,98 @@ from agent_core.domain.browser import (
     BrowserProviderError,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
+
+
+async def test_observation_pipelines_slow_controls_with_bounded_concurrency() -> None:
+    """Independent browser replies must not serialize a large login page's startup."""
+    active = 0
+    peak = 0
+    overlapping = asyncio.Event()
+
+    async def visible() -> bool:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active >= 2:
+            overlapping.set()
+        await overlapping.wait()
+        return True
+
+    async def disabled() -> bool:
+        nonlocal active
+        await asyncio.sleep(0)
+        active -= 1
+        return False
+
+    handles = []
+    for index in range(32):
+        handle = AsyncMock(spec=ElementHandle)
+        handle.is_visible.side_effect = visible
+        handle.is_disabled.side_effect = disabled
+        handle.evaluate.return_value = {
+            "tag": "button",
+            "role": None,
+            "inputType": None,
+            "name": f"Control {index}",
+        }
+        handles.append(handle)
+    controls = Mock(spec=Locator)
+    controls.element_handles = AsyncMock(return_value=handles)
+    body = Mock(spec=Locator)
+    body.inner_text = AsyncMock(return_value="Login page")
+    page = Mock(spec=Page)
+    page.url = "https://site.example/login"
+    page.title = AsyncMock(return_value="Sign in")
+    page.locator.side_effect = lambda selector: body if selector == "body" else controls
+
+    observation = await asyncio.wait_for(PythonPlaywrightRuntime()._observation(page), 1)
+
+    assert 2 <= peak <= 8
+    assert active == 0
+    assert [element.name for element in observation.elements] == [
+        f"Control {index}" for index in range(32)
+    ]
+
+
+async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_controls() -> None:
+    """A changing login form must not wait for a vanished indexed selector."""
+    handle = AsyncMock(spec=ElementHandle)
+    handle.is_visible.return_value = True
+    handle.get_attribute.return_value = None
+    handle.evaluate.side_effect = lambda expression: (
+        {"tag": "button", "role": None, "inputType": None, "name": "Log in"}
+        if "getAttribute" in expression
+        else "button"
+    )
+    handle.inner_text.return_value = "Log in"
+    handle.is_disabled.return_value = False
+
+    changing_control = Mock(spec=Locator)
+    changing_control.is_visible = AsyncMock(return_value=True)
+    changing_control.element_handle = AsyncMock(return_value=handle)
+    changing_control.get_attribute = AsyncMock(return_value=None)
+    changing_control.evaluate = AsyncMock(
+        side_effect=PlaywrightError("control disappeared while resolving its indexed selector")
+    )
+    controls = Mock(spec=Locator)
+    controls.count = AsyncMock(return_value=1)
+    controls.nth.return_value = changing_control
+    controls.element_handles = AsyncMock(return_value=[handle])
+    body = Mock(spec=Locator)
+    body.inner_text = AsyncMock(return_value="Welcome")
+    page = Mock(spec=Page)
+    page.url = "https://site.example/login"
+    page.title = AsyncMock(return_value="Sign in")
+    page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    runtime = PythonPlaywrightRuntime()
+
+    observation = await runtime._observation(page)
+
+    assert observation.text == "Welcome"
+    assert len(observation.elements) == 1
+    assert observation.elements[0].name == "Log in"
+    assert observation.elements[0].role == "button"
+    assert runtime._elements[observation.elements[0].ref] is handle
 
 
 @dataclass
@@ -232,6 +328,11 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
 @dataclass
 class FakeNavigationRequest:
     url: str
+
+    @property
+    def frame(self) -> SimpleNamespace:
+        """Expose the main-frame identity supplied with a navigation request."""
+        return SimpleNamespace(parent_frame=None)
 
     def is_navigation_request(self) -> bool:
         """Identify the fake request as a top-level navigation hop."""

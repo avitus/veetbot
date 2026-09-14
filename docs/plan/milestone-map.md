@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 29 subject specifications declare 470 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 479
-declarations, 476 registry entries once the 3 aliases are subtracted.
+The 30 subject specifications declare 484 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 493
+declarations, 490 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1556,6 +1556,27 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 32  gate.email.experience_release_evidence                   case    26
 ```
 
+### Bland calling
+
+[bland-calling.md](bland-calling.md) declares fourteen Milestone 27 gates.
+
+```text
+1 gate.call.default_off case 27
+2 gate.call.tool_separation case 27
+3 gate.call.approval_binding case 27
+4 gate.call.dispatch_recovery case 27
+5 gate.call.cancellation case 27
+6 gate.call.provider_boundary case 27
+7 gate.call.public_isolation case 27
+8 gate.call.callback_authentication case 27
+9 gate.call.durable_receipts case 27
+10 gate.call.repository_isolation case 27
+11 gate.call.retention_erasure case 27
+12 gate.call.notifications case 27
+13 gate.call.admission_bounds case 27
+14 gate.call.live_release case 27
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1649,6 +1670,7 @@ milestone  new gates  cumulative  the earliest of them
 26                32         476  shared client modes, active email sync,
                                   feedback, style, drafts, approved sends,
                                   shared semantic memory and lifecycle
+27                14         490  Bland calling and public correspondence intake
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1669,15 +1691,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of four hundred and seventy-six gates are green before
+2.  **Forty-one of four hundred and ninety gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches four hundred and seventy-six, which is every
-registry entry, at Milestone 26. Six of Milestone 10's gates are
+The cumulative column reaches four hundred and ninety, which is every
+registry entry, at Milestone 27. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,

@@ -93,6 +93,7 @@ test-apple-ui:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailModeAndExactDraftApprovalOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailCanBeCheckedOffFromInboxWithoutOpeningThread \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailDetailArchiveDisplaysNextConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailArchiveFailurePreservesInboxRow \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingKeepsFeedbackOptionalAndReplyReachable \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingInDarkAppearance \

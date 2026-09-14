@@ -1,0 +1,98 @@
+- id: gate.call.default_off
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Default off.** Disabled calling exposes no tools, ingress, reconciliation or alerts; incomplete
+    enabled configuration fails closed.'
+  check: tests/gates/test_call_api.py::test_call_api_is_default_off_owner_scoped_and_private
+- id: gate.call.tool_separation
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Tool separation.** Scoped read and call rosters are fixed and honestly classified with
+    no provider administration or arbitrary API passthrough.'
+  check: tests/gates/test_call_m27.py::test_call_rosters_and_approved_configuration
+- id: gate.call.approval_binding
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Approval binding.** Every outbound call requires approval of the exact recipient, brief,
+    facts, limits and pinned configuration; changes, denial, expiry and revocation prevent dispatch.'
+  check: tests/gates/test_call_runtime.py::test_call_dispatch_occurs_only_after_the_bound_owner_approval
+- id: gate.call.dispatch_recovery
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Dispatch recovery.** Crashes or lost responses after possible dispatch never redial and
+    preserve uncertain outcomes.'
+  check: tests/gates/test_call_lifecycle.py::test_outbound_reservation_never_redials_uncertain_dispatch
+- id: gate.call.cancellation
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Cancellation.** Cancellation prevents undispatched calls and requests provider termination
+    after dispatch, with an honest result.'
+  check: tests/gates/test_call_lifecycle.py::test_cancelled_run_terminates_a_recovered_uncertain_call_without_redial
+- id: gate.call.provider_boundary
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Provider boundary.** Provider requests use fixed HTTPS origins, refuse redirects, bound
+    responses and sanitize credentials and errors.'
+  check: tests/contract/test_bland_client_contract.py::test_bland_provider_content_is_bounded_and_key_redacted
+- id: gate.call.public_isolation
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Public isolation.** Callers and spoofed caller IDs gain no owner scopes, private context,
+    backend tools or automatic memory authority.'
+  check: tests/gates/test_call_m27.py::test_receptionist_payload_contains_only_reviewed_public_profile
+- id: gate.call.callback_authentication
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Callback authentication.** Signatures precede parsing and storage; size, direction, account,
+    number and call ownership are validated.'
+  check: tests/gates/test_call_api.py::test_public_ingress_authenticates_bytes_before_any_content_storage
+- id: gate.call.durable_receipts
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Durable receipts.** Duplicate, reordered, missed and replayed callbacks produce one result
+    without resurrecting erased content.'
+  check: tests/gates/test_call_lifecycle.py::test_erased_call_cannot_be_resurrected_by_a_valid_callback
+- id: gate.call.repository_isolation
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Repository isolation.** Shared memory and PostgreSQL contracts enforce principal isolation,
+    forced tenant RLS and atomic admission.'
+  check: tests/integration/test_call_persistence_m27.py::test_call_records_force_rls_and_transaction_rollback
+- id: gate.call.retention_erasure
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Retention and erasure.** Owner deletion and thirty-day expiry erase local transcript and
+    summary copies without claiming provider deletion.'
+  check: tests/contract/test_call_source_erasure_contract.py::test_memory_call_source_erasure
+- id: gate.call.notifications
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Notifications.** The declared call-result trigger produces only content-free owner notifications
+    and authenticated deep links.'
+  check: tests/gates/test_call_lifecycle.py::test_completed_call_notification_is_content_free_and_exactly_once
+- id: gate.call.admission_bounds
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Admission bounds.** Durable outbound reservations, bounded reconciliation and verified
+    provider-side inbound controls enforce documented limits.'
+  check: tests/gates/pending.py::pending_gate
+- id: gate.call.live_release
+  milestone: 27
+  kind: case
+  spec: docs/plan/bland-calling.md#hard-gates
+  statement: '**Live release.** Authorized real inbound and outbound calls, signed callbacks, voice quality
+    and final-head review and release evidence pass before completion.'
+  check: tests/gates/pending.py::pending_gate

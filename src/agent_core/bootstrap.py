@@ -71,6 +71,7 @@ from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
 )
+from agent_core.adapters.mcp.calls import BlandCallProvider
 from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
@@ -88,6 +89,7 @@ from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.adapters.models.unavailable import MissingCredentialProvider
 from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
+from agent_core.adapters.persistence.calls import InMemoryCallStore, PostgresCallStore
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -231,6 +233,7 @@ from agent_core.adapters.whatsapp import (
     WhatsAppDeliveryService,
     create_whatsapp_webhook_app,
 )
+from agent_core.api.call_ingress import create_call_ingress
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
@@ -239,6 +242,8 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.call_worker import CallWorker
+from agent_core.application.calling import CallService
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
@@ -333,6 +338,7 @@ from agent_core.config import (
     Settings,
     WebProviderAllocation,
     WebProviderKind,
+    load_call_worker_settings,
     load_config_document,
     load_memory_distillation_evidence,
     load_notification_worker_settings,
@@ -408,6 +414,7 @@ from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import (
+    calling_server_configs,
     email_server_configs,
     is_email_server_id,
     validate_mcp_config,
@@ -546,6 +553,7 @@ class ApplicationServices:
     memory: PublicMemoryReadServiceContract
     persona: PublicPersonaServiceContract
     email: EmailExperienceService
+    calls: CallService | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -588,6 +596,14 @@ class SurfaceWorkerComposition:
     webhook_app: FastAPI | None
     bind_host: str = "127.0.0.1"
     bind_port: int = 8002
+
+
+@dataclass(frozen=True, slots=True)
+class CallWorkerComposition:
+    worker: CallWorker | None
+    webhook_app: FastAPI | None
+    bind_host: str = "127.0.0.1"
+    bind_port: int = 8003
 
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
@@ -804,6 +820,7 @@ def _memory_uow_repositories(
         traces=traces,
         personas=InMemoryPersonaStore(),
         email=InMemoryEmailStore(),
+        calls=InMemoryCallStore(),
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -888,6 +905,7 @@ def _postgres_repository_factory(
             traces=traces,
             personas=PostgresPersonaStore(session),
             email=PostgresEmailStore(session),
+            calls=PostgresCallStore(session),
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,
@@ -1181,6 +1199,7 @@ def _validate_schedule_role(settings: Settings) -> Principal:
         require_auth_token=False,
         require_execution_environment=False,
         require_email_credentials=False,
+        require_call_credentials=False,
     )
     if not settings.schedule_worker_enabled:
         raise ConfigurationError("schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1")
@@ -1404,6 +1423,7 @@ def _validate_surface_role(settings: Settings) -> Principal:
         require_auth_token=False,
         require_execution_environment=False,
         require_email_credentials=False,
+        require_call_credentials=False,
         require_surface_credentials=True,
     )
     if not settings.surface_worker_enabled or not settings.surface_api_enabled:
@@ -1436,6 +1456,118 @@ def _validate_surface_role(settings: Settings) -> Principal:
         roles=set(settings.auth_roles),
         scopes=set(settings.auth_scopes),
     )
+
+
+@asynccontextmanager
+async def build_call_worker(
+    *,
+    settings: Settings | None = None,
+    ingress: bool = False,
+    clock: Clock | None = None,
+) -> AsyncIterator[CallWorkerComposition]:
+    """Compose either signed ingress or reconciliation without model credentials."""
+    selected = settings or load_call_worker_settings(ingress=ingress)
+    validate_settings(
+        selected,
+        require_auth_token=False,
+        require_execution_environment=False,
+        require_email_credentials=False,
+        require_surface_credentials=False,
+        require_call_credentials=not ingress,
+    )
+    if not selected.call_enabled or selected.call_configuration is None:
+        raise ConfigurationError("calling is disabled")
+    if (
+        selected.deployment_mode is not DeploymentMode.PRODUCTION
+        or selected.auth_mode is not AuthMode.TOKEN
+        or not selected.database_url.startswith(("postgresql://", "postgresql+asyncpg://"))
+    ):
+        raise ConfigurationError(
+            "calling roles require production PostgreSQL and a configured owner"
+        )
+    expected = set() if ingress else {"bland_read", "bland_call"}
+    if set(selected.credentials) != expected or selected.auth_token is not None:
+        raise ConfigurationError("calling role contains unrelated credentials")
+    if ingress and (not selected.call_ingress_enabled or selected.call_webhook_secret is None):
+        raise ConfigurationError("calling ingress is disabled or its signing secret is missing")
+    owner = Principal(
+        tenant_id=selected.auth_tenant_id,
+        principal_id=selected.auth_principal_id,
+        roles=set(selected.auth_roles),
+        scopes=set(),
+    )
+    effective_clock = clock or SystemClock()
+    runtime = load_config_document(selected, "runtime/limits.yaml")
+    scheduling = runtime["scheduling"]
+    admission = ScheduleAdmissionLimits.model_validate(
+        {
+            name: scheduling[name]
+            for name in (
+                "max_active_runs_per_tenant",
+                "max_materializations_per_minute",
+                "daily_cost",
+                "monthly_cost",
+            )
+        }
+    )
+    engine = create_engine(selected.database_url)
+    try:
+        await assert_schema_revision(engine)
+        factory = cast(
+            UnitOfWorkFactory,
+            PostgresUnitOfWorkFactory(
+                create_session_factory(engine),
+                _postgres_repository_factory(
+                    effective_clock,
+                    EventUpcasterRegistry(),
+                    lease_seconds=float(runtime["worker"]["lease_seconds"]),
+                    max_attempts=int(runtime["queue"]["max_attempts"]),
+                    skill_store=FilesystemSkillPackageStore(
+                        selected.artifact_root / "skill-packages"
+                    ),
+                    skill_validator=SkillPackageValidator(ConservativeTokenEstimator()),
+                    ids=RandomIdFactory(),
+                    schedule_admission_limits=admission,
+                    surface_admission_limits=SurfaceLimits.model_validate(runtime["surfaces"]),
+                    schedule_metrics=ScheduleMetrics(
+                        tenant_hash_key=tenant_hash_key(selected.database_url)
+                    ),
+                ),
+                owner.tenant_id,
+            ),
+        )
+        provider = (
+            None
+            if ingress
+            else BlandCallProvider(
+                owner.tenant_id,
+                SDKMCPClientFactory(),
+                MappingCredentialResolver(
+                    {
+                        name: secret.get_secret_value()
+                        for name, secret in selected.credentials.items()
+                    }
+                ),
+            )
+        )
+        service = CallService(
+            factory,
+            effective_clock,
+            owner,
+            selected.call_configuration,
+            provider,
+            notifications=selected.call_notifications_enabled and not ingress,
+        )
+        yield CallWorkerComposition(
+            worker=None if ingress else CallWorker(service),
+            webhook_app=create_call_ingress(
+                service, selected.call_webhook_secret.get_secret_value()
+            )
+            if ingress and selected.call_webhook_secret is not None
+            else None,
+        )
+    finally:
+        await engine.dispose()
 
 
 @asynccontextmanager
@@ -2484,6 +2616,18 @@ async def _compose(
                 mcp_clients = SDKMCPClientFactory(
                     http_proxy_url=None if mcp_proxy is None else mcp_proxy.url
                 )
+        call_service = (
+            None
+            if not settings.call_enabled or settings.call_configuration is None
+            else CallService(
+                uow_factory,
+                clock,
+                principal,
+                settings.call_configuration,
+                BlandCallProvider(principal.tenant_id, mcp_clients, credential_resolver),
+                notifications=settings.call_notifications_enabled,
+            )
+        )
         mcp_runtime = MCPRuntime(
             uow_factory,
             registry,
@@ -2493,6 +2637,7 @@ async def _compose(
             ids,
             connect_timeout_seconds=float(connect_timeout),
             idle_timeout_seconds=float(idle_timeout),
+            call_interceptor=None if call_service is None else call_service.invoke,
         )
         skill_catalogs = SkillCatalogService(
             uow_factory,
@@ -3183,6 +3328,7 @@ async def _compose(
             surfaces=surface_management,
             memory=PublicMemoryService(uow_factory=uow_factory),
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            calls=call_service,
             email=EmailExperienceService(
                 uow_factory=uow_factory,
                 clock=clock,
@@ -3598,7 +3744,22 @@ async def build(
         enabled=effective_settings.email_enabled,
         account_ids=effective_settings.email_account_ids,
     )
-    effective_mcp_servers = (*mcp_servers, *composed_email_rows)
+    if any(config.server_id in {"bland_read", "bland_call"} for config in mcp_servers):
+        raise ConfigurationError("first-party Bland rows require AGENT_CALL_ENABLED")
+    composed_call_rows = calling_server_configs(
+        effective_principal.tenant_id, enabled=effective_settings.call_enabled
+    )
+    effective_mcp_servers = (*mcp_servers, *composed_email_rows, *composed_call_rows)
+    if composed_call_rows:
+        effective_principal = effective_principal.model_copy(
+            update={
+                "scopes": {
+                    *effective_principal.scopes,
+                    *(scope for row in composed_call_rows for scope in row.required_scopes),
+                }
+            },
+            deep=True,
+        )
     if composed_email_rows:
         effective_principal = effective_principal.model_copy(
             update={

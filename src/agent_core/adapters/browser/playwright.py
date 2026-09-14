@@ -9,12 +9,13 @@ import secrets
 import tempfile
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
 from playwright.async_api import (
     Browser,
     BrowserContext,
+    CDPSession,
     Dialog,
     Download,
     ElementHandle,
@@ -39,7 +40,8 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
-from agent_core.execution.proxy import start_worker_egress_proxy
+from agent_core.domain.web import is_public_https_url
+from agent_core.execution.proxy import start_browser_egress_proxy
 
 MAXIMUM_ELEMENTS = 256
 MAXIMUM_TEXT_CHARACTERS = 262_144
@@ -87,6 +89,8 @@ class PythonPlaywrightRuntime:
         self._revision: str | None = None
         self._elements: dict[str, ElementHandle] = {}
         self._disallowed_navigation = False
+        self._document_session: CDPSession | None = None
+        self._main_frame_id: str | None = None
 
     async def start(
         self,
@@ -109,7 +113,11 @@ class PythonPlaywrightRuntime:
         self._browser = await self._playwright.chromium.launch(
             headless=True,
             proxy={"server": proxy_url},
-            args=["--proxy-bypass-list=<-loopback>"],
+            args=[
+                "--proxy-bypass-list=<-loopback>",
+                "--disable-quic",
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            ],
             env={
                 "HOME": temporary_home,
                 "PATH": os.defpath,
@@ -123,26 +131,69 @@ class PythonPlaywrightRuntime:
         )
         await self._context.route("**/*", self._route)
         self._attach_page(await self._context.new_page())
+        self._document_session = await self._context.new_cdp_session(self._current_page())
+        tree = await self._document_session.send("Page.getFrameTree")
+        self._main_frame_id = str(tree["frameTree"]["frame"]["id"])
+        self._document_session.on("Fetch.requestPaused", self._guard_document_request)
+        await self._document_session.send(
+            "Fetch.enable",
+            {
+                "patterns": [
+                    {"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}
+                ]
+            },
+        )
         self._context.on("page", self._close_popup)
+
+    async def _guard_document_request(self, event: dict[str, Any]) -> None:
+        """Check document redirects before dispatch, even when a CDN tunnel exists."""
+        session = self._document_session
+        if session is None:
+            return
+        url = str(event.get("request", {}).get("url", ""))
+        frame_id = event.get("frameId")
+        main_frame = frame_id == self._main_frame_id
+        allowed = (
+            bool(frame_id)
+            and is_public_https_url(url)
+            and (not main_frame or _origin_allowed(url, self._allowed_origins))
+        )
+        if not allowed and main_frame:
+            self._disallowed_navigation = True
+        parameters = {"requestId": event["requestId"]}
+        if not allowed:
+            parameters["errorReason"] = "BlockedByClient"
+        with suppress(PlaywrightError):
+            await session.send(
+                "Fetch.continueRequest" if allowed else "Fetch.failRequest", parameters
+            )
 
     def _attach_page(self, page: Page) -> None:
         """Install request tracking and page guards before navigation begins."""
         page.on("dialog", self._dismiss_dialog)
         page.on("download", self._cancel_download)
-        # Chromium follows redirects without consulting the route handler, so a
-        # redirect hop outside the origin policy is visible only as a request.
+        # Record refused navigation for failure classification; the CDP document
+        # guard enforces redirect hops before dispatch.
         page.on("request", self._track_navigation)
         self._page = page
 
     def _track_navigation(self, request: Request) -> None:
         """Remember refused navigation origins for stable browser failure classification."""
-        if request.is_navigation_request() and not _origin_allowed(
-            request.url, self._allowed_origins
+        if (
+            request.is_navigation_request()
+            and request.frame.parent_frame is None
+            and not _origin_allowed(request.url, self._allowed_origins)
         ):
             self._disallowed_navigation = True
 
     async def _route(self, route: Route) -> None:
-        if _origin_allowed(route.request.url, self._allowed_origins):
+        request = route.request
+        allowed = is_public_https_url(request.url)
+        if request.is_navigation_request() and request.frame.parent_frame is None:
+            allowed = allowed and _origin_allowed(request.url, self._allowed_origins)
+            if self._page is not None and request.frame.page is not self._page:
+                allowed = False
+        if allowed:
             await route.continue_()
         else:
             await route.abort("blockedbyclient")
@@ -175,6 +226,8 @@ class PythonPlaywrightRuntime:
                 "tool.browser.provider_unavailable",
                 retryable=True,
             ) from exc
+        if not _origin_allowed(page.url, self._allowed_origins):
+            raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
         return await self._observation(page)
 
     async def observe(self) -> BrowserObservation:
@@ -188,40 +241,22 @@ class PythonPlaywrightRuntime:
         body = page.locator("body")
         text = (await body.inner_text(timeout=5_000))[:MAXIMUM_TEXT_CHARACTERS]
         locator = page.locator("a,button,input,select,textarea,[role]")
-        count = min(await locator.count(), MAXIMUM_ELEMENTS)
+        snapshot = (await locator.element_handles())[:MAXIMUM_ELEMENTS]
+        slots = asyncio.Semaphore(8)
+
+        async def capture(index: int, handle: ElementHandle) -> BrowserElement | None:
+            async with slots:
+                return await self._element_observation(handle, f"{revision}:{index}")
+
+        captured = await asyncio.gather(
+            *(capture(index, handle) for index, handle in enumerate(snapshot))
+        )
         elements: list[BrowserElement] = []
         handles: dict[str, ElementHandle] = {}
-        for index in range(count):
-            element = locator.nth(index)
-            if not await element.is_visible():
-                continue
-            handle = await element.element_handle()
-            if handle is None:
-                continue
-            role = await element.get_attribute("role")
-            tag = await element.evaluate("node => node.tagName.toLowerCase()")
-            input_type = await element.get_attribute("type")
-            resolved_role = role or _default_role(str(tag), input_type)
-            name = (
-                await element.get_attribute("aria-label")
-                or await element.get_attribute("title")
-                or await element.get_attribute("placeholder")
-                or (await element.inner_text(timeout=2_000))
-            )
-            checked: bool | None = None
-            if str(tag) == "input" and input_type in {"checkbox", "radio"}:
-                checked = await element.is_checked()
-            ref = f"{revision}:{index}"
-            elements.append(
-                BrowserElement(
-                    ref=ref,
-                    role=resolved_role,
-                    name=name[:1024],
-                    disabled=await element.is_disabled(),
-                    checked=checked,
-                )
-            )
-            handles[ref] = handle
+        for handle, element in zip(snapshot, captured, strict=True):
+            if element is not None:
+                elements.append(element)
+                handles[element.ref] = handle
         self._revision = revision
         self._elements = handles
         return BrowserObservation(
@@ -230,6 +265,34 @@ class PythonPlaywrightRuntime:
             revision=revision,
             text=text,
             elements=tuple(elements),
+        )
+
+    @staticmethod
+    async def _element_observation(handle: ElementHandle, ref: str) -> BrowserElement | None:
+        """Read one captured node without resolving a selector that may have changed."""
+        if not await handle.is_visible():
+            return None
+        metadata = await handle.evaluate(
+            """node => ({
+                tag: node.tagName.toLowerCase(),
+                role: node.getAttribute('role'),
+                inputType: node.getAttribute('type'),
+                name: Array.from(node.getAttribute('aria-label') || node.getAttribute('title') ||
+                    node.getAttribute('placeholder') || node.innerText || '')
+                    .slice(0, 1024).join('')
+            })"""
+        )
+        tag = str(metadata["tag"])
+        input_type = metadata["inputType"]
+        checked: bool | None = None
+        if tag == "input" and input_type in {"checkbox", "radio"}:
+            checked = await handle.is_checked()
+        return BrowserElement(
+            ref=ref,
+            role=metadata["role"] or _default_role(tag, input_type),
+            name=str(metadata["name"])[:1024],
+            disabled=await handle.is_disabled(),
+            checked=checked,
         )
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
@@ -355,6 +418,8 @@ class PythonPlaywrightRuntime:
             self._revision = None
             self._elements = {}
             self._disallowed_navigation = False
+            self._document_session = None
+            self._main_frame_id = None
 
 
 def _default_role(tag: str, input_type: str | None) -> str:
@@ -385,7 +450,7 @@ class PlaywrightBrowserProvider:
         tenant_id: str,
         allowed_origins: tuple[str, ...],
         runtime: BrowserRuntime | None = None,
-        proxy_factory: ProxyFactory = start_worker_egress_proxy,
+        proxy_factory: ProxyFactory = start_browser_egress_proxy,
     ) -> None:
         if not tenant_id:
             raise ValueError("browser provider requires a tenant")

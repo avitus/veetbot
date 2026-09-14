@@ -90,6 +90,22 @@ write_stub uv '
   [[ "${VEETBOT_TEST_FAIL_UV:-0}" != 1 ]]
 '
 write_stub flock 'exit 0'
+write_stub stat '
+  file="${!#}"
+  owner=veetbot
+  if [[ "$file" == *bland-signing ]]; then owner=veetbot-call-ingress; fi
+  if [[ "${VEETBOT_TEST_BAD_CALL_OWNER:-}" == "$file" ]]; then owner=unrelated; fi
+  mode="$(/usr/bin/stat -c %a "$file" 2>/dev/null || /usr/bin/stat -f %Lp "$file")"
+  printf "%s:%s\n" "$owner" "$mode"
+'
+write_stub getfacl '
+  file="${!#}"
+  if [[ "${VEETBOT_TEST_BAD_CALL_ACL:-}" == "$file" ]]; then
+    printf "user::rw-\nuser:unrelated:r--\ngroup::---\nmask::r--\nother::---\n"
+  else
+    printf "user::rw-\ngroup::---\nother::---\n"
+  fi
+'
 write_stub mv '
   if [[ "${1:-}" == -Tf ]]; then
     shift
@@ -222,6 +238,8 @@ make_stage() {
     "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/deploy/veetbot-notify.env.example" \
     "$stage/deploy/veetbot-surface.env.example" \
+    "$stage/deploy/veetbot-call.env.example" \
+    "$stage/deploy/veetbot-call-ingress.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_schedule_database_permissions.py" \
     "$stage/scripts/check_production_deployment.py"
@@ -233,7 +251,9 @@ make_stage() {
     veetbot-maintenance \
     veetbot-schedule \
     veetbot-notify \
-    veetbot-surface; do
+    veetbot-surface \
+    veetbot-call \
+    veetbot-call-ingress; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
       >"$stage/deploy/systemd/$unit.service"
   done
@@ -269,6 +289,8 @@ run_release() {
   VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
   VEETBOT_NOTIFY_ENV_FILE="${VEETBOT_TEST_NOTIFY_ENV_FILE:-$TEST_ROOT/veetbot-notify.env}" \
   VEETBOT_SURFACE_ENV_FILE="${VEETBOT_TEST_SURFACE_ENV_FILE:-$SURFACE_ENV_FILE}" \
+  VEETBOT_CALL_ENV_FILE="${VEETBOT_TEST_CALL_ENV_FILE:-$TEST_ROOT/call-worker.env}" \
+  VEETBOT_CALL_INGRESS_ENV_FILE="${VEETBOT_TEST_CALL_INGRESS_ENV_FILE:-$TEST_ROOT/call-ingress.env}" \
   VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE="$PROFILE_AUTH_FILE" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
@@ -636,5 +658,59 @@ if VEETBOT_TEST_READY_RELEASE=20260810-152259-ABCDEF0 run_release "$case_mismatc
 fi
 grep -Fq "local readiness probe did not report $case_mismatch_id" \
   "$TEST_ROOT/case-mismatch.out"
+
+call_env="$TEST_ROOT/call-enabled.env"
+cp "$ENV_FILE" "$call_env"
+printf '%s\n' 'AGENT_CALL_ENABLED=1' 'AGENT_CALL_INGRESS_ENABLED=1' 'AGENT_CALL_NOTIFICATIONS_ENABLED=0' \
+  "BLAND_CONFIGURATION_FILE=$TEST_ROOT/calls.json" >>"$call_env"
+touch "$TEST_ROOT/calls.json" "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"
+chmod 0600 "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"
+for role in worker ingress; do
+  printf '%s\n' 'AGENT_CALL_ENABLED=1' 'AGENT_CALL_INGRESS_ENABLED=1' \
+    'AGENT_CALL_NOTIFICATIONS_ENABLED=0' "BLAND_CONFIGURATION_FILE=$TEST_ROOT/calls.json" \
+    "AUTH_TENANT_ID=$(sed -n 's/^AUTH_TENANT_ID=//p' "$ENV_FILE")" \
+    "AUTH_PRINCIPAL_ID=$(sed -n 's/^AUTH_PRINCIPAL_ID=//p' "$ENV_FILE")" \
+    >"$TEST_ROOT/call-$role.env"
+done
+printf 'BLAND_API_KEY_FILE=%s\n' "$TEST_ROOT/bland-key" >>"$TEST_ROOT/call-worker.env"
+printf 'BLAND_WEBHOOK_SECRET_FILE=%s\n' "$TEST_ROOT/bland-signing" >>"$TEST_ROOT/call-ingress.env"
+# Refuse exposed credentials before starting services or promoting a release.
+invalid_index=0
+for private_file in "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"; do
+  for fault in mode owner acl; do
+    invalid_index=$((invalid_index + 1))
+    invalid_call_id="20260810-152300-000003$invalid_index"
+    make_stage "$invalid_call_id"
+    rm -f -- "$PROCESS_ROOT/4242/cwd"
+    ln -s "$DEPLOY_ROOT/releases/$invalid_call_id" "$PROCESS_ROOT/4242/cwd"
+    export VEETBOT_TEST_BAD_CALL_OWNER="" VEETBOT_TEST_BAD_CALL_ACL=""
+    case "$fault" in
+      mode) chmod 0644 "$private_file" ;;
+      owner) export VEETBOT_TEST_BAD_CALL_OWNER="$private_file" ;;
+      acl) export VEETBOT_TEST_BAD_CALL_ACL="$private_file" ;;
+    esac
+    : >"$LOG_FILE"
+    if VEETBOT_TEST_ENV_FILE="$call_env" run_release "$invalid_call_id" >"$TEST_ROOT/call-invalid.out" 2>&1; then
+      printf 'calling release accepted invalid credential %s\n' "$fault" >&2
+      exit 1
+    fi
+    grep -Fq 'calling role private credential file is missing or invalid' "$TEST_ROOT/call-invalid.out"
+    assert_log_lacks 'systemctl restart'
+    chmod 0600 "$private_file"
+    unset VEETBOT_TEST_BAD_CALL_OWNER VEETBOT_TEST_BAD_CALL_ACL
+  done
+done
+
+call_id="20260810-152300-0000027"
+make_stage "$call_id"
+for unit in call call-ingress; do
+  printf 'EnvironmentFile=/etc/veetbot/veetbot-%s.env\n' "$unit" >>"$DEPLOY_ROOT/releases/$call_id/deploy/systemd/veetbot-$unit.service"
+done
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$call_id" "$PROCESS_ROOT/4242/cwd"
+VEETBOT_TEST_ENV_FILE="$call_env" run_release "$call_id"
+grep -Fxq "EnvironmentFile=$TEST_ROOT/call-worker.env" "$SYSTEMD_DIR/veetbot-call.service"
+grep -Fxq "EnvironmentFile=$TEST_ROOT/call-ingress.env" "$SYSTEMD_DIR/veetbot-call-ingress.service"
+grep -Fxq 'AGENT_CALL_INGRESS_ENABLED=1' "$DEPLOY_ROOT/releases/$call_id/.release.env"
 
 printf 'release script tests passed\n'

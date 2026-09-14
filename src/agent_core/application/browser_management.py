@@ -44,8 +44,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 LOGIN_REDIRECT_MESSAGE = (
     "The website redirected the login page to an origin this website access "
     "does not allow, for example from a bare domain to its www address. Start "
-    "over with the address the site actually uses, or list the extra origin "
-    "under Advanced settings."
+    "over with the final address the site actually uses, including www if present."
 )
 
 

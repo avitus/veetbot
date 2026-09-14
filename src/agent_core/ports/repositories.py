@@ -373,6 +373,10 @@ class MaintenanceRepository(Protocol):
 
 
 class SessionDeletionRepository(Protocol):
+    async def erase_call_source(
+        self, principal: Principal, call_id: str, erased_at: datetime
+    ) -> dict[str, int]: ...
+
     async def erase_email_source(
         self,
         principal: Principal,

@@ -160,3 +160,30 @@ def build_stdio_environment(
     elif credential is not None:
         raise ValueError("credential supplied to an unauthenticated stdio server")
     return environment
+
+
+def calling_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCPServerConfig, ...]:
+    """Compose exactly the isolated Bland read and approved-call modes."""
+    if not enabled:
+        return ()
+    return tuple(
+        MCPServerConfig(
+            tenant_id=tenant_id,
+            server_id=f"bland_{mode}",
+            transport=MCPTransport.STDIO,
+            endpoint=shlex.join([sys.executable, "-m", "bland_mcp", "--mode", mode]),
+            operator_configured=True,
+            auth_scheme=MCPAuthScheme.ENV,
+            auth_name="BLAND_MCP_CREDENTIAL",
+            credential_ref=f"bland_{mode}",
+            side_effect=SideEffectClass.NETWORK_READ
+            if mode == "read"
+            else SideEffectClass.EXTERNAL_MESSAGE,
+            risk=RiskLevel.LOW if mode == "read" else RiskLevel.HIGH,
+            idempotency=IdempotencyClass.READ_ONLY
+            if mode == "read"
+            else IdempotencyClass.NON_IDEMPOTENT,
+            required_scopes=frozenset({f"mcp.bland_{mode}.use"}),
+        )
+        for mode in ("read", "call")
+    )

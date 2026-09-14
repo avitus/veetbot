@@ -34,6 +34,7 @@ public enum NotificationKind: String, Codable, CaseIterable, Sendable {
     case opsRecovered = "ops_recovered"
     case test
     case deviceInvocation = "device_invocation"
+    case callFinished = "call_finished"
 }
 
 public struct AppleDeviceRegistration: Codable, Equatable, Sendable {
@@ -205,6 +206,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
     public let occurrenceID: UUID?
     public let invocationID: UUID?
     public let deviceID: UUID?
+    public let callID: UUID?
     public let notificationID: UUID
     public let signal: String?
     public let severity: String?
@@ -216,7 +218,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         let allowedKeys: Set<String> = [
             "version", "kind", "title", "status", "tool_name", "session_id", "run_id",
             "approval_id", "question_id", "schedule_id", "occurrence_id", "invocation_id",
-            "device_id", "notification_id", "signal", "severity", "reason_code", "release_id",
+            "device_id", "call_id", "notification_id", "signal", "severity", "reason_code", "release_id",
         ]
         guard Set(value.keys).isSubset(of: allowedKeys),
             JSONSerialization.isValidJSONObject(value),
@@ -240,6 +242,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
             "occurrence_id": occurrenceID,
             "invocation_id": invocationID,
             "device_id": deviceID,
+            "call_id": callID,
         ]
         let present = Set(identifiers.compactMap { $0.value == nil ? nil : $0.key })
         guard present == Self.requiredIdentifiers[kind] else { return false }
@@ -251,7 +254,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
                 && toolName == nil
         case .opsRecovered:
             return signal != nil && severity == "recovered" && reasonCode != nil && toolName == nil
-        case .test:
+        case .test, .callFinished:
             return !hasOperations && toolName == nil
         default:
             return !hasOperations
@@ -268,6 +271,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsRecovered: "Production recovered",
         .test: "Test notification",
         .deviceInvocation: "Your device has a pending action",
+        .callFinished: "New call result",
     ]
 
     private static let requiredIdentifiers: [NotificationKind: Set<String>] = [
@@ -280,6 +284,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsRecovered: [],
         .test: [],
         .deviceInvocation: ["invocation_id", "device_id"],
+        .callFinished: ["call_id"],
     ]
 
     private static let allowedStatuses: [NotificationKind: Set<String?>] = [
@@ -294,6 +299,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .opsRecovered: [nil],
         .test: [nil],
         .deviceInvocation: ["pending"],
+        .callFinished: [nil],
     ]
 
     enum CodingKeys: String, CodingKey {
@@ -307,6 +313,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         case occurrenceID = "occurrence_id"
         case invocationID = "invocation_id"
         case deviceID = "device_id"
+        case callID = "call_id"
         case notificationID = "notification_id"
         case reasonCode = "reason_code"
         case releaseID = "release_id"

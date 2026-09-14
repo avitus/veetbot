@@ -1,9 +1,20 @@
-"""PostgreSQL journey for creating a schedule after a user clarification."""
+"""PostgreSQL journey for creating a schedule after a user clarification.
 
+Worker heartbeat waits use real time while application decisions use the fixed
+date. FixedClock.sleep advances immediately, so using it for concurrent heartbeats
+can exhaust a tool deadline during database I/O. The delayed-start case reproduces
+that false timeout without relaxing approval, persistence, or deadline checks.
+"""
+
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
+import pytest
+
+from agent_core.adapters.determinism import SystemClock
+from agent_core.adapters.persistence.repositories import PostgresToolInvocationRepository
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.messages import (
@@ -14,7 +25,9 @@ from agent_core.domain.messages import (
     ToolCallItem,
     ToolResultItem,
 )
+from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.views import TextContentBlock
 from agent_core.runtime.worker import DurableWorker
 from tests.integration.m2_support import database_settings
@@ -24,19 +37,43 @@ FIRE_AT = datetime(2026, 8, 26, 2, tzinfo=UTC)
 
 
 async def _run_worker(composition: Composition, worker_id: str) -> None:
-    """Run one durable queue claim for the test composition."""
+    """Run one claim without advancing domain time on every heartbeat wait."""
 
     worker = DurableWorker(
         uow_factory=composition.uow_factory,
         executor=composition.executor,
-        clock=composition.clock,
+        clock=SystemClock(),
         worker_id=worker_id,
     )
     assert await worker.run_once()
 
 
-async def test_clarified_reminder_resumes_once_and_creates_schedule() -> None:
-    """A clarified reminder should resume once, pass approval, and persist."""
+@pytest.mark.parametrize("database_delay", [0.0, 0.05])
+async def test_clarified_reminder_resumes_once_and_creates_schedule(
+    monkeypatch: pytest.MonkeyPatch, database_delay: float
+) -> None:
+    """Clarification and approval persist one reminder despite database latency."""
+
+    transition = PostgresToolInvocationRepository.transition
+
+    async def delayed_start(
+        repository: PostgresToolInvocationRepository,
+        invocation_id: UUID,
+        expected_status: ToolInvocationStatus,
+        invocation: ToolInvocation,
+        *,
+        lease: WorkerLease | None = None,
+    ) -> ToolInvocation:
+        if (
+            database_delay
+            and invocation.tool_name == "schedule.create"
+            and expected_status is ToolInvocationStatus.AUTHORIZED
+            and invocation.status is ToolInvocationStatus.RUNNING
+        ):
+            await asyncio.sleep(database_delay)
+        return await transition(repository, invocation_id, expected_status, invocation, lease=lease)
+
+    monkeypatch.setattr(PostgresToolInvocationRepository, "transition", delayed_start)
 
     arguments = {
         "title": "Throw the ball for Marzipan",
@@ -136,6 +173,14 @@ async def test_clarified_reminder_resumes_once_and_creates_schedule() -> None:
         await _run_worker(composition, "approved-reminder-worker")
         completed = await composition.runs.get(run_id)
         schedules = await composition.schedules.list(composition.principal, 10, None)
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+
+        creation = [item for item in invocations if item.tool_name == "schedule.create"]
+        assert len(creation) == 1
+        assert creation[0].result_item is not None
+        assert not creation[0].result_item.is_error, creation[0].outcome
+        assert composition.clock.now() == NOW
 
     assert completed.status is RunStatus.COMPLETED
     assert completed.final_message == "I scheduled the reminder."

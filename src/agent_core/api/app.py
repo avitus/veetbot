@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.auth import Authenticator
+from agent_core.api.calls import call_router
 from agent_core.api.email import email_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
@@ -34,6 +35,7 @@ from agent_core.application.services import (
     ArtifactService,
     BrowserGrantService,
     BrowserProfileService,
+    CallingService,
     DeviceIngestService,
     DeviceService,
     EmailService,
@@ -183,6 +185,9 @@ class ApplicationServices(Protocol):
 
     @property
     def email(self) -> EmailService: ...
+
+    @property
+    def calls(self) -> CallingService | None: ...
 
 
 class UpdatePersonaEntryRequest(BaseModel):
@@ -449,7 +454,7 @@ def _error_response(
     details: dict[str, object] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
-    if request.url.path.startswith("/v1/email/"):
+    if request.url.path.startswith(("/v1/email/", "/v1/calls")):
         # Unhandled errors are rendered outside the ordinary request middleware.
         headers = {**(headers or {}), "Cache-Control": PRIVATE_NO_STORE}
     return JSONResponse(
@@ -1697,5 +1702,7 @@ def create_app(
 
     if settings.email_mode_enabled:
         app.include_router(email_router(services.email, secured))
+    if settings.call_enabled and services.calls is not None:
+        app.include_router(call_router(services.calls, secured))
 
     return app

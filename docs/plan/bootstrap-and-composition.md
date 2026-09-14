@@ -1392,3 +1392,19 @@ provider/model and exact release identity using the mechanism in
 [email-experience.md](email-experience.md). Missing evidence leaves semantic
 formation disabled; stale or mismatched evidence cannot enable it. This is
 independent of the Email UX flag and the existing Chat memory policy selection.
+
+
+## Milestone 27 calling composition
+
+The [Bland calling design](bland-calling.md) adds default-off `AGENT_CALL_ENABLED`,
+`AGENT_CALL_INGRESS_ENABLED` and `AGENT_CALL_NOTIFICATIONS_ENABLED`, the public
+`BLAND_CONFIGURATION_FILE`, and role-confined `BLAND_API_KEY_FILE` and
+`BLAND_WEBHOOK_SECRET_FILE`. Enabled configuration fails closed when incomplete;
+inline API keys are rejected. The fixed sibling `bland_mcp` package runs in
+read/call modes through the existing MCP process boundary and cannot import core.
+`agent call-worker` and `agent call-ingress` use a dedicated composition without
+model credentials, an owner API bearer, execution or unrelated MCP tools. The
+worker reconciles results and erases expired content; ingress queues signed IDs
+with a receipt-only database role and separate operating-system user. Both
+require production PostgreSQL, a current migration and an explicit owner binding.
+See [setup](../bland-setup.md) for the complete configuration and role inventory.

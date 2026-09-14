@@ -22,6 +22,7 @@ from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
 from agent_core.domain.browser import normalize_browser_origin
+from agent_core.domain.calls import CallConfiguration
 from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     ProviderExtractionEvaluationEvidence,
@@ -137,6 +138,11 @@ class Settings:
     surface_whatsapp_graph_api_version: str | None = None
     surface_whatsapp_template_name: str = "veetbot_update_available"
     surface_whatsapp_template_language: str = "en_US"
+    call_enabled: bool = False
+    call_ingress_enabled: bool = False
+    call_notifications_enabled: bool = False
+    call_configuration: CallConfiguration | None = None
+    call_webhook_secret: SecretStr | None = None
     email_enabled: bool = False
     email_mode_enabled: bool = False
     email_semantic_evidence: Path | None = None
@@ -1116,6 +1122,7 @@ def validate_settings(
     require_execution_environment: bool = True,
     require_email_credentials: bool = True,
     require_surface_credentials: bool = False,
+    require_call_credentials: bool = True,
 ) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
@@ -1222,6 +1229,23 @@ def validate_settings(
         raise ConfigurationError("Gmail credentials require AGENT_EMAIL_ENABLED=1")
     if not settings.email_enabled and settings.email_account_ids:
         raise ConfigurationError("Gmail accounts require AGENT_EMAIL_ENABLED=1")
+    if settings.call_enabled and settings.call_configuration is None:
+        raise ConfigurationError("calling requires BLAND_CONFIGURATION_FILE")
+    if (
+        settings.call_ingress_enabled or settings.call_notifications_enabled
+    ) and not settings.call_enabled:
+        raise ConfigurationError("calling ingress and notifications require AGENT_CALL_ENABLED=1")
+    call_credentials = set(settings.credentials) & {"bland_read", "bland_call"}
+    if (
+        require_call_credentials
+        and settings.call_enabled
+        and call_credentials != {"bland_read", "bland_call"}
+    ):
+        raise ConfigurationError("calling requires BLAND_API_KEY_FILE")
+    if call_credentials and not settings.call_enabled:
+        raise ConfigurationError("Bland credentials require AGENT_CALL_ENABLED=1")
+    if settings.call_notifications_enabled and not settings.notification_api_enabled:
+        raise ConfigurationError("call notifications require the notification service")
     apns_values = {
         "APNS_KEY_FILE": settings.apns_key_file,
         "APNS_KEY_ID": settings.apns_key_id,
@@ -1406,8 +1430,12 @@ def _load_settings(
     load_email_credentials: bool,
     load_provider_credentials: bool,
     load_surface_credentials: bool,
+    load_call_credentials: bool | None = None,
+    load_call_webhook_secret: bool = False,
 ) -> Settings:
 
+    if load_call_credentials is None:
+        load_call_credentials = require_execution_environment
     values = _environment(environ)
     database_url = _required(values, "DATABASE_URL")
     deployment_mode = _parse_enum(
@@ -1519,6 +1547,52 @@ def _load_settings(
     surface_whatsapp_template_language = values.get(
         "AGENT_SURFACE_WHATSAPP_TEMPLATE_LANGUAGE", "en_US"
     ).strip()
+    call_enabled = _parse_flag(values, "AGENT_CALL_ENABLED")
+    call_ingress_enabled = _parse_flag(values, "AGENT_CALL_INGRESS_ENABLED")
+    call_notifications_enabled = _parse_flag(values, "AGENT_CALL_NOTIFICATIONS_ENABLED")
+    call_configuration = None
+    call_webhook_secret = None
+    raw_call_configuration = values.get("BLAND_CONFIGURATION_FILE", "").strip()
+    if values.get("BLAND_API_KEY", "").strip():
+        raise ConfigurationError("Bland credentials must use BLAND_API_KEY_FILE")
+    if call_enabled:
+        call_path = Path(raw_call_configuration)
+        try:
+            if (
+                not call_path.is_absolute()
+                or call_path.is_symlink()
+                or not 1 <= call_path.stat().st_size <= 16384
+            ):
+                raise ValueError("invalid file")
+            call_configuration = CallConfiguration.model_validate_json(call_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise ConfigurationError("BLAND_CONFIGURATION_FILE is invalid or unavailable") from exc
+        if load_call_credentials:
+            call_key_path = values.get("BLAND_API_KEY_FILE", "").strip()
+            if not call_key_path:
+                raise ConfigurationError("calling requires BLAND_API_KEY_FILE")
+            call_key = _read_private_surface_secret_file(call_key_path, "BLAND_API_KEY_FILE")
+            credential_json = json.dumps(
+                {"api_key": call_key, "configuration": call_configuration.model_dump()},
+                sort_keys=True,
+            )
+            for server_id in ("bland_read", "bland_call"):
+                if server_id in credentials:
+                    raise ConfigurationError("duplicate Bland credential source")
+                credentials[server_id] = SecretStr(credential_json)
+        if load_call_webhook_secret and call_ingress_enabled:
+            secret_path = values.get("BLAND_WEBHOOK_SECRET_FILE", "").strip()
+            if not secret_path:
+                raise ConfigurationError("calling ingress requires BLAND_WEBHOOK_SECRET_FILE")
+            call_webhook_secret = SecretStr(
+                _read_private_surface_secret_file(secret_path, "BLAND_WEBHOOK_SECRET_FILE")
+            )
+    elif (
+        raw_call_configuration
+        or values.get("BLAND_API_KEY_FILE")
+        or values.get("BLAND_WEBHOOK_SECRET_FILE")
+    ):
+        raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
     raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
@@ -1700,6 +1774,11 @@ def _load_settings(
         surface_whatsapp_graph_api_version=surface_whatsapp_graph_api_version,
         surface_whatsapp_template_name=surface_whatsapp_template_name,
         surface_whatsapp_template_language=surface_whatsapp_template_language,
+        call_enabled=call_enabled,
+        call_ingress_enabled=call_ingress_enabled,
+        call_notifications_enabled=call_notifications_enabled,
+        call_configuration=call_configuration,
+        call_webhook_secret=call_webhook_secret,
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
         email_semantic_evidence=email_semantic_evidence,
@@ -1733,5 +1812,22 @@ def _load_settings(
         require_execution_environment=require_execution_environment,
         require_email_credentials=load_email_credentials,
         require_surface_credentials=load_surface_credentials,
+        require_call_credentials=load_call_credentials,
     )
     return settings
+
+
+def load_call_worker_settings(
+    environ: Mapping[str, str] | None = None, *, ingress: bool = False
+) -> Settings:
+    """Load only the call role's provider key or its separate ingress signing secret."""
+    return _load_settings(
+        environ,
+        require_auth_token=False,
+        require_execution_environment=False,
+        load_email_credentials=False,
+        load_provider_credentials=False,
+        load_surface_credentials=False,
+        load_call_credentials=not ingress,
+        load_call_webhook_secret=ingress,
+    )

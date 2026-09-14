@@ -66,6 +66,15 @@ deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value v
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-notify
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-surface
 
+deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/.veetbot-call.service /etc/systemd/system/veetbot-call.service
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-call
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-call
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now veetbot-call
+deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/.veetbot-call-ingress.service /etc/systemd/system/veetbot-call-ingress.service
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-call-ingress
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-call-ingress
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now veetbot-call-ingress
+
 # deploy/nginx/deploy.sh — validate-and-reload phase
 deploy ALL=(root) NOPASSWD: /usr/bin/install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/veetbot-backups
 deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /tmp/veetbot-nginx-*.conf /etc/nginx/sites-available/veetbot

@@ -26,6 +26,7 @@ class NotificationKind(StrEnum):
     OPS_RECOVERED = "ops_recovered"
     TEST = "test"
     DEVICE_INVOCATION = "device_invocation"
+    CALL_FINISHED = "call_finished"
 
 
 DEVICE_CONFINED_KINDS: frozenset[NotificationKind] = frozenset(
@@ -137,6 +138,7 @@ class NotificationPayload(BaseModel):
     occurrence_id: UUID | None = None
     schedule_context: ScheduleNotificationContext | None = Field(default=None, repr=False)
     invocation_id: UUID | None = None
+    call_id: UUID | None = None
     device_id: UUID | None = None
     notification_id: UUID
     signal: str | None = Field(
@@ -174,6 +176,7 @@ class NotificationPayload(BaseModel):
             "occurrence_id": self.occurrence_id,
             "invocation_id": self.invocation_id,
             "device_id": self.device_id,
+            "call_id": self.call_id,
         }
         present_identifiers = {name for name, value in identifiers.items() if value is not None}
         if present_identifiers != required_identifiers:
@@ -197,7 +200,10 @@ class NotificationPayload(BaseModel):
         elif any(value is not None for value in ops_values):
             raise ValueError("only operational notifications may carry operational fields")
 
-        if self.kind is NotificationKind.TEST and self.tool_name is not None:
+        if (
+            self.kind in {NotificationKind.TEST, NotificationKind.CALL_FINISHED}
+            and self.tool_name is not None
+        ):
             raise ValueError("test notification cannot carry a tool name")
         if self.schedule_context is not None and self.kind not in {
             NotificationKind.SCHEDULE_RUN_FINISHED,
@@ -456,6 +462,7 @@ NOTIFICATION_TITLES: dict[NotificationKind, str] = {
     NotificationKind.OPS_RECOVERED: "Production recovered",
     NotificationKind.TEST: "Test notification",
     NotificationKind.DEVICE_INVOCATION: "Your device has a pending action",
+    NotificationKind.CALL_FINISHED: "New call result",
 }
 
 _REQUIRED_IDENTIFIERS: dict[NotificationKind, set[str]] = {
@@ -473,6 +480,7 @@ _REQUIRED_IDENTIFIERS: dict[NotificationKind, set[str]] = {
     NotificationKind.OPS_RECOVERED: set(),
     NotificationKind.TEST: set(),
     NotificationKind.DEVICE_INVOCATION: {"invocation_id", "device_id"},
+    NotificationKind.CALL_FINISHED: {"call_id"},
 }
 
 _ALLOWED_SUBJECT_STATUSES: dict[
@@ -497,6 +505,7 @@ _ALLOWED_SUBJECT_STATUSES: dict[
     NotificationKind.OPS_RECOVERED: {None},
     NotificationKind.TEST: {None},
     NotificationKind.DEVICE_INVOCATION: {DeviceInvocationSubjectStatus.PENDING},
+    NotificationKind.CALL_FINISHED: {None},
 }
 
 _OPS_SIGNAL = re.compile(r"^[a-z][a-z0-9_]*$")
