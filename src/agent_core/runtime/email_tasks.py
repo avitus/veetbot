@@ -12,6 +12,7 @@ from uuid import UUID
 
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.email import (
+    EMAIL_HISTORY_DAYS,
     EMAIL_POLICY_VERSION,
     EmailAccount,
     EmailAssessment,
@@ -58,6 +59,7 @@ EMAIL_MESSAGE_WINDOW = 100
 EMAIL_BODY_WINDOW_BYTES = 512 * 1024
 EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
+EMAIL_HISTORY_POLICY = "email-history@2:90d"
 
 
 class EmailToolError(Exception):
@@ -356,6 +358,8 @@ class _TaskIO:
         if not isinstance(sequence, int) or not isinstance(tool_name, str):
             return
         for message in value.get("messages", []):
+            if self.task.kind == "refresh" and not self._recent(message):
+                continue
             if (
                 (not message.get("body_complete") and not message.get("body_available"))
                 or not message.get("headers_complete")
@@ -384,6 +388,8 @@ class _TaskIO:
     async def _register_body(
         self, account_id: str, provider_id: str, header: dict[str, Any], body: dict[str, Any]
     ) -> None:
+        if self.task.kind == "refresh" and not self._recent(header):
+            return
         if not body.get("body") or not header.get("headers_complete"):
             return
         try:
@@ -432,9 +438,34 @@ class _TaskIO:
         async with c.uow_factory() as uow:
             account = await read_value(uow.email, c.principal, "account", account_id, EmailAccount)
             sync = await read_value(uow.email, c.principal, "sync", account_id, EmailSyncState)
-        return account or EmailAccount(
-            id=account_id, label=account_id.replace("_", " ").title()
-        ), sync or EmailSyncState(anchor=c.clock.now().date().isoformat())
+        account = account or EmailAccount(id=account_id, label=account_id.replace("_", " ").title())
+        sync = sync or EmailSyncState(anchor=c.clock.now().date().isoformat())
+        if sync.history_policy != EMAIL_HISTORY_POLICY or sync.history_since is None:
+            # Old cursors were bound to unbounded queries. Restart discovery once,
+            # keeping cached source identities and learning intact.
+            account = account.model_copy(
+                update={
+                    "inbox_complete": False,
+                    "inbox_cursor": None,
+                    "history_complete": False,
+                    "history_cursor": None,
+                    "history_window": 0,
+                    "history_processed": 0,
+                }
+            )
+            sync = EmailSyncState(
+                anchor=c.clock.now().date().isoformat(),
+                history_policy=EMAIL_HISTORY_POLICY,
+                history_since=int((c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)).timestamp()),
+            )
+        return account, sync
+
+    def _recent(self, message: dict[str, Any]) -> bool:
+        try:
+            sent_at = datetime.fromtimestamp(int(message["internal_date"]) / 1000, tz=UTC)
+        except (KeyError, ValueError, TypeError, OverflowError):
+            return False
+        return sent_at >= self.context.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
 
     async def _save_sync(self, account: EmailAccount, sync: EmailSyncState) -> None:
         c = self.context
@@ -515,6 +546,11 @@ class _TaskIO:
             await self._erase_progress(progress_key)
             return None, True
         messages = result["messages"]
+        if self.task.kind == "refresh":
+            for item in messages:
+                if not self._recent(item) and item.get("next_body_offset") is not None:
+                    item["next_body_offset"] = None
+                    item["body_available"] = False
         pending_body = next(
             (
                 item
@@ -598,7 +634,11 @@ class _TaskIO:
             )
             if thread is None:
                 return False
-            if not any(message.body for message in thread.messages):
+            if not any(
+                message.body
+                and message.sent_at >= c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
+                for message in thread.messages
+            ):
                 return True
             assessment = await uow.email.get(c.principal, "assessment", str(thread.id))
         return assessment is not None and (
@@ -664,7 +704,7 @@ class _TaskIO:
                         account_id,
                         "search_threads",
                         {
-                            "query": "in:inbox -in:spam -in:trash",
+                            "query": f"in:inbox after:{sync.history_since} -in:spam -in:trash",
                             "max_results": 25,
                             **(
                                 {"page_token": account.inbox_cursor} if account.inbox_cursor else {}
@@ -772,7 +812,11 @@ class _TaskIO:
                 thread
                 for thread in candidates
                 if thread.account_id in self.task.account_ids
-                and any(message.body for message in thread.messages)
+                and any(
+                    message.body
+                    and message.sent_at >= c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
+                    for message in thread.messages
+                )
                 and not assessment_current(thread)
             ),
             key=assessment_order,
@@ -807,6 +851,10 @@ class _TaskIO:
             and thread.priority >= 0.7
             and thread.needs_reply
             and thread.complete
+            and all(
+                message.sent_at >= c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
+                for message in thread.messages
+            )
             and not thread.reply_blocked_reason
             and thread.dismissed_revision != thread.revision
             and assessment_current(thread)
@@ -1003,18 +1051,9 @@ class _TaskIO:
     async def _history(
         self, account: EmailAccount, sync: EmailSyncState
     ) -> tuple[EmailAccount, EmailSyncState]:
-        from datetime import date
-
-        anchor = date.fromisoformat(sync.anchor or self.context.clock.now().date().isoformat())
-        recent = anchor - timedelta(days=90)
-        previous = recent - timedelta(days=365)
-        query = (
-            f"after:{recent.isoformat()}"
-            if account.history_window == 0
-            else f"after:{previous.isoformat()} before:{recent.isoformat()}"
-            if account.history_window == 1
-            else f"before:{previous.isoformat()}"
-        )
+        if account.history_window > 0:
+            return account.model_copy(update={"history_complete": True}), sync
+        query = f"after:{sync.history_since}"
         if not sync.history_page_open:
             page = await self.call(
                 account.id,
@@ -1048,7 +1087,7 @@ class _TaskIO:
                 update={
                     "history_cursor": sync.history_next,
                     "history_window": account.history_window + (1 if end else 0),
-                    "history_complete": end and account.history_window >= 2,
+                    "history_complete": end,
                 }
             )
             sync.history_page_open = False
@@ -1116,7 +1155,7 @@ class _TaskIO:
             if c.checkpoint.provider_pin is None
             else c.checkpoint.provider_pin.registry_version
         )
-        return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:email-assessment@2"
+        return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:email-assessment@3"
 
     async def assess(self, thread: EmailThread, learning: dict[str, Any]) -> None:
         async with self.context.uow_factory() as uow:
@@ -1126,11 +1165,28 @@ class _TaskIO:
             previous.get("source_fingerprint") == thread.source_fingerprint
             and previous.get("model_revision") == self._model_revision()
         )
+        if (
+            same_source
+            and thread.assessment_version == EMAIL_POLICY_VERSION
+            and previous.get("analysis_complete") is True
+            and previous.get("assessment_context") == learning.get("assessment_context")
+            and isinstance(learning.get("assessment_context"), str)
+        ):
+            await self.service.save_assessment(
+                self.context.principal,
+                thread.id,
+                thread.revision,
+                {**previous, "profile_revision": learning["profile_revision"]},
+                run=self.context.run,
+                lease=self.context.lease,
+            )
+            return
         cursor = int(str(previous.get("analysis_cursor", 0))) if same_source else 0
         segments = [
             (message, start)
             for message in reversed(thread.messages)
             if message.body
+            and message.sent_at >= self.context.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
             for start in range(0, len(message.body), EMAIL_ASSESSMENT_PASSAGE_CHARACTERS)
         ]
         if not segments:
@@ -1160,7 +1216,11 @@ class _TaskIO:
                 "context_complete": len(segments) == 1,
                 "messages": visible,
             },
-            "learning": learning,
+            "learning": {
+                key: value
+                for key, value in learning.items()
+                if key in {"owner_feedback", "reply_partner_counts", "shared_memories"}
+            },
         }
         next_cursor = len(segments) if was_complete else selected_index + 1
         assessment = await self.model(
@@ -1215,6 +1275,7 @@ class _TaskIO:
             )
         value.update(
             grounded=grounded,
+            assessment_context=learning.get("assessment_context"),
             profile_revision=int(str(learning.get("profile_revision", 0))),
             analysis_cursor=next_cursor,
             analysis_complete=next_cursor >= len(segments),
@@ -1241,6 +1302,8 @@ class _TaskIO:
 
     async def _form_semantics(self, thread: EmailThread, facts: list[EmailSemanticFact]) -> None:
         for message in thread.messages:
+            if message.sent_at < self.context.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS):
+                continue
             proposed = [fact for fact in facts if fact.message_id == message.id]
             if not proposed or not message.body:
                 continue

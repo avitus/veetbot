@@ -15,6 +15,7 @@ from agent_core.domain.email_semantics import EmailSemanticFact
 
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
+EMAIL_HISTORY_DAYS = 90
 
 
 class EmailValue(BaseModel):
@@ -305,6 +306,8 @@ class EmailSyncState(EmailValue):
     history_next: str | None = None
     history_page_open: bool = False
     anchor: str | None = None
+    history_policy: str | None = None
+    history_since: int | None = None
 
 
 def addresses(values: list[str]) -> list[str]:

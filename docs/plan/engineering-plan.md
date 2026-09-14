@@ -4030,7 +4030,7 @@ Implement:
   single-action consent through the existing approval and tool machinery;
   autonomous mailbox writes remain excluded (ADR-0095).
 - Reliable account-qualified incremental synchronization and resumable historical
-  received and Sent analysis without a fixed age cutoff, with honest partial
+  received and Sent analysis limited to the latest ninety days for now (ADR-0096), with honest partial
   coverage, checkpoints, provider failure recovery and no duplicate learning.
 - Shared explainable sender/content importance and contextual writing-style
   profiles, explicit feedback precedence, undo/reset, supported relationship

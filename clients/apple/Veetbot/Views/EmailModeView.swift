@@ -141,6 +141,18 @@ public struct EmailModeView: View {
                         .buttonStyle(.bordered)
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
+                if let pause = model.budgetPauseMessage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Automatic email work is paused", systemImage: "pause.circle").appFont(.headline)
+                        Text(pause).appFont(.callout).foregroundColor(.secondary)
+                        if let retryAt = model.budgetRetryAt {
+                            Text("Next automatic check: \(retryAt.formatted(date: .abbreviated, time: .shortened))")
+                                .appFont(.caption).foregroundColor(.secondary)
+                        }
+                        Button("Check again") { Task { await model.refresh() } }
+                            .buttonStyle(.bordered)
+                    }.padding(.vertical, 12).emailHideSeparator()
+                }
                 if model.newImportantCount > 0 {
                     Button {
                         model.showNewItems()
@@ -155,7 +167,7 @@ public struct EmailModeView: View {
                 if model.isLoading && model.items.isEmpty {
                     ProgressView("Finding your mail…").padding(.vertical, 32)
                         .frame(maxWidth: .infinity).emailHideSeparator()
-                } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil {
+                } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil && model.budgetPauseMessage == nil {
                     emptyInbox.emailHideSeparator()
                 }
                 ForEach(model.items) { thread in
@@ -947,7 +959,7 @@ struct EmailLearningScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(
-                        "Veetbot analyzes received and Sent email, including older correspondence, to learn what matters, your writing style, and useful memories shared with Chat and both accounts. Selected email content is processed by Veetbot's hosted models. This updates your assistant's preferences without fine-tuning a model."
+                        "Veetbot automatically analyzes received and Sent email from the latest 90 days to learn what matters, your writing style, and useful memories shared with Chat and both accounts. Selected email content is processed by Veetbot's hosted models. This updates your assistant's preferences without fine-tuning a model."
                     )
                     .appFont(.caption).foregroundColor(.secondary)
                     .accessibilityIdentifier("email.learning-disclosure")
@@ -959,8 +971,8 @@ struct EmailLearningScreen: View {
                         .appFont(.caption).foregroundColor(.secondary)
                         Text(
                             learning.historyComplete
-                                ? "Accessible mail retrieved; analysis continues as needed."
-                                : "Historical retrieval is incomplete."
+                                ? "The 90-day window has been retrieved; analysis continues as needed."
+                                : "Retrieval of the latest 90 days is incomplete. Older history is paused."
                         )
                         .appFont(.caption).foregroundColor(.secondary)
                         Button(learning.paused ? "Resume learning" : "Pause learning") {
@@ -988,8 +1000,8 @@ struct EmailLearningScreen: View {
                                             .appFont(.callout)
                                         Text(
                                             account.historyComplete
-                                                ? "Accessible mail retrieved; analysis continues as needed."
-                                                : "More history remains. Learning continues while Email is active."
+                                                ? "The 90-day window has been retrieved; analysis continues as needed."
+                                                : "More of the 90-day window remains. Older history is paused."
                                         )
                                         .appFont(.caption).foregroundColor(.secondary)
                                     }

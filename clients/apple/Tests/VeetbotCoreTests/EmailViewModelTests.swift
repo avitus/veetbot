@@ -913,6 +913,63 @@ import SwiftUI
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == count)
     }
 
+    @Test func testBudgetPauseExpiresAndConnectionResetClearsItsState() async throws {
+        let requests = EmailRequestRecorder()
+        var current = Date(timeIntervalSince1970: 1_789_344_000)
+        let model = try makeModel(refreshNanoseconds: 10_000_000, now: { current }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                return (402, Self.error("budget_exceeded", "Budget paused."))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        try await waitForEmailTestCondition { model.budgetRetryAt != nil && !model.isRefreshing }
+        #expect(model.budgetPauseMessage == "Budget paused.")
+        #expect(model.errorMessage == nil)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        current = try #require(model.budgetRetryAt).addingTimeInterval(1)
+        try await waitForEmailTestCondition {
+            requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2 && !model.isRefreshing
+        }
+        model.setActive(false)
+        model.resetConnection()
+        #expect(model.budgetPauseMessage == nil)
+        #expect(model.budgetRetryAt == nil)
+    }
+
+    @Test func testBudgetCeilingStopsTimerAcrossVisitsAndManualRefreshRecovers() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(refreshNanoseconds: 10_000_000) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                if requests.snapshot.filter({ $0.httpMethod == "POST" }).count == 1 {
+                    return (402, "{\"error\":{\"code\":\"budget_exceeded\",\"message\":\"Automatic email work has reached its cost ceiling.\",\"details\":{\"reason\":\"email_aggregate_cost\",\"retry_at\":\"2099-01-01T00:00:00+00:00\"},\"request_id\":\"budget-test\"}}")
+                }
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        model.setActive(false)
+        model.setActive(true)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+        #expect(model.items.count == 1, "cached mail stays available during the pause")
+        await model.refresh()
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2)
+        #expect(model.errorMessage == nil)
+    }
+
     @Test func testForegroundReturnStartsOneLoopAndVisibleCadenceRepeats() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel(refreshNanoseconds: 20_000_000) { request in
@@ -1653,6 +1710,7 @@ import SwiftUI
     /// Isolates each model's URLSession route and allows real transport errors from its handler.
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
+        now: @escaping () -> Date = Date.init,
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
@@ -1663,7 +1721,7 @@ import SwiftUI
             configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
-        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds)
+        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now)
     }
 
     private static let accountsJSON = """

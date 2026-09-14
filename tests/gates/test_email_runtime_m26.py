@@ -110,7 +110,7 @@ async def test_refresh_uses_governed_mailbox_reads_without_owner_prompt_or_model
         assert account["status"] == "ready"
         assert account["email_address"] == "owner@example.test"
         assert account["inbox_complete"] is True
-        assert account["history_complete"] is False
+        assert account["history_complete"] is True  # ADR-0096: the permitted 90-day window.
         run = await app.runs.get(operation.run_id)
         assert run.status is RunStatus.COMPLETED
         assert run.model_call_count == 0
@@ -1565,7 +1565,6 @@ async def test_invalid_json_mailbox_result_preserves_account_and_draft(
 @pytest.mark.parametrize("missing", ["id", "from", "internal_date"])
 async def test_invalid_memory_source_fields_do_not_interrupt_mailbox_viewing(missing: str) -> None:
     from types import SimpleNamespace
-    from typing import cast
     from unittest.mock import AsyncMock
     from uuid import UUID
 
@@ -1574,12 +1573,19 @@ async def test_invalid_memory_source_fields_do_not_interrupt_mailbox_viewing(mis
     message = dict(_page()["messages"][0])
     del message[missing]
     semantics = SimpleNamespace(register_source=AsyncMock())
-    io = cast(
-        _TaskIO,
-        SimpleNamespace(
-            context=SimpleNamespace(run=SimpleNamespace(session_id=UUID(int=1)), lease=None),
-            semantics=semantics,
+    from datetime import UTC, datetime
+
+    from agent_core.adapters.determinism import FixedClock
+
+    io = _TaskIO.__new__(_TaskIO)
+    vars(io).update(
+        task=SimpleNamespace(kind="refresh"),
+        context=SimpleNamespace(
+            run=SimpleNamespace(session_id=UUID(int=1)),
+            lease=None,
+            clock=FixedClock(datetime(2026, 9, 14, tzinfo=UTC)),
         ),
+        semantics=semantics,
     )
     await _TaskIO._register_sources(
         io,

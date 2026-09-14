@@ -1247,7 +1247,7 @@ milestones:
     authorized_scope:
       - shared Chat and Email presentation on iPhone, iPad and Mac
       - owner-requested archive and move-to-Inbox actions for one exact thread in the originating Gmail account
-      - foreground-request-driven Gmail synchronization and resumable complete eligible history
+      - foreground-request-driven Gmail synchronization and resumable history limited to the latest ninety days for now (ADR-0096)
       - shared reversible sender, content and writing-style personalization
       - internal versioned drafts and exact-action approval for every send
       - evaluated attributed semantic email memory shared with Chat and both accounts

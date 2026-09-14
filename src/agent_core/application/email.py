@@ -24,6 +24,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
+    EMAIL_HISTORY_DAYS,
     EMAIL_POLICY_VERSION,
     EMAIL_SLICE_RESERVATION,
     EmailAccount,
@@ -751,24 +752,72 @@ class EmailExperienceService:
     async def _check_budget(self, store: EmailStore, principal: Principal, amount: Decimal) -> None:
         """Count settled usage and unresolved reservations against both windows."""
         now = self.clock.now().astimezone(UTC)
-        daily = Decimal("0")
-        monthly = Decimal("0")
+        daily_spent = Decimal("0")
+        monthly_spent = Decimal("0")
+        reserved = Decimal("0")
+        settled: list[tuple[datetime, Decimal]] = []
+        spent_by_day: dict[str, Decimal] = {}
         async for record in task_records(store, principal, created_since=now - timedelta(days=30)):
             task = EmailTask.model_validate(record.payload)
-            cost = task.reservation if task.settled_cost is None else task.settled_cost
-            if task.settled_cost is None or task.created_at.astimezone(UTC).date() == now.date():
-                daily += cost
-            if task.settled_cost is None or task.created_at >= now - timedelta(days=30):
-                monthly += cost
+            if task.settled_cost is None:
+                reserved += task.reservation
+            else:
+                created = task.created_at.astimezone(UTC)
+                settled.append((created, task.settled_cost))
+                day = created.date().isoformat()
+                spent_by_day[day] = spent_by_day.get(day, Decimal("0")) + task.settled_cost
+                monthly_spent += task.settled_cost
+                if created.date() == now.date():
+                    daily_spent += task.settled_cost
         if (
-            daily + amount > self.budget_limits.daily_cost
-            or monthly + amount > self.budget_limits.monthly_cost
+            daily_spent + reserved + amount <= self.budget_limits.daily_cost
+            and monthly_spent + reserved + amount <= self.budget_limits.monthly_cost
         ):
-            raise BudgetExceededError(
-                "email_aggregate_cost",
-                "Automatic email work has reached its cost ceiling; "
-                "cached mail and editing remain available.",
-            )
+            return
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Do not promise that midnight renews a rolling-month or unresolved hold.
+        candidates = sorted(
+            {
+                midnight,
+                *(created + timedelta(days=30, microseconds=1) for created, _ in settled),
+            }
+        )
+        retry_at = now + timedelta(hours=1)
+        settled.sort()
+        monthly = monthly_spent
+        expired = 0
+        for candidate in candidates:
+            if candidate <= now:
+                continue
+            daily = spent_by_day.get(candidate.date().isoformat(), Decimal("0"))
+            while expired < len(settled) and settled[expired][0] < candidate - timedelta(days=30):
+                monthly -= settled[expired][1]
+                expired += 1
+            if (
+                daily + reserved + amount <= self.budget_limits.daily_cost
+                and monthly + reserved + amount <= self.budget_limits.monthly_cost
+            ):
+                retry_at = candidate
+                break
+        raise BudgetExceededError(
+            "email_aggregate_cost",
+            f"Automatic email work is paused. Today: ${daily_spent:.2f} spent, "
+            f"${reserved:.2f} reserved, ${self.budget_limits.daily_cost:.2f} limit. "
+            f"Rolling 30 days: ${monthly_spent:.2f} spent, "
+            f"${self.budget_limits.monthly_cost:.2f} limit. "
+            f"The next batch needs ${amount:.2f} available. "
+            "Cached mail and editing remain available.",
+            details={
+                "daily_spent": str(daily_spent),
+                "daily_reserved": str(reserved),
+                "daily_limit": str(self.budget_limits.daily_cost),
+                "monthly_spent": str(monthly_spent),
+                "monthly_reserved": str(reserved),
+                "monthly_limit": str(self.budget_limits.monthly_cost),
+                "next_reservation": str(amount),
+                "retry_at": retry_at.isoformat(),
+            },
+        )
 
     async def submit_task(
         self,
@@ -1654,7 +1703,7 @@ class EmailExperienceService:
             ),
             reverse=True,
         )
-        return {
+        result: dict[str, object] = {
             "profile_revision": state.profile_revision,
             "paused": state.paused,
             "owner_feedback": [
@@ -1677,6 +1726,21 @@ class EmailExperienceService:
                 "facts and decisions remain specific to their source thread."
             ),
         }
+        relevant = {
+            "owner_feedback": result["owner_feedback"],
+            "shared_memories": result["shared_memories"],
+            "relationships": sorted(
+                (
+                    json.dumps(item, sort_keys=True)
+                    for item in relationships
+                    if correspondents.intersection(cast(list[str], item["recipients"]))
+                ),
+            ),
+        }
+        result["assessment_context"] = hashlib.sha256(
+            json.dumps(relevant, sort_keys=True).encode()
+        ).hexdigest()
+        return result
 
     async def _archive_observed_in(
         self,
@@ -1912,7 +1976,9 @@ class EmailExperienceService:
                     and previous.in_inbox == in_inbox
                     and previous.archive_operation == archive_operation
                 ):
-                    await self._learn_history(uow.email, principal, previous)
+                    await self._learn_history(
+                        uow.email, principal, previous, automatic=run is not None
+                    )
                     return previous
                 # Keep legacy label-bearing fingerprints stable: assessments and
                 # semantic evidence are keyed to that existing content identity.
@@ -1990,11 +2056,16 @@ class EmailExperienceService:
                     ),
                 },
             )
-            await self._learn_history(uow.email, principal, thread)
+            await self._learn_history(uow.email, principal, thread, automatic=run is not None)
             return thread
 
     async def _learn_history(
-        self, store: EmailStore, principal: Principal, thread: EmailThread
+        self,
+        store: EmailStore,
+        principal: Principal,
+        thread: EmailThread,
+        *,
+        automatic: bool = False,
     ) -> None:
         state = await self._learning_state(store, principal)
         if state.paused:
@@ -2025,7 +2096,11 @@ class EmailExperienceService:
         changed = False
         for message in thread.messages:
             if (
-                message.direction != "sent"
+                (
+                    automatic
+                    and message.sent_at < self.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
+                )
+                or message.direction != "sent"
                 or not message.complete
                 or not owned.intersection(addresses([message.sender]))
             ):

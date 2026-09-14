@@ -49,6 +49,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var isPerformingAction = false
     @Published public private(set) var unavailable = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var budgetPauseMessage: String?
+    @Published public private(set) var budgetRetryAt: Date?
     @Published private var draftActionError: String?
     @Published private var threadReadError: String?
     @Published public private(set) var feedbackMessage: String?
@@ -70,6 +72,7 @@ public final class EmailViewModel: ObservableObject {
     public var authenticationFailure: ((Error) -> Void)?
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let refreshNanoseconds: UInt64
+    private let now: () -> Date
     private var active = false
     private var activation = UUID()
     private var generation = UUID()
@@ -105,10 +108,12 @@ public final class EmailViewModel: ObservableObject {
 
     public init(
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
-        refreshNanoseconds: UInt64 = 60_000_000_000
+        refreshNanoseconds: UInt64 = 60_000_000_000,
+        now: @escaping () -> Date = Date.init
     ) {
         self.makeAPIClient = makeAPIClient
         self.refreshNanoseconds = refreshNanoseconds
+        self.now = now
     }
 
     deinit {
@@ -201,6 +206,8 @@ public final class EmailViewModel: ObservableObject {
         revisions = []
         refreshKey = nil
         refreshFailure = nil
+        budgetPauseMessage = nil
+        budgetRetryAt = nil
         saveKeys = [:]
         sendKeys = [:]
         isLoading = false
@@ -363,14 +370,18 @@ public final class EmailViewModel: ObservableObject {
 
     /// Admits one foreground refresh and ignores results after its connection or visibility expires.
     public func refresh() async {
-        await refresh(activation: activation)
+        await refresh(activation: activation, manual: true)
     }
 
     /// Keeps admission ownership distinct from a later visit while retaining uncertain admission keys.
-    private func refresh(activation foreground: UUID) async {
+    private func refresh(activation foreground: UUID, manual: Bool = false) async {
         let connection = generation
         guard acceptsRead(connection: connection, activation: foreground), !unavailable, !isRefreshing,
               let api = makeAPIClient() else { return }
+        if !manual, let budgetRetryAt, budgetRetryAt > now() {
+            await reload(preserveOrder: true, activation: foreground)
+            return
+        }
         isRefreshing = true
         let key = refreshKey ?? UUID().uuidString
         refreshKey = key
@@ -379,6 +390,8 @@ public final class EmailViewModel: ObservableObject {
             let operation = try await api.refreshEmail(idempotencyKey: key)
             guard acceptsRead(connection: connection, activation: foreground) else { return }
             refreshKey = nil
+            budgetPauseMessage = nil
+            budgetRetryAt = nil
             recordRefreshStatus(operation.status)
             await reload(preserveOrder: true, activation: foreground)
             guard acceptsRead(connection: connection, activation: foreground) else { return }
@@ -387,6 +400,7 @@ public final class EmailViewModel: ObservableObject {
         } catch {
             guard acceptsRead(connection: connection, activation: foreground) else { return }
             if isUnavailable(error) { unavailable = true }
+            else if recordBudgetPause(error) { refreshKey = nil }
             else { recordRefreshFailure(error) }
         }
     }
@@ -427,6 +441,28 @@ public final class EmailViewModel: ObservableObject {
     private func acceptsRead(connection: UUID, activation foreground: UUID?) -> Bool {
         generation == connection && !Task.isCancelled
             && (foreground == nil || (active && foreground == activation))
+    }
+
+    /// Budget refusal is a persistent pause, not a transient refresh error.
+    private func recordBudgetPause(_ error: Error) -> Bool {
+        guard case HTTPTransportError.api(let failure) = error,
+              failure.statusCode == 402, failure.code == .budgetExceeded else { return false }
+        let current = now()
+        let formatter = ISO8601DateFormatter()
+        let raw = failure.details.values["retry_at"]?.stringValue
+        var retry = raw.flatMap { formatter.date(from: $0) }
+        if retry == nil {
+            formatter.formatOptions.insert(.withFractionalSeconds)
+            retry = raw.flatMap { formatter.date(from: $0) }
+        }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let fallback = utc.startOfDay(for: current).addingTimeInterval(86_400)
+        budgetRetryAt = max(retry ?? fallback, current.addingTimeInterval(60))
+        budgetPauseMessage = failure.message
+        refreshFailure = nil
+        errorMessage = nil
+        return true
     }
 
     /// Retains refresh failures across successful cache reads until an operation completes.
