@@ -23,12 +23,13 @@ class CallConfiguration(BaseModel):
     account_id: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,64}$")
     phone_number: str = Field(pattern=r"^\+[1-9][0-9]{7,14}$")
     public_name: str = Field(min_length=1, max_length=128)
+    assistant_name: str = Field(default="Veetbot", min_length=1, max_length=128)
     public_profile: str = Field(min_length=1, max_length=4000, repr=False)
     voice: str = Field(default="maya", min_length=1, max_length=128)
     max_duration_minutes: int = Field(default=5, ge=1, le=5)
     webhook_url: str = Field(max_length=2048)
 
-    @field_validator("public_name", "public_profile", "voice")
+    @field_validator("public_name", "assistant_name", "public_profile", "voice")
     @classmethod
     def public_material(cls, value: str) -> str:
         if not value.strip() or contains_credential(value):
