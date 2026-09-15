@@ -397,16 +397,13 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testSendingMessageDismissesKeyboard() {
         submitSlowChatMessage()
-        let keyboardDismissed = NSPredicate(format: "exists == false")
-        let expectation = XCTNSPredicateExpectation(
-            predicate: keyboardDismissed,
-            object: app.keyboards.firstMatch
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [expectation], timeout: 2),
-            .completed,
+        // Predicate expectations delay their first poll; a slow accessibility
+        // snapshot can then exhaust this deadline even with the keyboard gone.
+        XCTAssertTrue(
+            app.keyboards.firstMatch.waitForNonExistence(timeout: 2),
             "the keyboard must dismiss before the delayed submission returns"
         )
+        XCTAssertTrue(app.staticTexts["Sending…"].exists)
     }
 
     func testSendingMessageShowsActivityBeforeAcceptance() {
