@@ -30,9 +30,9 @@ from agent_core.domain.memory import (
     RecallResult,
     RecallTrace,
     Sensitivity,
-    lexical_query_terms,
     lexical_term_lexemes,
     lexical_tokens,
+    recall_query_terms,
 )
 from agent_core.domain.runs import Run
 from agent_core.memory.profiles import (
@@ -44,7 +44,7 @@ from agent_core.memory.profiles import (
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 
-RETRIEVAL_POLICY_VERSION = "retrieval@3"
+RETRIEVAL_POLICY_VERSION = "retrieval@4"
 # Episode search reads the session stream in bounded pages: never the whole
 # stream at once, and never more pages than a bounded read is worth.
 EPISODE_PAGE_MINIMUM = 256
@@ -53,6 +53,17 @@ EPISODE_MAX_PAGES = 64
 # the same belief said twice, and the second one is demoted rather than lost.
 NEAR_DUPLICATE_SIMILARITY = 0.8
 _DURABLE_TYPES = frozenset({BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR})
+_PERSONAL_TYPES = [BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR, BeliefType.RELATIONSHIP]
+# Explicit requests to recall the owner's profile, rather than advice about
+# what they should do. The structured arm supplies paraphrased candidates;
+# subject/text matches still outrank a type-only match.
+_PERSONAL_RECALL = re.compile(
+    r"\b(?:what|which|where|when|how)\b[^?!.]{0,80}\b(?:do|did|have|am)\s+i\b|"
+    r"\b(?:what|which|who)\b[^?!.]{0,80}\b(?:is|are|was|were)\s+my\b|"
+    r"\bwho\b[^?!.]{0,50}\bme\b|"
+    r"\b(?:do|did)\s+i\s+(?:still\s+)?(?:have|own|use|drive|wear|live|work)\b",
+    re.I,
+)
 _STALE_STATUSES = frozenset({MemoryStatus.EXPIRED, MemoryStatus.RETIRED})
 # The three ways a belief stops holding without being deleted, and therefore
 # the three a snapshot member can need a correction line for.
@@ -105,6 +116,7 @@ class DeterministicQueryFormer:
                 current_scope=current_scope or self._scope,
                 text=text or None,
                 subjects=subjects,
+                structured_belief_types=_PERSONAL_TYPES if _PERSONAL_RECALL.search(text) else [],
                 profile=RecallProfile.TASK,
                 budget_tokens=self._budget_tokens,
                 max_items=self._max_items,
@@ -169,13 +181,19 @@ class HybridMemoryRetriever:
                 }
             )
         )
+        if moment == RecallMoment.SNAPSHOT.value:
+            # ADR-0019 excludes provisional beliefs from the frozen core.
+            # Filter before the store's candidate cap, not after ranking:
+            # recent provisional rows must not crowd out older active facts.
+            # CORE also serves in-turn deltas, where provisional recall is valid.
+            effective_query = effective_query.model_copy(update={"include_provisional": False})
         if not authorized:
             # Isolation is fail-closed before reaching an adapter query.
             records: list[MemoryRecord] = []
             head = 0
         else:
             async with self._uow_factory() as uow:
-                records = await uow.memories.query(query)
+                records = await uow.memories.query(effective_query)
                 # The watermark is the store's own head, read in the same unit
                 # of work as the query: a belief this query did not match still
                 # occupies a position, and calling the highest position the
@@ -493,7 +511,9 @@ def _score(
     and the ranking still has to say which rows are no longer current.
     """
 
-    terms = lexical_query_terms(query.text)
+    if not query.include_provisional and record.status is MemoryStatus.PROVISIONAL:
+        return None
+    terms = recall_query_terms(query.text)
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_tokens = lexical_tokens(f"{record.subject} {record.statement}")
     lexical = (
@@ -502,7 +522,13 @@ def _score(
         if terms
         else 0
     )
-    structured = 1.0 if record.subject.casefold() in subject_terms else 0
+    structured = (
+        1.0
+        if record.subject.casefold() in subject_terms
+        else 0.25
+        if record.belief_type in query.structured_belief_types
+        else 0
+    )
     arms = []
     if structured:
         arms.append("structured")

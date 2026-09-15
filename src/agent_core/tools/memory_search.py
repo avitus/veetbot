@@ -47,8 +47,15 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 class MemorySearchTool:
     spec = ToolSpec(
         name="memory.search",
-        version="1.0.0",
-        description="Search governed long-term beliefs within the caller's hard scope.",
+        version="1.0.1",
+        description=(
+            "Search governed long-term beliefs. Search before asking the user to repeat "
+            "personal context, such as home location, preferences, or standing constraints. "
+            "The snapshot and automatic recall are incomplete: a missing fact there does not "
+            "mean it is unknown. Query the fact needed to answer (for example, 'home location "
+            "city residence'), even when the user's question names a different topic. "
+            "Tenant, principal, and sensitivity boundaries always apply; scope ranks relevance."
+        ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
         side_effect=SideEffectClass.NONE,

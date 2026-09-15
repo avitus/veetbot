@@ -990,7 +990,7 @@ at `runtime-loop.md:1150` reads it. Restricted context is
 `context-engine.md:339`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
-child-run recall class at `memory-retrieval-and-ranking.md:90`, which
+child-run recall class at `memory-retrieval-and-ranking.md:96`, which
 gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:986`: *"the registry resolves
 the child's set through `specs_for_session` with the child's

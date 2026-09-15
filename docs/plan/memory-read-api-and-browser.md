@@ -26,7 +26,7 @@ platform through the native client.
 
 The retrieval design already drew the line this milestone builds on. A recall
 trace explains one answer; browsing everything the agent believes is *a
-different surface* (memory-retrieval-and-ranking.md:674-675), and that surface
+different surface* (memory-retrieval-and-ranking.md:702-703), and that surface
 has never existed anywhere but the command line. Milestone 17 builds it: two
 GET routes, one exact scope, one default-off flag, and a browser in the Apple
 client.
@@ -64,7 +64,7 @@ find it here should find the reason here.
    not safe behind a route at any ceiling. That predicate must be added, and
    the trace store's contract suite must observe it, before a trace route is
    designed. Beyond the defect, a trace view owes the minimum-of-two-ceilings
-   rule (memory-retrieval-and-ranking.md:679-685), which is a second ceiling
+   rule (memory-retrieval-and-ranking.md:707-713), which is a second ceiling
    mechanism in a milestone whose whole ceiling story is one parameter.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
@@ -167,7 +167,7 @@ extends the existing cross-tenant-404 rule
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
-(memory-retrieval-and-ranking.md:679-685).
+(memory-retrieval-and-ranking.md:707-713).
 
 ### Errors
 

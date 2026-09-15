@@ -32,11 +32,112 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallProfile,
     RecallQuery,
     RejectionKind,
     Sensitivity,
 )
 from tests.integration.m2_support import database_settings
+
+
+@pytest.mark.parametrize("profile_text", ["unmatched paraphrase", None])
+async def test_postgres_recall_common_word_and_snapshot_candidate_filters(
+    tmp_path: Path, profile_text: str | None
+) -> None:
+    """Filters apply in SQL before recent noise can exhaust the candidate cap."""
+    async with build(settings=_settings(tmp_path), storage="postgres") as app:
+        session_id = await app.sessions.create()
+        address = await _remember(
+            app,
+            session_id,
+            "Home address: 123 Example Lane, Exampleville.",
+            subject="Example Owner",
+            belief_type=BeliefType.FACT,
+            sensitivity=Sensitivity.RESTRICTED,
+        )
+        noise = [
+            address.model_copy(
+                update={
+                    "id": uuid4(),
+                    "subject": f"profile entry {index}",
+                    "statement": f"The user enabled this repository {index} notification.",
+                    "belief_type": BeliefType.USER_MODEL_ATTR,
+                    "status": MemoryStatus.PROVISIONAL,
+                    "confidence": 0.65,
+                    "store_position": address.store_position + index + 1,
+                }
+            )
+            for index in range(321)
+        ]
+        mirror = InMemoryMemoryStore(app.clock)
+        async with app.uow_factory() as uow:
+            for record in noise:
+                await uow.memories.upsert_belief(record)
+        for record in [address, *noise]:
+            await mirror.upsert_belief(record)
+        for text, subjects, expected in [
+            (
+                "Is it worth adding iron fertilizer to my hydrangeas this late in the season?",
+                [],
+                [],
+            ),
+            ("the this", [], []),
+            ("the this", ["Example Owner"], [address.id]),
+            (None, ["Example Owner"], [address.id]),
+            ("home location residence", [], [address.id]),
+        ]:
+            query = _query(app, text=text, subjects=subjects)
+            async with app.uow_factory() as uow:
+                postgres_ids = [row.id for row in await uow.memories.query(query)]
+            assert postgres_ids == [row.id for row in await mirror.query(query)] == expected
+        snapshot = await app.memory_retriever.snapshot(
+            session_id=session_id, current_scope="integration"
+        )
+        assert [row.belief_id for row in snapshot.items] == [address.id]
+        async with app.uow_factory() as uow:
+            trace = await uow.traces.get(snapshot.trace_id, app.principal)
+        assert trace.candidates == 1
+        assert trace.query.include_provisional is False
+        assert [row.id for row in await mirror.query(trace.query)] == [address.id]
+        profile_query = _query(app, text=profile_text).model_copy(
+            update={"structured_belief_types": [BeliefType.FACT]}
+        )
+        async with app.uow_factory() as uow:
+            profile_rows = await uow.memories.query(profile_query)
+        assert [row.id for row in profile_rows] == [address.id]
+        assert [row.id for row in await mirror.query(profile_query)] == [address.id]
+        async with app.uow_factory() as uow:
+            assert (
+                await uow.memories.query(
+                    profile_query.model_copy(update={"principal_id": "other-principal"})
+                )
+                == []
+            )
+            assert (
+                await uow.memories.query(
+                    profile_query.model_copy(update={"sensitivity_ceiling": Sensitivity.INTERNAL})
+                )
+                == []
+            )
+            assert (
+                await uow.memories.query(
+                    profile_query.model_copy(update={"belief_types": [BeliefType.PREFERENCE]})
+                )
+                == []
+            )
+        # A low-ceiling surface still cannot see the address after this repair.
+        restricted = await app.memory_retriever.snapshot(
+            session_id=session_id,
+            current_scope="integration",
+            sensitivity_ceiling=Sensitivity.INTERNAL,
+        )
+        assert restricted.items == []
+        # CORE is also used for in-turn deltas; those retain provisional recall.
+        delta = await app.memory_retriever.recall(
+            _query(app, text=None).model_copy(update={"profile": RecallProfile.CORE}),
+            session_id=session_id,
+        )
+        assert any(row.status is MemoryStatus.PROVISIONAL for row in delta.items)
 
 
 def _settings(tmp_path: Path) -> Settings:

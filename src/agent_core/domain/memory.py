@@ -360,6 +360,105 @@ def lexical_query_terms(text: str | None) -> list[str]:
     return [collapsed] if collapsed else []
 
 
+_RECALL_FUNCTION_WORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "these",
+        "those",
+        "am",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "have",
+        "has",
+        "had",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "may",
+        "might",
+        "must",
+        "i",
+        "me",
+        "my",
+        "mine",
+        "we",
+        "us",
+        "our",
+        "ours",
+        "you",
+        "your",
+        "yours",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "hers",
+        "it",
+        "its",
+        "they",
+        "them",
+        "their",
+        "theirs",
+        "who",
+        "whom",
+        "whose",
+        "what",
+        "which",
+        "when",
+        "where",
+        "why",
+        "how",
+        "and",
+        "or",
+        "but",
+        "if",
+        "as",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "into",
+        "of",
+        "on",
+        "onto",
+        "to",
+        "with",
+        "about",
+        "than",
+        "then",
+        "there",
+        "here",
+    ]
+)
+
+
+def recall_query_terms(text: str | None) -> list[str]:
+    """Content terms for belief recall, distinct from literal browse/knowledge search.
+
+    Keep negation, names, and domain terms. A function-word-only query has no
+    lexical arm; callers must not interpret it as an unfiltered store query.
+    Explicit subject lookup remains available even for a function-word name.
+    """
+
+    return [term for term in lexical_query_terms(text) if term not in _RECALL_FUNCTION_WORDS]
+
+
 class ProviderExtractionEvaluationEvidence(BaseModel):
     """Version-bound evidence required before provider extraction can activate."""
 
@@ -777,8 +876,15 @@ class RecallQuery(BaseModel):
     text: str | None = None
     subjects: list[str] = Field(default_factory=list)
     belief_types: list[BeliefType] = Field(default_factory=list)
+    # Structured recall anchors, ORed with text/subject matches. Unlike
+    # belief_types (an AND filter), these can retrieve a paraphrased profile
+    # detail when an explicit self-knowledge question shares no content words.
+    structured_belief_types: list[BeliefType] = Field(default_factory=list)
     as_of: datetime | None = None
     include_superseded: bool = False
+    # Snapshot recalls set this false before candidate selection. In-turn
+    # deltas and deliberate lookup retain downweighted provisional beliefs.
+    include_provisional: bool = True
     profile: RecallProfile = RecallProfile.TASK
     budget_tokens: PositiveInt
     max_items: PositiveInt
