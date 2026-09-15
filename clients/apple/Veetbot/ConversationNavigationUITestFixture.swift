@@ -1,5 +1,8 @@
 #if DEBUG
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 
 enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
@@ -13,6 +16,14 @@ enum ConversationNavigationUITestFixture {
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
         ConversationNavigationUITestURLProtocol.resetEmail()
+        #if os(macOS)
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                guard let window = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
+                window.setFrame(NSRect(x: 100, y: 100, width: 1000, height: 700), display: true)
+            }
+        }
+        #endif
 
         let suiteName = "com.veetbot.apple.ui-tests"
         guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
@@ -227,7 +238,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         case ("GET", "/v1/runs/\(Self.runID)/events"):
             statusCode = 200
-            body = """
+            body = ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools")
+                ? Self.mixedToolEvents : """
                 id: 3
                 event: run.completed
                 data: {"run_id":"\(Self.runID)"}
@@ -393,6 +405,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         return """
             {"id":"\(emailApprovalID)","run_id":"\(emailRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"\(sent ? "APPROVED" : "PENDING")","tool_name":"mcp.gmail_work_send.send_message","action_summary":"Send the exact reply","arguments":{"thread_id":"provider-thread","to":"alex@example.test","cc":null,"bcc":null,"subject":"Re: Board agenda","body":\(escapedBody)},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
             """
+    }
+
+    /// Synthetic mixed Gmail activity exercises expansion without mailbox contents or credentials.
+    private static var mixedToolEvents: String {
+        var frames = (1...20).map { index in
+            let name = index.isMultiple(of: 2)
+                ? "mcp.gmail_read.get_thread" : "mcp.gmail_work_read.search_threads"
+            let event = index > 14 ? "tool.call.failed" : "tool.call.completed"
+            return "id: \(index + 2)\nevent: \(event)\ndata: {\"call_id\":\"gmail-\(index)\",\"name\":\"\(name)\",\"arguments\":{\"query\":\"example \(index)\"},\"result_item\":{\"content\":[{\"type\":\"text\",\"text\":\"Example result \(index)\"}],\"is_error\":false,\"trust\":\"external_untrusted\"}}\n\n"
+        }
+        frames.append("id: 23\nevent: assistant.message.completed\ndata: {\"message\":{\"kind\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Your answer is visible below the tool summary.\"}]}}\n\n")
+        frames.append("id: 24\nevent: run.completed\ndata: {\"run_id\":\"\(runID)\"}\n\n")
+        return frames.joined()
     }
 
     private static let firstSessionJSON = """

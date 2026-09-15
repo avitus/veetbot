@@ -91,6 +91,7 @@ test-apple-ui:
 		-destination 'platform=macOS' \
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailModeAndExactDraftApprovalOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailCanBeCheckedOffFromInboxWithoutOpeningThread \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailDetailArchiveDisplaysNextConversation \

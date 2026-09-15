@@ -64,7 +64,7 @@ pretending SwiftData is available there.
    available inside the expanded bundle, along with its individual risk; the
    collapsed bundle presents the highest risk among its calls. Messages,
    different tools, approvals, and non-success outcomes break the bundle,
-   except for the owner-requested fetch presentation refinement below.
+   except for the owner-requested presentation refinements below.
 9. **Execute native tests under full Xcode in hosted CI.** Command Line Tools may
    compile a Swift Testing bundle without running its tests. The repository's
    `make test-apple` target therefore refuses that environment and selects full
@@ -86,6 +86,19 @@ approval-bound calls, denials, and uncertain outcomes remain standalone
 boundaries. Other tools retain their existing successful-completion rule.
 This changes presentation only, without changing execution, retry, policy,
 or the durable event history.
+
+## Mixed-tool presentation refinement (2026-09-15)
+
+The owner requested compact grouping after alternating Gmail tools and repeated
+failures obscured the answer. This supersedes the same-name and fetch-only
+restrictions above: adjacent terminal calls across tool names share one collapsed
+summary with a total call count and outcome counts. Completed error results count
+as failed for every tool. Corrected retries retain their specific labels. Messages,
+unknown tool names, queued or running calls, approvals, denials, and uncertain
+outcomes remain boundaries. The summary uses the highest risk, and expansion
+identifies every tool by its exact name with its arguments, result, status, and
+individual risk still accessible. This remains a client presentation change;
+execution, policy, and durable events are unchanged.
 
 ## Consequences
 

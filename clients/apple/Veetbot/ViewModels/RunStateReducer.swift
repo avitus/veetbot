@@ -47,18 +47,17 @@ public struct ToolActivity: Identifiable, Sendable {
     fileprivate var hasKnownName: Bool
 
     public var id: String { callID }
-    /// Present error-bearing completed fetches as failed without rewriting their wire status.
+    /// Present error-bearing completed calls as failed without rewriting their wire status.
     public var presentationStatus: ToolActivityStatus {
-        name == "web.fetch" && status == .completed && result?.isError == true
+        status == .completed && result?.isError == true
             ? .failed : status
     }
     /// Select terminal tool outcomes that can be grouped without hiding approval state.
     fileprivate var isBundleCandidate: Bool {
         guard hasKnownName, approvalID == nil else { return false }
-        if name == "web.fetch" {
-            return [.completed, .rejected, .unavailable, .failed].contains(presentationStatus)
-        }
-        return status == .completed && result?.isError != true
+        return [
+            .completed, .rejected, .unavailable, .failed, .needsCorrection, .correctedAndRetried,
+        ].contains(presentationStatus)
     }
 }
 
@@ -66,17 +65,12 @@ public struct ToolActivityBundle: Identifiable, Sendable {
     public let activities: [ToolActivity]
 
     public init?(activities: [ToolActivity]) {
-        guard activities.count > 1, let first = activities.first,
-            first.isBundleCandidate,
-            activities.dropFirst().allSatisfy({
-                $0.isBundleCandidate && $0.name == first.name
-            })
+        guard activities.count > 1, activities.allSatisfy(\.isBundleCandidate)
         else { return nil }
         self.activities = activities
     }
 
     public var id: String { activities[0].callID }
-    public var name: String { activities[0].name }
     public var count: Int { activities.count }
     public var highestRisk: RiskLevel? {
         activities.compactMap(\.risk).max {
@@ -85,13 +79,15 @@ public struct ToolActivityBundle: Identifiable, Sendable {
     }
     /// Describe the bundle count and each represented outcome.
     public var summary: String {
-        let title = "\(count) \(Self.pluralizedDisplayName(name))"
-        let statuses: [ToolActivityStatus] = [.completed, .rejected, .unavailable, .failed]
+        let title = "\(count) tool calls"
+        let statuses: [ToolActivityStatus] = [
+            .completed, .correctedAndRetried, .needsCorrection, .rejected, .unavailable, .failed,
+        ]
         let outcomes = statuses.compactMap { status -> (Int, String)? in
             let matchingCount = activities.filter { $0.presentationStatus == status }.count
             return matchingCount > 0 ? (matchingCount, status.rawValue.capitalized) : nil
         }
-        if outcomes.count == 1 { return "\(title) \(outcomes[0].1)" }
+        if outcomes.count == 1 { return "\(title) · \(outcomes[0].1)" }
         return ([title] + outcomes.map { "\($0.0) \($0.1)" }).joined(separator: " · ")
     }
 
@@ -102,38 +98,6 @@ public struct ToolActivityBundle: Identifiable, Sendable {
         case .high: 2
         case .critical: 3
         }
-    }
-
-    private static func pluralizedDisplayName(_ name: String) -> String {
-        var segments = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-        guard let action = segments.popLast() else { return name }
-        var words = action.split(separator: "_", omittingEmptySubsequences: false).map(String.init)
-        guard let finalWord = words.popLast() else { return name }
-        words.append(pluralized(finalWord))
-        segments.append(words.map(displaySegment).joined(separator: "_"))
-        return segments.map(displaySegment).joined(separator: ".")
-    }
-
-    private static func pluralized(_ word: String) -> String {
-        let lowercased = word.lowercased()
-        if lowercased.hasSuffix("ch") || lowercased.hasSuffix("sh")
-            || lowercased.hasSuffix("s") || lowercased.hasSuffix("x")
-            || lowercased.hasSuffix("z")
-        {
-            return word + "es"
-        }
-        if lowercased.hasSuffix("y"), lowercased.count > 1 {
-            let preceding = lowercased[lowercased.index(lowercased.endIndex, offsetBy: -2)]
-            if !"aeiou".contains(preceding) {
-                return String(word.dropLast()) + "ies"
-            }
-        }
-        return word + "s"
-    }
-
-    private static func displaySegment(_ segment: String) -> String {
-        guard let first = segment.first else { return segment }
-        return first.uppercased() + segment.dropFirst()
     }
 }
 
@@ -583,9 +547,6 @@ public final class RunStateReducer: ObservableObject {
                 flushPending()
                 bundled.append(activity)
                 continue
-            }
-            if let first = pending.first, first.name != tool.name {
-                flushPending()
             }
             pending.append(tool)
         }

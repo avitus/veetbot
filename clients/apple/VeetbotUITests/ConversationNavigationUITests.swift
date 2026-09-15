@@ -16,6 +16,70 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    /// Twenty mixed calls occupy one compact row; each original result remains expandable.
+    func testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-mixed-tools")
+        app.launch()
+        #if os(macOS)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForFrame(of: window, timeout: 5) { $0.minX >= 0 && $0.width == 1000 })
+        #endif
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        // The plain sidebar button's vertical midpoint is between its two text lines.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        row.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        #if os(macOS)
+        composer.click()
+        #else
+        composer.tap()
+        #endif
+        composer.typeText("Show tool summary")
+        #if os(macOS)
+        app.buttons["Send"].click()
+        #else
+        app.buttons["Send"].tap()
+        #endif
+        let summary = app.buttons["tool.bundle.gmail-1"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.label.contains("20 tool calls"))
+        XCTAssertTrue(summary.label.contains("6 Failed"))
+        XCTAssertEqual(summary.value as? String, "Collapsed")
+        XCTAssertLessThan(summary.frame.height, 80)
+        let answer = app.staticTexts["Your answer is visible below the tool summary."]
+        XCTAssertTrue(answer.waitForExistence(timeout: 5))
+        XCTAssertTrue(answer.isHittable)
+        #if os(macOS)
+        summary.click()
+        #else
+        summary.tap()
+        #endif
+        let detail = app.descendants(matching: .any)["tool.detail.gmail-1"].firstMatch
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        #if os(macOS)
+        detail.click()
+        #else
+        detail.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Example result 1"].waitForExistence(timeout: 5))
+        #if os(macOS)
+        summary.click()
+        #else
+        summary.tap()
+        #endif
+        XCTAssertEqual(summary.value as? String, "Collapsed")
+        XCTAssertFalse(app.staticTexts["Example result 1"].exists)
+        XCTAssertTrue(answer.isHittable)
+    }
+
     /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
