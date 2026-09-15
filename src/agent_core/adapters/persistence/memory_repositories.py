@@ -15,6 +15,7 @@ from sqlalchemy import (
     and_,
     bindparam,
     delete,
+    false,
     func,
     or_,
     select,
@@ -74,6 +75,7 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     lexical_query_terms,
+    recall_query_terms,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
@@ -400,23 +402,41 @@ class PostgresMemoryStore:
             predicates.append(MemoryRow.store_position > query.min_store_position)
         if not query.include_superseded and query.as_of is None:
             predicates.append(MemoryRow.status.in_(_LIVE))
+        if not query.include_provisional:
+            predicates.append(MemoryRow.status != MemoryStatus.PROVISIONAL.value)
         if query.belief_types:
             predicates.append(
                 MemoryRow.belief_type.in_(tuple(item.value for item in query.belief_types))
             )
-        terms = lexical_query_terms(query.text)
-        if terms:
+        predicates.append(
+            or_(
+                MemoryRow.portability != Portability.LOCAL.value,
+                MemoryRow.scope == query.current_scope,
+                func.lower(MemoryRow.subject).in_(
+                    tuple(item.casefold() for item in query.subjects)
+                ),
+            )
+        )
+        terms = recall_query_terms(query.text)
+        if query.text is not None or query.subjects or query.structured_belief_types:
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
             vector = func.to_tsvector("simple", MemoryRow.subject + " " + MemoryRow.statement)
             text_match: ColumnElement[bool] = or_(
-                *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms]
+                false(), *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms]
             )
             if query.subjects:
                 text_match = or_(
                     text_match,
                     func.lower(MemoryRow.subject).in_(
                         tuple(item.casefold() for item in query.subjects)
+                    ),
+                )
+            if query.structured_belief_types:
+                text_match = or_(
+                    text_match,
+                    MemoryRow.belief_type.in_(
+                        tuple(item.value for item in query.structured_belief_types)
                     ),
                 )
             predicates.append(text_match)
@@ -430,16 +450,7 @@ class PostgresMemoryStore:
                 )
             ).all()
         )
-        subjects = {item.casefold() for item in query.subjects}
-        return [
-            _memory(row)
-            for row in rows
-            if not (
-                row.portability == Portability.LOCAL.value
-                and row.scope != query.current_scope
-                and row.subject.casefold() not in subjects
-            )
-        ]
+        return [_memory(row) for row in rows]
 
     async def related(
         self,

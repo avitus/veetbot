@@ -222,7 +222,7 @@ The snapshot side is specified in
 [memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md): the
 session-open snapshot query excludes, as a hard predicate, every belief whose
 persona entry stands, because the persona row already carries it at higher
-trust and a forty-item core (memory-retrieval-and-ranking.md:156) cannot
+trust and a forty-item core (memory-retrieval-and-ranking.md:162) cannot
 afford duplicates. Eligibility returns the moment the entry is removed.
 In-turn recall and explicit search are unfiltered. Because snapshot
 membership changes, the implementing change re-records the deterministic

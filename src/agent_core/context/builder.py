@@ -660,6 +660,7 @@ class BudgetedContextBuilder:
                             "profile": RecallProfile.CORE,
                             "text": None,
                             "subjects": [],
+                            "structured_belief_types": [],
                             "min_store_position": snapshot_watermark,
                             "budget_tokens": remaining,
                         }

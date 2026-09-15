@@ -97,14 +97,6 @@ public struct ChatView: View {
                             }
                             .id(NotificationFocus.approval(approval.id).scrollID)
                         }
-                        if state.runStatus == .running || state.runStatus == .queued {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text(state.reasoningActive ? "Reasoning…" : "Working…")
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 8)
-                        }
                         if let prompt = state.clarifyingQuestion {
                             ClarifyingQuestionCard(prompt: prompt) { answer in
                                 await model.answerQuestion(prompt, answer: answer)
@@ -128,6 +120,17 @@ public struct ChatView: View {
                 .onAppear {
                     scroll(proxy)
                 }
+            }
+            if let activityLabel {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(activityLabel)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("chat.activity")
             }
             Divider()
             composer
@@ -192,6 +195,12 @@ public struct ChatView: View {
         .background(AppTheme.turquoise.opacity(0.055))
     }
 
+    private var activityLabel: String? {
+        if model.isSending { return "Sending…" }
+        guard state.runStatus == .running || state.runStatus == .queued else { return nil }
+        return state.reasoningActive ? "Reasoning…" : "Working…"
+    }
+
     private var canSendDraft: Bool {
         !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !model.isSending
@@ -222,18 +231,17 @@ public struct ChatView: View {
         guard canSendDraft else { return }
         let message = model.composerText
         model.composerText = ""
+#if os(iOS)
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+#endif
         Task {
             let sent = await model.send(message)
-            if sent {
-#if os(iOS)
-                UIApplication.shared.sendAction(
-                    #selector(UIResponder.resignFirstResponder),
-                    to: nil,
-                    from: nil,
-                    for: nil
-                )
-#endif
-            } else if model.composerText.isEmpty {
+            if !sent && model.composerText.isEmpty {
                 model.composerText = message
             }
         }

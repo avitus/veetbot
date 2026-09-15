@@ -640,11 +640,11 @@ def test_lexical_arm_scores_whole_lexemes_the_stores_filter_on() -> None:
     assert _score(record, recall_query(text="themes")) is not None
 
 
-def test_retrieval_policy_version_is_retrieval_3_in_render_header() -> None:
-    """Evidence-age ranking and uncertainty rendering identify their policy."""
+def test_retrieval_policy_version_is_retrieval_4_in_render_header() -> None:
+    """Snapshot eligibility and content-term recall identify their policy."""
 
-    assert RETRIEVAL_POLICY_VERSION == "retrieval@3"
-    assert 'policy="retrieval@3"' in render_memory([], as_of=NOW)
+    assert RETRIEVAL_POLICY_VERSION == "retrieval@4"
+    assert 'policy="retrieval@4"' in render_memory([], as_of=NOW)
 
 
 async def test_near_duplicate_penalty_demotes_but_keeps_the_second_statement() -> None:

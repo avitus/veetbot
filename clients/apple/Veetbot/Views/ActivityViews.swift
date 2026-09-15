@@ -85,16 +85,18 @@ struct ToolActivityBundleCard: View {
                 HStack(spacing: 10) {
                     Image(systemName: taxonomy.icon)
                         .foregroundColor(taxonomy.color)
-                    Text(bundle.summary).appFont(.headline)
+                    Text(bundle.summary).appFont(.subheadline)
                     Spacer()
                     if let risk = bundle.highestRisk {
                         RiskBadge(risk: risk, color: taxonomy.color)
                     }
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("tool.bundle.\(bundle.id)")
 
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -116,7 +118,8 @@ struct ToolActivityBundleCard: View {
 
     private var taxonomy: TaxonomyStyle {
         let first = bundle.activities[0]
-        return TaxonomyStyle(sideEffect: first.sideEffect, risk: bundle.highestRisk)
+        let sharedEffect = bundle.activities.allSatisfy { $0.sideEffect == first.sideEffect }
+        return TaxonomyStyle(sideEffect: sharedEffect ? first.sideEffect : nil, risk: bundle.highestRisk)
     }
 }
 
@@ -128,8 +131,35 @@ private struct BundledToolActivityRow: View {
 
     /// Present one bundled tool result with its own outcome and risk label.
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                expanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(index). \(activity.name)")
+                            .appFont(.subheadline)
+                        if let detail = rowDetail {
+                            Text(detail).appFont(.caption).lineLimit(1)
+                        }
+                        Text(activity.presentationStatus.rawValue.capitalized)
+                            .appFont(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if let risk = activity.risk {
+                        let taxonomy = TaxonomyStyle(sideEffect: activity.sideEffect, risk: risk)
+                        RiskBadge(risk: risk, color: taxonomy.color)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("tool.detail.\(activity.id)")
+
+            if expanded {
                 if !activity.arguments.isEmpty {
                     DetailBlock(
                         title: "Arguments",
@@ -144,37 +174,18 @@ private struct BundledToolActivityRow: View {
                     )
                 }
             }
-            .padding(.top, 6)
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(rowLabel)
-                        .lineLimit(1)
-                    Text(activity.presentationStatus.rawValue.capitalized)
-                        .appFont(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                if let risk = activity.risk {
-                    let taxonomy = TaxonomyStyle(
-                        sideEffect: activity.sideEffect,
-                        risk: risk
-                    )
-                    RiskBadge(risk: risk, color: taxonomy.color)
-                }
-            }
         }
     }
 
-    /// Identify a bundled web call by query or URL before falling back to its ordinal.
-    private var rowLabel: String {
+    /// Identify a bundled web call by query or URL when available.
+    private var rowDetail: String? {
         if let query = activity.arguments["query"]?.stringValue, !query.isEmpty {
-            return "\(index). \(query)"
+            return query
         }
         if let url = activity.arguments["url"]?.stringValue, !url.isEmpty {
-            return "\(index). \(url)"
+            return url
         }
-        return "Call \(index)"
+        return nil
     }
 }
 

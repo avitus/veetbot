@@ -149,6 +149,66 @@ import SwiftUI
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
     }
 
+    /// A slow legacy draft response must not hide the already available conversation.
+    @Test func testThreadIsReadableBeforeFallbackDraftArrives() async throws {
+        let draftRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(), draftRead) }
+            return (200, self.threadJSON(), nil)
+        }
+        defer { draftRead.release(); model.resetConnection() }
+        let opening = Task { await model.openThread(threadID) }
+        try await waitForEmailTestCondition { draftRead.isWaiting }
+        #expect(model.thread?.id == threadID)
+        #expect(!model.isLoadingThread, "Available messages must replace the opening spinner immediately")
+        draftRead.release()
+        await opening.value
+        #expect(model.draft?.id == draftID)
+    }
+
+    /// Foreground polling cannot supersede a slow initial read and prolong the opening spinner.
+    @Test func testRefreshReusesInFlightThreadRead() async throws {
+        let threadRead = EmailArchiveResponseGate()
+        let duplicateRead = EmailArchiveResponseGate()
+        let requests = EmailRequestRecorder()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            return (200, self.threadJSON(draft: self.draftJSON()), requests.snapshot.count == 1 ? threadRead : duplicateRead)
+        }
+        defer { threadRead.release(); duplicateRead.release(); model.resetConnection() }
+        let opening = Task { await model.openThread(threadID) }
+        try await waitForEmailTestCondition { threadRead.isWaiting }
+        let refreshing = Task { await model.openThread(threadID, refreshOnly: true) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(requests.snapshot.count == 1, "Polling must not replace the selected thread's pending read")
+        threadRead.release()
+        duplicateRead.release()
+        await opening.value
+        await refreshing.value
+        #expect(model.thread?.id == threadID)
+        #expect(!model.isLoadingThread)
+    }
+
+    /// A completed draft operation still refreshes displayed mail while an older fallback read is pending.
+    @Test func testNewDraftRefreshSupersedesAnOlderFallbackRead() async throws {
+        let draftRead = EmailArchiveResponseGate()
+        let requests = EmailRequestRecorder()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(), draftRead) }
+            let count = requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count
+            return (200, count == 1 ? self.threadJSON() : self.threadJSON(draft: self.draftJSON(revision: 2)), nil)
+        }
+        defer { draftRead.release(); model.resetConnection() }
+        let opening = Task { await model.openThread(threadID) }
+        try await waitForEmailTestCondition { draftRead.isWaiting }
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draft?.revision == 2)
+        draftRead.release()
+        await opening.value
+        #expect(model.draft?.revision == 2, "An older draft response must not overwrite the completed operation")
+    }
+
     /// A held admission response cannot delay removal, block the next row, or let a refresh resurrect it.
     @Test func testArchiveDisappearsBeforeAdmissionWithoutBlockingNextRow() async throws {
         let requests = EmailRequestRecorder()

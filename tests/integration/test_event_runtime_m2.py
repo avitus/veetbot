@@ -4,7 +4,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import text, update
+from sqlalchemy import func, select, text, update
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.database import (
@@ -13,7 +13,11 @@ from agent_core.adapters.persistence.database import (
     create_engine,
     create_session_factory,
 )
-from agent_core.adapters.persistence.sqlalchemy_models import ProjectionWatermarkRow
+from agent_core.adapters.persistence.sqlalchemy_models import (
+    CheckpointRow,
+    ProjectionWatermarkRow,
+    RunRow,
+)
 from agent_core.bootstrap import build
 from agent_core.domain.errors import ConflictError, WorkerFencedError
 from agent_core.domain.events import NewEvent
@@ -441,6 +445,76 @@ async def test_artifact_orphan_reconciliation_uses_a_coarse_independent_cadence(
 
 async def test_nonterminal_checkpoints_are_dispensible() -> None:
     assert await _crash_after_checkpoint(delete_checkpoint=True) is RunStatus.COMPLETED
+
+
+async def test_terminal_delta_checkpoint_preserves_chain_and_allows_memory_sweep() -> None:
+    clock = FixedClock(NOW)
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    memory_sweeps = 0
+
+    async def consolidate() -> int:
+        nonlocal memory_sweeps
+        memory_sweeps += 1
+        return 0
+
+    try:
+        async with build(settings=settings, storage="postgres", clock=clock) as composition:
+            failed_id = await composition.runs.submit("a failed run")
+            healthy_id = await composition.runs.submit("a completed run")
+            async with composition.uow_factory() as uow:
+                for run_id, count in ((failed_id, 6), (healthy_id, 2)):
+                    initial = await uow.checkpoints.latest(run_id)
+                    assert initial is not None and initial.version == 1
+                    for version in range(2, count + 1):
+                        terminal = run_id == healthy_id and version == count
+                        await uow.checkpoints.write(
+                            run_id,
+                            RunCheckpoint(
+                                run_id=run_id,
+                                version=version,
+                                status=RunStatus.COMPLETED if terminal else RunStatus.RUNNING,
+                                created_at=NOW,
+                            ),
+                            full=terminal,
+                        )
+            # Reproduce persisted terminal state without a final full checkpoint.
+            async with engine.begin() as connection:
+                for run_id, status in (
+                    (failed_id, RunStatus.FAILED),
+                    (healthy_id, RunStatus.COMPLETED),
+                ):
+                    await connection.execute(
+                        update(RunRow).where(RunRow.id == run_id).values(status=status.value)
+                    )
+
+            worker = MaintenanceWorker(
+                uow_factory=composition.uow_factory,
+                clock=clock,
+                sweep_memory_consolidation=consolidate,
+            )
+            await worker.run_once()
+
+            assert memory_sweeps == 1
+            async with engine.connect() as connection:
+                counts = dict(
+                    (
+                        await connection.execute(
+                            select(CheckpointRow.run_id, func.count()).group_by(
+                                CheckpointRow.run_id
+                            )
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+            assert counts == {failed_id: 6, healthy_id: 1}
+            async with composition.uow_factory() as uow:
+                with pytest.raises(ConflictError, match="final full snapshot"):
+                    await uow.checkpoints.prune(failed_id, terminal=True)
+                assert (await uow.checkpoints.latest(failed_id)) is not None
+    finally:
+        await engine.dispose()
 
 
 async def test_stale_fenced_worker_cannot_affect_rows() -> None:

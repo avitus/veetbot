@@ -284,8 +284,8 @@ import Testing
 
     /// Group adjacent completed web calls while retaining each call and its arguments.
     @Test(arguments: [
-        ("web.search", "query", "query ", "10 Web.Searches Completed"),
-        ("web.fetch", "url", "https://example.com/page/", "10 Web.Fetches Completed"),
+        ("web.search", "query", "query ", "10 tool calls · Completed"),
+        ("web.fetch", "url", "https://example.com/page/", "10 tool calls · Completed"),
     ])
     func testSuccessiveCompletedWebCallsRenderAsSingleActivity(
         name: String, argument: String, valuePrefix: String, summary: String
@@ -370,7 +370,7 @@ import Testing
             Issue.record("expected mixed briefing fetches in one bundle")
             return
         }
-        #expect(bundle.summary == "5 Web.Fetches · 3 Completed · 1 Unavailable · 1 Failed")
+        #expect(bundle.summary == "5 tool calls · 3 Completed · 1 Unavailable · 1 Failed")
         #expect(bundle.activities.map(\.callID) == (1...5).map { "fetch-\($0)" })
         #expect(bundle.activities.map(\.status) == [.completed, .unavailable, .completed, .failed, .completed])
         #expect(bundle.activities[1].arguments["url"]?.stringValue == "https://example.com/2")
@@ -394,7 +394,7 @@ import Testing
             Issue.record("expected rejected and error fetches in one bundle")
             return
         }
-        #expect(bundle.summary == "2 Web.Fetches · 1 Rejected · 1 Failed")
+        #expect(bundle.summary == "2 tool calls · 1 Rejected · 1 Failed")
         #expect(bundle.activities[1].result?.isError == true)
         #expect(bundle.activities[1].presentationStatus == .failed)
     }
@@ -417,7 +417,7 @@ import Testing
     }
 
     @Test
-    func testBundlingRequiresAdjacentCompletedCallsWithTheSameName() {
+    func testAdjacentDifferentToolsShareOneSummary() {
         let reducer = RunStateReducer()
         for (sequence, callID, name) in [
             (1, "search-1", "web.search"),
@@ -432,15 +432,13 @@ import Testing
         #expect(
             reducer.activityTimeline.map(\.id) == [
                 "tool:search-1",
-                "tool:fetch-1",
-                "tool:search-3",
             ]
         )
         let summaries = reducer.activityTimeline.compactMap { activity -> String? in
             guard case .toolBundle(let bundle) = activity else { return nil }
             return bundle.summary
         }
-        #expect(summaries == ["2 Web.Searches Completed", "2 Web.Searches Completed"])
+        #expect(summaries == ["5 tool calls · Completed"])
     }
 
     @Test
@@ -454,7 +452,7 @@ import Testing
             return
         }
         #expect(bundle.activities.map(\.callID) == ["search-1", "search-2"])
-        #expect(bundle.summary == "2 Searches Completed")
+        #expect(bundle.summary == "2 tool calls · Completed")
     }
 
     @Test
@@ -492,7 +490,7 @@ import Testing
     }
 
     @Test
-    func testMessagesAndFailuresBreakCompletedToolBundles() {
+    func testMessagesBreakBundlesWhileFailuresRemainCounted() {
         let reducer = RunStateReducer()
         reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
         reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
@@ -515,15 +513,14 @@ import Testing
                 "tool:search-1",
                 "message:event-3",
                 "tool:search-3",
-                "tool:search-failed",
-                "tool:search-5",
             ]
         )
-        let failedTools = reducer.activityTimeline.compactMap { activity -> ToolActivity? in
-            guard case .tool(let tool) = activity, tool.status == .failed else { return nil }
-            return tool
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.last else {
+            Issue.record("expected failure in the second activity group")
+            return
         }
-        #expect(failedTools.map(\.callID) == ["search-failed"])
+        #expect(bundle.summary == "5 tool calls · 4 Completed · 1 Failed")
+        #expect(bundle.activities.filter { $0.status == .failed }.map(\.callID) == ["search-failed"])
     }
 
     @Test
@@ -668,7 +665,7 @@ import Testing
     }
 
     @Test
-    func testErrorResultBreaksCompletedToolBundles() {
+    func testErrorResultIsCountedAsFailedInToolBundle() {
         let reducer = RunStateReducer()
         reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
         reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
@@ -683,19 +680,15 @@ import Testing
         reducer.reduce(toolFrame(id: 4, callID: "search-3", name: "web.search"))
         reducer.reduce(toolFrame(id: 5, callID: "search-4", name: "web.search"))
 
-        #expect(
-            reducer.activityTimeline.map(\.id) == [
-                "tool:search-1",
-                "tool:search-error",
-                "tool:search-3",
-            ]
-        )
-        guard case .tool(let error) = reducer.activityTimeline[1] else {
-            Issue.record("expected error result to remain standalone")
+        #expect(reducer.activityTimeline.count == 1)
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected error result inside the activity summary")
             return
         }
-        #expect(error.status == .completed)
-        #expect(error.result?.isError == true)
+        #expect(bundle.summary == "5 tool calls · 4 Completed · 1 Failed")
+        #expect(bundle.activities[2].status == .completed)
+        #expect(bundle.activities[2].presentationStatus == .failed)
+        #expect(bundle.activities[2].result?.isError == true)
     }
 
     @Test
@@ -712,6 +705,40 @@ import Testing
             return
         }
         #expect(bundle.activities.map(\.callID) == ["search-1", "search-2"])
+    }
+
+    /// Reproduce the alternating Gmail calls and repeated failures observed in the owner's chat.
+    @Test
+    func testTwentyMixedGmailCallsKeepAnswerVisibleAndDetailsIntact() {
+        let reducer = RunStateReducer()
+        for index in 1...20 {
+            let name = index.isMultiple(of: 2)
+                ? "mcp.gmail_read.get_thread" : "mcp.gmail_work_read.search_threads"
+            reducer.reduce(SSEFrame(id: index * 2, event: "tool.call.proposed", data: [
+                "call_id": .string("gmail-\(index)"), "name": .string(name),
+                "arguments": .object(["query": .string("example \(index)")]),
+            ]))
+            let frame = toolFrame(
+                id: index * 2 + 1,
+                event: index > 14 ? "tool.call.failed" : "tool.call.completed",
+                callID: "gmail-\(index)", name: name,
+                risk: index == 20 ? .high : .low
+            )
+            reducer.reduce(frame)
+            reducer.reduce(frame)
+        }
+        reducer.reduce(assistantMessageFrame(id: 42, text: "Here is the answer."))
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:gmail-1", "message:event-42"])
+        #expect(reducer.tools.count == 20)
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected twenty Gmail calls in one expandable summary")
+            return
+        }
+        #expect(bundle.summary == "20 tool calls · 14 Completed · 6 Failed")
+        #expect(bundle.activities.map(\.callID) == (1...20).map { "gmail-\($0)" })
+        #expect(bundle.activities[19].name == "mcp.gmail_read.get_thread")
+        #expect(bundle.activities[19].arguments["query"]?.stringValue == "example 20")
+        #expect(bundle.highestRisk == .high)
     }
 
     private func assistantMessageFrame(id: Int, text: String) -> SSEFrame {

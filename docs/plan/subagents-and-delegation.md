@@ -35,7 +35,7 @@ post-terminal hook that is genuinely part of the run lifecycle
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:977-983); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
-(context-engine.md:339-342, memory-retrieval-and-ranking.md:90); and the
+(context-engine.md:339-342, memory-retrieval-and-ranking.md:96); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).

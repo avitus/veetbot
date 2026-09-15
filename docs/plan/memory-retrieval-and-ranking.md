@@ -81,6 +81,12 @@ from the session's opening goal. It is rendered into the cacheable prefix and ne
 changes for the life of the session. Profile: `core`. This is the "who you are
 talking to" layer, and it is the only memory the model gets for free.
 
+Snapshot recall excludes provisional beliefs before the store's candidate cap;
+otherwise recent provisional profile entries can crowd out older confirmed facts.
+The retriever enforces `include_provisional=false` for the snapshot moment and
+records that effective query in the trace. The `core` profile also ranks in-turn
+deltas, which retain provisional beliefs at their ordinary reduced weight.
+
 **2. In-turn recall (the task layer).** Mid-session, when the turn needs something
 the snapshot does not carry. Two triggers: an automatic pre-turn recall when the
 query former's confidence in a relevant hit clears a floor, and the agent's
@@ -295,6 +301,23 @@ in play, and a text query for the intent. Query formation is a replaceable strat
 assisted former is a later optimization, gated by evals, and never on the fast path
 without a cache.
 
+Explicit self-knowledge questions, such as "Which vehicle do I drive?", also
+anchor the structured arm to the requested type: preferences for preference
+questions, relationships for relationship questions, and user-model attributes
+for identity or ownership questions. Unrelated personal types cannot crowd the
+requested type out of the candidate cap. Compound questions retain each clause's
+requested types; temporal routine questions include preferences and user-model
+attributes because either can represent a routine.
+This bounded profile lookup can retrieve a paraphrased personal detail even when
+its statement shares no content words with the question. A type-only anchor has
+match weight 0.25, below an exact subject match's 1.0; lexical matches still
+contribute normally. Advice questions such as "Which car should I buy?" do not
+activate this lookup. Generic how-to questions ("How do I deploy this service?")
+also do not activate it; "how" questions require an explicit profile predicate,
+such as "How do I like my coffee?". It uses the existing item/token caps, lifecycle weights,
+scope rules, and hard isolation predicates, and never upgrades provisional facts
+to active or puts them into the frozen snapshot.
+
 ### 2. Hard filter
 
 Applied in the SQL predicate, before any scoring:
@@ -307,7 +330,8 @@ Applied in the SQL predicate, before any scoring:
 - sensitivity ceiling for the current surface (a memory that is fine in a private
   session may not be renderable to a shared or inbound surface — Section 22);
 - `portability = local` beliefs from other projects, unless the query names their
-  subject explicitly. This is the one place project scope still narrows the
+  subject explicitly. This filter precedes the candidate cap in both stores.
+  This is the one place project scope still narrows the
   candidate set, and it is a precision measure rather than an isolation one.
 
 Project scope is otherwise **not** a predicate — it is carried into ranking as
@@ -325,6 +349,12 @@ results rather than delaying the turn.
 - **Lexical** (always on). Postgres full-text search over `subject` + `statement` with
   `ts_rank_cd`, plus trigram similarity for names and typos. Cheap, debuggable, and
   strong on the proper nouns that dominate memory queries.
+  Belief recall removes a bounded list of English function words such as "the"
+  and "this" before both candidate selection and scoring. Negation and content
+  terms remain. A function-word-only query has no lexical matches; explicitly
+  named subjects still match. Literal memory browsing and knowledge search keep
+  their own lexical behavior. These eligibility and matching repairs are
+  versioned as `retrieval@4` and re-record the deterministic benchmark.
 - **Semantic** (optional, off at first). `pgvector` over statement embeddings. This is
   where paraphrased preferences are found ("keep it brief" vs "prefers concise
   writing") — the case lexical genuinely misses. It is built behind the fusion
@@ -490,8 +520,10 @@ class RecallQuery(BaseModel):
     text: str | None = None            # intent; may be multi-sentence
     subjects: list[str] = []           # structured anchors, aliased
     belief_types: list[str] = []
+    structured_belief_types: list[str] = []  # OR anchors; belief_types is an AND filter
     as_of: datetime | None = None      # bi-temporal; None means now
     include_superseded: bool = False   # historical queries only
+    include_provisional: bool = True   # forced false for snapshot recall
     profile: str = "task"              # "core" | "task" | "deep"
     budget_tokens: int
     max_items: int
@@ -618,6 +650,10 @@ Two tools, both returning `TrustLevel.MEMORY` data:
 - **`memory.search`** — deliberate belief lookup: text, optional subject and
   `belief_type` filters, optional `as_of`. Returns ranked beliefs with ids. Subject to
   the same hard filter, safety pass, and budget as automatic recall.
+  Its description directs the model to search before asking the user to repeat
+  personal context. The query names the fact needed to answer, such as home
+  location, even when the question names another topic. Absence from the bounded
+  snapshot or automatic recall does not establish that the fact is unknown.
 - **`memory.recall_episodes`** — the escalation path into episodic and archival
   history, scoped by time or session, with its own budget. Not automatic.
 

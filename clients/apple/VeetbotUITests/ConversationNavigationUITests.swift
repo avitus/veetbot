@@ -16,6 +16,75 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    /// Twenty mixed calls occupy one compact row; each original result remains expandable.
+    func testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-mixed-tools")
+        #if os(macOS)
+        // Exercise discovery after the original one-shot resize deadline.
+        app.launchArguments.append("--ui-testing-delayed-window")
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "900,650"
+        #endif
+        app.launch()
+        #if os(macOS)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForFrame(of: window, timeout: 5) { $0.minX >= 0 && $0.width == 1000 })
+        #endif
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        // The plain sidebar button's vertical midpoint is between its two text lines.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        row.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        #if os(macOS)
+        composer.click()
+        #else
+        composer.tap()
+        #endif
+        composer.typeText("Show tool summary")
+        #if os(macOS)
+        app.buttons["Send"].click()
+        #else
+        app.buttons["Send"].tap()
+        #endif
+        let summary = app.buttons["tool.bundle.gmail-1"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.label.contains("20 tool calls"))
+        XCTAssertTrue(summary.label.contains("6 Failed"))
+        XCTAssertEqual(summary.value as? String, "Collapsed")
+        XCTAssertLessThan(summary.frame.height, 80)
+        let answer = app.staticTexts["Your answer is visible below the tool summary."]
+        XCTAssertTrue(answer.waitForExistence(timeout: 5))
+        XCTAssertTrue(answer.isHittable)
+        #if os(macOS)
+        summary.click()
+        #else
+        summary.tap()
+        #endif
+        let detail = app.descendants(matching: .any)["tool.detail.gmail-1"].firstMatch
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        #if os(macOS)
+        detail.click()
+        #else
+        detail.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Example result 1"].waitForExistence(timeout: 5))
+        #if os(macOS)
+        summary.click()
+        #else
+        summary.tap()
+        #endif
+        XCTAssertEqual(summary.value as? String, "Collapsed")
+        XCTAssertFalse(app.staticTexts["Example result 1"].exists)
+        XCTAssertTrue(answer.isHittable)
+    }
+
     /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
@@ -369,7 +438,11 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
-    func testSendingMessageDismissesKeyboard() {
+    private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false) {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-chat-slow-send")
+        if fails { app.launchArguments.append("--ui-testing-chat-send-failure") }
+        app.launch()
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
         ]
@@ -382,20 +455,53 @@ final class ConversationNavigationUITests: XCTestCase {
         composer.typeText("Follow up")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
 
-        let send = app.buttons["Send"]
-        XCTAssertTrue(send.isHittable)
-        send.tap()
+        if useReturn {
+            composer.typeText("\n")
+        } else {
+            let send = app.buttons["Send"]
+            XCTAssertTrue(send.isHittable)
+            send.tap()
+        }
+    }
 
-        let keyboardDismissed = NSPredicate(format: "exists == false")
-        let expectation = XCTNSPredicateExpectation(
-            predicate: keyboardDismissed,
-            object: app.keyboards.firstMatch
+    func testSendingMessageDismissesKeyboard() {
+        submitSlowChatMessage()
+        // Predicate expectations delay their first poll; a slow accessibility
+        // snapshot can then exhaust this deadline even with the keyboard gone.
+        XCTAssertTrue(
+            app.keyboards.firstMatch.waitForNonExistence(timeout: 2),
+            "the keyboard must dismiss before the delayed submission returns"
         )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [expectation], timeout: 5),
-            .completed,
-            "the keyboard remained visible after the message was sent"
+        XCTAssertTrue(app.staticTexts["Sending…"].exists)
+    }
+
+    func testSendingMessageShowsActivityBeforeAcceptance() {
+        submitSlowChatMessage(useReturn: true)
+        XCTAssertTrue(app.staticTexts["Sending…"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(app.descendants(matching: .any)["chat.composer"].value as? String, "")
+        XCTAssertFalse(app.buttons["Send"].isEnabled)
+        XCTAssertTrue(app.staticTexts["Working…"].waitForExistence(timeout: 12))
+        let finished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.staticTexts["Working…"]
         )
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 12), .completed)
+        XCTAssertFalse(app.staticTexts["Sending…"].exists)
+    }
+
+    func testFailedSubmissionRestoresDraft() {
+        submitSlowChatMessage(fails: true)
+        XCTAssertTrue(app.staticTexts["Sending…"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 12))
+        app.alerts.buttons["OK"].tap()
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Follow up"),
+            object: app.descendants(matching: .any)["chat.composer"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 12), .completed)
+        XCTAssertFalse(app.staticTexts["Sending…"].exists)
+        XCTAssertTrue(app.buttons["Send"].isEnabled)
     }
 
     func testMemoryBrowserListsAndOpensDetail() {
