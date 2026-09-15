@@ -49,12 +49,12 @@ class MemorySearchTool:
         name="memory.search",
         version="1.0.1",
         description=(
-            "Search governed long-term beliefs. Search before asking the user to repeat "
-            "personal context, such as home location, preferences, or standing constraints. "
-            "The snapshot and automatic recall are incomplete: a missing fact there does not "
-            "mean it is unknown. Query the fact needed to answer (for example, 'home location "
-            "city residence'), even when the user's question names a different topic. "
-            "Tenant, principal, and sensitivity boundaries always apply; scope ranks relevance."
+            "Search governed beliefs before asking the user to repeat personal context "
+            "(home location, preferences, standing constraints). A missing snapshot or automatic "
+            "recall fact may still be known. Query the needed fact (e.g. 'home location city "
+            "residence') even if the question names another topic. Tenant, principal and "
+            "sensitivity limits apply. Scope gates local memories unless their subject is "
+            "explicit; it ranks contextual and portable memories."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,

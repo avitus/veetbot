@@ -53,15 +53,17 @@ EPISODE_MAX_PAGES = 64
 # the same belief said twice, and the second one is demoted rather than lost.
 NEAR_DUPLICATE_SIMILARITY = 0.8
 _DURABLE_TYPES = frozenset({BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR})
-_PERSONAL_TYPES = [BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR, BeliefType.RELATIONSHIP]
 # Explicit requests to recall the owner's profile, rather than advice about
 # what they should do. The structured arm supplies paraphrased candidates;
 # subject/text matches still outrank a type-only match.
 _PERSONAL_RECALL = re.compile(
-    r"\b(?:what|which|where|when|how)\b[^?!.]{0,80}\b(?:do|did|have|am)\s+i\b|"
+    r"\b(?:what|which|where|when)\b[^?!.]{0,80}\b(?:do|did|have|am)\s+i\b|"
+    r"\bhow\b[^?!.]{0,80}\b(?:do|did)\s+i\s+(?:still\s+)?"
+    r"(?:prefer|like|want)\b|"
+    r"\bhow\s+many\b[^?!.]{0,80}\b(?:do|did)\s+i\s+(?:have|own)\b|"
     r"\b(?:what|which|who)\b[^?!.]{0,80}\b(?:is|are|was|were)\s+my\b|"
     r"\bwho\b[^?!.]{0,50}\bme\b|"
-    r"\b(?:do|did)\s+i\s+(?:still\s+)?(?:have|own|use|drive|wear|live|work)\b",
+    r"(?:^|[?!.]\s*)(?:do|did)\s+i\s+(?:still\s+)?(?:have|own|use|drive|wear|live|work)\b",
     re.I,
 )
 _STALE_STATUSES = frozenset({MemoryStatus.EXPIRED, MemoryStatus.RETIRED})
@@ -75,6 +77,36 @@ _INJECTION = re.compile(
     r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
     re.I,
 )
+
+
+def _personal_belief_types(text: str) -> list[BeliefType]:
+    """Anchor each requested kind of personal fact before candidate capping."""
+
+    types: set[BeliefType] = set()
+    for clause in re.split(r"[,;?!]|\band\b", text, flags=re.I):
+        clause = clause.strip()
+        if not _PERSONAL_RECALL.search(clause):
+            continue
+        if re.search(
+            r"\b(?:who|partner|spouse|wife|husband|mother|father|sibling|brother|sister|"
+            r"parent|child|children|daughter|son|friend|manager|colleague)\b",
+            clause,
+            re.I,
+        ):
+            types.add(BeliefType.RELATIONSHIP)
+        elif re.search(
+            r"\b(?:prefer|preferred|preference|preferences|like|want|favorite|favourite)\b",
+            clause,
+            re.I,
+        ):
+            types.add(BeliefType.PREFERENCE)
+        else:
+            types.add(BeliefType.USER_MODEL_ATTR)
+            # Routines can be stored as either a personal attribute or a
+            # preference, so temporal questions retain both representations.
+            if re.search(r"\b(?:when|day|week|often|routine|schedule)\b", clause, re.I):
+                types.add(BeliefType.PREFERENCE)
+    return sorted(types, key=lambda item: item.value)
 
 
 class DeterministicQueryFormer:
@@ -116,7 +148,7 @@ class DeterministicQueryFormer:
                 current_scope=current_scope or self._scope,
                 text=text or None,
                 subjects=subjects,
-                structured_belief_types=_PERSONAL_TYPES if _PERSONAL_RECALL.search(text) else [],
+                structured_belief_types=_personal_belief_types(text),
                 profile=RecallProfile.TASK,
                 budget_tokens=self._budget_tokens,
                 max_items=self._max_items,

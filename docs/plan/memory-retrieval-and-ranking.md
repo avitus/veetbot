@@ -302,12 +302,19 @@ assisted former is a later optimization, gated by evals, and never on the fast p
 without a cache.
 
 Explicit self-knowledge questions, such as "Which vehicle do I drive?", also
-anchor the structured arm to preferences, user-model attributes, and relationships.
+anchor the structured arm to the requested type: preferences for preference
+questions, relationships for relationship questions, and user-model attributes
+for identity or ownership questions. Unrelated personal types cannot crowd the
+requested type out of the candidate cap. Compound questions retain each clause's
+requested types; temporal routine questions include preferences and user-model
+attributes because either can represent a routine.
 This bounded profile lookup can retrieve a paraphrased personal detail even when
 its statement shares no content words with the question. A type-only anchor has
 match weight 0.25, below an exact subject match's 1.0; lexical matches still
 contribute normally. Advice questions such as "Which car should I buy?" do not
-activate this lookup. It uses the existing item/token caps, lifecycle weights,
+activate this lookup. Generic how-to questions ("How do I deploy this service?")
+also do not activate it; "how" questions require an explicit profile predicate,
+such as "How do I like my coffee?". It uses the existing item/token caps, lifecycle weights,
 scope rules, and hard isolation predicates, and never upgrades provisional facts
 to active or puts them into the frozen snapshot.
 
@@ -323,7 +330,8 @@ Applied in the SQL predicate, before any scoring:
 - sensitivity ceiling for the current surface (a memory that is fine in a private
   session may not be renderable to a shared or inbound surface — Section 22);
 - `portability = local` beliefs from other projects, unless the query names their
-  subject explicitly. This is the one place project scope still narrows the
+  subject explicitly. This filter precedes the candidate cap in both stores.
+  This is the one place project scope still narrows the
   candidate set, and it is a precision measure rather than an isolation one.
 
 Project scope is otherwise **not** a predicate — it is carried into ranking as

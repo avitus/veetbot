@@ -20,6 +20,11 @@ final class ConversationNavigationUITests: XCTestCase {
     func testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails() {
         app.terminate()
         app.launchArguments.append("--ui-testing-mixed-tools")
+        #if os(macOS)
+        // Exercise discovery after the original one-shot resize deadline.
+        app.launchArguments.append("--ui-testing-delayed-window")
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "900,650"
+        #endif
         app.launch()
         #if os(macOS)
         let window = app.windows.firstMatch

@@ -408,6 +408,15 @@ class PostgresMemoryStore:
             predicates.append(
                 MemoryRow.belief_type.in_(tuple(item.value for item in query.belief_types))
             )
+        predicates.append(
+            or_(
+                MemoryRow.portability != Portability.LOCAL.value,
+                MemoryRow.scope == query.current_scope,
+                func.lower(MemoryRow.subject).in_(
+                    tuple(item.casefold() for item in query.subjects)
+                ),
+            )
+        )
         terms = recall_query_terms(query.text)
         if query.text is not None or query.subjects or query.structured_belief_types:
             # Any-term semantics: lexical recall is a ranking arm, so one term
@@ -441,16 +450,7 @@ class PostgresMemoryStore:
                 )
             ).all()
         )
-        subjects = {item.casefold() for item in query.subjects}
-        return [
-            _memory(row)
-            for row in rows
-            if not (
-                row.portability == Portability.LOCAL.value
-                and row.scope != query.current_scope
-                and row.subject.casefold() not in subjects
-            )
-        ]
+        return [_memory(row) for row in rows]
 
     async def related(
         self,

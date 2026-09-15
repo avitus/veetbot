@@ -1335,3 +1335,50 @@ async def test_postgres_head_position_and_minimum_position_bound_the_recall_delt
         assert {record.id for record in everything} == {older.id, newer.id}
         assert [record.id for record in delta] == [newer.id]
         assert exhausted == []
+
+
+async def test_postgres_local_scope_filter_precedes_candidate_limit(tmp_path: Path) -> None:
+    async with build(settings=_settings(tmp_path), storage="postgres") as app:
+        session_id = await app.sessions.create()
+        target = await _remember(
+            app,
+            session_id,
+            "The current endpoint is ready.",
+            subject="current endpoint",
+            belief_type=BeliefType.FACT,
+            portability=Portability.LOCAL,
+        )
+        noise = [
+            target.model_copy(
+                update={
+                    "id": uuid4(),
+                    "subject": f"other endpoint {index}",
+                    "scope": "other-project",
+                    "origin_scopes": ["other-project"],
+                    "store_position": target.store_position + index + 1,
+                }
+            )
+            for index in range(65)
+        ]
+        mirror = InMemoryMemoryStore(app.clock)
+        async with app.uow_factory() as uow:
+            for record in noise:
+                await uow.memories.upsert_belief(record)
+        for record in [target, *noise]:
+            await mirror.upsert_belief(record)
+        query = _query(app, text="unmatched").model_copy(
+            update={
+                "structured_belief_types": [BeliefType.FACT],
+                "max_items": 1,
+            }
+        )
+        for selected, expected in [
+            (query, [target.id]),
+            (
+                query.model_copy(update={"subjects": [noise[-1].subject.upper()]}),
+                [noise[-1].id, target.id],
+            ),
+        ]:
+            async with app.uow_factory() as uow:
+                actual = [row.id for row in await uow.memories.query(selected)]
+            assert actual == [row.id for row in await mirror.query(selected)] == expected

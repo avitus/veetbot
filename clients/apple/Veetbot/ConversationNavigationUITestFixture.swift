@@ -18,9 +18,21 @@ enum ConversationNavigationUITestFixture {
         ConversationNavigationUITestURLProtocol.resetEmail()
         #if os(macOS)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                guard let window = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
-                window.setFrame(NSRect(x: 100, y: 100, width: 1000, height: 700), display: true)
+            let availableAfter = Date().addingTimeInterval(
+                ProcessInfo.processInfo.arguments.contains("--ui-testing-delayed-window") ? 2 : 0
+            )
+            Task { @MainActor in
+                for _ in 0..<40 {
+                    if Date() >= availableAfter,
+                        let window = NSApp.windows.first(where: { $0.canBecomeMain })
+                    {
+                        window.setFrame(
+                            NSRect(x: 100, y: 100, width: 1000, height: 700), display: true
+                        )
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
             }
         }
         #endif

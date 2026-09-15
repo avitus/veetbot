@@ -73,6 +73,9 @@ async def test_explicit_personal_recall_uses_structured_profile_as_well_as_words
         "What should I plant?",
         "Which car should I buy?",
         "Who is their manager?",
+        "How do I deploy this service?",
+        "How do I configure PostgreSQL?",
+        "How do I use PostgreSQL?",
     ],
 )
 async def test_advice_and_third_party_questions_do_not_browse_personal_profile(
@@ -83,6 +86,7 @@ async def test_advice_and_third_party_questions_do_not_browse_personal_profile(
     async with factory() as uow:
         await uow.memories.upsert_belief(record)
     query = DeterministicQueryFormer(principal()).form(run(), WorkingState(), question)[0]
+    assert query.structured_belief_types == []
     result = await retriever.recall(query, session_id=SESSION_ID)
     assert result.items == []
 
@@ -261,3 +265,42 @@ async def test_structured_profile_preserves_scope_ceiling_and_ranking() -> None:
     result = await retriever.recall(query, session_id=SESSION_ID)
     assert [item.belief_id for item in result.items] == [matched.id, background.id]
     assert result.items[0].score > result.items[1].score
+
+
+@pytest.mark.parametrize(
+    ("question", "belief_type", "statement"),
+    [
+        ("Who is my partner?", BeliefType.RELATIONSHIP, "User's wife is Casey."),
+        ("Which vehicle do I drive?", BeliefType.USER_MODEL_ATTR, "User owns a cargo bike."),
+        ("How do I like my coffee?", BeliefType.PREFERENCE, "User prefers espresso."),
+    ],
+)
+async def test_personal_intent_survives_unrelated_type_candidate_flood(
+    question: str, belief_type: BeliefType, statement: str
+) -> None:
+    _clock, factory, _service, retriever = await formation_stack()
+    target = memory(statement=statement).model_copy(
+        update={"subject": "personal detail", "belief_type": belief_type}
+    )
+    noise_type = (
+        BeliefType.USER_MODEL_ATTR
+        if belief_type is BeliefType.PREFERENCE
+        else BeliefType.PREFERENCE
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(target)
+        for index in range(161):
+            await uow.memories.upsert_belief(
+                memory(
+                    belief_id=10000 + index, statement=f"Notification setting {index}."
+                ).model_copy(
+                    update={
+                        "subject": f"setting {index}",
+                        "belief_type": noise_type,
+                        "store_position": index + 2,
+                    }
+                )
+            )
+    query = DeterministicQueryFormer(principal()).form(run(), WorkingState(), question)[0]
+    result = await retriever.recall(query, session_id=SESSION_ID)
+    assert [item.belief_id for item in result.items] == [target.id]
