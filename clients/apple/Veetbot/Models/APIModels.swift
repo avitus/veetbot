@@ -385,6 +385,9 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
     public let toolName: String?
     public let actionSummary: String
     public let arguments: [String: JSONValue]
+    /// SHA-256 of each argument the approval view truncated for length. Absent on a
+    /// server that does not publish them, so a truncated value stays unverifiable.
+    public let argumentDigests: [String: String]?
     public let risk: String
     public let policyReason: String
     public let expiresAt: Date?
@@ -395,6 +398,7 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, status, arguments, risk, decision
+        case argumentDigests = "argument_digests"
         case runID = "run_id"
         case sessionID = "session_id"
         case toolName = "tool_name"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
@@ -1086,6 +1087,11 @@ async def test_policy_load_is_process_scoped_event_and_approval_arguments_are_re
     assert approval.arguments == {
         "destination": "demo",
         "content": f"{'x' * 512}…[TRUNCATED]",
+    }
+    # Truncation must stay verifiable: the owner's client holds the full value and can
+    # only confirm the frozen action matches it through the published digest.
+    assert approval.argument_digests == {
+        "content": hashlib.sha256(("x" * 600).encode("utf-8")).hexdigest()
     }
     assert _approval_argument_view({"api_key": "secret", "content": "token=value"}) == {
         "api_key": "[REDACTED]",

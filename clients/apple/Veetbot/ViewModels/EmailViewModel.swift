@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -779,7 +780,21 @@ public final class EmailViewModel: ObservableObject {
     public func closeReview() { review = nil; reviewDraft = nil }
 
     private func approvalMatchesDraft(_ approval: ApprovalView, draft: EmailDraftView) -> Bool {
+        /// Verifies one frozen argument against the draft.
+        ///
+        /// The approval view truncates a long string, so comparing it to the full
+        /// local value can never succeed. A published digest is then the only exact
+        /// evidence, and it is authoritative wherever it exists — it covers the whole
+        /// value, not just the prefix the view carries. Without one, a value that no
+        /// longer compares equal stays refused rather than presented unverified.
+        func textMatches(_ key: String, _ expected: String) -> Bool {
+            if let digest = approval.argumentDigests?[key] {
+                return digest == Self.sha256Hex(expected)
+            }
+            return approval.arguments[key]?.stringValue == expected
+        }
         func addressesMatch(_ key: String, _ expected: [String]) -> Bool {
+            if approval.argumentDigests?[key] != nil { return textMatches(key, expected.joined(separator: ", ")) }
             guard let value = approval.arguments[key], value != .null else { return key != "to" && expected.isEmpty }
             if let text = value.stringValue { return text == expected.joined(separator: ", ") }
             guard let entries = value.arrayValue else { return false }
@@ -791,9 +806,12 @@ public final class EmailViewModel: ObservableObject {
             let toolName = draft.sendToolName, toolName == "mcp.\(serverID).send_message", approval.toolName == toolName,
             let providerThreadID = draft.providerThreadID,
             approval.arguments["thread_id"]?.stringValue == providerThreadID else { return false }
-        return approval.arguments["subject"]?.stringValue == draft.subject
-            && approval.arguments["body"]?.stringValue == draft.body
+        return textMatches("subject", draft.subject) && textMatches("body", draft.body)
             && addressesMatch("to", draft.to) && addressesMatch("cc", draft.cc) && addressesMatch("bcc", draft.bcc)
+    }
+
+    private static func sha256Hex(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     public func discussionSession() async -> UUID? {

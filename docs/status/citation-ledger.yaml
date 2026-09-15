@@ -376,7 +376,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/policy-and-approvals.md:1095-1096"
     excerpt: "GET /v1/approvals?status=pending&run_id=&session_id=&limit=&"
     digest: "0c48565524e957b5"
-  - cite: "docs/plan/readiness.md#docs/plan/policy-and-approvals.md:1105"
+  - cite: "docs/plan/readiness.md#docs/plan/policy-and-approvals.md:1122"
     excerpt: "`POST /v1/approvals/{approval_id}/resolve` is unchanged in s"
     digest: "81297f25872683b9"
   - cite: "docs/plan/readiness.md#docs/plan/runtime-loop.md:1150"

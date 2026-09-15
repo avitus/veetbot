@@ -370,7 +370,12 @@ Coverage counts describe threads retrieved, not completed semantic analysis.
 Review & Send verifies
 the approval's exact tool/account, provider thread, recipients, subject and body
 against the frozen draft before presenting the existing approve-once action.
-The client never invokes Gmail or substitutes a retry send after uncertainty.
+Because the approval view truncates a string over 512 characters, a reply longer
+than that is verified through the published `argument_digests` entry for that
+argument, which proves the whole value rather than the retained prefix; a
+truncated argument with no digest stays unverifiable and is refused rather than
+presented. The client never invokes Gmail or substitutes a retry send after
+uncertainty.
 
 Mail and unsaved edits stay in process memory; there is no durable offline mail
 cache or authoritative offline write queue. A connection change, forgotten
