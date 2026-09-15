@@ -369,7 +369,11 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
-    func testSendingMessageDismissesKeyboard() {
+    private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false) {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-chat-slow-send")
+        if fails { app.launchArguments.append("--ui-testing-chat-send-failure") }
+        app.launch()
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
         ]
@@ -382,20 +386,56 @@ final class ConversationNavigationUITests: XCTestCase {
         composer.typeText("Follow up")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
 
-        let send = app.buttons["Send"]
-        XCTAssertTrue(send.isHittable)
-        send.tap()
+        if useReturn {
+            composer.typeText("\n")
+        } else {
+            let send = app.buttons["Send"]
+            XCTAssertTrue(send.isHittable)
+            send.tap()
+        }
+    }
 
+    func testSendingMessageDismissesKeyboard() {
+        submitSlowChatMessage()
         let keyboardDismissed = NSPredicate(format: "exists == false")
         let expectation = XCTNSPredicateExpectation(
             predicate: keyboardDismissed,
             object: app.keyboards.firstMatch
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [expectation], timeout: 5),
+            XCTWaiter.wait(for: [expectation], timeout: 2),
             .completed,
-            "the keyboard remained visible after the message was sent"
+            "the keyboard must dismiss before the delayed submission returns"
         )
+    }
+
+    func testSendingMessageShowsActivityBeforeAcceptance() {
+        submitSlowChatMessage(useReturn: true)
+        XCTAssertTrue(app.staticTexts["Sending…"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(app.descendants(matching: .any)["chat.composer"].value as? String, "")
+        XCTAssertFalse(app.buttons["Send"].isEnabled)
+        XCTAssertTrue(app.staticTexts["Working…"].waitForExistence(timeout: 12))
+        let finished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.staticTexts["Working…"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 12), .completed)
+        XCTAssertFalse(app.staticTexts["Sending…"].exists)
+    }
+
+    func testFailedSubmissionRestoresDraft() {
+        submitSlowChatMessage(fails: true)
+        XCTAssertTrue(app.staticTexts["Sending…"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 12))
+        app.alerts.buttons["OK"].tap()
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Follow up"),
+            object: app.descendants(matching: .any)["chat.composer"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 12), .completed)
+        XCTAssertFalse(app.staticTexts["Sending…"].exists)
+        XCTAssertTrue(app.buttons["Send"].isEnabled)
     }
 
     func testMemoryBrowserListsAndOpensDetail() {

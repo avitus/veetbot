@@ -58,6 +58,7 @@ enum ConversationNavigationUITestFixture {
 }
 
 private final class ConversationNavigationUITestURLProtocol: URLProtocol {
+    private var pendingResponse: DispatchWorkItem?
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailRevision = 1
@@ -217,13 +218,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             "POST",
             "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/messages"
         ):
-            statusCode = 202
-            body =
-                "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-send-failure") {
+                statusCode = 400
+                body = #"{"error":{"code":"invalid_request","message":"Submission rejected","details":{},"request_id":"ui-test"}}"#
+            } else {
+                statusCode = 202
+                body = "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
+            }
         case ("GET", "/v1/runs/\(Self.runID)/events"):
             statusCode = 200
             body = """
-                id: 1
+                id: 3
                 event: run.completed
                 data: {"run_id":"\(Self.runID)"}
 
@@ -298,12 +303,27 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let deliver = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Data(body.utf8))
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        pendingResponse = deliver
+        let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
+        let isSubmission = request.httpMethod == "POST" && url.path.hasSuffix("/messages")
+        let isRunStream = url.path == "/v1/runs/\(Self.runID)/events"
+        if slowChat && (isSubmission || isRunStream) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: deliver)
+        } else {
+            deliver.perform()
+        }
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        pendingResponse?.cancel()
+        pendingResponse = nil
+    }
 
     private func requestJSON() -> [String: Any] {
         var data = request.httpBody ?? Data()

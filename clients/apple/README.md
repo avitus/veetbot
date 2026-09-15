@@ -116,8 +116,14 @@ activity bundle. Expanding the bundle retains access to every call's arguments
 and result, including its individual risk. The collapsed bundle uses the
 highest risk among its calls. Messages, different tools, approvals, failures,
 denials, uncertain outcomes, and error results remain separate activity items.
-On iOS, a successfully submitted composer message dismisses the software keyboard. A
-failed submission restores the draft without dismissing the keyboard.
+On iOS, tapping Send or pressing Return immediately clears the submitted draft
+and dismisses the software keyboard, before waiting for the server. A persistent
+activity row above the composer shows **Sending…** during submission, then
+**Working…** or **Reasoning…** while the accepted run is active, even when the
+transcript is scrolled away from the bottom. The indicator clears when work ends
+or needs input. A failed submission restores the draft if the composer is still
+empty, without overwriting newer text. A delayed success does not dismiss a
+keyboard reopened to write the next message.
 
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute
