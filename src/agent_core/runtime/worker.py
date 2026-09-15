@@ -267,8 +267,11 @@ class MaintenanceWorker:
         async with self._uow_factory() as uow:
             checkpoints = await uow.maintenance.checkpoint_runs(self._reclaim_limit)
         for run_id, terminal in checkpoints:
-            async with self._uow_factory() as uow:
-                await uow.checkpoints.prune(run_id, terminal=terminal)
+            try:
+                async with self._uow_factory() as uow:
+                    await uow.checkpoints.prune(run_id, terminal=terminal)
+            except Exception as exc:
+                logger.error("checkpoint prune failed for run %s (%s)", run_id, type(exc).__name__)
         if self._sweep_approvals is not None:
             try:
                 await self._sweep_approvals()
