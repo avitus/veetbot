@@ -136,6 +136,12 @@ public final class EmailViewModel: ObservableObject {
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
     /// Keeps an unresolved owner-action failure visible even when a later thread read fails or recovers.
     public var draftError: String? { draftActionError ?? threadReadError }
+    /// An owner action that failed, so a refusal can be shown beside the control that
+    /// caused it. Reporting it only above the conversation leaves the action looking
+    /// inert, because the button that triggered it is far below.
+    public var draftActionMessage: String? { draftActionError }
+    /// A failed mail read, reported with the conversation it could not refresh.
+    public var threadReadMessage: String? { threadReadError }
     public var canReview: Bool {
         guard let draft else { return false }
         return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
@@ -716,9 +722,22 @@ public final class EmailViewModel: ObservableObject {
     /// Saves edits and proposes the exact draft for approval, retaining accepted work if Email is hidden.
     public func prepareSend() async {
         guard canReview, let api = makeAPIClient() else { return }
-        autosaveTask?.cancel()
-        if currentEdit?.isDirty == true, !(await saveDraft()) { return }
-        guard let draft, currentEdit?.isDirty == false, !draft.stale else { return }
+        // Typing continues while a save is in flight, so a save can succeed and still
+        // leave the edit dirty, holding back the very text the owner asked to send.
+        // Settle the newest revision before freezing one, bounding the attempts so
+        // continuous typing cannot spin here.
+        for _ in 0..<3 {
+            autosaveTask?.cancel()
+            guard currentEdit?.isDirty == true else { break }
+            guard await saveDraft() else { return }
+        }
+        guard let draft, !draft.stale else { return }
+        // Never freeze a revision that is not the text on screen; a stalled save is
+        // reported instead of leaving the action looking like it did nothing.
+        guard currentEdit?.isDirty == false else {
+            draftActionError = "Your most recent edits are still saving. Review and send again."
+            return
+        }
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }

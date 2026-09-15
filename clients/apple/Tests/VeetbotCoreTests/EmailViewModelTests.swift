@@ -907,6 +907,61 @@ import SwiftUI
         #expect(model.thread?.isHandled == false)
     }
 
+    /// A failed owner action is reported separately from a failed thread read, so the
+    /// composer can show a refusal beside the button that caused it instead of only at
+    /// the top of the reading pane, far above the action.
+    @Test func testFailedOwnerActionIsReportedApartFromThreadReadFailures() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (400, Self.error("invalid_argument", "Review could not be prepared."))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+
+        #expect(model.draftActionMessage == "Review could not be prepared.")
+        #expect(model.threadReadMessage == nil)
+        #expect(model.draftError == "Review could not be prepared.")
+    }
+
+    /// Typing while Review & Send's own save is in flight leaves the edit dirty even
+    /// though that save succeeded. The proposal must still reach the server carrying
+    /// the latest text, rather than the click doing nothing at all.
+    @Test func testReviewSendProposesAfterAnEditArrivesDuringItsOwnSave() async throws {
+        let requests = EmailRequestRecorder()
+        let saveGate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "PUT" {
+                let saves = requests.snapshot.filter { $0.httpMethod == "PUT" }.count
+                // Hold only the first save open, so a retry can settle the later edit.
+                return (200, self.draftJSON(revision: saves + 1), saves == 1 ? saveGate : nil)
+            }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"draft\":\(self.draftJSON(revision: 3, status: "awaiting_approval"))}", nil)
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, "{\"id\":\"\(self.runID)\",\"status\":\"WAITING_FOR_APPROVAL\"}", nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { saveGate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "First edit")
+        let sending = Task { await model.prepareSend() }
+        try await waitForEmailTestCondition { saveGate.isWaiting }
+        model.changeEdit(\.body, to: "Typed while the save was still in flight")
+        saveGate.release()
+        await sending.value
+
+        #expect(requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
     /// A reply over the approval view's 512-character ceiling arrives truncated. The
     /// published digest still proves the frozen body is exactly the displayed draft,
     /// so review opens instead of silently refusing every long email.
