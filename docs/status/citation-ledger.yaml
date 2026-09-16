@@ -505,7 +505,7 @@ citations:
   - cite: "docs/plan/subagents-and-delegation.md#docs/plan/runtime-loop.md:284-292"
     excerpt: "```"
     digest: "f9cdcc2bef24e69f"
-  - cite: "docs/plan/subagents-and-delegation.md#docs/plan/skills.md:1086"
+  - cite: "docs/plan/subagents-and-delegation.md#docs/plan/skills.md:1091"
     excerpt: "## The background review is a child run with four restrictio"
     digest: "113a887243714cca"
   - cite: "docs/plan/subagents-and-delegation.md#docs/plan/tool-system.md:969-972"

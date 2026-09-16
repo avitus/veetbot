@@ -110,3 +110,4 @@ implementation without one.
 - [ADR-0099 — Approval argument redaction stays verifiable (Accepted)](0099-verifiable-approval-argument-redaction.md)
 - [ADR-0100 — People and relationship memory (Accepted; Milestone 28)](0100-people-and-relationship-memory.md)
 - [ADR-0101 — People availability without evaluation gates (Accepted)](0101-people-availability-without-evaluation-gates.md)
+- [ADR-0103 — Email admission never discovers MCP servers under the owner lock (Accepted)](0103-email-admission-without-mcp-discovery.md)

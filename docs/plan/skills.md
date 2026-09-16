@@ -600,6 +600,11 @@ per session, from the agent's `enabled_skills` and the MCP prompts
 discovered at session open, and it does not change for the life of
 the prefix epoch.
 
+A session that never renders a catalog records an empty one and
+starts no MCP server for discovery. Refresh, archive and
+source-exclusion audit sessions in Email are the only such sessions
+(ADR-0103).
+
 That is the same rule
 [context-engine.md](context-engine.md) already applies to tools —
 "the tool set is resolved once at session open and pinned" — and it

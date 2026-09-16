@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Email reads no longer wait for archive and refresh admission
+
+- Archiving a conversation or starting an Email refresh no longer starts the
+  Gmail MCP servers in the API process. In production that startup took 10–16
+  seconds per request and ran while the owner's email lock was held. Thread
+  reads and inbox reconciliation waited behind it, and archive requests took
+  23–25 seconds. These requests now finish without that delay. The worker still
+  starts its own servers when it runs the task (ADR-0103).
+- Opening a thread in Chat or starting its first draft still pins the full skill
+  catalog, but server discovery now happens before the lock is taken.
+
 ## 2026-09-16 — Archiving the open email from its row advances the reading pane
 
 - In the Apple client's Email mode, checking off the open conversation in the
