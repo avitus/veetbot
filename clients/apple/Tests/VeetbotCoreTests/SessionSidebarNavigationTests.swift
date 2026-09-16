@@ -142,4 +142,87 @@ import Testing
         #expect(!directList.contains(".navigationDestination(isPresented:"))
         #expect(pushingList.contains(".navigationDestination(isPresented:"))
     }
+
+    /// Both sidebar variants render history through one shared section builder,
+    /// so folder sections cannot drift between macOS/iPad and compact iPhone.
+    @Test
+    func testBothSidebarVariantsShareTheFolderAwareHistorySections() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
+            encoding: .utf8
+        )
+        let directListStart = try #require(
+            source.range(of: "private var directlyActivatingList: some View")
+        )
+        let pushingListStart = try #require(
+            source.range(of: "private var pushingList: some View")
+        )
+        let navigationListStart = try #require(
+            source.range(of: "private var navigationList: some View")
+        )
+        let bindingStart = try #require(
+            source.range(of: "private var notificationNavigationBinding: Binding<Bool>")
+        )
+        let directList = source[directListStart.lowerBound ..< pushingListStart.lowerBound]
+        let navigationList = source[navigationListStart.lowerBound ..< bindingStart.lowerBound]
+        #expect(directList.contains("historySections {"))
+        #expect(navigationList.contains("historySections {"))
+        #expect(!directList.contains("ForEach(model.history)"))
+        #expect(!navigationList.contains("ForEach(model.history)"))
+        #expect(source.contains("Section(\"Suggested folders\")"))
+        #expect(source.contains("DisclosureGroup(isExpanded:"))
+    }
+
+    /// Every folder control carries a stable identifier and is gated on
+    /// availability, so an older server shows exactly today's sidebar.
+    @Test
+    func testFolderControlsCarryStableIdentifiersAndAreGatedOnAvailability() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let root = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
+            encoding: .utf8
+        )
+        let views = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Veetbot/Views/ConversationFolderViews.swift"
+            ),
+            encoding: .utf8
+        )
+        let combined = root + views
+        for identifier in [
+            "sidebar.new-folder",
+            "sidebar.folder.rename",
+            "sidebar.folder.delete",
+            "sidebar.session.move.none",
+            "folder.name",
+            "folder.save",
+            "folder.cancel",
+        ] {
+            #expect(combined.contains("\"\(identifier)\""), "missing \(identifier)")
+        }
+        for prefix in [
+            "sidebar.folder.\\(",
+            "sidebar.folder.menu.\\(",
+            "sidebar.session.move.\\(",
+            "sidebar.session.move.to.\\(",
+            "sidebar.proposal.\\(",
+            "sidebar.proposal.accept.\\(",
+            "sidebar.proposal.decline.\\(",
+        ] {
+            #expect(combined.contains(prefix), "missing \(prefix)")
+        }
+        #expect(root.contains("model.foldersAvailable"))
+        #expect(root.contains("folderDeletionCandidate"))
+        #expect(root.contains("FolderNameSheet"))
+        #expect(!root.contains(".alert(") || !root.contains("TextField(\"Folder name\""))
+        #expect(root.contains("sidebar.new-conversation"))
+        #expect(root.contains("sidebar.session.\\(entry.sessionID.uuidString)"))
+    }
 }

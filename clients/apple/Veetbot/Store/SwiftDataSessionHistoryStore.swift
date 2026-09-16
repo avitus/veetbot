@@ -11,6 +11,7 @@ final class LocalSessionRecord {
     var createdAt: Date
     var updatedAt: Date
     var lastRunID: String?
+    var folderID: String?
 
     init(entry: SessionHistoryEntry) {
         sessionID = entry.sessionID.uuidString
@@ -19,16 +20,19 @@ final class LocalSessionRecord {
         createdAt = entry.createdAt
         updatedAt = entry.updatedAt
         lastRunID = entry.lastRunID?.uuidString
+        folderID = entry.folderID?.uuidString
     }
 
     @discardableResult
     func update(from entry: SessionHistoryEntry) -> Bool {
         let nextLastRunID = entry.lastRunID?.uuidString
+        let nextFolderID = entry.folderID?.uuidString
         guard title != entry.title
             || agentID != entry.agentID
             || createdAt != entry.createdAt
             || updatedAt != entry.updatedAt
             || lastRunID != nextLastRunID
+            || folderID != nextFolderID
         else { return false }
 
         title = entry.title
@@ -36,6 +40,7 @@ final class LocalSessionRecord {
         createdAt = entry.createdAt
         updatedAt = entry.updatedAt
         lastRunID = nextLastRunID
+        folderID = nextFolderID
         return true
     }
 
@@ -47,7 +52,8 @@ final class LocalSessionRecord {
             agentID: agentID,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            lastRunID: lastRunID.flatMap(UUID.init(uuidString:))
+            lastRunID: lastRunID.flatMap(UUID.init(uuidString:)),
+            folderID: folderID.flatMap(UUID.init(uuidString:))
         )
     }
 }
