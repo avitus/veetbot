@@ -782,3 +782,29 @@ async def test_working_state_is_typed_bounded_and_carried_by_field() -> None:
     )
     with pytest.raises(WorkingStateLimitError, match="constraint cap"):
         constrained.transition(WorkingState(constraints=["first"]), {"add_constraints": ["second"]})
+
+
+async def test_people_revision_invalidates_turn_cache_without_rotating_prefix() -> None:
+    retriever = _CountingMemoryRetriever()
+    builder = _builder(memory_retriever=retriever, query_former=_StaticQueryFormer())
+    revision = 1
+
+    async def current_revision() -> int:
+        return revision
+
+    builder._recall_revision = current_revision
+    active_run = run(status=RunStatus.RUNNING)
+    checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="How should you answer?")])],
+        created_at=NOW,
+    )
+    before = await builder.build(active_run, checkpoint, agent(), principal())
+    await builder.build(active_run, checkpoint, agent(), principal())
+    assert retriever.calls == 1
+    revision = 2
+    after = await builder.build(active_run, checkpoint, agent(), principal())
+    assert retriever.calls == 2, "a People correction must invalidate cached task memory"
+    assert before.metadata["prefix_sha256"] == after.metadata["prefix_sha256"]

@@ -230,6 +230,7 @@ class BudgetedContextBuilder:
         memory_retriever: MemoryRetriever | None = None,
         query_former: QueryFormer | None = None,
         session_scope: Callable[[UUID], Awaitable[str]] | None = None,
+        recall_revision: Callable[[], Awaitable[int]] | None = None,
     ) -> None:
         self._planner = planner
         self._estimator = estimator
@@ -238,6 +239,7 @@ class BudgetedContextBuilder:
         self._memory_retriever = memory_retriever
         self._query_former = query_former
         self._session_scope = session_scope
+        self._recall_revision = recall_revision
         self._recall_tasks: OrderedDict[tuple[UUID, int, str], asyncio.Task[_RecallBundle]] = (
             OrderedDict()
         )
@@ -560,6 +562,9 @@ class BudgetedContextBuilder:
                     "epoch": plan.epoch,
                     "snapshot_id": None if plan.snapshot_id is None else str(plan.snapshot_id),
                     "snapshot_watermark": plan.snapshot_watermark,
+                    "recall_revision": None
+                    if self._recall_revision is None
+                    else await self._recall_revision(),
                 }
             )
         ).hexdigest()
@@ -632,7 +637,7 @@ class BudgetedContextBuilder:
                 extra={"run_id": str(run.id), "error_class": type(exc).__name__},
             )
             return _RecallBundle()
-        rendered_base = base.rendered if base.items else None
+        rendered_base = base.rendered if base.items or base.people else None
         # One instant governs the turn's memory, the way it governs one recall:
         # a historical query stamps both blocks with the moment it asks about.
         instant = queries[0].as_of or self._clock.now()

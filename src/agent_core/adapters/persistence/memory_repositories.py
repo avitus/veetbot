@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Text,
     and_,
+    any_,
     bindparam,
     delete,
     false,
@@ -22,6 +23,9 @@ from sqlalchemy import (
     text,
     update,
 )
+from sqlalchemy import cast as sql_cast
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +33,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
+from agent_core.adapters.persistence.people_erasure import lock_run_erasure
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
@@ -37,11 +42,14 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     KnowledgeChunkRow,
     KnowledgeDocumentRow,
     MemoryRejectionRow,
+    MemoryRevisionRow,
     MemoryRow,
     RecallTraceRow,
+    RunRow,
 )
 from agent_core.domain.agents import Principal
-from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
+from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeChunk,
@@ -74,11 +82,13 @@ from agent_core.domain.memory import (
     Sensitivity,
     TracedBelief,
     TracedPassage,
+    TracedPersonContext,
     lexical_query_terms,
     recall_query_terms,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
+from agent_core.ports.people import PeopleStore
 
 _LIVE = (MemoryStatus.ACTIVE.value, MemoryStatus.PROVISIONAL.value)
 
@@ -195,6 +205,8 @@ class PostgresIntegratedEpisodeStore:
                 )
             )
         ).one()
+        if existing.erasure_pending:
+            raise ConflictError("integrated episode is fenced for erasure")
         value = _episode(existing)
         if value.model_dump(exclude={"id", "created_at"}) != episode.model_dump(
             exclude={"id", "created_at"}
@@ -209,6 +221,7 @@ class PostgresIntegratedEpisodeStore:
                     IntegratedEpisodeRow.id == episode_id,
                     IntegratedEpisodeRow.tenant_id == principal.tenant_id,
                     IntegratedEpisodeRow.principal_id == principal.principal_id,
+                    ~IntegratedEpisodeRow.erasure_pending,
                 )
             )
         ).one_or_none()
@@ -225,6 +238,7 @@ class PostgresIntegratedEpisodeStore:
                     IntegratedEpisodeRow.derivation_key == derivation_key,
                     IntegratedEpisodeRow.tenant_id == principal.tenant_id,
                     IntegratedEpisodeRow.principal_id == principal.principal_id,
+                    ~IntegratedEpisodeRow.erasure_pending,
                 )
             )
         ).one_or_none()
@@ -247,6 +261,7 @@ class PostgresIntegratedEpisodeStore:
                         IntegratedEpisodeRow.session_id == session_id,
                         IntegratedEpisodeRow.tenant_id == principal.tenant_id,
                         IntegratedEpisodeRow.principal_id == principal.principal_id,
+                        ~IntegratedEpisodeRow.erasure_pending,
                     )
                     .order_by(
                         IntegratedEpisodeRow.source_started_at,
@@ -276,6 +291,33 @@ class PostgresIntegratedEpisodeStore:
             )
         )
         return _rowcount(result)
+
+    async def fence_for_erasure(self, principal: Principal, session_ids: Sequence[UUID]) -> int:
+        result = await self._session.execute(
+            update(IntegratedEpisodeRow)
+            .where(
+                IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+                IntegratedEpisodeRow.principal_id == principal.principal_id,
+                ~IntegratedEpisodeRow.erasure_pending,
+                IntegratedEpisodeRow.session_id
+                == any_(bindparam(None, list(session_ids), type_=ARRAY(PGUUID(as_uuid=True)))),
+            )
+            .values(erasure_pending=True)
+        )
+        return _rowcount(result)
+
+    async def purge_erased(self, principal: Principal) -> bool:
+        rows = select(IntegratedEpisodeRow.id).where(
+            IntegratedEpisodeRow.tenant_id == principal.tenant_id,
+            IntegratedEpisodeRow.principal_id == principal.principal_id,
+            IntegratedEpisodeRow.erasure_pending,
+        )
+        await self._session.execute(
+            delete(IntegratedEpisodeRow).where(
+                IntegratedEpisodeRow.id.in_(rows.order_by(IntegratedEpisodeRow.id).limit(256)),
+            )
+        )
+        return bool(await self._session.scalar(select(rows.exists())))
 
 
 def _memory(row: MemoryRow) -> MemoryRecord:
@@ -356,6 +398,43 @@ class PostgresMemoryStore:
         self._session = session
         self._clock = clock
 
+    async def _remember_revision(self, record: MemoryRecord) -> None:
+        await self._session.execute(
+            pg_insert(MemoryRevisionRow).values(
+                tenant_id=record.tenant_id,
+                principal_id=record.principal_id,
+                belief_id=record.id,
+                recorded_at=self._clock.now(),
+                payload=record.model_dump(mode="json"),
+            )
+        )
+
+    async def get_at(
+        self, belief_id: UUID, principal: Principal, *, known_at: datetime
+    ) -> MemoryRecord:
+        current = await self.get(belief_id, principal)
+        row = await self._session.scalar(
+            select(MemoryRevisionRow)
+            .where(
+                MemoryRevisionRow.tenant_id == principal.tenant_id,
+                MemoryRevisionRow.principal_id == principal.principal_id,
+                MemoryRevisionRow.belief_id == belief_id,
+                MemoryRevisionRow.recorded_at <= known_at,
+            )
+            .order_by(MemoryRevisionRow.recorded_at.desc(), MemoryRevisionRow.id.desc())
+            .limit(1)
+        )
+        if row is None:
+            raise NotFoundError("memory was not recorded at this time")
+        historical = MemoryRecord.model_validate(row.payload)
+        return historical.model_copy(
+            update={
+                "sensitivity": max(
+                    (current.sensitivity, historical.sensitivity), key=SENSITIVITY_ORDER.__getitem__
+                )
+            }
+        )
+
     async def next_position(self) -> int:
         value = await self._session.scalar(select(func.nextval("memory_store_position_seq")))
         if value is None:
@@ -370,6 +449,7 @@ class PostgresMemoryStore:
             select(func.max(MemoryRow.store_position)).where(
                 MemoryRow.tenant_id == principal.tenant_id,
                 MemoryRow.principal_id == principal.principal_id,
+                ~MemoryRow.erasure_pending,
             )
         )
         return 0 if value is None else int(value)
@@ -381,6 +461,7 @@ class PostgresMemoryStore:
                     MemoryRow.id == belief_id,
                     MemoryRow.tenant_id == principal.tenant_id,
                     MemoryRow.principal_id == principal.principal_id,
+                    ~MemoryRow.erasure_pending,
                 )
             )
         ).one_or_none()
@@ -389,15 +470,20 @@ class PostgresMemoryStore:
         return _memory(row)
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
+        if query.known_at is not None:
+            return await self._query_at(query)
         as_of = query.as_of or self._clock.now()
         predicates: list[Any] = [
             MemoryRow.tenant_id == query.tenant_id,
             MemoryRow.principal_id == query.principal_id,
+            ~MemoryRow.erasure_pending,
             MemoryRow.valid_from <= as_of,
             or_(MemoryRow.valid_to.is_(None), MemoryRow.valid_to > as_of),
             or_(MemoryRow.expires_at.is_(None), MemoryRow.expires_at > as_of),
             MemoryRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
         ]
+        if query.include_ids is not None:
+            predicates.append(MemoryRow.id.in_(query.include_ids))
         if query.min_store_position:
             predicates.append(MemoryRow.store_position > query.min_store_position)
         if not query.include_superseded and query.as_of is None:
@@ -418,7 +504,9 @@ class PostgresMemoryStore:
             )
         )
         terms = recall_query_terms(query.text)
-        if query.text is not None or query.subjects or query.structured_belief_types:
+        if query.include_ids is None and (
+            query.text is not None or query.subjects or query.structured_belief_types
+        ):
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
             vector = func.to_tsvector("simple", MemoryRow.subject + " " + MemoryRow.statement)
@@ -439,7 +527,11 @@ class PostgresMemoryStore:
                         tuple(item.value for item in query.structured_belief_types)
                     ),
                 )
-            predicates.append(text_match)
+            predicates.append(
+                or_(text_match, MemoryRow.id.in_(query.expand_ids))
+                if query.expand_ids
+                else text_match
+            )
         rows = list(
             (
                 await self._session.scalars(
@@ -451,6 +543,113 @@ class PostgresMemoryStore:
             ).all()
         )
         return [_memory(row) for row in rows]
+
+    async def _query_at(self, query: RecallQuery) -> list[MemoryRecord]:
+        """Select the original revision before applying relevance or result limits."""
+        latest = (
+            select(MemoryRevisionRow)
+            .where(
+                MemoryRevisionRow.tenant_id == query.tenant_id,
+                MemoryRevisionRow.principal_id == query.principal_id,
+                MemoryRevisionRow.recorded_at <= query.known_at,
+            )
+            .distinct(MemoryRevisionRow.belief_id)
+            .order_by(
+                MemoryRevisionRow.belief_id,
+                MemoryRevisionRow.recorded_at.desc(),
+                MemoryRevisionRow.id.desc(),
+            )
+            .subquery()
+        )
+        payload = latest.c.payload
+        at = query.as_of or self._clock.now()
+        allowed = _allowed_sensitivities(query.sensitivity_ceiling)
+        subjects = tuple(item.casefold() for item in query.subjects)
+        predicates = [
+            MemoryRow.tenant_id == query.tenant_id,
+            MemoryRow.principal_id == query.principal_id,
+            ~MemoryRow.erasure_pending,
+            MemoryRow.sensitivity.in_(allowed),
+            payload["sensitivity"].astext.in_(allowed),
+            sql_cast(payload["valid_from"].astext, DateTime(timezone=True)) <= at,
+            or_(
+                payload["valid_to"].astext.is_(None),
+                sql_cast(payload["valid_to"].astext, DateTime(timezone=True)) > at,
+            ),
+            or_(
+                payload["expires_at"].astext.is_(None),
+                sql_cast(payload["expires_at"].astext, DateTime(timezone=True)) > at,
+            ),
+            sql_cast(payload["store_position"].astext, Integer) > query.min_store_position,
+            or_(
+                MemoryRow.portability != Portability.LOCAL.value,
+                MemoryRow.scope == query.current_scope,
+                func.lower(MemoryRow.subject).in_(subjects),
+            ),
+            or_(
+                payload["portability"].astext != Portability.LOCAL.value,
+                payload["scope"].astext == query.current_scope,
+                func.lower(payload["subject"].astext).in_(subjects),
+            ),
+        ]
+        if query.include_ids is not None:
+            predicates.append(latest.c.belief_id.in_(query.include_ids))
+        if not query.include_superseded and query.as_of is None:
+            predicates.append(payload["status"].astext.in_(_LIVE))
+        if query.belief_types:
+            predicates.append(
+                payload["belief_type"].astext.in_(tuple(kind.value for kind in query.belief_types))
+            )
+        if not query.include_provisional:
+            predicates.append(payload["status"].astext != MemoryStatus.PROVISIONAL.value)
+        terms = recall_query_terms(query.text)
+        if query.include_ids is None and (
+            query.text is not None or query.subjects or query.structured_belief_types
+        ):
+            vector = func.to_tsvector(
+                "simple", payload["subject"].astext + " " + payload["statement"].astext
+            )
+            predicates.append(
+                or_(
+                    false(),
+                    *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms],
+                    payload["belief_type"].astext.in_(
+                        tuple(kind.value for kind in query.structured_belief_types)
+                    ),
+                    func.lower(payload["subject"].astext).in_(subjects),
+                    latest.c.belief_id.in_(query.expand_ids),
+                )
+            )
+        rows = await self._session.execute(
+            select(payload, MemoryRow.sensitivity)
+            .join(
+                MemoryRow,
+                and_(
+                    MemoryRow.id == latest.c.belief_id,
+                    MemoryRow.tenant_id == latest.c.tenant_id,
+                    MemoryRow.principal_id == latest.c.principal_id,
+                ),
+            )
+            .where(*predicates)
+            .order_by(
+                sql_cast(payload["store_position"].astext, Integer).desc(), latest.c.belief_id
+            )
+            .limit(max(query.max_items * 8, 64))
+        )
+        result = []
+        for data, sensitivity in rows:
+            record = MemoryRecord.model_validate(data)
+            result.append(
+                record.model_copy(
+                    update={
+                        "sensitivity": max(
+                            (record.sensitivity, Sensitivity(sensitivity)),
+                            key=SENSITIVITY_ORDER.__getitem__,
+                        )
+                    }
+                )
+            )
+        return result
 
     async def related(
         self,
@@ -465,6 +664,7 @@ class PostgresMemoryStore:
                     select(MemoryRow).where(
                         MemoryRow.tenant_id == tenant_id,
                         MemoryRow.principal_id == principal_id,
+                        ~MemoryRow.erasure_pending,
                         func.lower(MemoryRow.subject) == subject.casefold(),
                         MemoryRow.belief_type == belief_type.value,
                         MemoryRow.status.in_(_LIVE),
@@ -487,6 +687,8 @@ class PostgresMemoryStore:
             )
             if existing != belief:
                 raise ConflictError("memory id identifies different content")
+        else:
+            await self._remember_revision(belief)
         return belief
 
     async def reinforce(self, belief: MemoryRecord) -> MemoryRecord:
@@ -496,11 +698,13 @@ class PostgresMemoryStore:
                 MemoryRow.id == belief.id,
                 MemoryRow.tenant_id == belief.tenant_id,
                 MemoryRow.principal_id == belief.principal_id,
+                ~MemoryRow.erasure_pending,
             )
             .values(**_memory_values(belief))
         )
         if not _rowcount(result):
             raise NotFoundError("memory not found")
+        await self._remember_revision(belief)
         return belief
 
     async def supersede(
@@ -511,14 +715,24 @@ class PostgresMemoryStore:
         # stale-current conflict cannot leave that replacement behind when the
         # caller handles the conflict and continues the outer transaction.
         async with self._session.begin_nested():
+            if await self._session.scalar(
+                select(MemoryRow.id).where(MemoryRow.id == replacement.id)
+            ):
+                raise ConflictError("replacement memory already exists")
             await self._session.execute(pg_insert(MemoryRow).values(**_memory_values(replacement)))
             result = await self._session.execute(
                 update(MemoryRow)
-                .where(MemoryRow.id == current.id, MemoryRow.status.in_(_LIVE))
+                .where(
+                    MemoryRow.id == current.id,
+                    MemoryRow.status.in_(_LIVE),
+                    ~MemoryRow.erasure_pending,
+                )
                 .values(**_memory_values(current))
             )
             if not _rowcount(result):
                 raise ConflictError("memory was already inactive")
+            await self._remember_revision(current)
+            await self._remember_revision(replacement)
         return current, replacement
 
     async def list_memories(
@@ -532,6 +746,7 @@ class PostgresMemoryStore:
         predicates: list[Any] = [
             MemoryRow.tenant_id == principal.tenant_id,
             MemoryRow.principal_id == principal.principal_id,
+            ~MemoryRow.erasure_pending,
         ]
         if not include_inactive:
             predicates.append(MemoryRow.status.in_(_LIVE))
@@ -553,6 +768,7 @@ class PostgresMemoryStore:
         predicates: list[Any] = [
             MemoryRow.tenant_id == query.tenant_id,
             MemoryRow.principal_id == query.principal_id,
+            ~MemoryRow.erasure_pending,
             MemoryRow.sensitivity.in_(_allowed_sensitivities(query.ceiling)),
             MemoryRow.status.in_(tuple(status.value for status in query.statuses)),
         ]
@@ -606,10 +822,12 @@ class PostgresMemoryStore:
         predicates: list[ColumnElement[bool]] = [
             MemoryRow.tenant_id == principal.tenant_id,
             MemoryRow.principal_id == principal.principal_id,
+            ~MemoryRow.erasure_pending,
             MemoryRow.status.in_(_LIVE),
             MemoryRow.last_evidence_at <= evidence_before,
         ]
         if decay_confidence_ceiling is not None:
+            predicates.append(MemoryRow.lifecycle_policy_version != "people-lifecycle@1")
             predicates.append(
                 or_(
                     MemoryRow.status == MemoryStatus.PROVISIONAL.value,
@@ -635,6 +853,82 @@ class PostgresMemoryStore:
         await self.get(belief_id, principal)
         return await self.reinforce(edited)
 
+    async def _erase_rejections(self, principal: Principal, belief_ids: Sequence[UUID]) -> None:
+        keys = bindparam(None, list(belief_ids), type_=ARRAY(PGUUID(as_uuid=True)))
+        await self._session.execute(
+            update(MemoryRejectionRow)
+            .where(
+                MemoryRejectionRow.tenant_id == principal.tenant_id,
+                MemoryRejectionRow.principal_id == principal.principal_id,
+                or_(
+                    MemoryRejectionRow.belief_id == any_(keys),
+                    MemoryRejectionRow.replacement_id == any_(keys),
+                ),
+            )
+            .values(
+                kind="deleted",
+                subject="erased memory",
+                statement=None,
+                replacement_id=None,
+                trace_id=None,
+            )
+        )
+
+    async def fence_for_erasure(self, principal: Principal, belief_ids: Sequence[UUID]) -> int:
+        result = await self._session.execute(
+            update(MemoryRow)
+            .where(
+                MemoryRow.tenant_id == principal.tenant_id,
+                MemoryRow.principal_id == principal.principal_id,
+                MemoryRow.id
+                == any_(bindparam(None, list(belief_ids), type_=ARRAY(PGUUID(as_uuid=True)))),
+                ~MemoryRow.erasure_pending,
+            )
+            .values(erasure_pending=True)
+        )
+        await self._erase_rejections(principal, belief_ids)
+        return _rowcount(result)
+
+    async def purge_erased(
+        self, principal: Principal, belief_ids: Sequence[UUID], *, operation_id: UUID
+    ) -> int:
+        if len(belief_ids) > 256:
+            raise ValueError("memory erasure batches contain at most 256 beliefs")
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(MemoryRow)
+                    .where(
+                        MemoryRow.tenant_id == principal.tenant_id,
+                        MemoryRow.principal_id == principal.principal_id,
+                        MemoryRow.id.in_(belief_ids),
+                        MemoryRow.erasure_pending,
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        if not rows:
+            return 0
+        await self._session.execute(
+            pg_insert(MemoryRejectionRow),
+            [
+                _rejection_values(
+                    memory_erasure_tombstone(_memory(row), operation_id, self._clock.now())
+                )
+                for row in rows
+            ],
+        )
+        await self._session.execute(
+            delete(MemoryRow).where(
+                MemoryRow.tenant_id == principal.tenant_id,
+                MemoryRow.principal_id == principal.principal_id,
+                MemoryRow.id.in_([row.id for row in rows]),
+                MemoryRow.erasure_pending,
+            )
+        )
+        return len(rows)
+
     async def delete(
         self, belief_id: UUID, principal: Principal, tombstone: BeliefRejection
     ) -> None:
@@ -643,12 +937,14 @@ class PostgresMemoryStore:
                 MemoryRow.id == belief_id,
                 MemoryRow.tenant_id == principal.tenant_id,
                 MemoryRow.principal_id == principal.principal_id,
+                ~MemoryRow.erasure_pending,
             )
         )
         if not _rowcount(result):
             raise NotFoundError("memory not found")
+        await self._erase_rejections(principal, [belief_id])
         await self._session.execute(
-            pg_insert(MemoryRejectionRow).values(**_rejection_values(tombstone))
+            pg_insert(MemoryRejectionRow).values(**_rejection_values(erased_rejection(tombstone)))
         )
 
     async def reject(self, rejection: BeliefRejection, updated: MemoryRecord) -> MemoryRecord:
@@ -758,6 +1054,7 @@ class PostgresMemoryStore:
                     select(MemoryRow).where(
                         MemoryRow.tenant_id == principal.tenant_id,
                         MemoryRow.principal_id == principal.principal_id,
+                        ~MemoryRow.erasure_pending,
                         MemoryRow.status.in_(_LIVE),
                         MemoryRow.expires_at.is_not(None),
                         MemoryRow.expires_at <= now,
@@ -785,10 +1082,52 @@ class PostgresMemoryStore:
 
 
 class PostgresTraceStore:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, people: PeopleStore | None = None) -> None:
         self._session = session
+        self._people = people
+
+    async def erase_people(
+        self, principal: Principal, record_ids: Sequence[UUID], belief_ids: Sequence[UUID] = ()
+    ) -> int:
+        predicates = [
+            RecallTraceRow.trace.contains({"people": [{field: value}]})
+            for record_id in record_ids
+            for field, value in (
+                ("record_id", str(record_id)),
+                ("person_ids", [str(record_id)]),
+                ("source_ids", [str(record_id)]),
+            )
+        ]
+        predicates.extend(
+            RecallTraceRow.trace.contains({"returned": [str(belief_id)]})
+            for belief_id in belief_ids
+        )
+        predicates.extend(
+            RecallTraceRow.trace.contains({"query": {"people_scope": [str(record_id)]}})
+            for record_id in record_ids
+        )
+        predicates.extend(
+            RecallTraceRow.trace.contains({"query": {field: [str(belief_id)]}})
+            for belief_id in belief_ids
+            for field in ("include_ids", "expand_ids")
+        )
+        if not predicates:
+            return 0
+        result = await self._session.execute(
+            delete(RecallTraceRow).where(
+                RecallTraceRow.tenant_id == principal.tenant_id,
+                RecallTraceRow.principal_id == principal.principal_id,
+                or_(*predicates),
+            )
+        )
+        return _rowcount(result)
 
     async def record(self, trace: RecallTrace) -> None:
+        if (
+            trace.run_id is not None
+            and await lock_run_erasure(self._session, trace.run_id) is not None
+        ):
+            raise RunCancelledError("People erasure fenced recall trace writes")
         statement = (
             pg_insert(RecallTraceRow)
             .values(
@@ -806,7 +1145,7 @@ class PostgresTraceStore:
         result = await self._session.execute(statement)
         if not _rowcount(result):
             row = await self._session.get(RecallTraceRow, trace.id)
-            if row is None or RecallTrace.model_validate(row.trace) != trace:
+            if row is None or row.erasure_pending or RecallTrace.model_validate(row.trace) != trace:
                 raise ConflictError("trace id identifies different content")
 
     async def for_turn(self, turn_id: UUID) -> list[RecallTrace]:
@@ -814,7 +1153,7 @@ class PostgresTraceStore:
             (
                 await self._session.scalars(
                     select(RecallTraceRow)
-                    .where(RecallTraceRow.turn_id == turn_id)
+                    .where(RecallTraceRow.turn_id == turn_id, ~RecallTraceRow.erasure_pending)
                     .order_by(RecallTraceRow.created_at, RecallTraceRow.id)
                 )
             ).all()
@@ -826,6 +1165,7 @@ class PostgresTraceStore:
             await self._session.scalars(
                 select(RecallTraceRow).where(
                     RecallTraceRow.id == trace_id,
+                    ~RecallTraceRow.erasure_pending,
                     RecallTraceRow.tenant_id == principal.tenant_id,
                     RecallTraceRow.principal_id == principal.principal_id,
                 )
@@ -846,6 +1186,7 @@ class PostgresTraceStore:
                 select(RecallTraceRow)
                 .where(
                     RecallTraceRow.id == trace_id,
+                    ~RecallTraceRow.erasure_pending,
                     RecallTraceRow.tenant_id == principal.tenant_id,
                     RecallTraceRow.principal_id == principal.principal_id,
                 )
@@ -883,6 +1224,7 @@ class PostgresTraceStore:
         traces = await self.for_turn(turn_id)
         ceiling = Sensitivity(viewing_ceiling)
         beliefs: list[TracedBelief] = []
+        people: list[TracedPersonContext] = []
         passages: list[TracedPassage] = []
         for trace in traces:
             effective = min(
@@ -907,6 +1249,12 @@ class PostgresTraceStore:
             passages.extend(
                 item for item in trace.passages if SENSITIVITY_ORDER[item.sensitivity] <= effective
             )
+            if self._people is not None:
+                owner = Principal(tenant_id=trace.tenant_id, principal_id=trace.principal_id)
+                for person_item in trace.people:
+                    live = await self._people.get(owner, person_item.record_id, ceiling=ceiling)
+                    if live is not None and SENSITIVITY_ORDER[person_item.sensitivity] <= effective:
+                        people.append(person_item)
         as_of = max(
             (trace.created_at for trace in traces),
             default=datetime.min.replace(tzinfo=UTC),
@@ -915,6 +1263,7 @@ class PostgresTraceStore:
             turn_id=turn_id,
             moments=[trace.moment for trace in traces],
             beliefs=beliefs,
+            people=people[:20],
             passages=passages,
             considered_not_shown=sum(trace.considered_not_shown for trace in traces),
             withheld_by_safety=sum(len(trace.blocked) for trace in traces),
@@ -945,6 +1294,20 @@ class PostgresTraceStore:
             if passages != trace.passages:
                 updated = trace.model_copy(update={"passages": passages})
                 row.trace = updated.model_dump(mode="json")
+
+
+def _knowledge_source_visible() -> ColumnElement[bool]:
+    return (
+        ~select(ArtifactRow.id)
+        .join(RunRow, RunRow.id == ArtifactRow.run_id)
+        .where(
+            ArtifactRow.id == KnowledgeDocumentRow.source_artifact_id,
+            ArtifactRow.origin != "upload",
+            RunRow.people_erased_at.is_not(None),
+        )
+        .correlate(KnowledgeDocumentRow)
+        .exists()
+    )
 
 
 def _knowledge_document(row: KnowledgeDocumentRow, source: ArtifactRow) -> KnowledgeDocument:
@@ -992,6 +1355,12 @@ class PostgresKnowledgeStore:
 
     async def ingest(self, prepared: KnowledgeIngestPrepared) -> None:
         document = prepared.document
+        if (
+            document.source_ref.origin != "upload"
+            and document.source_ref.run_id is not None
+            and await lock_run_erasure(self._session, document.source_ref.run_id) is not None
+        ):
+            raise RunCancelledError("People erasure fenced knowledge ingestion")
         await self._session.execute(
             update(KnowledgeDocumentRow)
             .where(
@@ -1019,6 +1388,7 @@ class PostgresKnowledgeStore:
                 .where(
                     KnowledgeDocumentRow.tenant_id == tenant_id,
                     KnowledgeDocumentRow.document_id == document_id,
+                    _knowledge_source_visible(),
                 )
                 .order_by(KnowledgeDocumentRow.version.desc())
                 .limit(1)
@@ -1055,6 +1425,7 @@ class PostgresKnowledgeStore:
                     )
                     .where(
                         KnowledgeDocumentRow.tenant_id == query.tenant_id,
+                        _knowledge_source_visible(),
                         KnowledgeDocumentRow.valid_from <= as_of,
                         or_(
                             KnowledgeDocumentRow.valid_to.is_(None),
@@ -1098,7 +1469,14 @@ class PostgresKnowledgeStore:
         return passages
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
-        row = await self._session.get(KnowledgeChunkRow, chunk_id)
+        row = await self._session.scalar(
+            select(KnowledgeChunkRow)
+            .join(
+                KnowledgeDocumentRow,
+                KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+            )
+            .where(KnowledgeChunkRow.chunk_id == chunk_id, _knowledge_source_visible())
+        )
         return None if row is None else _chunk(row)
 
     async def delete(self, document_id: UUID, principal: Principal) -> list[ArtifactRef]:

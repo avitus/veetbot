@@ -14,6 +14,22 @@ from agent_core.domain.persistence import ProjectionCursor, WorkerLease
 
 
 class EventRepository(Protocol):
+    async def list_window(
+        self,
+        principal: Principal,
+        *,
+        session_ids: Sequence[UUID],
+        since: datetime,
+        until: datetime,
+        after: tuple[datetime, int] | None = None,
+        limit: int = 256,
+    ) -> list[EventEnvelope]:
+        """Read owned sessions ordered by (created_at, globally unique event ID).
+
+        ``after`` holds that same pair, never the session-local sequence.
+        """
+        ...
+
     async def append(
         self, event: NewEvent, *, lease: WorkerLease | None = None
     ) -> EventEnvelope: ...

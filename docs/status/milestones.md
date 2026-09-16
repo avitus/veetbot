@@ -224,6 +224,20 @@ live routing is unchanged.
 - [ ] Verify provider-side admission controls and real signed-byte convention; authorize live test calls
 - [ ] Hosted CI, explicitly authorized CodeRabbit review and production delivery evidence
 
+### Milestone 28 — People and relationship memory
+
+Thirty-six gates; independent workstream under ADR-0100.
+
+ADR-0101 makes the complete implemented Milestone 28 People experience available
+by default. Quality measurements remain open evidence work, without gating runtime
+functionality or release. Production delivery still follows exact-head CI/review.
+
+
+- [ ] Review complete temporal/source-erasure gate coverage and worst-case initial-fence latency
+- [ ] Finish native accessibility, load/contention and signed restore verification
+- [ ] Independently reviewed labels, version-bound quality and private owner evaluation evidence
+- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.

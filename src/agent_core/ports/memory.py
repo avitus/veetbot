@@ -41,6 +41,10 @@ class MemoryStore(Protocol):
 
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord: ...
 
+    async def get_at(
+        self, belief_id: UUID, principal: Principal, *, known_at: datetime
+    ) -> MemoryRecord: ...
+
     async def query(self, query: RecallQuery) -> list[MemoryRecord]: ...
 
     async def related(
@@ -89,6 +93,16 @@ class MemoryStore(Protocol):
     async def edit(
         self, belief_id: UUID, principal: Principal, edit: MemoryEdit, edited: MemoryRecord
     ) -> MemoryRecord: ...
+
+    async def fence_for_erasure(self, principal: Principal, belief_ids: Sequence[UUID]) -> int:
+        """Atomically hide owned beliefs from current and historical reads and mutation."""
+        ...
+
+    async def purge_erased(
+        self, principal: Principal, belief_ids: Sequence[UUID], *, operation_id: UUID
+    ) -> int:
+        """Erase at most 256 fenced beliefs and their history; preserve deletion evidence."""
+        ...
 
     async def delete(
         self, belief_id: UUID, principal: Principal, tombstone: BeliefRejection
@@ -139,6 +153,14 @@ class IntegratedEpisodeStore(Protocol):
     async def delete_for_session(self, session_id: UUID, principal: Principal) -> int: ...
 
     async def delete_for_principal(self, principal: Principal) -> int: ...
+
+    async def fence_for_erasure(self, principal: Principal, session_ids: Sequence[UUID]) -> int:
+        """Hide source-session episodes before resumable physical cleanup."""
+        ...
+
+    async def purge_erased(self, principal: Principal) -> bool:
+        """Remove at most 256 fenced episodes; return whether more remain."""
+        ...
 
 
 class MemoryConsolidator(Protocol):
@@ -226,6 +248,10 @@ class EpisodeSearch(Protocol):
 
 
 class TraceStore(Protocol):
+    async def erase_people(
+        self, principal: Principal, record_ids: Sequence[UUID], belief_ids: Sequence[UUID] = ()
+    ) -> int: ...
+
     async def record(self, trace: RecallTrace) -> None: ...
 
     async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...

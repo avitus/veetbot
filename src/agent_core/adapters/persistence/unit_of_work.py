@@ -29,6 +29,7 @@ from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
 from agent_core.ports.notifications import NotificationOutbox
+from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.personas import PersonaStore
 from agent_core.ports.repositories import (
@@ -106,6 +107,7 @@ class UnitOfWorkRepositories:
     personas: PersonaStore
     email: EmailStore
     calls: CallStore
+    people: PeopleStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
@@ -168,6 +170,7 @@ class MemoryUnitOfWork:
         self.personas = repositories.personas
         self.email = repositories.email
         self.calls = repositories.calls
+        self.people = repositories.people
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules
@@ -286,6 +289,7 @@ class PostgresUnitOfWork:
         self.personas = repositories.personas
         self.email = repositories.email
         self.calls = repositories.calls
+        self.people = repositories.people
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules

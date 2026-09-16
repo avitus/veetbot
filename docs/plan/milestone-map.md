@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 30 subject specifications declare 484 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 493
-declarations, 490 registry entries once the 3 aliases are subtracted.
+The 31 subject specifications declare 520 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 529
+declarations, 526 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1577,6 +1577,49 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 14 gate.call.live_release case 27
 ```
 
+### People and relationship memory
+
+[people-and-relationships.md](people-and-relationships.md) declares 36 Milestone 28 gates.
+
+```text
+1 gate.people.identity_precision case 28
+2 gate.people.identifier_linking case 28
+3 gate.people.identity_repair case 28
+4 gate.people.repository_isolation case 28
+5 gate.people.person_formation case 28
+6 gate.people.speaker_attribution case 28
+7 gate.people.source_grounding case 28
+8 gate.people.durable_corrections case 28
+9 gate.people.evidence_deduplication case 28
+10 gate.people.temporal_history case 28
+11 gate.people.lifecycle case 28
+12 gate.people.interaction_roles case 28
+13 gate.people.commitments case 28
+14 gate.people.history_pagination case 28
+15 gate.people.ambiguity case 28
+16 gate.people.shared_retrieval case 28
+17 gate.people.bounded_relationships case 28
+18 gate.people.memory_trust case 28
+19 gate.people.context_budget case 28
+20 gate.people.trace_faithfulness case 28
+21 gate.people.api_boundaries case 28
+22 gate.people.tool_schemas case 28
+23 gate.people.governed_writes case 28
+24 gate.people.default_available case 28
+25 gate.people.erasure case 28
+26 gate.people.egress case 28
+27 gate.people.email_history_bound case 28
+28 gate.people.import_jobs case 28
+29 gate.people.migration_compatibility case 28
+30 gate.people.email_bridge case 28
+31 gate.people.native_workflows case 28
+32 gate.people.native_states case 28
+33 gate.people.formation_quality case 28
+34 gate.people.retrieval_quality case 28
+35 gate.people.performance case 28
+36 gate.people.release_evidence case 28
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1671,6 +1714,7 @@ milestone  new gates  cumulative  the earliest of them
                                   feedback, style, drafts, approved sends,
                                   shared semantic memory and lifecycle
 27                14         490  Bland calling and public correspondence intake
+28                36         526  People identity, temporal relationships, history and governed recall
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1691,15 +1735,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of four hundred and ninety gates are green before
+2.  **Forty-one of five hundred and twenty-six gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches four hundred and ninety, which is every
-registry entry, at Milestone 27. Six of Milestone 10's gates are
+The cumulative column reaches five hundred and twenty-six, which is every
+registry entry, at Milestone 28. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1714,7 +1758,8 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.schedule.*`, Milestone 24's twelve return to the existing
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
 area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
-entries to the existing email area. Every authorized milestone now has a specification
+entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
+and Milestone 28 adds thirty-six `gate.people.*` entries. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

@@ -26,6 +26,7 @@ from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
 from agent_core.ports.notifications import NotificationOutbox
+from agent_core.ports.people import PeopleStore
 from agent_core.ports.personas import PersonaStore
 from agent_core.ports.repositories import (
     AgentRepository,
@@ -86,6 +87,7 @@ class RepositoryUnitOfWork(Protocol):
     personas: PersonaStore
     email: EmailStore
     calls: CallStore
+    people: PeopleStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository

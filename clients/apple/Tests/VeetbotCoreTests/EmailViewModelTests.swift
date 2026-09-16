@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 import Testing
 #if os(macOS)
@@ -904,6 +905,141 @@ import SwiftUI
         #expect(model.selectedThreadID == threadID)
         #expect(model.currentEdit?.body == "Keep this unsent edit")
         #expect(model.thread?.isHandled == false)
+    }
+
+    /// A stale save response explains why Review & Send cannot create a proposal.
+    @Test func testReviewSendExplainsDraftBecomingStaleDuringSave() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" {
+                return (200, self.draftJSON(revision: 2, body: "Changed body").replacingOccurrences(of: "\"stale\":false", with: "\"stale\":true"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Changed body")
+        await model.prepareSend()
+        #expect(model.draft?.stale == true)
+        #expect(model.draftActionMessage == "This draft is out of date. Refresh the thread and review the draft again.")
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
+    }
+
+    /// A failed owner action is reported separately from a failed thread read, so the
+    /// composer can show a refusal beside the button that caused it instead of only at
+    /// the top of the reading pane, far above the action.
+    @Test func testFailedOwnerActionIsReportedApartFromThreadReadFailures() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (400, Self.error("invalid_argument", "Review could not be prepared."))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+
+        #expect(model.draftActionMessage == "Review could not be prepared.")
+        #expect(model.threadReadMessage == nil)
+        #expect(model.draftError == "Review could not be prepared.")
+    }
+
+    /// Typing while Review & Send's own save is in flight leaves the edit dirty even
+    /// though that save succeeded. The proposal must still reach the server carrying
+    /// the latest text, rather than the click doing nothing at all.
+    @Test func testReviewSendProposesAfterAnEditArrivesDuringItsOwnSave() async throws {
+        let requests = EmailRequestRecorder()
+        let saveGate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "PUT" {
+                let saves = requests.snapshot.filter { $0.httpMethod == "PUT" }.count
+                // Hold only the first save open, so a retry can settle the later edit.
+                return (200, self.draftJSON(revision: saves + 1), saves == 1 ? saveGate : nil)
+            }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"draft\":\(self.draftJSON(revision: 3, status: "awaiting_approval"))}", nil)
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, "{\"id\":\"\(self.runID)\",\"status\":\"WAITING_FOR_APPROVAL\"}", nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { saveGate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "First edit")
+        let sending = Task { await model.prepareSend() }
+        try await waitForEmailTestCondition { saveGate.isWaiting }
+        model.changeEdit(\.body, to: "Typed while the save was still in flight")
+        saveGate.release()
+        await sending.value
+
+        #expect(requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
+    /// A reply over the approval view's 512-character ceiling arrives truncated. The
+    /// published digest still proves the frozen body is exactly the displayed draft,
+    /// so review opens instead of silently refusing every long email.
+    @Test func testReviewAcceptsATruncatedApprovalBodyWithAMatchingDigest() async throws {
+        let body = String(repeating: "b", count: 600)
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") {
+                return (200, self.approvalJSON(
+                    body: Self.truncatedView(body),
+                    digests: "{\"body\":\"\(Self.sha256Hex(body))\"}"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON(body: body, status: "awaiting_approval")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.loadReview()
+        #expect(model.review != nil)
+        #expect(model.reviewDraft?.body == body)
+        #expect(model.draftError == nil)
+    }
+
+    /// The digest is the verification, not a bypass: a frozen body that differs is
+    /// still refused even though the truncated prefix matches.
+    @Test func testReviewRefusesATruncatedApprovalBodyWhoseDigestDiffers() async throws {
+        let body = String(repeating: "b", count: 600)
+        let tampered = body.dropLast() + "X"
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") {
+                return (200, self.approvalJSON(
+                    body: Self.truncatedView(body),
+                    digests: "{\"body\":\"\(Self.sha256Hex(String(tampered)))\"}"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON(body: body, status: "awaiting_approval")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.loadReview()
+        #expect(model.review == nil)
+        #expect(model.draftError != nil)
+    }
+
+    /// A truncated body with no digest cannot be verified, so it must not be presented.
+    @Test func testReviewRefusesATruncatedApprovalBodyWithNoDigest() async throws {
+        let body = String(repeating: "b", count: 600)
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") {
+                return (200, self.approvalJSON(body: Self.truncatedView(body)))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON(body: body, status: "awaiting_approval")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.loadReview()
+        #expect(model.review == nil)
+        #expect(model.draftError != nil)
     }
 
     @Test func testReviewRefusesAnApprovalForDifferentMessageContent() async throws {
@@ -1860,6 +1996,13 @@ import SwiftUI
     private static let accountsJSON = """
         {"items":[{"id":"personal","label":"Personal","email_address":"owner@example.test","status":"ready","last_synced_at":"2026-09-11T00:00:00Z","history_complete":false,"history_processed":25,"read_server_id":"gmail_read","send_server_id":"gmail_send"},{"id":"work","label":"Work","email_address":"owner@work.test","status":"ready","last_synced_at":null,"history_complete":false,"history_processed":0,"read_server_id":"gmail_work_read","send_server_id":"gmail_work_send"}],"next_cursor":null}
         """
+    /// Mirrors the server's approval view: the first 512 characters plus the marker.
+    private static func truncatedView(_ value: String) -> String {
+        "\(value.prefix(512))…[TRUNCATED]"
+    }
+    private static func sha256Hex(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
     private static func error(_ code: String, _ message: String) -> String {
         "{\"error\":{\"code\":\"\(code)\",\"message\":\"\(message)\",\"details\":{},\"request_id\":\"test\"}}"
     }
@@ -1876,9 +2019,9 @@ import SwiftUI
         {"id":"\(draftID)","thread_id":"\(threadID)","account_id":"personal","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)","status":"\(status)","stale":false,"run_id":"\(runID)","approval_id":"\(approvalID)","session_id":"\(threadID)","updated_at":"2026-09-11T00:00:00Z"}
         """
     }
-    private func approvalJSON(body: String) -> String {
+    private func approvalJSON(body: String, digests: String = "{}") -> String {
         """
-        {"id":"\(approvalID)","run_id":"\(runID)","session_id":"\(threadID)","status":"PENDING","tool_name":"mcp.gmail_send.send_message","action_summary":"Send reply","arguments":{"thread_id":"provider-thread","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)"},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+        {"id":"\(approvalID)","run_id":"\(runID)","session_id":"\(threadID)","status":"PENDING","tool_name":"mcp.gmail_send.send_message","action_summary":"Send reply","arguments":{"thread_id":"provider-thread","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)"},"argument_digests":\(digests),"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
         """
     }
 }

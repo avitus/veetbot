@@ -1099,8 +1099,25 @@ GET /v1/approvals/{approval_id}
 Both are tenant-scoped from the authenticated principal and never from a query
 parameter — a tenant identifier accepted from the client is a cross-tenant read
 waiting to be discovered. Responses carry `action_summary`, `tool_name`,
-`arguments`, `risk`, `expires_at`, and `policy_reason`; they do not carry the
-rule that fired.
+`arguments`, `argument_digests`, `risk`, `expires_at`, and `policy_reason`; they
+do not carry the rule that fired.
+
+`arguments` is a redacted view, not the action: a value under a sensitive key or
+matching a credential shape becomes `[REDACTED]`, and a string over 512
+characters is truncated to that many characters plus a marker. Truncation alone
+would leave a client unable to confirm that a frozen action still matches the
+content it displays, so `argument_digests` carries the SHA-256 of every argument
+truncated **for length**, keyed by argument name. A client verifies a truncated
+value by digesting its own copy, which covers the whole value rather than the
+retained prefix. A value redacted for sensitivity is never digested: the owner
+has no reason to verify a credential, and its digest would be a brute-force
+target. The digests describe only the top-level arguments; nested truncation
+inside an object or array remains unverifiable.
+
+Neither field is the integrity boundary. `normalized_arguments_hash` still
+covers the full normalized arguments of the tool invocation, and dispatch uses
+the invocation's arguments, never this view — a truncated view can therefore
+never become a truncated action.
 
 `POST /v1/approvals/{approval_id}/resolve` is unchanged in shape and gains the
 `409`-on-conflicting-resolution behaviour described above. All three routes are

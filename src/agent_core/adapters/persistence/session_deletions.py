@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import any_, bindparam, delete, func, select, update
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,15 +19,28 @@ from agent_core.adapters.persistence.email_erasure import (
     erase_postgres_source,
 )
 from agent_core.adapters.persistence.mappers import artifact_to_domain
+from agent_core.adapters.persistence.people import InMemoryPeopleStore
+from agent_core.adapters.persistence.people_erasure import (
+    email_cleanup_key,
+    erase_memory_copies_locked,
+    erase_postgres_copies,
+    references,
+    source_cleanup_receipts,
+)
+from agent_core.adapters.persistence.people_reference_index import reference_overlap
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
     DelegationRow,
     KnowledgeDocumentRow,
     MemoryRejectionRow,
+    MemoryRevisionRow,
     MemoryRow,
     NotificationDeliveryRow,
     NotificationOutboxRow,
+    PeopleHeadRow,
+    PeopleLinkRow,
+    PeopleRevisionRow,
     RecallTraceRow,
     RunRow,
     ScheduleOccurrenceRow,
@@ -35,8 +51,12 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.memory import Sensitivity
+from agent_core.domain.people import PeopleCopyCleanup, PeopleErasure, PeopleQuery, PeopleSource
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.trajectory import ArtifactRef
+from agent_core.ports.memory import TraceStore
+from agent_core.ports.people import PeopleStore
 
 
 def _deletion_artifact_ref(artifact: ArtifactRef) -> ArtifactRef:
@@ -48,8 +68,116 @@ def _deletion_artifact_ref(artifact: ArtifactRef) -> ArtifactRef:
 class PostgresSessionDeletionRepository:
     """Atomically remove a session graph and retain byte-deletion work."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, people: PeopleStore, traces: TraceStore) -> None:
         self._session = session
+        self._people = people
+        self._traces = traces
+
+    async def _people_source_ids(self, query: PeopleQuery) -> list[UUID]:
+        ids: list[UUID] = []
+        while True:
+            rows = await self._people.query(query)
+            ids.extend(row.id for row in rows[: query.limit])
+            if len(rows) <= query.limit:
+                return ids
+            query = query.model_copy(update={"after": rows[query.limit - 1].id})
+
+    async def erase_people_copies(
+        self,
+        principal: Principal,
+        record_ids: list[UUID],
+        erased_at: datetime,
+        *,
+        run_ids: Sequence[UUID] = (),
+        purge_generated: bool = True,
+    ) -> PeopleCopyCleanup:
+        return await erase_postgres_copies(
+            self._session,
+            principal,
+            record_ids,
+            erased_at,
+            run_ids=run_ids,
+            purge_generated=purge_generated,
+        )
+
+    async def _source_copy_keys(self, principal: Principal, source_ids: list[UUID]) -> list[UUID]:
+        if not source_ids:
+            return []
+        belief_ids = (
+            await self._session.scalars(
+                select(PeopleRevisionRow.payload["belief_id"].astext)
+                .join(
+                    PeopleLinkRow,
+                    (PeopleLinkRow.tenant_id == PeopleRevisionRow.tenant_id)
+                    & (PeopleLinkRow.principal_id == PeopleRevisionRow.principal_id)
+                    & (PeopleLinkRow.entity_id == PeopleRevisionRow.entity_id)
+                    & (PeopleLinkRow.revision == PeopleRevisionRow.revision),
+                )
+                .where(
+                    PeopleRevisionRow.tenant_id == principal.tenant_id,
+                    PeopleRevisionRow.principal_id == principal.principal_id,
+                    PeopleLinkRow.role == "source",
+                    PeopleLinkRow.target_id
+                    == any_(bindparam(None, source_ids, type_=ARRAY(PGUUID(as_uuid=True)))),
+                    PeopleRevisionRow.payload["belief_id"].astext.is_not(None),
+                )
+            )
+        ).all()
+        keys = sorted({*source_ids, *(UUID(key) for key in belief_ids if key is not None)})
+        traces = (
+            await self._session.scalars(
+                select(RecallTraceRow.id).where(
+                    RecallTraceRow.tenant_id == principal.tenant_id,
+                    RecallTraceRow.principal_id == principal.principal_id,
+                    reference_overlap("trace::text", keys),
+                )
+            )
+        ).all()
+        return sorted({*keys, *traces})
+
+    async def _erase_source_copies(
+        self,
+        principal: Principal,
+        sources: list[UUID],
+        keys: list[UUID],
+        erased_at: datetime,
+        *,
+        deleted_session_id: UUID | None = None,
+        request_hash: str | None = None,
+    ) -> None:
+        if not sources:
+            return
+        beliefs = list(
+            (
+                await self._session.scalars(
+                    select(MemoryRow.id).where(
+                        MemoryRow.tenant_id == principal.tenant_id,
+                        MemoryRow.principal_id == principal.principal_id,
+                        MemoryRow.authority == "inferred"
+                        if deleted_session_id is None
+                        else (
+                            (MemoryRow.source_session_id == deleted_session_id)
+                            | MemoryRow.formation_run_id.in_(
+                                select(RunRow.id).where(RunRow.session_id == deleted_session_id)
+                            )
+                        ),
+                        MemoryRow.id
+                        == any_(bindparam(None, keys, type_=ARRAY(PGUUID(as_uuid=True)))),
+                    )
+                )
+            ).all()
+        )
+        cleanup = await self.erase_people_copies(principal, keys, erased_at)
+        for receipt in source_cleanup_receipts(
+            principal,
+            sources,
+            keys,
+            cleanup,
+            erased_at,
+            belief_ids=beliefs,
+            request_hash=request_hash,
+        ):
+            await self._people.put(receipt, expected_revision=0)
 
     async def erase_call_source(
         self, principal: Principal, call_id: str, erased_at: datetime
@@ -66,11 +194,84 @@ class PostgresSessionDeletionRepository:
         message_ids: frozenset[str],
         erased_at: datetime,
     ) -> dict[str, int]:
-        return await erase_postgres_source(
+        async with self._people.lock(principal):
+            return await self._erase_email_source_with_people_lock(
+                principal, account_id, thread_id, message_ids, erased_at
+            )
+
+    async def _erase_email_source_with_people_lock(
+        self,
+        principal: Principal,
+        account_id: str,
+        thread_id: str,
+        message_ids: frozenset[str],
+        erased_at: datetime,
+    ) -> dict[str, int]:
+        source_ids = await self._people_source_ids(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["source"],
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                account_id=account_id,
+                thread_id=thread_id,
+                message_ids=list(message_ids),
+                limit=100,
+            )
+        )
+        copy_keys = await self._source_copy_keys(principal, source_ids)
+        result = await erase_postgres_source(
             self._session, principal, account_id, thread_id, message_ids, erased_at
         )
+        cleanup_key = email_cleanup_key(principal, account_id, thread_id)
+        await self._erase_source_copies(
+            principal, source_ids, copy_keys, erased_at, request_hash=cleanup_key
+        )
+        await self._people.erase_email_source(principal, account_id, thread_id, message_ids)
+        await self._traces.erase_people(principal, source_ids)
+        pending, artifacts = (
+            await self._session.execute(
+                select(
+                    func.count(),
+                    func.coalesce(
+                        func.sum(
+                            func.jsonb_array_length(
+                                PeopleRevisionRow.payload["pending_artifact_ids"]
+                            )
+                        ),
+                        0,
+                    ),
+                )
+                .select_from(PeopleRevisionRow)
+                .join(
+                    PeopleHeadRow,
+                    (PeopleHeadRow.tenant_id == PeopleRevisionRow.tenant_id)
+                    & (PeopleHeadRow.principal_id == PeopleRevisionRow.principal_id)
+                    & (PeopleHeadRow.id == PeopleRevisionRow.entity_id)
+                    & (PeopleHeadRow.revision == PeopleRevisionRow.revision),
+                )
+                .where(
+                    PeopleHeadRow.tenant_id == principal.tenant_id,
+                    PeopleHeadRow.principal_id == principal.principal_id,
+                    PeopleHeadRow.kind == "erasure",
+                    ~PeopleHeadRow.erased,
+                    PeopleRevisionRow.payload["request_hash"].astext == cleanup_key,
+                    PeopleRevisionRow.payload["state"].astext == "cleanup_pending",
+                )
+            )
+        ).one()
+        if pending:
+            result["pending_people_cleanup"] = int(pending)
+        result["pending_artifacts"] = max(result.get("pending_artifacts", 0), int(artifacts))
+        return result
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
+        async with self._people.lock(principal):
+            return await self._delete_with_people_lock(session_id, principal, deleted_at)
+
+    async def _delete_with_people_lock(
+        self, session_id: UUID, principal: Principal, deleted_at: datetime
+    ) -> bool:
         session_row = (
             await self._session.scalars(
                 select(SessionRow)
@@ -141,6 +342,21 @@ class PostgresSessionDeletionRepository:
             ]
             ledger_row.links_erased_at = deleted_at
 
+        source_ids = await self._people_source_ids(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["source"],
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                session_id=session_id,
+                limit=100,
+            )
+        )
+        copy_keys = await self._source_copy_keys(principal, source_ids)
+        await self._erase_source_copies(
+            principal, source_ids, copy_keys, deleted_at, deleted_session_id=session_id
+        )
+
         artifacts = list(
             (
                 await self._session.scalars(
@@ -188,6 +404,13 @@ class PostgresSessionDeletionRepository:
                 | MemoryRejectionRow.replacement_id.in_(memory_ids)
             )
         )
+        await self._session.execute(
+            delete(MemoryRevisionRow).where(
+                MemoryRevisionRow.tenant_id == principal.tenant_id,
+                MemoryRevisionRow.principal_id == principal.principal_id,
+                MemoryRevisionRow.payload["source_session_id"].astext == str(session_id),
+            )
+        )
         await self._session.execute(delete(MemoryRow).where(MemoryRow.id.in_(memory_ids)))
         await self._session.execute(
             delete(ConsolidationRunRow).where(ConsolidationRunRow.session_id == session_id)
@@ -221,6 +444,8 @@ class PostgresSessionDeletionRepository:
                     artifact=artifact.model_dump(mode="json"),
                 )
             )
+        await self._people.erase_session(principal, session_id)
+        await self._traces.erase_people(principal, source_ids)
         await self._session.execute(delete(SessionRow).where(SessionRow.id == session_id))
         return True
 
@@ -306,6 +531,7 @@ class InMemorySessionDeletionRepository:
         trajectory_exports: Any,
         artifacts: Any,
         memories: Any,
+        people: InMemoryPeopleStore,
         episodes: Any,
         traces: Any,
         knowledge: Any,
@@ -324,6 +550,7 @@ class InMemorySessionDeletionRepository:
         self._trajectory_exports = trajectory_exports
         self._artifacts = artifacts
         self._memories = memories
+        self._people = people
         self._episodes = episodes
         self._traces = traces
         self._knowledge = knowledge
@@ -333,6 +560,107 @@ class InMemorySessionDeletionRepository:
         self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
+
+    def _source_copy_keys_locked(self, principal: Principal, sources: list[UUID]) -> list[UUID]:
+        keys = set(sources)
+        for key, revisions in self._people._records.items():
+            if key[:2] != (principal.tenant_id, principal.principal_id):
+                continue
+            for record in revisions:
+                if keys.intersection(record.support_ids) and hasattr(record, "belief_id"):
+                    keys.add(record.belief_id)
+        identifiers = {str(key) for key in keys}
+        keys.update(
+            trace.id
+            for trace in self._traces._traces.values()
+            if (trace.tenant_id, trace.principal_id)
+            == (principal.tenant_id, principal.principal_id)
+            and references(trace.model_dump(mode="json"), identifiers)
+        )
+        return sorted(keys)
+
+    def _erase_source_copies_locked(
+        self,
+        principal: Principal,
+        sources: list[UUID],
+        keys: list[UUID],
+        erased_at: datetime,
+        *,
+        deleted_session_id: UUID | None = None,
+        request_hash: str | None = None,
+    ) -> None:
+        if not sources:
+            return
+        key_set = set(keys)
+        deleted_runs = {
+            run.id for run in self._runs._runs.values() if run.session_id == deleted_session_id
+        }
+        beliefs = [
+            record.id
+            for record in self._memories._records.values()
+            if (record.tenant_id, record.principal_id)
+            == (principal.tenant_id, principal.principal_id)
+            and record.id in key_set
+            and (
+                record.authority.value == "inferred"
+                if deleted_session_id is None
+                else record.source_session_id == deleted_session_id
+                or record.formation_run_id in deleted_runs
+            )
+        ]
+        cleanup = erase_memory_copies_locked(self, principal, keys, erased_at)
+        for receipt in source_cleanup_receipts(
+            principal,
+            sources,
+            keys,
+            cleanup,
+            erased_at,
+            belief_ids=beliefs,
+            request_hash=request_hash,
+        ):
+            key = (principal.tenant_id, principal.principal_id, receipt.id)
+            if key in self._people._records:
+                continue
+            self._people._records[key] = [receipt]
+            owner = (principal.tenant_id, principal.principal_id)
+            self._people._positions[owner] = self._people._positions.get(owner, 0) + 1
+
+    async def erase_people_copies(
+        self,
+        principal: Principal,
+        record_ids: list[UUID],
+        erased_at: datetime,
+        *,
+        run_ids: Sequence[UUID] = (),
+        purge_generated: bool = True,
+    ) -> PeopleCopyCleanup:
+        locks = sorted(
+            {
+                id(lock): lock
+                for lock in (
+                    self._lock,
+                    self._sessions._lock,
+                    self._events._lock,
+                    self._runs._lock,
+                    self._invocations._lock,
+                    self._checkpoints._lock,
+                    self._artifacts._lock,
+                    self._trajectory_exports._lock,
+                    self._knowledge._lock,
+                    self._traces._lock,
+                )
+            }.values(),
+            key=id,
+        )
+        for lock in locks:
+            await lock.acquire()
+        try:
+            return erase_memory_copies_locked(
+                self, principal, record_ids, erased_at, run_ids=run_ids
+            )
+        finally:
+            for lock in reversed(locks):
+                lock.release()
 
     async def erase_call_source(
         self, principal: Principal, call_id: str, erased_at: datetime
@@ -375,6 +703,19 @@ class InMemorySessionDeletionRepository:
         message_ids: frozenset[str],
         erased_at: datetime,
     ) -> dict[str, int]:
+        async with self._people.lock(principal):
+            return await self._erase_email_source_with_people_lock(
+                principal, account_id, thread_id, message_ids, erased_at
+            )
+
+    async def _erase_email_source_with_people_lock(
+        self,
+        principal: Principal,
+        account_id: str,
+        thread_id: str,
+        message_ids: frozenset[str],
+        erased_at: datetime,
+    ) -> dict[str, int]:
         locks = sorted(
             {
                 id(lock): lock
@@ -398,14 +739,62 @@ class InMemorySessionDeletionRepository:
         for lock in locks:
             await lock.acquire()
         try:
-            return erase_memory_source_locked(
+            before = {
+                key[2]
+                for key in self._people._records
+                if key[:2] == (principal.tenant_id, principal.principal_id)
+            }
+            sources = [
+                row.id
+                for key, versions in self._people._records.items()
+                if key[:2] == (principal.tenant_id, principal.principal_id)
+                and isinstance(row := versions[-1], PeopleSource)
+                and row.source_kind == "email"
+                and row.account_id == account_id
+                and row.thread_id == thread_id
+                and row.message_id in message_ids
+            ]
+            keys = self._source_copy_keys_locked(principal, sources)
+            result = erase_memory_source_locked(
                 self, principal, account_id, thread_id, message_ids, erased_at
             )
+            cleanup_key = email_cleanup_key(principal, account_id, thread_id)
+            self._erase_source_copies_locked(
+                principal, sources, keys, erased_at, request_hash=cleanup_key
+            )
+            self._people.erase_email_source_locked(principal, account_id, thread_id, message_ids)
+            after = {
+                key[2]
+                for key in self._people._records
+                if key[:2] == (principal.tenant_id, principal.principal_id)
+            }
+            self._traces.erase_people_locked(principal, list(before - after))
+            pending = [
+                row
+                for key, versions in self._people._records.items()
+                if key[:2] == (principal.tenant_id, principal.principal_id)
+                and isinstance(row := versions[-1], PeopleErasure)
+                and row.request_hash == cleanup_key
+                and row.state == "cleanup_pending"
+            ]
+            if pending:
+                result["pending_people_cleanup"] = len(pending)
+            result["pending_artifacts"] = max(
+                result.get("pending_artifacts", 0),
+                sum(len(row.pending_artifact_ids) for row in pending),
+            )
+            return result
         finally:
             for lock in reversed(locks):
                 lock.release()
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
+        async with self._people.lock(principal):
+            return await self._delete_with_people_lock(session_id, principal, deleted_at)
+
+    async def _delete_with_people_lock(
+        self, session_id: UUID, principal: Principal, deleted_at: datetime
+    ) -> bool:
         # Every collaborator normally protects its state with its own lock. Take
         # those locks in one stable order so cross-repository discovery and
         # erasure form one deterministic in-memory transaction.
@@ -466,6 +855,17 @@ class InMemorySessionDeletionRepository:
                 reason="active_run_exists",
                 details={"run_id": str(active[0].id)},
             )
+        sources = [
+            row.id
+            for key, versions in self._people._records.items()
+            if key[:2] == (principal.tenant_id, principal.principal_id)
+            and isinstance(row := versions[-1], PeopleSource)
+            and row.session_id == session_id
+        ]
+        keys = self._source_copy_keys_locked(principal, sources)
+        self._erase_source_copies_locked(
+            principal, sources, keys, deleted_at, deleted_session_id=session_id
+        )
         # Delegated child sessions exist only for their parent: erase each of
         # them first, then drop the parent's ledger rows the way the CASCADE
         # foreign keys do in PostgreSQL. A child deleted alone stamps the
@@ -571,6 +971,12 @@ class InMemorySessionDeletionRepository:
             for key, value in self._memories._records.items()
             if value.source_session_id != session_id and value.formation_run_id not in run_ids
         }
+        self._memories._erasure_pending.intersection_update(self._memories._records)
+        self._memories._history = {
+            key: [(at, record) for at, record in value if record.source_session_id != session_id]
+            for key, value in self._memories._history.items()
+            if key in self._memories._records
+        }
         self._memories._rejections = {
             key: value
             for key, value in self._memories._rejections.items()
@@ -661,6 +1067,19 @@ class InMemorySessionDeletionRepository:
         self._runs._runs = {
             key: value for key, value in self._runs._runs.items() if key not in run_ids
         }
+        for repository in (
+            self._events,
+            self._runs,
+            self._invocations,
+            self._checkpoints,
+            self._artifacts,
+            self._trajectory_exports,
+        ):
+            for run_id in run_ids:
+                repository._people_erased_runs.pop(run_id, None)
+        for run_id in run_ids:
+            self._knowledge._people_erased_runs.pop(run_id, None)
+            self._traces._people_erased_runs.pop(run_id, None)
         removed_events = self._events._events.pop(session_id, [])
         removed_event_ids = {event.id for event in removed_events}
         self._events._derived = {
@@ -668,6 +1087,18 @@ class InMemorySessionDeletionRepository:
             for key, value in self._events._derived.items()
             if value.id not in removed_event_ids
         }
+        before = {
+            key[2]
+            for key in self._people._records
+            if key[:2] == (principal.tenant_id, principal.principal_id)
+        }
+        self._people.erase_session_locked(principal, session_id)
+        after = {
+            key[2]
+            for key in self._people._records
+            if key[:2] == (principal.tenant_id, principal.principal_id)
+        }
+        self._traces.erase_people_locked(principal, list(before - after))
         self._sessions._sessions.pop(session_id, None)
         self._tombstones[session_id] = (
             principal.tenant_id,

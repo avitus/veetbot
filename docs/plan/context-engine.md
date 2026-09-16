@@ -271,17 +271,23 @@ it, which never yields because a third `skill.load` fails instead.
 
 After authorization and session-environment filtering, tools explicitly named in
 `AgentSpec.enabled_tools` receive slots first, in first-occurrence order. Discovered
-tools fill the remaining slots in name order. The selected set is then sorted by
-name for stable rendering. Adding an MCP account must not evict an explicitly
+tools fill the remaining slots in name order when their complete definitions fit
+both the item and token caps. An oversized discovered definition is skipped;
+explicitly enabled capabilities still fail at plan time if they exceed the token
+cap. The selected set is then sorted by name for stable rendering. Adding an MCP account must not evict an explicitly
 enabled web, clock, or workspace capability merely because its name sorts earlier.
 The item and token ceilings still apply; excess discovered tools require a narrower
-catalog or explicit agent configuration. Builder version `context-builder@7`
+catalog or explicit agent configuration. Builder version `context-builder@10`
 rebuilds older plans through the ordinary logged epoch rotation, so existing
 sessions recover the configured capabilities without replacing their history.
+A snapshot containing People context is retained even when it contains no ordinary
+beliefs; the epoch rotation also rebuilds older plans that omitted such snapshots.
 
 The token side of the tool-definition cap measures the conservative larger form
 of the **model-visible** provider contract: name, description, and input schema
-plus provider framing. The complete pinned `ToolSpec` still participates in the
+plus provider framing. Provider serialization omits redundant generated titles
+and empty default annotations while retaining every validation keyword and
+meaningful non-empty default. The complete pinned `ToolSpec` still participates in the
 prefix hash and replay identity, but its output schema, policy classification,
 timeouts, and execution limits are not sent to the model and therefore do not
 consume this prompt class. A session-bound capability is also a runtime-environment
@@ -811,6 +817,7 @@ Events (extending Section 6.8):
 ```text
 context.plan.created
 context.epoch.rotated
+context.snapshot.used
 context.compacted
 context.working_state.updated
 context.budget.pressure
@@ -820,6 +827,15 @@ context.budget.exceeded
 `context.budget.pressure` records that a yield step ran and which one; it is the
 signal that tells an operator a deployment is chronically over-subscribed before
 `context.budget.exceeded` tells them it has failed.
+
+`context.snapshot.used` binds a run to the opaque recall-trace ID and epoch of
+its nonempty frozen snapshot before provider egress. Registration and snapshot
+plan persistence use the owner People fence, so erasure either discovers the
+dependent run or prevents the stale snapshot from being used. Missing snapshot
+traces invalidate both cached and persisted plans; the next plan rotates the
+epoch and recalls eligible memory again. People erasure redacts the persisted
+snapshot and conservatively fences runs in its session for legacy plans without
+usage events. Explicitly authored persona entries remain a separate source.
 
 ## Failure modes and defenses
 

@@ -11,6 +11,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -20,6 +21,7 @@ from pydantic import (
 )
 
 from agent_core.domain.events import EventEnvelope, ProcessEvent
+from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
 
 
 class MemoryStatus(StrEnum):
@@ -201,6 +203,8 @@ class IntegratedEpisode(BaseModel):
 class MemoryCandidate(BaseModel):
     """A provenance-bound proposal emitted before policy and conflict gates."""
 
+    people: PeopleClaim | None = None
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     belief_type: BeliefType
@@ -270,9 +274,11 @@ class MemoryExtractionResult(list[MemoryCandidate]):
         candidates: Iterable[MemoryCandidate] = (),
         *,
         provider_failure: ProviderExtractionFailure | None = None,
+        people_interactions: Iterable[InteractionEvidence] = (),
     ) -> None:
         super().__init__(candidates)
         self.provider_failure = provider_failure
+        self.people_interactions = list(people_interactions)
 
 
 def minimum_supported_case_count(positive_case_count: int) -> int:
@@ -881,6 +887,7 @@ class RecallQuery(BaseModel):
     # detail when an explicit self-knowledge question shares no content words.
     structured_belief_types: list[BeliefType] = Field(default_factory=list)
     as_of: datetime | None = None
+    known_at: AwareDatetime | None = None
     include_superseded: bool = False
     # Snapshot recalls set this false before candidate selection. In-turn
     # deltas and deliberate lookup retain downweighted provisional beliefs.
@@ -894,6 +901,9 @@ class RecallQuery(BaseModel):
     # something the caller has to filter for afterwards.
     min_store_position: int = Field(default=0, ge=0)
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
+    include_ids: tuple[UUID, ...] | None = Field(default=None, max_length=1000)
+    expand_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
+    people_scope: tuple[UUID, ...] | None = Field(default=None, max_length=3)
     # Beliefs the persona row already carries at higher trust: a hard snapshot
     # exclusion, never a relevance signal (persona-surface.md).
     exclude_ids: tuple[UUID, ...] = ()
@@ -938,6 +948,17 @@ class TracedPassage(BaseModel):
     deleted: bool = False
 
 
+class TracedPersonContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    record_id: UUID
+    revision: int = Field(ge=1)
+    person_ids: list[UUID] = Field(min_length=1, max_length=64)
+    kind: Literal["person", "relationship", "interaction", "commitment"]
+    text: str = Field(min_length=1, max_length=2000)
+    sensitivity: Sensitivity
+    source_ids: list[UUID] = Field(default_factory=list, max_length=256)
+
+
 class RecallTrace(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -965,6 +986,7 @@ class RecallTrace(BaseModel):
     carried_in: list[UUID] = Field(default_factory=list)
     beliefs: list[RecalledBelief] = Field(default_factory=list)
     passages: list[TracedPassage] = Field(default_factory=list)
+    people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime
@@ -1004,6 +1026,7 @@ class RecallTraceView(BaseModel):
     moments: list[RecallMoment]
     beliefs: list[TracedBelief]
     passages: list[TracedPassage]
+    people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
     considered_not_shown: int = Field(ge=0)
     withheld_by_safety: int = Field(ge=0)
     as_of: datetime
@@ -1013,6 +1036,7 @@ class RecallResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     items: list[RecalledBelief]
+    people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
     rendered: str
     tokens: int = Field(ge=0)
     truncated: bool

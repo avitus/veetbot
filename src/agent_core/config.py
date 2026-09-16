@@ -27,6 +27,7 @@ from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     ProviderExtractionEvaluationEvidence,
 )
+from agent_core.domain.people_evidence import PeopleFormationEvidence
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 PRODUCTION_MODEL_POLICY = "astra"
@@ -85,6 +86,7 @@ class MemoryFormationPolicyPin(StrEnum):
     PROVIDER_ASSISTED = "formation@8"
     DISTILLATION = "formation@9"
     REPAIRED_PROVIDER_ASSISTED = "formation@10"
+    PEOPLE = "formation@11"
 
 
 class BrowserProviderKind(StrEnum):
@@ -123,6 +125,7 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    people_enabled: bool = True
     persona_api_enabled: bool = False
     delegation_enabled: bool = False
     device_channel_enabled: bool = False
@@ -1062,6 +1065,14 @@ def load_memory_distillation_evidence(path: Path) -> MemoryDistillationEvidence:
         ) from exc
 
 
+def load_people_formation_evidence(path: Path) -> PeopleFormationEvidence:
+    """Validate the new policy independently; old artifacts cannot activate it."""
+    try:
+        return PeopleFormationEvidence.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise ConfigurationError("People formation evaluation evidence did not pass") from exc
+
+
 def load_memory_release_evidence(
     path: Path,
 ) -> ProviderExtractionEvaluationEvidence | MemoryDistillationEvidence:
@@ -1088,7 +1099,7 @@ def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
 
 
 def _provider_extraction_evidence_is_valid(
-    path: Path, *, policy_pin: MemoryFormationPolicyPin | None = None
+    path: Path, *, policy_pin: MemoryFormationPolicyPin | None = None, people_enabled: bool = False
 ) -> bool:
     """Whether an artifact can satisfy required mode under the operator's pin.
 
@@ -1100,6 +1111,15 @@ def _provider_extraction_evidence_is_valid(
     """
 
     try:
+        if policy_pin is None and people_enabled:
+            try:
+                load_people_formation_evidence(path)
+                return True
+            except ConfigurationError:
+                pass
+        if policy_pin is MemoryFormationPolicyPin.PEOPLE:
+            load_people_formation_evidence(path)
+            return True
         if policy_pin in (
             MemoryFormationPolicyPin.PROVIDER_ASSISTED,
             MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
@@ -1127,7 +1147,15 @@ def validate_settings(
     """Refuse unsafe deployment identities before constructing resources."""
 
     _validate_release_id(settings.release_id)
-    if settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED:
+    if (
+        settings.memory_formation_policy_pin is MemoryFormationPolicyPin.PEOPLE
+        and not settings.people_enabled
+    ):
+        raise ConfigurationError("formation@11 requires AGENT_PEOPLE_ENABLED")
+    if settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED and not (
+        settings.people_enabled
+        and settings.memory_formation_policy_pin in (None, MemoryFormationPolicyPin.PEOPLE)
+    ):
         evidence_paths = provider_extraction_evidence_paths(settings)
         if not evidence_paths:
             raise ConfigurationError(
@@ -1140,7 +1168,9 @@ def validate_settings(
         )
         if not any(
             _provider_extraction_evidence_is_valid(
-                path, policy_pin=settings.memory_formation_policy_pin
+                path,
+                policy_pin=settings.memory_formation_policy_pin,
+                people_enabled=settings.people_enabled,
             )
             for path in required_paths
         ):
@@ -1514,6 +1544,7 @@ def _load_settings(
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
+    people_enabled = _parse_flag({"AGENT_PEOPLE_ENABLED": "1", **values}, "AGENT_PEOPLE_ENABLED")
     persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
@@ -1759,6 +1790,7 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        people_enabled=people_enabled,
         persona_api_enabled=persona_api_enabled,
         delegation_enabled=delegation_enabled,
         device_channel_enabled=device_channel_enabled,

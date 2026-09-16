@@ -2085,3 +2085,19 @@ ordinary tool proposals and approvals bind the call brief. The separate signed
 401 for invalid authentication or payload, 413 for an oversized body, 408 for a
 body timeout and 429 with `Retry-After: 60` for a full queue. It stores only a
 provider call ID before private reconciliation. See [bland-calling.md](bland-calling.md).
+
+
+## Milestone 28 People routes
+
+[people-and-relationships.md](people-and-relationships.md#http-routes) owns the
+seventeen People routes and their closed request/response contracts. They are
+absent unless `AGENT_PEOPLE_ENABLED=1`. Reads require `people.read`; writes
+require `people.write`, a bounded `Idempotency-Key`, and the documented exact
+revision or preview. Source reads additionally require `session.read` or
+`email.read`. All responses carry `Cache-Control: private, no-store`.
+
+The public directory binds relationship/state/pin filters, sort, ceiling, time,
+and both People and belief watermarks into its cursor. Import discovery uses
+its own owner-bound cursor and restores an existing job without widening its
+source scope. Static import and operation routes precede dynamic person IDs.
+The two `/v1/memories` routes remain read-only.

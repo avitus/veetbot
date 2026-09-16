@@ -6,12 +6,14 @@ import hashlib
 import logging
 import re
 from collections import Counter
-from contextlib import suppress
+from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack, suppress
 from datetime import datetime, timedelta
 from uuid import UUID
 
 from pydantic import ValidationError
 
+from agent_core.application.people_belief_erasure import erase_belief_copies
 from agent_core.domain.agents import Principal
 from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
@@ -50,6 +52,7 @@ from agent_core.domain.memory import (
     UsageFeedback,
 )
 from agent_core.domain.messages import TextPart
+from agent_core.domain.people_tools import RememberPeopleArgs
 from agent_core.domain.persona import (
     PERSONA_ENTRY_MAX_CHARS,
     PersonaNomination,
@@ -77,6 +80,7 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 FORMATION_POLICY_VERSION = "formation@7"
 NEMORI_FORMATION_POLICY_VERSION = "formation@9"
+DISTILLATION_FORMATION_POLICIES = frozenset({NEMORI_FORMATION_POLICY_VERSION, "formation@11"})
 HIGH_RECALL_EXTRACTOR_VERSION = "nemori-deterministic-fallback-v1"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_NEMORI_AUTOMATIC_CANDIDATES = 32
@@ -2340,6 +2344,8 @@ class GovernedMemoryService:
         formation_profile: FormationProfile = DEFAULT_FORMATION_PROFILE,
         decay_tau_days: DecayTauDays = DEFAULT_RETRIEVAL_PROFILE.decay_tau_days,
         usage: UsageDeltas = DEFAULT_RETRIEVAL_PROFILE.usage,
+        people_enabled: bool = False,
+        commit_guard: Callable[[RepositoryUnitOfWork], Awaitable[None]] | None = None,
     ) -> None:
         if not policy_version:
             raise ValueError("memory formation policy version must not be empty")
@@ -2358,6 +2364,8 @@ class GovernedMemoryService:
         # Usage moves utility only. The deltas are the ranker's too, so what a
         # citation is worth is stated once, in the retrieval profile.
         self._usage = usage
+        self._people_enabled = people_enabled
+        self._commit_guard = commit_guard
 
     @property
     def formation_profile(self) -> FormationProfile:
@@ -2424,6 +2432,35 @@ class GovernedMemoryService:
         )
         return record
 
+    async def remember_people(
+        self,
+        arguments: RememberPeopleArgs,
+        *,
+        session_id: UUID,
+        run_id: UUID | None,
+        principal: Principal,
+        origin_trust: TrustLevel,
+    ) -> MemoryRecord:
+        from agent_core.memory.people_explicit import remember_linked
+
+        if not self._people_enabled:
+            raise ToolValidationError("People memory is disabled")
+        if (principal.tenant_id, principal.principal_id) != (
+            self._principal.tenant_id,
+            self._principal.principal_id,
+        ):
+            raise NotFoundError("person not found")
+        return await remember_linked(
+            self,
+            self._uow_factory,
+            self._clock,
+            principal,
+            arguments,
+            session_id=session_id,
+            run_id=run_id,
+            origin_trust=origin_trust,
+        )
+
     async def remember_formation(
         self,
         *,
@@ -2469,8 +2506,8 @@ class GovernedMemoryService:
                 or (
                     semantic_external
                     and portability is Portability.CONTEXTUAL
-                    and self._policy_version == "email-semantic@1"
-                    and trigger == "email-semantic@1"
+                    and self._policy_version in {"email-semantic@1", "email-semantic@2"}
+                    and trigger == self._policy_version
                 )
             )
         )
@@ -2828,7 +2865,7 @@ class GovernedMemoryService:
 
         if existing_uow is not None:
             return await apply(existing_uow)
-        async with self._uow_factory() as uow:
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
             return await apply(uow)
 
     async def _retraction_targets(
@@ -2888,6 +2925,7 @@ class GovernedMemoryService:
         scope: str,
         session_id: UUID | None,
         since_watermark: int | None = None,
+        source_window: tuple[EventEnvelope, ...] | None = None,
     ) -> ConsolidationResult:
         started_at = self._clock.now()
         if session_id is None:
@@ -2913,31 +2951,69 @@ class GovernedMemoryService:
                 await uow.memories.record_consolidation(run)
             return ConsolidationResult(run=run)
         async with self._uow_factory() as uow:
-            watermark = (
-                await uow.memories.consolidation_watermark(session_id, self._principal)
-                if since_watermark is None
-                else since_watermark
-            )
-            events = await uow.events.list_after(session_id, watermark, self._principal)
-            pending_requests = [
-                event for event in events if event.event_type == "memory.formation.requested"
-            ]
-            # A formation@9 consolidation completes with its fallback and moves
-            # the watermark, so a provider re-pass names the range it must read
-            # again; the request itself sits above the watermark and is what
-            # made the session due.
-            repass_floor = _provider_repass_floor(pending_requests, watermark)
-            if since_watermark is None and repass_floor is not None:
-                events = await uow.events.list_after(session_id, repass_floor, self._principal)
+            if source_window is not None:
+                if (
+                    self._policy_version != "formation@11"
+                    or not self._people_enabled
+                    or not 1 <= len(source_window) <= 256
+                    or since_watermark is not None
+                    or any(event.session_id != session_id for event in source_window)
+                ):
+                    raise ToolValidationError("invalid bounded People import window")
+                sequences = [event.sequence for event in source_window]
+                if sequences != sorted(set(sequences)):
+                    raise ToolValidationError("import events must be ordered and unique")
+                watermark = sequences[0] - 1
+                originals = await uow.events.list_after(
+                    session_id, watermark, self._principal, limit=256
+                )
+                original_by_sequence = {event.sequence: event for event in originals}
+                if any(
+                    original_by_sequence.get(event.sequence) != event for event in source_window
+                ):
+                    raise ToolValidationError("import evidence differs from the original source")
+                events = list(source_window)
+                pending_requests = []
+                repass_floor = None
+            else:
+                watermark = (
+                    await uow.memories.consolidation_watermark(session_id, self._principal)
+                    if since_watermark is None
+                    else since_watermark
+                )
+                events = await uow.events.list_after(session_id, watermark, self._principal)
+                pending_requests = [
+                    event for event in events if event.event_type == "memory.formation.requested"
+                ]
+                # A formation@9 consolidation completes with its fallback and moves
+                # the watermark, so a provider re-pass names the range it must read
+                # again; the request itself sits above the watermark and is what
+                # made the session due.
+                repass_floor = _provider_repass_floor(pending_requests, watermark)
+                if since_watermark is None and repass_floor is not None:
+                    events = await uow.events.list_after(session_id, repass_floor, self._principal)
+        # Erasure is a persistent owner constraint, independent of capture policy.
+        from agent_core.domain.people_sources import source_id as people_source_id
+
+        extraction_events = []
+        async with self._uow_factory() as uow:
+            for extraction_event in events:
+                if not await uow.people.source_suppressed(
+                    self._principal,
+                    people_source_id(
+                        self._principal, extraction_event.session_id, extraction_event.sequence
+                    ),
+                ):
+                    extraction_events.append(extraction_event)
         extracted = await self._extractor.extract(
-            events,
+            extraction_events,
             principal=self._principal,
             scope=scope,
         )
         provider_failure = (
             extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
         )
-        admitted_sources = formation_sources(events, self._principal)
+        admitted_sources = formation_sources(extraction_events, self._principal)
         trusted_user_sources = {
             sequence
             for sequence, source in admitted_sources.items()
@@ -2956,7 +3032,7 @@ class GovernedMemoryService:
             for candidate in self._established_fact_candidates(events, scope, trusted_user_sources)
         ]
         proposals.extend((candidate, MemoryAuthority.INFERRED) for candidate in extracted)
-        if self._policy_version == NEMORI_FORMATION_POLICY_VERSION:
+        if self._policy_version in DISTILLATION_FORMATION_POLICIES:
             candidates = _select_nemori_candidates(proposals)
             displacement_counts = _nemori_displacement_counts(proposals, candidates)
         else:
@@ -2993,7 +3069,8 @@ class GovernedMemoryService:
             effective_trigger = "provider_retry"
             current_attempt = max(retry_attempts)
         retryable_failure = (
-            since_watermark is None
+            source_window is None
+            and since_watermark is None
             and provider_failure is not None
             and provider_failure.retryable
             and current_attempt < PROVIDER_MAX_ATTEMPTS
@@ -3003,9 +3080,11 @@ class GovernedMemoryService:
         # fallback now and schedules a bounded re-pass over the same evidence,
         # so an outage delays the provider's contribution without discarding
         # either the fallback's memories or the evidence the provider missed.
-        should_retry = retryable_failure and self._policy_version != NEMORI_FORMATION_POLICY_VERSION
+        should_retry = (
+            retryable_failure and self._policy_version not in DISTILLATION_FORMATION_POLICIES
+        )
         should_repass = (
-            retryable_failure and self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+            retryable_failure and self._policy_version in DISTILLATION_FORMATION_POLICIES
         )
 
         def no_work(at_watermark: int) -> ConsolidationResult:
@@ -3031,15 +3110,25 @@ class GovernedMemoryService:
                 )
             )
 
-        async with self._uow_factory() as uow:
+        async with (
+            self._uow_factory() as uow,
+            AsyncExitStack() as fences,
+        ):
             acquired = await uow.maintenance.acquire_memory_session(self._principal, session_id)
             if not acquired:
                 return no_work(watermark)
             try:
+                await fences.enter_async_context(uow.people.lock(self._principal))
+                if self._commit_guard is not None:
+                    await self._commit_guard(uow)
                 current_watermark = await uow.memories.consolidation_watermark(
                     session_id, self._principal
                 )
-                if since_watermark is None and current_watermark != watermark:
+                if (
+                    source_window is None
+                    and since_watermark is None
+                    and current_watermark != watermark
+                ):
                     return no_work(current_watermark)
                 consolidation_id = self._ids.new_id()
                 beliefs: list[MemoryRecord] = []
@@ -3050,7 +3139,20 @@ class GovernedMemoryService:
                 reinforced = 0
                 superseded = 0
                 conflicted = 0
+                people_mentions = 0
                 for candidate, authority in [] if should_retry else candidates:
+                    suppressed = False
+                    for sequence in candidate.source_event_ids:
+                        if await uow.people.source_suppressed(
+                            self._principal,
+                            people_source_id(self._principal, session_id, sequence),
+                        ):
+                            suppressed = True
+                            break
+                    if suppressed:
+                        rejected += 1
+                        decisions["rejected_erased_source"] += 1
+                        continue
                     candidate_sources = [
                         admitted_sources.get(sequence) for sequence in candidate.source_event_ids
                     ]
@@ -3079,7 +3181,7 @@ class GovernedMemoryService:
                         continue
                     if (
                         (
-                            self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                            self._policy_version in DISTILLATION_FORMATION_POLICIES
                             and authority is MemoryAuthority.INFERRED
                         )
                         or attributed_communication
@@ -3120,6 +3222,46 @@ class GovernedMemoryService:
                             else "rejected_injection"
                         ] += 1
                         continue
+                    prepared_people = None
+                    if (
+                        self._people_enabled
+                        and self._policy_version == "formation@11"
+                        and candidate.people is not None
+                    ):
+                        from agent_core.memory.people_formation import prepare_people
+
+                        if (
+                            people_mentions
+                            + (len(candidate.people.mentions) + len(candidate.people.organizations))
+                            > 64
+                        ):
+                            rejected += 1
+                            decisions["people_overflow"] += 1
+                            continue
+                        try:
+                            prepared_people = await prepare_people(
+                                uow.people,
+                                self._principal,
+                                candidate,
+                                admitted_sources,
+                                self._clock.now(),
+                            )
+                        except (ValueError, ToolValidationError, ConflictError):
+                            rejected += 1
+                            decisions["rejected_people_evidence"] += 1
+                            continue
+                        people_mentions += len(candidate.people.mentions) + len(
+                            candidate.people.organizations
+                        )
+                        candidate = candidate.model_copy(
+                            update={
+                                "subject": prepared_people.subject,
+                                "sensitivity_guess": max(
+                                    (candidate.sensitivity_guess, Sensitivity.SENSITIVE),
+                                    key=SENSITIVITY_ORDER.__getitem__,
+                                ),
+                            }
+                        )
                     # A candidate commits under its own key, except an
                     # automatic retraction, which commits under the key of
                     # every live belief it negates: a correction may update
@@ -3127,7 +3269,7 @@ class GovernedMemoryService:
                     # nothing live to retract it is counted and dropped.
                     commit_keys = [(candidate.subject, candidate.belief_type)]
                     if (
-                        self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                        self._policy_version in DISTILLATION_FORMATION_POLICIES
                         and candidate.polarity is Polarity.RETRACT
                         and authority is not MemoryAuthority.USER
                     ):
@@ -3171,7 +3313,12 @@ class GovernedMemoryService:
                                 authority=authority,
                                 polarity=candidate.polarity,
                                 confidence=candidate.model_confidence,
-                                valid_from=candidate.valid_from,
+                                valid_from=candidate.valid_from
+                                or (
+                                    max((event.created_at for event in source_events), default=None)
+                                    if self._policy_version == "formation@11"
+                                    else None
+                                ),
                                 expires_at=candidate.expires_hint,
                                 trigger=effective_trigger,
                                 record_audit=False,
@@ -3200,6 +3347,33 @@ class GovernedMemoryService:
                                 rejected += 1
                                 decisions["rejected_validation"] += 1
                         else:
+                            if prepared_people is not None:
+                                from agent_core.memory.people_formation import (
+                                    direct_owner_kinship,
+                                    persist_people,
+                                )
+
+                                if (
+                                    direct_owner_kinship(prepared_people, belief)
+                                    and belief.lifecycle_policy_version != "people-lifecycle@1"
+                                ):
+                                    belief = await uow.memories.reinforce(
+                                        belief.model_copy(
+                                            update={
+                                                "lifecycle_policy_version": "people-lifecycle@1",
+                                                "longevity": MemoryLongevity.DURABLE,
+                                                "expires_at": None,
+                                            }
+                                        )
+                                    )
+
+                                await persist_people(
+                                    uow.people,
+                                    self._principal,
+                                    prepared_people,
+                                    belief,
+                                    self._clock.now(),
+                                )
                             if action == "unchanged":
                                 if counted:
                                     rejected += 1
@@ -3230,7 +3404,47 @@ class GovernedMemoryService:
                                         if candidate.derivation is MemoryDerivation.HYPOTHESIS
                                         else "committed_direct"
                                     ] += 1
+                if (
+                    not should_retry
+                    and self._people_enabled
+                    and self._policy_version == "formation@11"
+                    and isinstance(extracted, MemoryExtractionResult)
+                ):
+                    from agent_core.memory.people_formation import persist_interaction
+
+                    for interaction in extracted.people_interactions[:32]:
+                        if people_mentions + len(interaction.mentions) > 64:
+                            decisions["people_overflow"] += 1
+                            continue
+                        try:
+                            await persist_interaction(
+                                uow.people,
+                                self._principal,
+                                interaction,
+                                admitted_sources,
+                                self._clock.now(),
+                                scope,
+                            )
+                        except (ValueError, ToolValidationError, ConflictError):
+                            decisions["rejected_people_interaction"] += 1
+                        else:
+                            people_mentions += len(interaction.mentions)
+                            decisions["people_interaction"] += 1
+                    decisions["people_overflow"] += max(0, len(extracted.people_interactions) - 32)
                 if not should_retry:
+                    if self._people_enabled:
+                        from agent_core.memory.people_sms import project_sent_sms, project_sms
+
+                        for source in list(admitted_sources.values())[:256]:
+                            if source.channel == "sms" and await project_sms(
+                                uow, self._principal, source.event, self._clock.now()
+                            ):
+                                decisions["people_sms_interaction"] += 1
+                        for event in extraction_events[:256]:
+                            if await project_sent_sms(
+                                uow, self._principal, event, self._clock.now()
+                            ):
+                                decisions["people_sms_interaction"] += 1
                     await self._nominate_persona_candidates(uow, beliefs, consolidation_id)
                 watermark_after = watermark if should_retry else after
 
@@ -3274,9 +3488,10 @@ class GovernedMemoryService:
                 if should_retry:
                     await schedule_provider_retry(uow, watermark)
                 else:
-                    await uow.memories.set_consolidation_watermark(
-                        session_id, self._principal, after
-                    )
+                    if source_window is None:
+                        await uow.memories.set_consolidation_watermark(
+                            session_id, self._principal, after
+                        )
                     if should_repass:
                         await schedule_provider_retry(
                             uow, watermark if repass_floor is None else repass_floor
@@ -3645,7 +3860,11 @@ class GovernedMemoryService:
             return stored
 
     async def delete(self, belief_id: UUID, *, trace_id: UUID | None = None) -> None:
-        async with self._uow_factory() as uow:
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
             current = await uow.memories.get(belief_id, self._principal)
             tombstone = BeliefRejection(
                 id=self._ids.new_id(),
@@ -3661,6 +3880,7 @@ class GovernedMemoryService:
                 trace_id=trace_id,
                 created_at=self._clock.now(),
             )
+            await erase_belief_copies(uow, self._principal, current, self._clock.now())
             await uow.memories.delete(belief_id, self._principal, tombstone)
             await self._append_event(uow, _source_session(current), None, "memory.deleted", current)
 
@@ -3732,6 +3952,130 @@ class GovernedMemoryService:
                 await uow.memories.reject(linked_rejection, linked)
             return replacement
         return stored
+
+    async def correct_from_owner(
+        self,
+        belief_id: UUID,
+        *,
+        session_id: UUID,
+        source_event_id: int,
+        operation: str,
+        statement: str | None,
+        expected_position: int,
+        effective_at: datetime | None = None,
+        existing_uow: RepositoryUnitOfWork,
+    ) -> MemoryRecord | None:
+        uow = existing_uow
+        if operation not in {"correct", "changed", "reject", "affirm", "remove"}:
+            raise ToolValidationError("unknown owner correction")
+        await self._validate_sources(uow, session_id, [source_event_id])
+        events = await uow.events.list_after(session_id, source_event_id - 1, self._principal)
+        source = next((event for event in events if event.sequence == source_event_id), None)
+        if (
+            source is None
+            or source.actor_type not in {"user", "principal"}
+            or source.actor_id != self._principal.principal_id
+            or source.event_type not in {"user.message.created", "people.owner_assertion"}
+        ):
+            raise ToolTrustRejectedError("correction requires an owner assertion")
+        current = await uow.memories.get(belief_id, self._principal)
+        if current.store_position != expected_position:
+            raise ConflictError("memory revision changed")
+        if effective_at is not None and (
+            operation != "changed" or not current.valid_from <= effective_at <= self._clock.now()
+        ):
+            raise ToolValidationError("change date must fall between the fact start and now")
+        changed_at = effective_at or self._clock.now()
+        if operation in {"correct", "changed"} and (
+            not statement or not self._salience.eligible(statement, explicit=True)
+        ):
+            raise ToolValidationError("correction requires a safe statement")
+        if operation in {"reject", "remove", "affirm"} and statement is not None:
+            raise ToolValidationError("correction has unexpected replacement text")
+        kind = (
+            RejectionKind.DELETED
+            if operation == "remove"
+            else (
+                RejectionKind.UNTRUE
+                if operation in {"reject", "correct"}
+                else RejectionKind.CHANGED
+            )
+        )
+        rejection = BeliefRejection(
+            id=self._ids.new_id(),
+            tenant_id=current.tenant_id,
+            principal_id=current.principal_id,
+            belief_id=current.id,
+            kind=kind,
+            subject=current.subject,
+            statement=None if operation == "remove" else current.statement,
+            statement_sha256=hashlib.sha256(current.statement.casefold().encode()).hexdigest(),
+            belief_type=current.belief_type,
+            scope=current.scope,
+            created_at=self._clock.now(),
+        )
+        if operation == "remove":
+            await erase_belief_copies(uow, self._principal, current, self._clock.now())
+            await uow.memories.delete(current.id, self._principal, rejection)
+            await self._append_event(uow, session_id, None, "memory.deleted", current)
+            return None
+        replacement_text: str | None
+        if operation == "affirm":
+            replacement_text = current.statement
+        else:
+            position = await uow.memories.next_position()
+            retired = current.model_copy(
+                update={
+                    "status": MemoryStatus.RETIRED
+                    if operation in {"reject", "correct"}
+                    else MemoryStatus.SUPERSEDED,
+                    "valid_to": current.valid_from
+                    if operation in {"reject", "correct"}
+                    else changed_at,
+                    "updated_at": self._clock.now(),
+                    "store_position": position,
+                }
+            )
+            await uow.memories.reject(rejection, retired)
+            await self._append_event(uow, session_id, None, "memory.rejected", retired)
+            if operation == "reject":
+                return retired
+            replacement_text = statement
+        assert replacement_text is not None
+        replacement, _ = await self.remember_formation(
+            session_id=session_id,
+            run_id=None,
+            statement=replacement_text,
+            subject=current.subject,
+            scope=current.scope,
+            belief_type=current.belief_type,
+            portability=current.portability,
+            sensitivity=current.sensitivity,
+            source_event_ids=[source_event_id],
+            origin_trust=TrustLevel.USER,
+            explicit=True,
+            authority=MemoryAuthority.USER,
+            polarity=Polarity.ASSERT,
+            confidence=1.0,
+            valid_from=current.valid_from if operation == "correct" else changed_at,
+            expires_at=None,
+            trigger="people.owner_correction",
+            record_audit=True,
+            existing_uow=uow,
+        )
+        if operation != "affirm":
+            # An incorrect fact remains retired with an empty validity interval;
+            # its replacement lineage lives in the typed rejection. Only a
+            # previously true fact that changed may be marked superseded.
+            linked = (
+                retired.model_copy(update={"superseded_by": replacement.id})
+                if operation == "changed"
+                else retired
+            )
+            await uow.memories.reject(
+                rejection.model_copy(update={"replacement_id": replacement.id}), linked
+            )
+        return replacement
 
     async def expire(self) -> list[MemoryRecord]:
         async with self._uow_factory() as uow:
@@ -3810,6 +4154,11 @@ class GovernedMemoryService:
     def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
         """Whether this belief is idle, uncertain, and unwritten long enough."""
 
+        if (
+            record.lifecycle_policy_version == "people-lifecycle@1"
+            and record.consolidation_policy_version == "formation@11"
+        ):
+            return False
         if record.status is not MemoryStatus.PROVISIONAL and (
             record.confidence >= MAX_INFERRED_CONFIDENCE
         ):
@@ -4020,7 +4369,7 @@ class GovernedMemoryService:
                 if derivation is MemoryDerivation.HYPOTHESIS
                 else (
                     0.65
-                    if self._policy_version == NEMORI_FORMATION_POLICY_VERSION
+                    if self._policy_version in DISTILLATION_FORMATION_POLICIES
                     else MAX_INFERRED_CONFIDENCE
                 )
             )
@@ -4085,6 +4434,13 @@ class GovernedMemoryService:
         existing = await uow.events.existing_sequences(session_id, set(sources), self._principal)
         if existing != set(sources):
             raise ToolValidationError("memory provenance names missing source events")
+        from agent_core.domain.people_sources import source_id
+
+        for sequence in sources:
+            if await uow.people.source_suppressed(
+                self._principal, source_id(self._principal, session_id, sequence)
+            ):
+                raise ConflictError("memory source was erased")
 
     async def _append_event(
         self,
@@ -4107,7 +4463,9 @@ class GovernedMemoryService:
                 actor_type=actor_type
                 or ("principal" if belief.authority is MemoryAuthority.USER else "memory"),
                 actor_id=self._principal.principal_id,
-                payload={"belief": belief.model_dump(mode="json")},
+                payload={"belief_id": str(belief.id)}
+                if event_type == "memory.deleted"
+                else {"belief": belief.model_dump(mode="json")},
             )
         )
 

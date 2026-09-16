@@ -1,0 +1,247 @@
+- id: gate.people.identity_precision
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Same-name people, unnamed siblings, changed names, role accounts, and recycled addresses
+    do not falsely merge.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.identifier_linking
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Validated time-bounded identifiers link the same person across eligible channels without
+    upgrading claims.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.identity_repair
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Merge/split/undo are atomic, revision-checked, source-preserving, and durable across replay.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.repository_isolation
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Person, relationship, source, and interaction repository contracts pass on both adapters
+    with forced RLS and scoped FK checks.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.person_formation
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Multi-person owner speech produces independent facts and correct directed relationships.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.speaker_attribution
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Pronouns, third-party reports, quoted/forwarded text, and group participants retain correct
+    attribution or explicit ambiguity.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.source_grounding
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Unsupported source spans, fabricated people/relationships, arbitrary tools, and excluded
+    channels cannot form records.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.durable_corrections
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Owner corrections, identity distinctions, retractions, and deletion suppression dominate
+    retry/backfill/policy changes.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.evidence_deduplication
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Duplicate delivery, quotations, thread rereads, cross-account copies, and provider retry
+    cannot inflate evidence.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.temporal_history
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Effective, occurred, evidence, and recorded times remain distinct; historical queries and
+    late corrections have no future leakage.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.lifecycle
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Current expiry preserves permitted dated history; identity/kinship persistence and other
+    existing lifetimes follow the explicit policy.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.interaction_roles
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Interactions distinguish observed communications, reported events, mentions, and actual participation.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.commitments
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Commitments distinguish request/promise/draft/completion and preserve debtor, beneficiary,
+    dates, and state evidence.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.history_pagination
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Cross-session person history uses bounded indexed queries, stable paging, correct ties, and
+    honest partial coverage.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.ambiguity
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Person lookup ambiguity never mixes contexts or changes verified email recipients.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.shared_retrieval
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Automatic and explicit recall share hard filters, source restrictions, uncertainty, conflict
+    handling, and attribution.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.bounded_relationships
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: One-hop expansion is bounded and cannot infer transitive relationships or leak hidden nodes/edges/counts.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.memory_trust
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: All returned text is injection-scanned memory data; People cannot grant action authority
+    or edit trusted persona.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.context_budget
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Context budgets, deterministic truncation, cache keys, correction deltas, and frozen-prefix
+    behavior remain valid.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.trace_faithfulness
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Persisted traces faithfully record IDs/revisions and rendered content; their views enforce
+    owner and sensitivity constraints.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.api_boundaries
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: HTTP/tool happy path, malformed inputs, missing/wrong scopes, unavailable sources, failures,
+    retries, and limits are covered.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.tool_schemas
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Tool schemas advertise every bound enforced at execution; pinned old sessions remain compatible
+    and revocations apply at invocation.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.governed_writes
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Public People writes reach governed memory, require owner intent and exact targets, and leave
+    `/v1/memories` read-only.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.default_available
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: People is available by default without evaluation artifacts; explicit shutdown hides routes/tools
+    and stops new formation while preserving cleanup.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.erasure
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Forget/source/session/principal erasure removes derived influence, handles shared evidence,
+    fences running work, and survives restore.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.egress
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Auxiliary extraction egress retains current sensitivity filtering; no directory or protected
+    alias leaks through diagnostics.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.email_history_bound
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Ninety-day automatic email boundary survives the People bridge; older import requires an
+    explicit bounded request.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.import_jobs
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Imports resume/cancel safely, preserve original evidence dates, and respect aggregate money/source/concurrency
+    ceilings.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.migration_compatibility
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Forward capture, deterministic linking, populated migration, safe rollback, and legacy unlinked
+    memories remain compatible.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.email_bridge
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Both-account email learning/feedback/drafting and person corrections agree without duplicate
+    identities or stale derived scores.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.native_workflows
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: All three Apple platforms support browse/evidence/correction/identity repair/forget and preserve
+    Chat/Email state.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.native_states
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Accessibility, loading, empty, denied, disabled, partial, paused, unavailable-source, and
+    concurrent-edit UI states pass.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.formation_quality
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Person-aware formation meets the quality floors below and preserves inherited formation/semantic-policy
+    thresholds.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.retrieval_quality
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Retrieval and end-to-end person tasks meet the quality floors below without regressions in
+    ordinary memory tasks.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.performance
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Representative load and cost tests meet budgets, expose truncation/backlog, and preserve
+    interactive responsiveness.
+  check: tests/gates/pending.py::pending_gate
+- id: gate.people.release_evidence
+  milestone: 28
+  kind: case
+  spec: docs/plan/people-and-relationships.md#hard-gates
+  statement: Quality evidence and owner feedback remain honestly reported; exact-head CI/review and authorized
+    release smoke are complete without evaluation-gated availability.
+  check: tests/gates/pending.py::pending_gate

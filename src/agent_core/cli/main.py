@@ -11,6 +11,7 @@ import signal
 import socket
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
@@ -31,6 +32,8 @@ from agent_core.bootstrap import (
     build_surface_worker,
     serve_execution_service,
 )
+from agent_core.cli.people import app as people_app
+from agent_core.cli.people import configure as configure_people
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import (
@@ -106,6 +109,10 @@ app.add_typer(approval_app)
 app.add_typer(memory_app)
 app.add_typer(persona_app)
 app.add_typer(surface_app)
+
+
+configure_people(build)
+app.add_typer(people_app)
 
 
 async def _surface_list() -> list[Any]:
@@ -240,6 +247,49 @@ class _CapabilityModule(Protocol):
     ) -> Any | None: ...
 
     def resolve_build_ref(self, repository_root: Path, explicit: str | None) -> str: ...
+
+
+class _PeopleEvalModule(Protocol):
+    def corpus_report(self, root: Path) -> dict[str, object]: ...
+
+    def score_observations(self, root: Path, path: Path) -> dict[str, object]: ...
+
+
+class _PeopleComparisonModule(Protocol):
+    async def run_comparison(
+        self,
+        root: Path,
+        *,
+        output: Path,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        maximum_cost: Decimal,
+        repeats: int,
+        development_case: str | None,
+    ) -> dict[str, object]: ...
+
+
+class _PeopleReleaseModule(Protocol):
+    def run_digest(self, directory: Path) -> str: ...
+
+    def publish_evidence(
+        self, root: Path, directory: Path, acceptance_path: Path, output: Path
+    ) -> Any: ...
+
+
+class _EmailPeopleReleaseModule(Protocol):
+    def run_digest(self, directory: Path) -> str: ...
+
+    def publish_evidence(
+        self,
+        root: Path,
+        directory: Path,
+        people_path: Path,
+        baseline_path: Path,
+        candidate_path: Path,
+        output: Path,
+    ) -> Any: ...
 
 
 class _MemoryFormationEvalModule(Protocol):
@@ -1252,6 +1302,199 @@ def eval_memory_formation(
     if not result.passed:
         typer.echo(f"memory-formation evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
+
+
+@eval_app.command("people")
+def eval_people(
+    check_corpus: Annotated[bool, typer.Option("--check-corpus")] = False,
+    observations: Annotated[Path | None, typer.Option("--observations")] = None,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    run: Annotated[bool, typer.Option("--run")] = False,
+    model_policy: Annotated[str | None, typer.Option("--model-policy")] = None,
+    policy_profile: Annotated[str, typer.Option("--policy-profile")] = "default",
+    build_ref: Annotated[str | None, typer.Option("--build-ref")] = None,
+    max_cost_usd: Annotated[str | None, typer.Option("--max-cost-usd")] = None,
+    repeats: Annotated[int, typer.Option(min=3, max=10)] = 3,
+    development_case: Annotated[str | None, typer.Option("--development-case")] = None,
+) -> None:
+    """Validate fixtures, score observations, or run an explicitly budgeted comparison."""
+    if sum((check_corpus, observations is not None, run)) != 1:
+        raise typer.BadParameter("select exactly one of --check-corpus, --observations, or --run")
+    if run and (
+        output is None or model_policy is None or build_ref is None or max_cost_usd is None
+    ):
+        raise typer.BadParameter(
+            "--run requires --output, --model-policy, --build-ref, and --max-cost-usd"
+        )
+    if not run and any(
+        value is not None for value in (model_policy, build_ref, max_cost_usd, development_case)
+    ):
+        raise typer.BadParameter("live comparison options require --run")
+    try:
+        if run:
+            comparison = cast(
+                _PeopleComparisonModule,
+                importlib.import_module("agent_core.evals.people_comparison"),
+            )
+            maximum = Decimal(cast(str, max_cost_usd))
+            if not maximum.is_finite() or maximum <= 0:
+                raise ValueError("comparison requires a finite positive monetary cap")
+            result = asyncio.run(
+                comparison.run_comparison(
+                    Path.cwd(),
+                    output=cast(Path, output),
+                    model_policy=cast(str, model_policy),
+                    policy_profile=policy_profile,
+                    build_ref=cast(str, build_ref),
+                    maximum_cost=maximum,
+                    repeats=repeats,
+                    development_case=development_case,
+                )
+            )
+        else:
+            module = cast(_PeopleEvalModule, importlib.import_module("agent_core.evals.people"))
+            result = (
+                module.corpus_report(Path.cwd())
+                if check_corpus
+                else module.score_observations(Path.cwd(), cast(Path, observations))
+            )
+            if output is not None:
+                with output.open("x") as stream:
+                    stream.write(json.dumps(result, sort_keys=True) + "\n")
+        typer.echo(json.dumps(result, sort_keys=True))
+    except (ConfigurationError, OSError, ValueError, InvalidOperation, RuntimeError) as exc:
+        typer.echo(f"People evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@eval_app.command("email-people")
+def eval_email_people(
+    check_corpus: Annotated[bool, typer.Option("--check-corpus")] = False,
+    observations: Annotated[Path | None, typer.Option("--observations")] = None,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    run: Annotated[bool, typer.Option("--run")] = False,
+    model_policy: Annotated[str | None, typer.Option("--model-policy")] = None,
+    policy_profile: Annotated[str, typer.Option("--policy-profile")] = "default",
+    build_ref: Annotated[str | None, typer.Option("--build-ref")] = None,
+    max_cost_usd: Annotated[str | None, typer.Option("--max-cost-usd")] = None,
+    repeats: Annotated[int, typer.Option(min=3, max=10)] = 3,
+    development_case: Annotated[str | None, typer.Option("--development-case")] = None,
+) -> None:
+    """Validate fixtures, score observations, or run an explicitly budgeted comparison."""
+    if sum((check_corpus, observations is not None, run)) != 1:
+        raise typer.BadParameter("select exactly one of --check-corpus, --observations, or --run")
+    if run and (
+        output is None or model_policy is None or build_ref is None or max_cost_usd is None
+    ):
+        raise typer.BadParameter(
+            "--run requires --output, --model-policy, --build-ref, and --max-cost-usd"
+        )
+    if not run and any(
+        value is not None for value in (model_policy, build_ref, max_cost_usd, development_case)
+    ):
+        raise typer.BadParameter("live comparison options require --run")
+    try:
+        if run:
+            comparison = cast(
+                _PeopleComparisonModule,
+                importlib.import_module("agent_core.evals.email_people_execution"),
+            )
+            maximum = Decimal(cast(str, max_cost_usd))
+            if not maximum.is_finite() or maximum <= 0:
+                raise ValueError("comparison requires a finite positive monetary cap")
+            result = asyncio.run(
+                comparison.run_comparison(
+                    Path.cwd(),
+                    output=cast(Path, output),
+                    model_policy=cast(str, model_policy),
+                    policy_profile=policy_profile,
+                    build_ref=cast(str, build_ref),
+                    maximum_cost=maximum,
+                    repeats=repeats,
+                    development_case=development_case,
+                )
+            )
+        else:
+            module = cast(
+                _PeopleEvalModule, importlib.import_module("agent_core.evals.email_people")
+            )
+            result = (
+                module.corpus_report(Path.cwd())
+                if check_corpus
+                else module.score_observations(Path.cwd(), cast(Path, observations))
+            )
+            if output is not None:
+                with output.open("x") as stream:
+                    stream.write(json.dumps(result, sort_keys=True) + "\n")
+        typer.echo(json.dumps(result, sort_keys=True))
+    except (ConfigurationError, OSError, ValueError, InvalidOperation, RuntimeError) as exc:
+        typer.echo(f"Email People evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@eval_app.command("email-people-evidence")
+def eval_email_people_evidence(
+    run_directory: Annotated[Path, typer.Option("--run-directory")],
+    people_evidence: Annotated[Path | None, typer.Option("--people-evidence")] = None,
+    baseline_labels: Annotated[Path | None, typer.Option("--baseline-labels")] = None,
+    candidate_labels: Annotated[Path | None, typer.Option("--candidate-labels")] = None,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+) -> None:
+    """Compile Email evidence from a settled run and separate paired owner labels."""
+    supplied = (people_evidence, baseline_labels, candidate_labels, output)
+    if any(value is not None for value in supplied) and any(value is None for value in supplied):
+        raise typer.BadParameter(
+            "publication requires --people-evidence, --baseline-labels, "
+            "--candidate-labels and --output"
+        )
+    try:
+        module = cast(
+            _EmailPeopleReleaseModule,
+            importlib.import_module("agent_core.evals.email_people_release"),
+        )
+        if (
+            people_evidence is None
+            or baseline_labels is None
+            or candidate_labels is None
+            or output is None
+        ):
+            typer.echo(json.dumps({"run_sha256": module.run_digest(run_directory)}))
+        else:
+            evidence = module.publish_evidence(
+                Path.cwd(),
+                run_directory,
+                people_evidence,
+                baseline_labels,
+                candidate_labels,
+                output,
+            )
+            typer.echo(evidence.model_dump_json())
+    except (ConfigurationError, OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        typer.echo(f"Email People evidence publication failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@eval_app.command("people-evidence")
+def eval_people_evidence(
+    run_directory: Annotated[Path, typer.Option("--run-directory")],
+    owner_acceptance: Annotated[Path | None, typer.Option("--owner-acceptance")] = None,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+) -> None:
+    """Identify a completed run or compile evidence after separate owner acceptance."""
+    if (owner_acceptance is None) != (output is None):
+        raise typer.BadParameter("publication requires both --owner-acceptance and --output")
+    try:
+        module = cast(
+            _PeopleReleaseModule, importlib.import_module("agent_core.evals.people_release")
+        )
+        if owner_acceptance is None or output is None:
+            typer.echo(json.dumps({"run_sha256": module.run_digest(run_directory)}))
+        else:
+            evidence = module.publish_evidence(Path.cwd(), run_directory, owner_acceptance, output)
+            typer.echo(evidence.model_dump_json())
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        typer.echo(f"People evidence publication failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 @eval_app.command("memory-distillation")

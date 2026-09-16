@@ -113,6 +113,10 @@ _SENSITIVE_ARGUMENT_KEY = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential)", re.I
 )
 _CREDENTIAL_SHAPE = re.compile(r"(?:api[_-]?key|secret|password|token|bearer)\s*[:=]\s*\S+", re.I)
+# The longest string an approval view carries whole. A longer one is truncated and
+# its full value is published as a digest instead, so exact client-side
+# verification survives redaction.
+_APPROVAL_ARGUMENT_CEILING = 512
 
 
 def _approval_argument_value(value: Any, *, key: str | None = None) -> Any:
@@ -121,7 +125,9 @@ def _approval_argument_value(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, str):
         if _CREDENTIAL_SHAPE.search(value) is not None:
             return "[REDACTED]"
-        return value if len(value) <= 512 else f"{value[:512]}…[TRUNCATED]"
+        if len(value) <= _APPROVAL_ARGUMENT_CEILING:
+            return value
+        return f"{value[:_APPROVAL_ARGUMENT_CEILING]}…[TRUNCATED]"
     if isinstance(value, dict):
         items = list(value.items())[:50]
         redacted = {
@@ -142,6 +148,27 @@ def _approval_argument_value(value: Any, *, key: str | None = None) -> Any:
 
 def _approval_argument_view(arguments: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], _approval_argument_value(arguments))
+
+
+def _approval_argument_digests(arguments: dict[str, Any]) -> dict[str, str]:
+    """Digest every top-level argument the view truncates for length.
+
+    The view cuts a long string to its first 512 characters, so a client holding
+    the original can no longer compare it for equality. The digest restores exact
+    verification without publishing the value. A value redacted for sensitivity is
+    never digested: the owner has no reason to verify a credential, and a digest of
+    one is a brute-force target.
+    """
+    digests: dict[str, str] = {}
+    for key, value in arguments.items():
+        if not isinstance(value, str) or len(value) <= _APPROVAL_ARGUMENT_CEILING:
+            continue
+        if _SENSITIVE_ARGUMENT_KEY.search(key) is not None:
+            continue
+        if _CREDENTIAL_SHAPE.search(value) is not None:
+            continue
+        digests[key] = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return digests
 
 
 class _UnavailableCollaborator:
@@ -1521,6 +1548,7 @@ class ToolPipeline:
             action_summary=action_summary,
             tool_name=tool.spec.name,
             arguments=_approval_argument_view(approval_arguments),
+            argument_digests=_approval_argument_digests(approval_arguments),
             normalized_arguments_hash=invocation.normalized_arguments_hash,
             required_scopes=set(tool.spec.required_scopes),
             agent_version=agent.version,

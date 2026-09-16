@@ -176,6 +176,7 @@ class ApprovalView(BaseModel):
     tool_name: str | None
     action_summary: str
     arguments: dict[str, Any]
+    argument_digests: dict[str, str] = Field(default_factory=dict)
     risk: str
     policy_reason: str
     expires_at: datetime | None

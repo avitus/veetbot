@@ -11,6 +11,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from agent_core.adapters.persistence.conversation import conversation_items
+from agent_core.adapters.persistence.people_erasure import ORIGINAL_EVENTS, redact
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
     ApprovalCursor,
@@ -20,7 +21,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
     CONVERSATION_MESSAGE_EVENTS,
@@ -255,6 +256,7 @@ class InMemoryRunRepository:
         self._sessions = sessions
         self._clock = clock
         self._runs: dict[UUID, Run] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, run: Run) -> None:
@@ -286,6 +288,23 @@ class InMemoryRunRepository:
                 raise NotFoundError("run not found") from exc
         await self._sessions.get(run.session_id, principal)
         return run
+
+    async def has_higher_priority_work(self, principal: Principal, priority: int) -> bool:
+        async with self._lock:
+            sessions = {
+                row.session_id
+                for row in self._runs.values()
+                if row.priority < priority
+                and row.status in {RunStatus.QUEUED, RunStatus.RUNNING}
+                and (row.scheduled_for is None or row.scheduled_for <= self._clock.now())
+            }
+        for session_id in sessions:
+            try:
+                await self._sessions.get(session_id, principal)
+            except NotFoundError:
+                continue
+            return True
+        return False
 
     async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None:
         await self._sessions.get(session_id, principal)
@@ -392,6 +411,9 @@ class InMemoryRunRepository:
                 )
             require_transition(current.status, new_status)
             typed_failure = None if failure is None else RunFailure.model_validate(failure)
+            if run_id in self._people_erased_runs:
+                final_message = None
+                typed_failure = None
             updated = current.model_copy(
                 update={
                     "status": new_status,
@@ -424,7 +446,14 @@ class InMemoryRunRepository:
                 },
                 deep=True,
             )
-            if run != updated:
+            supplied = run
+            if run.cancel_requested_at is None and current.cancel_requested_at is not None:
+                # Account for an in-flight model response without overwriting
+                # the cancellation requested after the worker read this run.
+                supplied = run.model_copy(
+                    update={"cancel_requested_at": current.cancel_requested_at}
+                )
+            if supplied != updated:
                 raise ConflictError("counter update may change only counters and usage")
             self._runs[run.id] = updated
 
@@ -462,6 +491,7 @@ class InMemoryEventRepository:
         self._clock = clock
         self._events: dict[UUID, list[EventEnvelope]] = defaultdict(list)
         self._derived: dict[str, EventEnvelope] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._next_id = 1
         self._lock = asyncio.Lock()
 
@@ -470,6 +500,8 @@ class InMemoryEventRepository:
             raise NotImplementedError("the in-memory repository does not support worker leases")
         occurred_at = self._clock.now()
         async with self._lock:
+            if event.run_id in self._people_erased_runs and event.event_type not in ORIGINAL_EVENTS:
+                event = event.model_copy(update={"payload": redact(event.payload)}, deep=True)
             if event.derivation_key is not None:
                 existing = self._derived.get(event.derivation_key)
                 if existing is not None:
@@ -495,6 +527,32 @@ class InMemoryEventRepository:
         if touch is not None:
             await touch(event.session_id, occurred_at)
         return envelope.model_copy(deep=True)
+
+    async def list_window(
+        self,
+        principal: Principal,
+        *,
+        session_ids: Sequence[UUID],
+        since: datetime,
+        until: datetime,
+        after: tuple[datetime, int] | None = None,
+        limit: int = 256,
+    ) -> list[EventEnvelope]:
+        from agent_core.domain.events import validate_event_window
+
+        validate_event_window(session_ids, since, until, after, limit)
+        for session_id in session_ids:
+            await self._sessions.get(session_id, principal)
+        async with self._lock:
+            records = [
+                event
+                for session_id in session_ids
+                for event in self._events[session_id]
+                if since <= event.created_at < until
+                and (after is None or (event.created_at, event.id) > after)
+            ]
+            records.sort(key=lambda event: (event.created_at, event.id))
+            return [event.model_copy(deep=True) for event in records[:limit]]
 
     async def list_after(
         self,
@@ -671,6 +729,7 @@ class InMemoryToolInvocationRepository:
     def __init__(self, runs: RunRepository) -> None:
         self._runs = runs
         self._invocations: dict[UUID, ToolInvocation] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._idempotency: dict[tuple[UUID, str], UUID] = {}
         self._lock = asyncio.Lock()
 
@@ -680,6 +739,8 @@ class InMemoryToolInvocationRepository:
         if lease is not None:
             raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
+            if invocation.run_id in self._people_erased_runs:
+                raise RunCancelledError("People erasure fenced tool invocation writes")
             if invocation.id in self._invocations:
                 raise ConflictError("tool invocation already exists")
             key = (invocation.run_id, invocation.idempotency_key)
@@ -742,6 +803,8 @@ class InMemoryToolInvocationRepository:
                 )
             if invocation.id != invocation_id or invocation.run_id != current.run_id:
                 raise ConflictError("tool invocation identity cannot change")
+            if current.run_id in self._people_erased_runs:
+                raise RunCancelledError("People erasure fenced tool invocation writes")
             if invocation.status not in ALLOWED_TOOL_TRANSITIONS[current.status]:
                 raise ConflictError(
                     f"invalid tool transition {current.status.value}->{invocation.status.value}"
@@ -980,6 +1043,7 @@ class InMemoryPolicyProfileRepository:
 class InMemoryCheckpointRepository:
     def __init__(self) -> None:
         self._checkpoints: dict[UUID, list[tuple[RunCheckpoint, bool]]] = defaultdict(list)
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
     async def write(
@@ -993,6 +1057,12 @@ class InMemoryCheckpointRepository:
         if lease is not None:
             raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
+            if run_id in self._people_erased_runs:
+                if checkpoint.status in TERMINAL_RUN_STATUSES:
+                    # Finalization may advance the run without restoring its
+                    # erased checkpoint contents or creating a resumable state.
+                    return checkpoint.version
+                raise RunCancelledError("People erasure fenced checkpoint writes")
             rows = self._checkpoints[run_id]
             expected = rows[-1][0].version + 1 if rows else 1
             if checkpoint.version != expected:
@@ -1218,6 +1288,7 @@ class InMemoryExportConsentRepository:
 class InMemoryTrajectoryExportRepository:
     def __init__(self) -> None:
         self._rows: dict[UUID, TrajectoryExport] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
     async def get_for_run(self, run_id: UUID) -> TrajectoryExport | None:
@@ -1227,6 +1298,12 @@ class InMemoryTrajectoryExportRepository:
 
     async def create(self, export: TrajectoryExport) -> TrajectoryExport:
         async with self._lock:
+            if (erased_at := self._people_erased_runs.get(export.run_id)) is not None:
+                export = export.model_copy(
+                    update={
+                        "artifact": export.artifact.model_copy(update={"expires_at": erased_at})
+                    }
+                )
             existing = self._rows.get(export.run_id)
             if existing is not None:
                 return existing.model_copy(deep=True)
@@ -1286,10 +1363,15 @@ class InMemoryTrajectoryExportRepository:
 class InMemoryArtifactRepository:
     def __init__(self) -> None:
         self._rows: dict[UUID, ArtifactRef] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, artifact: ArtifactRef) -> ArtifactRef:
         async with self._lock:
+            if artifact.run_id is not None and artifact.origin != "upload":
+                erased_at = self._people_erased_runs.get(artifact.run_id)
+                if erased_at is not None:
+                    artifact = artifact.model_copy(update={"expires_at": erased_at})
             existing = self._rows.get(artifact.id)
             if existing is not None and existing != artifact:
                 raise ConflictError("artifact id already exists with different metadata")
@@ -1330,6 +1412,8 @@ class InMemoryArtifactRepository:
                 or artifact.principal_id != principal.principal_id
             ):
                 raise NotFoundError("artifact not found")
+            if artifact.origin != "upload" and artifact.run_id in self._people_erased_runs:
+                raise RunCancelledError("People erasure fenced knowledge retention")
             retained = artifact.model_copy(
                 update={"origin": "knowledge_source", "expires_at": None}, deep=True
             )
@@ -1346,6 +1430,8 @@ class InMemoryArtifactRepository:
                 or artifact.principal_id != principal.principal_id
             ):
                 raise NotFoundError("artifact not found")
+            if artifact.origin != "upload" and artifact.run_id in self._people_erased_runs:
+                expired_at = min(expired_at, self._people_erased_runs[artifact.run_id])
             expired = artifact.model_copy(update={"expires_at": expired_at}, deep=True)
             self._rows[artifact_id] = expired
             return expired.model_copy(deep=True)

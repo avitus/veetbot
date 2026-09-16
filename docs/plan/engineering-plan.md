@@ -4089,6 +4089,33 @@ hosted review and authorized production delivery. The verified ceiling remains 1
 Private in-call tools, automatic bookings or payments, transfers, SMS, campaigns
 and automatic call-derived memory remain excluded.
 
+### Milestone 28: People and relationship memory
+
+The owner authorized implementation on 2026-09-15 under ADR-0100. Implement
+[people-and-relationships.md](people-and-relationships.md): stable owner-scoped
+person identity and reversible repairs; directed temporal relationships and
+bounded organization references; source-backed facts, interactions and
+commitments; indexed cross-session history; shared governed Chat/Email recall;
+scoped People APIs, native browsing and correction; complete erasure, bounded
+imports and version-bound quality evidence. The design declares 36 gates. ADR-0101 makes all implemented People functionality
+available by default without evaluation artifacts; quality evidence measures
+completion and does not control runtime availability or release.
+
+This admits the People-specific portion of roadmap B6, including a relational
+temporal graph with one-hop retrieval and person-linked history. Direct
+owner-stated kinship and owner-confirmed identity persist until corrected,
+retracted or erased; other current claims retain applicable evidence horizons.
+The existing memory HTTP collection remains read-only; People-specific writes
+are explicit governed capabilities. Automatic email learning retains its
+ninety-day boundary; older imports require explicit source/date/budget scope.
+
+Completion requires every declared gate and inherited suite, both repository
+adapters, all Apple lanes, comparative and private owner evaluation, and exact
+head hosted CI/review plus separately authorized production delivery evidence.
+The verified sequential ceiling stays at Milestone 12. New source providers,
+general graph inference, arbitrary history mining, external enrichment,
+automatic outreach and automatic persona changes remain outside this milestone.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4104,7 +4131,7 @@ owner's current ranking, not a schedule.
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
-| B6 | Memory residue after Milestone 22: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation. The persona surface entered as Milestone 22 on 2026-09-01 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
+| B6 | Memory residue after Milestone 28: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, general graph inference and arbitrary session-history/artifact retrieval, belief merge and global consolidation. Excludes the bounded People relational temporal graph, one-hop retrieval and person-linked history admitted by Milestone 28 (ADR-0100); the persona surface entered as Milestone 22 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 24 on 2026-08-26 (ADR-0081); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |

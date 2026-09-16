@@ -66,6 +66,7 @@ nav:
   - Current Milestone: plan/current-milestone.md
   - Bland Calling Proposal: bland-calling-proposal.md
   - Bland Calling Setup: bland-setup.md
+  - People Memory Operations: people-operations.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
       - Bland Calling: plan/bland-calling.md
@@ -79,6 +80,7 @@ nav:
       - Tool System: plan/tool-system.md
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
+      - People and Relationship Memory: plan/people-and-relationships.md
       - Evaluation Harness: plan/evaluation-harness.md
       - Runtime Loop: plan/runtime-loop.md
       - HTTP API & Streaming: plan/http-api-and-streaming.md
@@ -218,4 +220,7 @@ nav:
       - ADR-0096 Ninety-day email catch-up: adr/0096-bounded-email-catch-up.md
       - ADR-0097 Bland calling and public receptionist: adr/0097-bland-calling-and-public-receptionist.md
       - ADR-0098 Automatic browser site resources: adr/0098-automatic-browser-site-resources.md
+      - ADR-0099 Verifiable approval argument redaction: adr/0099-verifiable-approval-argument-redaction.md
+      - ADR-0100 People and relationship memory: adr/0100-people-and-relationship-memory.md
+      - ADR-0101 People availability: adr/0101-people-availability-without-evaluation-gates.md
   - Changelog: changelog.md

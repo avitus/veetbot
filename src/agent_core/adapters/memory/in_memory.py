@@ -9,7 +9,8 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
+from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeChunk,
@@ -29,12 +30,14 @@ from agent_core.domain.memory import (
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
+    Portability,
     RecallQuery,
     RecallTrace,
     RecallTraceView,
     Sensitivity,
     TracedBelief,
     TracedPassage,
+    TracedPersonContext,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
@@ -42,6 +45,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
+from agent_core.ports.people import PeopleStore
 
 _LIVE_MEMORY = frozenset({MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL})
 
@@ -149,16 +153,67 @@ class InMemoryIntegratedEpisodeStore:
                 )
             return len(ids)
 
+    async def fence_for_erasure(self, principal: Principal, session_ids: Sequence[UUID]) -> int:
+        count = 0
+        for session_id in set(session_ids):
+            count += await self.delete_for_session(session_id, principal)
+        return count
+
+    async def purge_erased(self, principal: Principal) -> bool:
+        return False
+
 
 class InMemoryMemoryStore:
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
         self._records: dict[UUID, MemoryRecord] = {}
+        self._history: dict[UUID, list[tuple[datetime, MemoryRecord]]] = {}
         self._rejections: dict[UUID, BeliefRejection] = {}
         self._consolidations: dict[UUID, ConsolidationRun] = {}
         self._watermarks: dict[tuple[str, str, UUID], int] = {}
         self._position = 0
+        self._erasure_pending: set[UUID] = set()
         self._lock = asyncio.Lock()
+
+    def _remember_revision(self, record: MemoryRecord) -> None:
+        revisions = self._history.setdefault(record.id, [])
+        if not revisions or revisions[-1][1] != record:
+            revisions.append((self._clock.now(), record.model_copy(deep=True)))
+
+    async def get_at(
+        self, belief_id: UUID, principal: Principal, *, known_at: datetime
+    ) -> MemoryRecord:
+        async with self._lock:
+            current = self._records.get(belief_id)
+            if (
+                current is None
+                or belief_id in self._erasure_pending
+                or (current.tenant_id, current.principal_id)
+                != (
+                    principal.tenant_id,
+                    principal.principal_id,
+                )
+            ):
+                raise NotFoundError("memory not found")
+            historical = next(
+                (
+                    record
+                    for at, record in reversed(self._history.get(belief_id, []))
+                    if at <= known_at
+                ),
+                None,
+            )
+            if historical is None:
+                raise NotFoundError("memory was not recorded at this time")
+            return historical.model_copy(
+                update={
+                    "sensitivity": max(
+                        (current.sensitivity, historical.sensitivity),
+                        key=SENSITIVITY_ORDER.__getitem__,
+                    )
+                },
+                deep=True,
+            )
 
     async def next_position(self) -> int:
         async with self._lock:
@@ -171,7 +226,8 @@ class InMemoryMemoryStore:
                 (
                     record.store_position
                     for record in self._records.values()
-                    if record.tenant_id == principal.tenant_id
+                    if record.id not in self._erasure_pending
+                    and record.tenant_id == principal.tenant_id
                     and record.principal_id == principal.principal_id
                 ),
                 default=0,
@@ -180,9 +236,13 @@ class InMemoryMemoryStore:
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord:
         async with self._lock:
             record = self._records.get(belief_id)
-            if record is None or (
-                record.tenant_id != principal.tenant_id
-                or record.principal_id != principal.principal_id
+            if (
+                record is None
+                or belief_id in self._erasure_pending
+                or (
+                    record.tenant_id != principal.tenant_id
+                    or record.principal_id != principal.principal_id
+                )
             ):
                 raise NotFoundError("memory not found")
             return record.model_copy(deep=True)
@@ -194,7 +254,41 @@ class InMemoryMemoryStore:
         async with self._lock:
             result = []
             for record in self._records.values():
+                if record.id in self._erasure_pending:
+                    continue
                 if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
+                    continue
+                if query.known_at is not None:
+                    historical = next(
+                        (
+                            row
+                            for at, row in reversed(self._history.get(record.id, []))
+                            if at <= query.known_at
+                        ),
+                        None,
+                    )
+                    if (
+                        historical is None
+                        or (
+                            SENSITIVITY_ORDER[record.sensitivity]
+                            > SENSITIVITY_ORDER[query.sensitivity_ceiling]
+                        )
+                        or (
+                            record.portability is Portability.LOCAL
+                            and record.scope != query.current_scope
+                            and record.subject.casefold() not in subjects
+                        )
+                    ):
+                        continue
+                    record = historical.model_copy(
+                        update={
+                            "sensitivity": max(
+                                (record.sensitivity, historical.sensitivity),
+                                key=SENSITIVITY_ORDER.__getitem__,
+                            )
+                        }
+                    )
+                if query.include_ids is not None and record.id not in query.include_ids:
                     continue
                 if record.store_position <= query.min_store_position:
                     continue
@@ -227,6 +321,8 @@ class InMemoryMemoryStore:
                     continue
                 if (
                     (query.text is not None or subjects or query.structured_belief_types)
+                    and query.include_ids is None
+                    and record.id not in query.expand_ids
                     and record.subject.casefold() not in subjects
                     and record.belief_type not in query.structured_belief_types
                 ):
@@ -248,7 +344,8 @@ class InMemoryMemoryStore:
             return [
                 record.model_copy(deep=True)
                 for record in self._records.values()
-                if record.tenant_id == tenant_id
+                if record.id not in self._erasure_pending
+                and record.tenant_id == tenant_id
                 and record.principal_id == principal_id
                 and record.subject.casefold() == subject.casefold()
                 and record.belief_type is belief_type
@@ -257,18 +354,22 @@ class InMemoryMemoryStore:
 
     async def upsert_belief(self, belief: MemoryRecord) -> MemoryRecord:
         async with self._lock:
+            if belief.id in self._erasure_pending:
+                raise ConflictError("memory is fenced for erasure")
             existing = self._records.get(belief.id)
             if existing is not None and existing != belief:
                 raise ConflictError("memory id identifies different content")
             self._records[belief.id] = belief.model_copy(deep=True)
+            self._remember_revision(belief)
             self._position = max(self._position, belief.store_position)
             return belief.model_copy(deep=True)
 
     async def reinforce(self, belief: MemoryRecord) -> MemoryRecord:
         async with self._lock:
-            if belief.id not in self._records:
+            if belief.id not in self._records or belief.id in self._erasure_pending:
                 raise NotFoundError("memory not found")
             self._records[belief.id] = belief.model_copy(deep=True)
+            self._remember_revision(belief)
             self._position = max(self._position, belief.store_position)
             return belief.model_copy(deep=True)
 
@@ -277,12 +378,16 @@ class InMemoryMemoryStore:
     ) -> tuple[MemoryRecord, MemoryRecord]:
         async with self._lock:
             existing = self._records.get(current.id)
-            if existing is None:
+            if existing is None or current.id in self._erasure_pending:
                 raise NotFoundError("memory not found")
+            if replacement.id in self._records:
+                raise ConflictError("replacement memory already exists")
             if existing.status not in _LIVE_MEMORY:
                 raise ConflictError("memory was already inactive")
             self._records[current.id] = current.model_copy(deep=True)
+            self._remember_revision(current)
             self._records[replacement.id] = replacement.model_copy(deep=True)
+            self._remember_revision(replacement)
             self._position = max(self._position, current.store_position, replacement.store_position)
             return current.model_copy(deep=True), replacement.model_copy(deep=True)
 
@@ -298,7 +403,8 @@ class InMemoryMemoryStore:
             records = [
                 record
                 for record in self._records.values()
-                if record.tenant_id == principal.tenant_id
+                if record.id not in self._erasure_pending
+                and record.tenant_id == principal.tenant_id
                 and record.principal_id == principal.principal_id
                 and (include_inactive or record.status in _LIVE_MEMORY)
                 and (session_id is None or record.source_session_id == session_id)
@@ -318,6 +424,8 @@ class InMemoryMemoryStore:
         async with self._lock:
             result = []
             for record in self._records.values():
+                if record.id in self._erasure_pending:
+                    continue
                 if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
                     continue
                 if SENSITIVITY_ORDER[record.sensitivity] > SENSITIVITY_ORDER[query.ceiling]:
@@ -357,10 +465,15 @@ class InMemoryMemoryStore:
             records = [
                 record
                 for record in self._records.values()
-                if record.tenant_id == principal.tenant_id
+                if record.id not in self._erasure_pending
+                and record.tenant_id == principal.tenant_id
                 and record.principal_id == principal.principal_id
                 and record.status in _LIVE_MEMORY
                 and record.last_evidence_at <= evidence_before
+                and (
+                    decay_confidence_ceiling is None
+                    or record.lifecycle_policy_version != "people-lifecycle@1"
+                )
                 and (
                     decay_confidence_ceiling is None
                     or record.status is MemoryStatus.PROVISIONAL
@@ -376,34 +489,90 @@ class InMemoryMemoryStore:
         del edit
         async with self._lock:
             current = self._records.get(belief_id)
-            if current is None or (
-                current.tenant_id != principal.tenant_id
-                or current.principal_id != principal.principal_id
+            if (
+                current is None
+                or belief_id in self._erasure_pending
+                or (
+                    current.tenant_id != principal.tenant_id
+                    or current.principal_id != principal.principal_id
+                )
             ):
                 raise NotFoundError("memory not found")
             self._records[belief_id] = edited.model_copy(deep=True)
+            self._remember_revision(edited)
             self._position = max(self._position, edited.store_position)
             return edited.model_copy(deep=True)
+
+    def _erase_rejections(self, principal: Principal, belief_ids: set[UUID]) -> None:
+        for key, rejection in list(self._rejections.items()):
+            if (rejection.tenant_id, rejection.principal_id) == (
+                principal.tenant_id,
+                principal.principal_id,
+            ) and (rejection.belief_id in belief_ids or rejection.replacement_id in belief_ids):
+                self._rejections[key] = erased_rejection(rejection)
+
+    async def fence_for_erasure(self, principal: Principal, belief_ids: Sequence[UUID]) -> int:
+        async with self._lock:
+            owned = {
+                key
+                for key in belief_ids
+                if key in self._records
+                and (self._records[key].tenant_id, self._records[key].principal_id)
+                == (principal.tenant_id, principal.principal_id)
+            }
+            count = len(owned - self._erasure_pending)
+            self._erasure_pending.update(owned)
+            self._erase_rejections(principal, owned)
+            return count
+
+    async def purge_erased(
+        self, principal: Principal, belief_ids: Sequence[UUID], *, operation_id: UUID
+    ) -> int:
+        if len(belief_ids) > 256:
+            raise ValueError("memory erasure batches contain at most 256 beliefs")
+        async with self._lock:
+            count = 0
+            for key in set(belief_ids) & self._erasure_pending:
+                record = self._records.get(key)
+                if record is None or (record.tenant_id, record.principal_id) != (
+                    principal.tenant_id,
+                    principal.principal_id,
+                ):
+                    continue
+                tombstone = memory_erasure_tombstone(record, operation_id, self._clock.now())
+                self._rejections[tombstone.id] = tombstone
+                del self._records[key]
+                self._history.pop(key, None)
+                self._erasure_pending.discard(key)
+                count += 1
+            return count
 
     async def delete(
         self, belief_id: UUID, principal: Principal, tombstone: BeliefRejection
     ) -> None:
         async with self._lock:
             current = self._records.get(belief_id)
-            if current is None or (
-                current.tenant_id != principal.tenant_id
-                or current.principal_id != principal.principal_id
+            if (
+                current is None
+                or belief_id in self._erasure_pending
+                or (
+                    current.tenant_id != principal.tenant_id
+                    or current.principal_id != principal.principal_id
+                )
             ):
                 raise NotFoundError("memory not found")
             del self._records[belief_id]
-            self._rejections[tombstone.id] = tombstone.model_copy(deep=True)
+            self._history.pop(belief_id, None)
+            self._erase_rejections(principal, {belief_id})
+            self._rejections[tombstone.id] = erased_rejection(tombstone)
 
     async def reject(self, rejection: BeliefRejection, updated: MemoryRecord) -> MemoryRecord:
         async with self._lock:
-            if updated.id not in self._records:
+            if updated.id not in self._records or updated.id in self._erasure_pending:
                 raise NotFoundError("memory not found")
             self._rejections[rejection.id] = rejection.model_copy(deep=True)
             self._records[updated.id] = updated.model_copy(deep=True)
+            self._remember_revision(updated)
             self._position = max(self._position, updated.store_position)
             return updated.model_copy(deep=True)
 
@@ -459,7 +628,8 @@ class InMemoryMemoryStore:
         async with self._lock:
             for belief_id, record in list(self._records.items()):
                 if (
-                    record.tenant_id != principal.tenant_id
+                    record.id in self._erasure_pending
+                    or record.tenant_id != principal.tenant_id
                     or record.principal_id != principal.principal_id
                     or record.status not in _LIVE_MEMORY
                     or record.expires_at is None
@@ -480,17 +650,52 @@ class InMemoryMemoryStore:
                     }
                 )
                 self._records[belief_id] = updated
+                self._remember_revision(updated)
                 expired.append(updated.model_copy(deep=True))
         return expired
 
 
 class InMemoryTraceStore:
-    def __init__(self) -> None:
+    def __init__(self, people: PeopleStore | None = None) -> None:
+        self._people = people
         self._traces: dict[UUID, RecallTrace] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
+
+    async def erase_people(
+        self, principal: Principal, record_ids: Sequence[UUID], belief_ids: Sequence[UUID] = ()
+    ) -> int:
+        async with self._lock:
+            return self.erase_people_locked(principal, record_ids, belief_ids)
+
+    def erase_people_locked(
+        self, principal: Principal, record_ids: Sequence[UUID], belief_ids: Sequence[UUID] = ()
+    ) -> int:
+        records, beliefs = set(record_ids), set(belief_ids)
+        doomed = [
+            key
+            for key, trace in self._traces.items()
+            if (trace.tenant_id, trace.principal_id)
+            == (principal.tenant_id, principal.principal_id)
+            and (
+                any(
+                    ({item.record_id, *item.person_ids, *item.source_ids} & records)
+                    for item in trace.people
+                )
+                or beliefs & set(trace.returned)
+                or beliefs & set(trace.query.include_ids or ())
+                or beliefs & set(trace.query.expand_ids)
+                or records & set(trace.query.people_scope or ())
+            )
+        ]
+        for key in doomed:
+            del self._traces[key]
+        return len(doomed)
 
     async def record(self, trace: RecallTrace) -> None:
         async with self._lock:
+            if trace.run_id in self._people_erased_runs:
+                raise RunCancelledError("People erasure fenced recall trace writes")
             existing = self._traces.get(trace.id)
             if existing is not None and existing != trace:
                 raise ConflictError("trace id identifies different content")
@@ -567,6 +772,7 @@ class InMemoryTraceStore:
         ceiling = Sensitivity(viewing_ceiling)
         traces = await self.for_turn(turn_id)
         beliefs: list[TracedBelief] = []
+        people: list[TracedPersonContext] = []
         passages: list[TracedPassage] = []
         considered = 0
         withheld = 0
@@ -604,10 +810,17 @@ class InMemoryTraceStore:
                 for passage in trace.passages
                 if SENSITIVITY_ORDER[passage.sensitivity] <= effective
             )
+            if self._people is not None:
+                owner = Principal(tenant_id=trace.tenant_id, principal_id=trace.principal_id)
+                for person_item in trace.people:
+                    live = await self._people.get(owner, person_item.record_id, ceiling=ceiling)
+                    if live is not None and SENSITIVITY_ORDER[person_item.sensitivity] <= effective:
+                        people.append(person_item)
         return RecallTraceView(
             turn_id=turn_id,
             moments=[trace.moment for trace in traces],
             beliefs=beliefs,
+            people=people[:20],
             passages=passages,
             considered_not_shown=considered,
             withheld_by_safety=withheld,
@@ -634,11 +847,17 @@ class InMemoryKnowledgeStore:
         self._clock = clock
         self._documents: dict[UUID, KnowledgeDocument] = {}
         self._chunks: dict[str, KnowledgeChunk] = {}
+        self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
     async def ingest(self, prepared: KnowledgeIngestPrepared) -> None:
         async with self._lock:
             document = prepared.document
+            if (
+                document.source_ref.origin != "upload"
+                and document.source_ref.run_id in self._people_erased_runs
+            ):
+                raise RunCancelledError("People erasure fenced knowledge ingestion")
             if document.row_id in self._documents:
                 raise ConflictError("knowledge document row already exists")
             if any(

@@ -479,7 +479,7 @@ What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:1095-1096` and the resolve at
-`policy-and-approvals.md:1105`, and one reference in
+`policy-and-approvals.md:1122`, and one reference in
 `runtime-loop.md:1192` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4422-4499`
+Section 28 of the plan is not empty — `engineering-plan.md:4449-4526`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -580,7 +580,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1427`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4497` requires a container-escape attempt as
+    `engineering-plan.md:4524` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -987,7 +987,7 @@ review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1812`, and the sibling join
 at `runtime-loop.md:1150` reads it. Restricted context is
-`context-engine.md:339`, where `runs.seed_event_sequence` is nullable
+`context-engine.md:345`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:96`, which
@@ -1544,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4501-4658` for links to other documents returned
+`engineering-plan.md:4528-4685` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1765,7 +1765,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2642` against
-    `model-gateway.md:1810` and `milestone-map.md:1737`. The map
+    `model-gateway.md:1810` and `milestone-map.md:1782`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1774,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4497` requires a test the harness's case set
+    `engineering-plan.md:4524` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1886,3 +1886,16 @@ external verification requirements rather than design omissions.
 The owner approved [bland-calling.md](bland-calling.md) on 2026-09-11 under
 ADR-0097. Fourteen gates are registered. This independent workstream remains
 in progress; number setup and authorized live evidence are required for activation.
+
+## Milestone 28: People and relationship memory
+
+The owner authorized the complete People implementation plan on 2026-09-15
+under ADR-0100. [people-and-relationships.md](people-and-relationships.md)
+specifies 36 registered gates for identity, temporal relationships, cross-session
+history, governed formation/retrieval, source-aware correction and erasure,
+and a shared native People surface. This admits only the People-specific B6
+residue. Gate bindings remain pending until executable implementation evidence
+lands; no quality or production requirement is marked complete by admission.
+
+ADR-0101 makes all implemented People features available by default. Pending
+quality measurements do not gate runtime functionality or release.

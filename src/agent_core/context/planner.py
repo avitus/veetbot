@@ -14,7 +14,12 @@ from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import build_prefix, prefix_bytes
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
-from agent_core.domain.errors import ConflictError, ContextOverflow
+from agent_core.domain.errors import (
+    ConflictError,
+    ContextOverflow,
+    NotFoundError,
+    RunCancelledError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
@@ -36,7 +41,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@8"
+BUILDER_VERSION = "context-builder@10"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
@@ -108,6 +113,15 @@ class EventContextPlanner:
 
     async def current(self, session_id: UUID) -> ContextPlan | None:
         cached = self._cache.get(session_id)
+        if cached is not None and cached.memory_snapshot and cached.snapshot_id is not None:
+            async with self._uow_factory() as uow:
+                try:
+                    await uow.traces.get(cached.snapshot_id, self._principal)
+                except NotFoundError:
+                    # The durable plan event supplies its sanitized predecessor
+                    # and epoch; a cache cannot outlive source erasure.
+                    self._cache.pop(session_id, None)
+                    cached = None
         if cached is not None:
             self._cache.move_to_end(session_id)
             return cached.model_copy(deep=True)
@@ -133,6 +147,14 @@ class EventContextPlanner:
         if not plans:
             return None
         plan = max(plans, key=lambda candidate: candidate.epoch)
+        if plan.memory_snapshot and plan.snapshot_id is not None:
+            async with self._uow_factory() as uow:
+                try:
+                    await uow.traces.get(plan.snapshot_id, self._principal)
+                except NotFoundError:
+                    # Keep the recorded hash and epoch so plan() rotates the
+                    # prefix instead of reusing an untraceable snapshot.
+                    plan = plan.model_copy(update={"memory_snapshot": "", "snapshot_id": None})
         self._remember(plan)
         return plan.model_copy(deep=True)
 
@@ -328,20 +350,30 @@ class EventContextPlanner:
         configured_order = {
             name: index for index, name in enumerate(dict.fromkeys(agent.enabled_tools))
         }
-        tools = sorted(
-            sorted(
-                tools,
-                key=lambda tool: (
-                    configured_order.get(tool.name, len(configured_order)),
-                    tool.name,
-                ),
-            )[:maximum_tools],
-            key=lambda tool: tool.name,
+        candidates = sorted(
+            tools,
+            key=lambda tool: (configured_order.get(tool.name, len(configured_order)), tool.name),
         )
+        model_id = f"{model.provider}:{model.model}"
+        selected_tools: list[ToolSpec] = []
+        for tool in candidates:
+            if len(selected_tools) == maximum_tools:
+                break
+            proposed = sorted([*selected_tools, tool], key=lambda item: item.name)
+            if tool.name not in configured_order:
+                proposed_prefix = build_prefix(agent, proposed)
+                token_count = self._estimator.estimate(
+                    proposed_prefix[2:], model_id
+                ) + self._estimator.estimate_tools(proposed, model_id)
+                if token_count > int(tool_config["max_tokens"]):
+                    continue
+            # Explicit capabilities still fail at plan time if they cannot fit.
+            # Discovery fills only the remaining item and token capacity.
+            selected_tools.append(tool)
+        tools = sorted(selected_tools, key=lambda tool: tool.name)
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
-        model_id = f"{model.provider}:{model.model}"
         base_prefix = build_prefix(agent, tools)
         persona_prefix = build_prefix(agent, tools, persona=persona_text)
         catalog_prefix = build_prefix(agent, tools, catalog_metadata, persona=persona_text)
@@ -390,7 +422,9 @@ class EventContextPlanner:
                 moment=RecallMoment.SNAPSHOT.value,
                 measure_rendered_tokens=measure_memory_tokens,
             )
-        memory_snapshot = "" if snapshot is None or not snapshot.items else snapshot.rendered
+        memory_snapshot = (
+            "" if snapshot is None or not (snapshot.items or snapshot.people) else snapshot.rendered
+        )
         prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot, persona=persona_text)
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
@@ -504,7 +538,14 @@ class EventContextPlanner:
         candidate_reason = reason
         for _attempt in range(MAX_PLAN_APPEND_ATTEMPTS):
             derivation_key = f"context.plan:{candidate.session_id}:{candidate.epoch}"
-            async with self._uow_factory() as uow:
+            async with self._uow_factory() as uow, uow.people.lock(self._principal):
+                if candidate.memory_snapshot and candidate.snapshot_id is not None:
+                    try:
+                        await uow.traces.get(candidate.snapshot_id, self._principal)
+                    except NotFoundError as exc:
+                        raise RunCancelledError(
+                            "memory snapshot was erased before plan persistence"
+                        ) from exc
                 event = await uow.events.append(
                     NewEvent(
                         session_id=candidate.session_id,

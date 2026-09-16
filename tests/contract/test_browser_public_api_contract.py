@@ -225,6 +225,7 @@ class UnexpectedValueErrorSessions(Sessions):
 
 def settings() -> Settings:
     return Settings(
+        people_enabled=False,  # This fixture supplies only the browser public services.
         database_url="postgresql+asyncpg://unused/agent",
         deployment_mode=DeploymentMode.DEVELOPMENT,
         auth_mode=AuthMode.DEV,

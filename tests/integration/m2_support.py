@@ -29,6 +29,7 @@ def database_settings() -> Settings:
         config_dir=None,
         credentials=MappingProxyType({}),
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
+        people_enabled=False,  # Legacy suites opt into People in their own boundary cases.
     )
 
 
@@ -44,4 +45,5 @@ def memory_settings() -> Settings:
         config_dir=None,
         credentials=MappingProxyType({}),
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
+        people_enabled=False,  # Legacy suites opt into People in their own boundary cases.
     )

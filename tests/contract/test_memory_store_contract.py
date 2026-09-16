@@ -21,6 +21,7 @@ from agent_core.domain.memory import (
     lexical_term_lexemes,
     lexical_text_matches,
 )
+from agent_core.ports.memory import MemoryStore
 from tests.contract.memory_fixtures import browse_query, memory, recall_query
 from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
@@ -757,3 +758,202 @@ async def test_browse_keyset_predicate_walks_without_skipping_or_repeating_acros
     walked_ids = [record.id for record in (*page_one, *page_two, *page_three)]
     assert set(walked_ids) == {record.id for record in records.values()}
     assert len(walked_ids) == len(set(walked_ids))  # no repeats across the walk
+
+
+async def test_historical_memory_preserves_corrections_and_current_privacy() -> None:
+    clock = FixedClock(NOW)
+    store = InMemoryMemoryStore(clock)
+    await historical_memory_contract(store, clock)
+    assert not store._history
+
+
+async def historical_memory_contract(store: MemoryStore, clock: FixedClock) -> None:
+    value = memory()
+    await store.upsert_belief(value)
+    clock.advance(timedelta(days=2))
+    changed = value.model_copy(
+        update={
+            "statement": "Corrected statement",
+            "updated_at": clock.now(),
+            "sensitivity": Sensitivity.RESTRICTED,
+            "store_position": 2,
+        }
+    )
+    await store.reinforce(changed)
+    previous = await store.get_at(value.id, principal(), known_at=NOW + timedelta(days=1))
+    assert previous.statement == value.statement
+    assert previous.sensitivity == Sensitivity.RESTRICTED
+    assert (await store.get(value.id, principal())).statement == "Corrected statement"
+    with pytest.raises(NotFoundError):
+        await store.get_at(value.id, principal(), known_at=NOW - timedelta(seconds=1))
+    with pytest.raises(NotFoundError):
+        await store.get_at(
+            value.id, principal().model_copy(update={"principal_id": "other"}), known_at=NOW
+        )
+    await store.delete(
+        value.id,
+        principal(),
+        BeliefRejection(
+            id=UUID(int=999),
+            tenant_id=value.tenant_id,
+            principal_id=value.principal_id,
+            belief_id=value.id,
+            subject=value.subject,
+            belief_type=value.belief_type,
+            statement=value.statement,
+            kind=RejectionKind.DELETED,
+            created_at=clock.now(),
+            scope="user",
+            statement_sha256="0" * 64,
+        ),
+    )
+    with pytest.raises(NotFoundError):
+        await store.get_at(value.id, principal(), known_at=NOW)
+
+
+async def protected_people_decay_page_contract(store: MemoryStore) -> None:
+    from agent_core.domain.memory import MemoryLongevity
+
+    protected = memory(belief_id=9801).model_copy(
+        update={
+            "lifecycle_policy_version": "people-lifecycle@1",
+            "longevity": MemoryLongevity.DURABLE,
+            "confidence": 0.4,
+            "status": MemoryStatus.PROVISIONAL,
+        }
+    )
+    ordinary = memory(belief_id=9802).model_copy(
+        update={"confidence": 0.4, "status": MemoryStatus.PROVISIONAL}
+    )
+    protected = protected.model_copy(update={"store_position": await store.next_position()})
+    ordinary = ordinary.model_copy(update={"store_position": await store.next_position()})
+    await store.upsert_belief(protected)
+    await store.upsert_belief(ordinary)
+    selected = await store.list_idle(
+        principal(), evidence_before=NOW + timedelta(days=1), decay_confidence_ceiling=0.65, limit=1
+    )
+    assert [row.id for row in selected] == [ordinary.id]
+
+
+async def test_protected_people_do_not_starve_bounded_decay_pages() -> None:
+    await protected_people_decay_page_contract(_store())
+
+
+async def historical_recall_contract(store: MemoryStore, clock: FixedClock) -> None:
+    original = memory(belief_id=9850, statement="Maya enjoys astronomy").model_copy(
+        update={"subject": "Maya", "store_position": 51}
+    )
+    await store.upsert_belief(original)
+    clock.advance(timedelta(days=2))
+    await store.reinforce(
+        original.model_copy(
+            update={
+                "statement": "Maya enjoys ceramics",
+                "updated_at": clock.now(),
+                "store_position": 52,
+            }
+        )
+    )
+    query = recall_query(text="astronomy").model_copy(
+        update={
+            "known_at": NOW + timedelta(days=1),
+            "as_of": NOW,
+        }
+    )
+    rows = await store.query(query)
+    assert [row.statement for row in rows] == [original.statement]
+    assert await store.query(query.model_copy(update={"text": "ceramics"})) == []
+    assert (
+        await store.query(query.model_copy(update={"known_at": NOW - timedelta(seconds=1)})) == []
+    )
+    await store.reinforce(
+        original.model_copy(
+            update={
+                "sensitivity": Sensitivity.RESTRICTED,
+                "updated_at": clock.now(),
+                "store_position": 53,
+            }
+        )
+    )
+    assert (
+        await store.query(query.model_copy(update={"sensitivity_ceiling": Sensitivity.SENSITIVE}))
+        == []
+    )
+    assert await store.query(query.model_copy(update={"principal_id": "foreign"})) == []
+
+
+async def test_historical_recall_ranks_original_evidence_with_current_privacy() -> None:
+    clock = FixedClock(NOW)
+    await historical_recall_contract(InMemoryMemoryStore(clock), clock)
+
+
+async def memory_erasure_fence_contract(store: MemoryStore) -> None:
+    """An erasure fence hides every read before bounded physical cleanup runs."""
+    from uuid import uuid4
+
+    owner = principal()
+    target = memory(belief_id=7501)
+    survivor = memory(belief_id=7502).model_copy(
+        update={"subject": "Another person", "store_position": 2}
+    )
+    await store.upsert_belief(target)
+    await store.upsert_belief(survivor)
+    assert await store.fence_for_erasure(owner, [target.id]) == 1
+    for historical in (False, True):
+        with pytest.raises(NotFoundError):
+            if historical:
+                await store.get_at(target.id, owner, known_at=NOW)
+            else:
+                await store.get(target.id, owner)
+        query = recall_query(text="").model_copy(
+            update={
+                "include_ids": [target.id, survivor.id],
+                "known_at": NOW if historical else None,
+                "include_superseded": True,
+            }
+        )
+        assert [row.id for row in await store.query(query)] == [survivor.id]
+    assert target.id not in {
+        row.id for row in await store.list_memories(owner, include_inactive=True)
+    }
+    assert target.id not in {row.id for row in await store.browse(browse_query())}
+    assert (
+        await store.related(owner.tenant_id, owner.principal_id, target.subject, target.belief_type)
+        == []
+    )
+    with pytest.raises((ConflictError, NotFoundError)):
+        await store.reinforce(target.model_copy(update={"corroboration_count": 2}))
+    with pytest.raises((ConflictError, NotFoundError)):
+        await store.upsert_belief(target)
+    with pytest.raises((ConflictError, NotFoundError)):
+        await store.supersede(
+            survivor.model_copy(
+                update={
+                    "status": MemoryStatus.SUPERSEDED,
+                    "superseded_by": target.id,
+                    "valid_to": NOW,
+                    "store_position": 3,
+                }
+            ),
+            target.model_copy(update={"store_position": 4}),
+        )
+    assert await store.get(survivor.id, owner) == survivor
+    foreign = owner.model_copy(update={"principal_id": "foreign"})
+    assert await store.fence_for_erasure(foreign, [survivor.id]) == 0
+    operation = uuid4()
+    assert await store.purge_erased(foreign, [target.id], operation_id=operation) == 0
+    with pytest.raises(ValueError):
+        await store.purge_erased(owner, [target.id] * 257, operation_id=operation)
+    assert await store.purge_erased(owner, [target.id, survivor.id], operation_id=operation) == 1
+    assert await store.purge_erased(owner, [target.id], operation_id=operation) == 0
+    assert await store.get(survivor.id, owner) == survivor
+    tombstones = await store.outstanding_rejections(owner.tenant_id, owner.principal_id)
+    assert any(
+        row.belief_id == target.id and row.kind is RejectionKind.DELETED for row in tombstones
+    )
+    with pytest.raises(NotFoundError):
+        await store.get_at(target.id, owner, known_at=NOW)
+
+
+async def test_memory_erasure_fence_hides_all_reads_before_cleanup() -> None:
+    await memory_erasure_fence_contract(_store())

@@ -12,6 +12,19 @@ enum ConversationNavigationUITestFixture {
     static let scheduleID = "00000000-0000-0000-0000-000000000654"
     static let scheduleHistoryID = "00000000-0000-0000-0000-000000000656"
 
+    static func makeAppearanceIfRequested() -> AppearancePreferences? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument),
+            let rawSize = ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_TEXT_SIZE"],
+            let size = AppTextSize(rawValue: rawSize)
+        else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.appearance"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        defaults.removePersistentDomain(forName: suiteName)
+        let preferences = AppearancePreferences(defaults: defaults)
+        preferences.textSize = size
+        return preferences
+    }
+
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
@@ -120,6 +133,52 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let body: String
         let statusCode: Int
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/people"):
+            statusCode = 200
+            let second = Self.personJSON.replacingOccurrences(of: "000777", with: "000782").replacingOccurrences(of: "Maya", with: "Maya Chen")
+            body = "{\"items\":[\(Self.personJSON),\(second)],\"next_cursor\":null}"
+        case ("GET", "/v1/people/imports"):
+            statusCode = 200
+            body = #"{"items":[],"next_cursor":null}"#
+        case ("POST", "/v1/people/imports"):
+            statusCode = 200
+            let values = requestJSON()
+            let scope = values["scope"] as? [String: Any] ?? [:]
+            let scopeJSON = String(data: try! JSONSerialization.data(withJSONObject: scope), encoding: .utf8)!
+            let mailbox = scope["email_source"] as? String == "mailbox"
+            body = """
+            {"id":"00000000-0000-0000-0000-000000000784","revision":1,"state":"preview","scope":\(scopeJSON),"records_read":0,"mailbox_records_read":0,"mailbox_read_complete":false,"records_processed":0,"records_excluded":0,"failures":0,"spent_usd":"0","reserved_usd":"0","source_read_complete":false,"analysis_complete":false,"coverage":"\(mailbox ? "Selected mailbox history" : "Retained evidence only")"}
+            """
+        case ("POST", "/v1/people/00000000-0000-0000-0000-000000000777/forget"):
+            statusCode = 200
+            let applied = requestJSON()["phase"] as? String == "apply"
+            body = """
+            {"id":"00000000-0000-0000-0000-000000000785","revision":\(applied ? 2 : 1),"state":"\(applied ? "cleanup_pending" : "preview")","counts":{"beliefs":2,"interaction":1},"scope":"Forget derived memories about Maya. Original Chat and Email messages remain at their sources."}
+            """
+        case ("GET", "/v1/people/operations/00000000-0000-0000-0000-000000000785"):
+            statusCode = 200
+            body = #"{"id":"00000000-0000-0000-0000-000000000785","revision":3,"state":"completed","counts":{"beliefs":2,"interaction":1}}"#
+        case ("POST", "/v1/people/identity-operations"):
+            statusCode = 200
+            let applied = requestJSON()["operation"] as? String == "apply"
+            body = """
+            {"id":"00000000-0000-0000-0000-000000000783","revision":\(applied ? 2 : 1),"state":"\(applied ? "completed" : "preview")","operation":"merge","assignments":[{"entity_id":"00000000-0000-0000-0000-000000000780","expected_revision":1}]}
+            """
+        case ("GET", "/v1/people/00000000-0000-0000-0000-000000000777"):
+            statusCode = 200
+            body = """
+            {"person":\(Self.personJSON),"aliases":[],"relationships":[{"id":"00000000-0000-0000-0000-000000000779","revision":1,"subject":{"kind":"person","id":"00000000-0000-0000-0000-000000000777"},"object":{"kind":"owner"},"predicate":"sibling","qualifier":"","precision":"unknown","support_ids":["00000000-0000-0000-0000-000000000778"]}],"history":[],"commitments":[],"facts":[],"fact_revisions":{},"related_labels":{},"truncated":false,"coverage":"Recorded owner evidence; earlier history may be unavailable."}
+            """
+        case ("GET", "/v1/people/00000000-0000-0000-0000-000000000777/evidence/00000000-0000-0000-0000-000000000778"):
+            statusCode = 200
+            body = """
+            {"reference":"00000000-0000-0000-0000-000000000778","source_kind":"owner","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","event_sequence":10,"evidence_at":"2026-08-01T00:00:00Z","owner_assertion":"Maya is my sister."}
+            """
+        case ("GET", "/v1/people/00000000-0000-0000-0000-000000000777/identity-evidence"):
+            statusCode = 200
+            body = """
+            {"items":[{"id":"00000000-0000-0000-0000-000000000780","revision":1,"kind":"mention","label":"Subject mention · characters 0-4","support_ids":["00000000-0000-0000-0000-000000000778"],"unresolved":false},{"id":"00000000-0000-0000-0000-000000000781","revision":1,"kind":"memory_link","label":"Maya likes cycling.","support_ids":["00000000-0000-0000-0000-000000000778"],"unresolved":true}],"next_cursor":null}
+            """
         case ("GET", "/v1/email/learning"):
             statusCode = 200
             body = Self.learningJSON
@@ -223,6 +282,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = """
                 {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)],"next_cursor":null}
                 """
+        case ("POST", "/v1/sessions"):
+            statusCode = 201
+            body = Self.firstSessionJSON
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)"):
             statusCode = 200
             body = Self.firstSessionJSON
@@ -337,6 +399,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
         let isSubmission = request.httpMethod == "POST" && url.path.hasSuffix("/messages")
         let isRunStream = url.path == "/v1/runs/\(Self.runID)/events"
+        if slowChat && isSubmission && ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-hold-submission") {
+            // The keyboard test observes a pending request, independent of how
+            // long XCTest takes to query accessibility. Teardown cancels it.
+            return
+        }
         if slowChat && (isSubmission || isRunStream) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: deliver)
         } else {
@@ -438,6 +505,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let secondSessionJSON = """
         {"id":"\(ConversationNavigationUITestFixture.secondSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Second historical chat","metadata":{},"created_at":"2026-08-13T00:00:00Z","updated_at":"2026-08-13T00:04:00Z","active_run_id":null,"last_run_id":null}
+        """
+
+    private static let personJSON = """
+        {"id":"00000000-0000-0000-0000-000000000777","revision":1,"display_name":"Maya","state":"active","pinned":false,"sensitivity":"sensitive","support_ids":[]}
         """
 
     private static let memoryJSON = """

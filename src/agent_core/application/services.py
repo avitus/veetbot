@@ -19,6 +19,32 @@ from agent_core.domain.browser import (
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
+from agent_core.domain.people import (
+    PeopleErasure,
+    PeopleOperation,
+    PeopleRelationshipFilter,
+    Person,
+)
+from agent_core.domain.people_imports import (
+    PeopleImportCancel,
+    PeopleImportRequest,
+    PeopleImportView,
+)
+from agent_core.domain.people_views import (
+    CreatePerson,
+    LegacyPeopleLinkResult,
+    PeopleCorrectionRequest,
+    PeopleCorrectionResult,
+    PeopleErasureView,
+    PeopleEvidenceView,
+    PeopleForgetRequest,
+    PeopleIdentityRequest,
+    PeoplePage,
+    PeopleSectionPage,
+    PeopleSectionQuery,
+    PersonProfile,
+    UpdatePerson,
+)
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.schedules import (
     ScheduleDefinition,
@@ -377,6 +403,137 @@ class MemoryReadService(Protocol):
     async def get(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
     ) -> MemoryView: ...
+
+
+class PeopleErasureOperations(Protocol):
+    """Operator recovery remains available when People capture is disabled."""
+
+    async def export(
+        self,
+        principal: Principal,
+        receipt_id: UUID,
+    ) -> tuple[PeopleErasure, list[PeopleErasure]]: ...
+
+    async def reapply(
+        self,
+        principal: Principal,
+        receipt: PeopleErasure,
+        parts: list[PeopleErasure],
+        *,
+        session_id: UUID,
+    ) -> PeopleErasureView: ...
+
+    async def get(
+        self,
+        principal: Principal,
+        receipt_id: UUID,
+        *,
+        ceiling: Sensitivity,
+    ) -> PeopleErasureView: ...
+
+
+class PeopleService(Protocol):
+    async def link_existing(
+        self, principal: Principal, *, limit: int = 100, cursor: str | None = None
+    ) -> LegacyPeopleLinkResult: ...
+    async def list_imports(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[PeopleImportView]: ...
+
+    async def create_import(
+        self, principal: Principal, request: PeopleImportRequest, *, key: str, ceiling: Sensitivity
+    ) -> PeopleImportView: ...
+    async def get_import(
+        self, principal: Principal, job_id: UUID, *, ceiling: Sensitivity
+    ) -> PeopleImportView: ...
+    async def cancel_import(
+        self,
+        principal: Principal,
+        job_id: UUID,
+        request: PeopleImportCancel,
+        *,
+        ceiling: Sensitivity,
+        key: str,
+    ) -> PeopleImportView: ...
+
+    async def forget(
+        self,
+        principal: Principal,
+        person_id: UUID,
+        request: PeopleForgetRequest,
+        *,
+        key: str,
+        ceiling: Sensitivity,
+    ) -> PeopleErasureView: ...
+
+    async def correct(
+        self,
+        principal: Principal,
+        person_id: UUID,
+        request: PeopleCorrectionRequest,
+        *,
+        key: str,
+        ceiling: Sensitivity,
+    ) -> PeopleCorrectionResult: ...
+
+    async def identity_operation(
+        self,
+        principal: Principal,
+        request: PeopleIdentityRequest,
+        *,
+        key: str,
+        ceiling: Sensitivity,
+    ) -> PeopleOperation: ...
+    async def operation(
+        self, principal: Principal, operation_id: UUID, *, ceiling: Sensitivity
+    ) -> PeopleOperation | PeopleErasureView: ...
+
+    async def section(
+        self,
+        principal: Principal,
+        person_id: UUID,
+        request: PeopleSectionQuery,
+        *,
+        ceiling: Sensitivity,
+    ) -> PeopleSectionPage: ...
+    async def evidence(
+        self, principal: Principal, person_id: UUID, reference: UUID, *, ceiling: Sensitivity
+    ) -> PeopleEvidenceView: ...
+
+    async def create(
+        self, principal: Principal, request: CreatePerson, *, key: str, ceiling: Sensitivity
+    ) -> Person: ...
+    async def update(
+        self,
+        principal: Principal,
+        person_id: UUID,
+        request: UpdatePerson,
+        *,
+        key: str,
+        ceiling: Sensitivity,
+    ) -> Person: ...
+    async def get(
+        self, principal: Principal, person_id: UUID, *, ceiling: Sensitivity
+    ) -> PersonProfile: ...
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        text: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+        as_of: datetime | None = None,
+        state: str | None = None,
+        pinned: bool | None = None,
+        sort: str = "id",
+        relationship: PeopleRelationshipFilter | None = None,
+    ) -> PeoplePage: ...
 
 
 class PersonaService(Protocol):

@@ -22,6 +22,7 @@ from agent_core.api.calls import call_router
 from agent_core.api.email import email_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
+from agent_core.api.people import people_router
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
     BrowserLoginURLValidationError,
@@ -41,6 +42,7 @@ from agent_core.application.services import (
     EmailService,
     MemoryReadService,
     NotificationService,
+    PeopleService,
     PersonaService,
     RunService,
     ScheduleService,
@@ -188,6 +190,9 @@ class ApplicationServices(Protocol):
 
     @property
     def calls(self) -> CallingService | None: ...
+
+    @property
+    def people(self) -> PeopleService | None: ...
 
 
 class UpdatePersonaEntryRequest(BaseModel):
@@ -1580,6 +1585,9 @@ def create_app(
         """Read one memory through the principal's allowed retrieval ceiling."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
+
+    if settings.people_enabled and services.people is not None:
+        app.include_router(people_router(services.people, secured))
 
     if settings.memory_api_enabled:
         app.include_router(memory_router)

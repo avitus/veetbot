@@ -237,6 +237,15 @@ suite that can run locally, including integration if a database is up;
 integration suite from being quietly deleted from `check` the first
 time a laptop has no Docker.
 
+Integration tests use a disposable database. The per-test fixture clears prior
+synthetic application records before migration round trips too, considering only
+tables present in an empty or older schema and retaining `alembic_version`.
+Production downgrade guards remain enforced; tests of populated migrations
+create their own records after isolation and verify that data loss is refused.
+Large SQL fixtures refresh planner statistics between related-table insert
+stages inside one transaction and bound setup statements with a finite timeout.
+This keeps synthetic foreign-key validation from dominating the behavior tested.
+
 `db-up` waits. `docker compose up -d` returns as soon as the container
 is created, which is several seconds before PostgreSQL accepts
 connections, and a `make db-up migrate` that fails intermittently is

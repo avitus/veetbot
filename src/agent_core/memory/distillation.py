@@ -6,7 +6,8 @@ import asyncio
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Any, Literal, TypedDict
 from uuid import UUID
@@ -45,6 +46,7 @@ from agent_core.domain.messages import (
     TextPart,
     UserMessage,
 )
+from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.equivalence import (
     content_terms,
@@ -1133,6 +1135,7 @@ class NemoriAssistedCandidateExtractor:
     """Make three batched calls per segment, with deterministic fallback per stage."""
 
     name = NEMORI_EXTRACTOR_VERSION
+    policy_version = NEMORI_FORMATION_POLICY_VERSION
 
     def __init__(
         self,
@@ -1144,6 +1147,8 @@ class NemoriAssistedCandidateExtractor:
         ids: IdFactory,
         fallback: MemoryCandidateExtractor | None = None,
         timeout_seconds: float = DISTILLATION_TIMEOUT_SECONDS,
+        commit_guard: Callable[[RepositoryUnitOfWork], Awaitable[None]] | None = None,
+        source_isolated: bool = False,
     ) -> None:
         self._provider = provider
         self._resolved_model = resolved_model
@@ -1152,6 +1157,8 @@ class NemoriAssistedCandidateExtractor:
         self._ids = ids
         self._fallback = fallback or HighRecallCandidateExtractor()
         self._timeout_seconds = timeout_seconds
+        self._commit_guard = commit_guard
+        self._source_isolated = source_isolated
         self.last_audit = DistillationAudit(provider_calls=0)
 
     async def extract(
@@ -1162,6 +1169,7 @@ class NemoriAssistedCandidateExtractor:
         scope: str,
     ) -> list[MemoryCandidate] | MemoryExtractionResult:
         failures: dict[str, str] = {}
+        events = await self._eligible_events(events, principal)
         try:
             deterministic = list(
                 await self._fallback.extract(events, principal=principal, scope=scope)
@@ -1180,14 +1188,28 @@ class NemoriAssistedCandidateExtractor:
             return deterministic
 
         async with self._uow_factory() as uow:
-            live_memories = await uow.memories.list_memories(principal, limit=50)
+            live_memories = (
+                []
+                if self._source_isolated
+                else await uow.memories.list_memories(principal, limit=50)
+            )
             # The anticipation cue is the user's text before a segment's
             # earliest episode. A session's already-consolidated text is still
             # before it, so the cue reaches back past the watermark; without
             # that, every single-segment consolidation, which is nearly all of
             # them, ran anticipation with nothing to predict from.
-            history = await uow.events.list_after(selected[0].session_id, 0, principal)
-        prefix_pool = owned_user_events(history, principal)
+            if self._source_isolated:
+                history = []
+            elif self.policy_version == "formation@11":
+                history = await uow.events.list_after(
+                    selected[0].session_id,
+                    max(0, selected[0].sequence - 257),
+                    principal,
+                    limit=256,
+                )
+            else:
+                history = await uow.events.list_after(selected[0].session_id, 0, principal)
+        prefix_pool = await self._eligible_events(owned_user_events(history, principal), principal)
         # Anticipation is provider egress: a sensitive or restricted belief
         # stays out of the request, so it can neither be predicted from nor
         # attributed as redundancy.
@@ -1203,6 +1225,7 @@ class NemoriAssistedCandidateExtractor:
         stage_metrics: dict[str, dict[str, int | str | None]] = {}
         all_episodes: list[IntegratedEpisode] = []
         provider_candidates: list[MemoryCandidate] = []
+        people_interactions: list[InteractionEvidence] = []
         rejected_provider_candidates = 0
         coverage_counts: dict[str, int] = {}
         coverage_dispositions: dict[str, str] = {}
@@ -1301,7 +1324,10 @@ class NemoriAssistedCandidateExtractor:
                     ValueError("episode integration validation failed")
                 )
 
-            async with self._uow_factory() as uow:
+            async with self._uow_factory() as uow, self._episode_fence(uow, principal):
+                if len(await self._eligible_events(segment, principal, uow=uow)) != len(segment):
+                    failures["source_admission"] = "source_erased"
+                    continue
                 stored: list[IntegratedEpisode] = []
                 for episode in episodes:
                     try:
@@ -1351,7 +1377,7 @@ class NemoriAssistedCandidateExtractor:
             distilled_raw, failure, stage_metric = await self._call(
                 stage="prediction_error_distillation",
                 prompt=self._distillation_prompt(segment, episodes, anticipation, scope),
-                response_schema=_DistillationResponse.model_json_schema(),
+                response_schema=self._distillation_schema(),
                 principal=principal,
                 run_id=segment[-1].run_id,
             )
@@ -1361,7 +1387,7 @@ class NemoriAssistedCandidateExtractor:
                 provider_failure = provider_failure or failure
                 failures["prediction_error_distillation"] = failure.failure_kind
             try:
-                distilled = _DistillationResponse.model_validate_json(distilled_raw or "")
+                distilled, segment_interactions = self._parse_distillation(distilled_raw or "")
                 validation = _validate_coverage(
                     distilled,
                     coverage_units(segment),
@@ -1380,13 +1406,14 @@ class NemoriAssistedCandidateExtractor:
                     ValueError("prediction-error validation failed")
                 )
             else:
+                people_interactions.extend(segment_interactions)
                 segment_rejections = len(validation.ungrounded_candidates)
                 for index, distilled_candidate in enumerate(distilled.candidates):
                     if index in validation.ungrounded_candidates:
                         continue
                     try:
                         provider_candidates.append(
-                            _normalize_distilled_candidate(
+                            self._normalize_candidate(
                                 distilled_candidate,
                                 by_sequence=by_sequence,
                                 scope=scope,
@@ -1441,12 +1468,22 @@ class NemoriAssistedCandidateExtractor:
                 tuple(candidate.source_event_ids),
             )
             if key in seen:
+                if candidate.people is not None:
+                    for index, existing in enumerate(combined):
+                        if (
+                            existing.subject.casefold(),
+                            existing.statement.casefold(),
+                            tuple(existing.source_event_ids),
+                        ) == key and existing.people is None:
+                            combined[index] = candidate
                 return
             if semantic_deduplication:
                 for index, existing in enumerate(combined):
                     if not _candidates_semantically_duplicate(existing, candidate):
                         continue
-                    if _outranks(candidate, existing):
+                    if _outranks(candidate, existing) or (
+                        candidate.people is not None and existing.people is None
+                    ):
                         combined[index] = candidate
                         seen.add(key)
                     return
@@ -1473,7 +1510,54 @@ class NemoriAssistedCandidateExtractor:
             represented_unverified=represented_unverified,
             provider_stage_metrics=stage_metrics,
         )
-        return MemoryExtractionResult(combined, provider_failure=provider_failure)
+        return MemoryExtractionResult(
+            combined, provider_failure=provider_failure, people_interactions=people_interactions
+        )
+
+    @asynccontextmanager
+    async def _episode_fence(
+        self, uow: RepositoryUnitOfWork, principal: Principal
+    ) -> AsyncIterator[None]:
+        async with uow.people.lock(principal):
+            if self._commit_guard is not None:
+                await self._commit_guard(uow)
+            yield
+
+    async def _eligible_events(
+        self,
+        events: list[EventEnvelope],
+        principal: Principal,
+        *,
+        uow: RepositoryUnitOfWork | None = None,
+    ) -> list[EventEnvelope]:
+        from agent_core.domain.people_sources import source_id
+
+        if uow is None:
+            async with self._uow_factory() as owned:
+                return await self._eligible_events(events, principal, uow=owned)
+        if self._commit_guard is not None:
+            await self._commit_guard(uow)
+        eligible = []
+        for event in events:
+            if not await uow.people.source_suppressed(
+                principal, source_id(principal, event.session_id, event.sequence)
+            ):
+                eligible.append(event)
+        return eligible
+
+    @staticmethod
+    def _distillation_schema() -> dict[str, Any]:
+        return _DistillationResponse.model_json_schema()
+
+    @staticmethod
+    def _parse_distillation(raw: str) -> tuple[_DistillationResponse, list[InteractionEvidence]]:
+        return _DistillationResponse.model_validate_json(raw), []
+
+    @staticmethod
+    def _normalize_candidate(
+        candidate: _DistilledCandidate, *, by_sequence: dict[int, EventEnvelope], scope: str
+    ) -> MemoryCandidate:
+        return _normalize_distilled_candidate(candidate, by_sequence=by_sequence, scope=scope)
 
     async def _call(
         self,
@@ -1513,7 +1597,7 @@ class NemoriAssistedCandidateExtractor:
             ),
             metadata={
                 "execution_kind": "memory_distillation",
-                "formation_policy_version": NEMORI_FORMATION_POLICY_VERSION,
+                "formation_policy_version": self.policy_version,
                 "stage": stage,
             },
             timeout_seconds=self._timeout_seconds,
@@ -1761,4 +1845,113 @@ class NemoriAssistedCandidateExtractor:
             },
             separators=(",", ":"),
             sort_keys=True,
+        )
+
+
+class _PeopleDistilledCandidate(_DistilledCandidate):
+    people: PeopleClaim | None
+
+
+class _PeopleDistillationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidates: list[_PeopleDistilledCandidate] = Field(max_length=32)
+    coverage: list[_CoverageDisposition] = Field(min_length=1, max_length=512)
+    interactions: list[InteractionEvidence] = Field(max_length=32)
+
+    @model_validator(mode="after")
+    def bounded_people(self) -> _PeopleDistillationResponse:
+        mentions = [
+            mention
+            for candidate in self.candidates
+            if candidate.people
+            for mention in candidate.people.mentions
+        ]
+        mentions.extend(
+            mention for interaction in self.interactions for mention in interaction.mentions
+        )
+        if (
+            len(mentions)
+            + sum(
+                len(candidate.people.organizations)
+                for candidate in self.candidates
+                if candidate.people
+            )
+            > 64
+        ):
+            raise ValueError("People segment exceeds 64 evidence mentions")
+        counts: dict[int, int] = {}
+        for candidate in self.candidates:
+            for source in candidate.source_event_ids:
+                counts[source] = counts.get(source, 0) + 1
+        if any(count > 6 for count in counts.values()):
+            raise ValueError("People segment exceeds six claims per event")
+        return self
+
+
+class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
+    """Formation@11: one additional schema in the same three-call pipeline.
+
+    No People directory, stable identity, or sensitive memory is sent to the
+    provider. Every proposed identity is resolved locally against exact spans.
+    """
+
+    name = "people-assisted-v1"
+    policy_version = "formation@11"
+
+    @staticmethod
+    def _distillation_schema() -> dict[str, Any]:
+        return _PeopleDistillationResponse.model_json_schema()
+
+    @staticmethod
+    def _parse_distillation(raw: str) -> tuple[_DistillationResponse, list[InteractionEvidence]]:
+        response = _PeopleDistillationResponse.model_validate_json(raw)
+        return _DistillationResponse(
+            candidates=list(response.candidates), coverage=response.coverage
+        ), response.interactions
+
+    @staticmethod
+    def _normalize_candidate(
+        candidate: _DistilledCandidate, *, by_sequence: dict[int, EventEnvelope], scope: str
+    ) -> MemoryCandidate:
+        result = _normalize_distilled_candidate(candidate, by_sequence=by_sequence, scope=scope)
+        if isinstance(candidate, _PeopleDistilledCandidate):
+            result = result.model_copy(update={"people": candidate.people})
+        return result
+
+    @staticmethod
+    def _instructions(stage: str) -> str:
+        instructions = NemoriAssistedCandidateExtractor._instructions(stage)
+        if stage != "prediction_error_distillation":
+            return instructions
+        return instructions + (
+            " For formation@11, preserve useful facts about named people, their "
+            "relationships, and past interactions. "
+            "Attach source-local people evidence to those atomic candidates, and null "
+            "to other candidates. "
+            "Use only exact source spans with zero-based Unicode character start/end "
+            "offsets and local mention keys. "
+            "Copy identity names and identifiers from the evidence; namespace is "
+            "owner unless an explicit channel namespace is present. "
+            "Context may name an explicitly stated workplace or role; do not invent "
+            "it. A pronoun may reference only one unambiguous "
+            "preceding named anchor in the same source. Never resolve identities or "
+            "supply database IDs. "
+            "Keep relationship endpoints directional: Jules introduced_by Maya means "
+            "Maya introduced Jules. "
+            "Use organizations for exact source-local company or organization names, "
+            "and reference their keys as relationship endpoints. "
+            "Never create a person for an organization. A relationship to the owner "
+            "uses the key owner. Use no transitive, romantic, health, political, or "
+            "personality inference. "
+            "Distinguish current facts, changed circumstances and historical facts. A "
+            "date requires explicit source evidence; "
+            "otherwise use null and precision unknown. Emit source-grounded "
+            "interactions separately even when no durable fact is formed. "
+            "Interaction summaries must be exact substrings of their source text and "
+            "preserve who reported the event. "
+            "A mentioned person is not automatically an interaction participant. "
+            "Commitments name debtor and beneficiary; "
+            "completed or cancelled requires explicit evidence of that state, and "
+            "draft or proposed activity is never completion. "
+            "Limit a segment to 32 claims, six per event, 64 total mentions and 32 interactions."
         )

@@ -9,6 +9,7 @@ import pytest
 from agent_core.adapters.memory.in_memory import InMemoryTraceStore
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import RecallMoment, Sensitivity, TracedPassage
+from agent_core.ports.memory import TraceStore
 from tests.contract.memory_fixtures import recalled, trace
 from tests.contract.support import NOW, RUN_ID, principal
 
@@ -229,3 +230,46 @@ async def test_mark_cited_marks_used_and_is_principal_scoped_and_idempotent() ->
 
     widened = await store.mark_cited(value.id, principal(), [unused.belief_id])
     assert widened.cited == [used.belief_id, unused.belief_id]
+
+
+async def test_people_trace_erasure_removes_shared_summaries_only_for_owner() -> None:
+    from agent_core.domain.memory import TracedPersonContext
+
+    store = InMemoryTraceStore()
+    person_id = UUID(int=700)
+    interaction = TracedPersonContext(
+        record_id=UUID(int=701),
+        revision=1,
+        person_ids=[person_id, UUID(int=702)],
+        kind="interaction",
+        text="Sam and Alex met",
+        sensitivity=Sensitivity.SENSITIVE,
+    )
+    local = trace().model_copy(update={"people": [interaction], "rendered": interaction.text})
+    foreign = local.model_copy(update={"id": UUID(int=703), "principal_id": "other"})
+    await store.record(local)
+    await store.record(foreign)
+    assert await store.erase_people(principal(), [person_id]) == 1
+    with pytest.raises(NotFoundError):
+        await store.get(local.id, principal())
+    assert (
+        await store.get(foreign.id, principal().model_copy(update={"principal_id": "other"}))
+        == foreign
+    )
+
+
+async def people_trace_scope_erasure_contract(store: TraceStore) -> None:
+    person_id = UUID(int=771)
+    value = trace().model_copy(
+        update={
+            "query": trace().query.model_copy(update={"people_scope": (person_id,)}),
+        }
+    )
+    await store.record(value)
+    assert await store.erase_people(principal(), [person_id]) == 1
+    with pytest.raises(NotFoundError):
+        await store.get(value.id, principal())
+
+
+async def test_people_trace_erasure_includes_query_only_identity() -> None:
+    await people_trace_scope_erasure_contract(InMemoryTraceStore())

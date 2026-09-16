@@ -182,7 +182,11 @@ async def test_remember_tool_still_rejects_untrusted_origins(
 
 async def test_remember_tool_survives_builtin_patch_upgrade(tmp_path: Path) -> None:
     script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
-    async with build(settings=_settings(tmp_path), script=script, sequential_ids=True) as app:
+    async with build(
+        settings=replace(_settings(tmp_path), people_enabled=False),
+        script=script,
+        sequential_ids=True,
+    ) as app:
         run_id = await app.runs.submit("Remember that I prefer concise answers.")
         active_run = await app.runs.get(run_id)
         async with app.uow_factory() as uow:

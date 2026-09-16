@@ -87,12 +87,16 @@ public struct RootView: View {
                 ConnectionSettingsView(model: model, embedded: true)
             }
         }
-        .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory) }
+        .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
         .sheet(isPresented: $showingGlobalSchedules) { ScheduleBrowserView(model: globalSchedules) }
         .onChange(of: coordinator.mode) { _ in updateEmailActivity() }
         .onChange(of: model.isConfigured) { _ in updateEmailActivity() }
-        .onChange(of: model.connectionGeneration) { _ in updateEmailActivity() }
+        .onChange(of: model.connectionGeneration) { _ in
+            showingGlobalMemory = false
+            NotificationCenter.default.post(name: .peopleConnectionChanged, object: nil)
+            updateEmailActivity()
+        }
         .onChange(of: model.isReconfiguring) { _ in updateEmailActivity() }
         .onChange(of: scenePhase) { _ in updateEmailActivity() }
         .onAppear { updateEmailActivity() }
@@ -471,6 +475,7 @@ private struct SessionSidebar: View {
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel)
         }
+        .onChange(of: model.connectionGeneration) { _ in showingMemoryBrowser = false }
         .sheet(isPresented: $showingPersonaEditor) {
             PersonaEditorView(model: personaViewModel)
         }
@@ -513,6 +518,7 @@ private struct SessionSidebar: View {
                             activate(.session(entry.sessionID))
                         } label: {
                             historyLabel(entry)
+                                .contentShape(Rectangle())
                         }
                         .accessibilityIdentifier(
                             "sidebar.session.\(entry.sessionID.uuidString)"
@@ -994,6 +1000,14 @@ private final class MainWindowFrameAutosaveNSView: NSView {
                 ),
                 display: true
             )
+            if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] == "1",
+               let screen = NSScreen.screens.first {
+                let frame = screen.visibleFrame
+                window.setFrameOrigin(NSPoint(
+                    x: frame.midX - window.frame.width / 2,
+                    y: frame.midY - window.frame.height / 2
+                ))
+            }
         }
     }
     #endif

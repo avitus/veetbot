@@ -40,6 +40,11 @@ from agent_core.adapters.persistence.mappers import (
     trajectory_export_to_domain,
     trajectory_export_values,
 )
+from agent_core.adapters.persistence.people_erasure import (
+    ORIGINAL_EVENTS,
+    lock_run_erasure,
+    redact,
+)
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
@@ -56,6 +61,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     EventRow,
     ExportConsentRow,
     IdempotencyKeyRow,
+    KnowledgeDocumentRow,
     ModelCallRow,
     PolicyProfileRow,
     ProcessEventRow,
@@ -90,6 +96,7 @@ from agent_core.domain.errors import (
     ConcurrencyConflict,
     ConflictError,
     NotFoundError,
+    RunCancelledError,
     WorkerFencedError,
 )
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
@@ -435,6 +442,22 @@ class PostgresRunRepository:
             raise NotFoundError("run not found")
         return run_to_domain(row)
 
+    async def has_higher_priority_work(self, principal: Principal, priority: int) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(RunRow.id)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    RunRow.priority < priority,
+                    RunRow.status.in_([RunStatus.QUEUED.value, RunStatus.RUNNING.value]),
+                    or_(RunRow.scheduled_for.is_(None), RunRow.scheduled_for <= self._clock.now()),
+                )
+                .limit(1)
+            )
+        )
+
     async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None:
         rows = (
             await self._session.scalars(
@@ -549,6 +572,9 @@ class PostgresRunRepository:
     ) -> Run:
         require_transition(expected_status, new_status)
         typed_failure = None if failure is None else RunFailure.model_validate(failure)
+        if await lock_run_erasure(self._session, run_id) is not None:
+            final_message = None
+            typed_failure = None
         assignments: dict[str, Any] = {
             "status": new_status.value,
             "updated_at": self._clock.now(),
@@ -633,6 +659,12 @@ class PostgresEventRepository:
         self._upcasters = upcasters
 
     async def append(self, event: NewEvent, *, lease: WorkerLease | None = None) -> EventEnvelope:
+        if (
+            event.run_id is not None
+            and await lock_run_erasure(self._session, event.run_id) is not None
+            and event.event_type not in ORIGINAL_EVENTS
+        ):
+            event = event.model_copy(update={"payload": redact(event.payload)}, deep=True)
         if lease is not None:
             if event.run_id is not None and event.run_id != lease.run_id:
                 raise ConflictError("leased event run does not match the worker lease")
@@ -693,6 +725,51 @@ class PostgresEventRepository:
             )
         )
         return event_to_domain(row, self._upcasters)
+
+    async def list_window(
+        self,
+        principal: Principal,
+        *,
+        session_ids: Sequence[UUID],
+        since: datetime,
+        until: datetime,
+        after: tuple[datetime, int] | None = None,
+        limit: int = 256,
+    ) -> list[EventEnvelope]:
+        from agent_core.domain.events import validate_event_window
+
+        validate_event_window(session_ids, since, until, after, limit)
+        permitted = list(
+            (
+                await self._session.scalars(
+                    select(SessionRow.id).where(
+                        SessionRow.id.in_(session_ids),
+                        SessionRow.tenant_id == principal.tenant_id,
+                        SessionRow.principal_id == principal.principal_id,
+                    )
+                )
+            ).all()
+        )
+        if set(permitted) != set(session_ids):
+            raise NotFoundError("session not found")
+        statement = select(EventRow).where(
+            EventRow.session_id.in_(session_ids),
+            EventRow.created_at >= since,
+            EventRow.created_at < until,
+        )
+        if after is not None:
+            statement = statement.where(
+                or_(
+                    EventRow.created_at > after[0],
+                    and_(EventRow.created_at == after[0], EventRow.id > after[1]),
+                )
+            )
+        rows = (
+            await self._session.scalars(
+                statement.order_by(EventRow.created_at, EventRow.id).limit(limit)
+            )
+        ).all()
+        return [event_to_domain(row, self._upcasters) for row in rows]
 
     async def list_after(
         self,
@@ -918,7 +995,8 @@ class PostgresCheckpointRepository:
             (
                 await self._session.scalars(
                     select(CheckpointRow)
-                    .where(CheckpointRow.run_id == run_id)
+                    .join(RunRow, RunRow.id == CheckpointRow.run_id)
+                    .where(CheckpointRow.run_id == run_id, RunRow.people_erased_at.is_(None))
                     .order_by(CheckpointRow.version)
                 )
             ).all()
@@ -974,6 +1052,7 @@ class PostgresCheckpointRepository:
     ) -> int:
         if run_id != checkpoint.run_id:
             raise ConflictError("checkpoint run identity cannot change")
+        erased_at = await lock_run_erasure(self._session, run_id)
         if lease is not None:
             guard = (
                 update(RunRow)
@@ -982,6 +1061,10 @@ class PostgresCheckpointRepository:
             )
             if not _rowcount(await self._session.execute(guard)):
                 raise WorkerFencedError("checkpoint write guard failed; worker was fenced")
+        if erased_at is not None:
+            if checkpoint.status in TERMINAL_RUN_STATUSES:
+                return checkpoint.version
+            raise RunCancelledError("People erasure fenced checkpoint writes")
         await self._session.execute(
             select(func.pg_advisory_xact_lock(func.hashtextextended(f"checkpoint:{run_id}", 0)))
         )
@@ -1099,6 +1182,8 @@ class PostgresToolInvocationRepository:
     async def create(
         self, invocation: ToolInvocation, *, lease: WorkerLease | None = None
     ) -> ToolInvocation:
+        if await lock_run_erasure(self._session, invocation.run_id) is not None:
+            raise RunCancelledError("People erasure fenced tool invocation writes")
         await self._guard_lease(lease)
         statement = (
             pg_insert(ToolInvocationRow)
@@ -1166,6 +1251,8 @@ class PostgresToolInvocationRepository:
         *,
         lease: WorkerLease | None = None,
     ) -> ToolInvocation:
+        if await lock_run_erasure(self._session, invocation.run_id) is not None:
+            raise RunCancelledError("People erasure fenced tool invocation writes")
         await self._guard_lease(lease)
         row = (
             await self._session.scalars(
@@ -2286,6 +2373,10 @@ class PostgresTrajectoryExportRepository:
         return trajectory_export_to_domain(row[0], row[1])
 
     async def create(self, export: TrajectoryExport) -> TrajectoryExport:
+        if (erased_at := await lock_run_erasure(self._session, export.run_id)) is not None:
+            export = export.model_copy(
+                update={"artifact": export.artifact.model_copy(update={"expires_at": erased_at})}
+            )
         await self._session.execute(
             select(func.pg_advisory_xact_lock(func.hashtextextended(f"export:{export.run_id}", 0)))
         )
@@ -2344,6 +2435,11 @@ class PostgresTrajectoryExportRepository:
                     .where(
                         ArtifactRow.origin == "trajectory_export",
                         ArtifactRow.expires_at <= now,
+                        ~select(KnowledgeDocumentRow.row_id)
+                        .where(
+                            KnowledgeDocumentRow.source_artifact_id == ArtifactRow.id,
+                        )
+                        .exists(),
                     )
                     .order_by(ArtifactRow.expires_at, ArtifactRow.id)
                     .limit(limit)
@@ -2368,6 +2464,10 @@ class PostgresArtifactRepository:
         self._session = session
 
     async def create(self, artifact: ArtifactRef) -> ArtifactRef:
+        if artifact.run_id is not None and artifact.origin != "upload":
+            erased_at = await lock_run_erasure(self._session, artifact.run_id)
+            if erased_at is not None:
+                artifact = artifact.model_copy(update={"expires_at": erased_at})
         statement = pg_insert(ArtifactRow).values(**artifact_values(artifact))
         statement = statement.on_conflict_do_nothing(index_elements=[ArtifactRow.id])
         await self._session.execute(statement)
@@ -2415,6 +2515,13 @@ class PostgresArtifactRepository:
         return artifact_to_domain(row)
 
     async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        artifact = await self.get(artifact_id, principal)
+        if (
+            artifact.run_id is not None
+            and artifact.origin != "upload"
+            and await lock_run_erasure(self._session, artifact.run_id) is not None
+        ):
+            raise RunCancelledError("People erasure fenced knowledge retention")
         row = (
             await self._session.scalars(
                 update(ArtifactRow)
@@ -2434,6 +2541,11 @@ class PostgresArtifactRepository:
     async def expire(
         self, artifact_id: UUID, principal: Principal, expired_at: datetime
     ) -> ArtifactRef:
+        artifact = await self.get(artifact_id, principal)
+        if artifact.run_id is not None and artifact.origin != "upload":
+            erased_at = await lock_run_erasure(self._session, artifact.run_id)
+            if erased_at is not None:
+                expired_at = min(expired_at, erased_at)
         row = (
             await self._session.scalars(
                 update(ArtifactRow)
@@ -2459,6 +2571,11 @@ class PostgresArtifactRepository:
                         ArtifactRow.origin != "trajectory_export",
                         ArtifactRow.expires_at.is_not(None),
                         ArtifactRow.expires_at <= now,
+                        ~select(KnowledgeDocumentRow.row_id)
+                        .where(
+                            KnowledgeDocumentRow.source_artifact_id == ArtifactRow.id,
+                        )
+                        .exists(),
                     )
                     .order_by(ArtifactRow.expires_at, ArtifactRow.id)
                     .limit(limit)

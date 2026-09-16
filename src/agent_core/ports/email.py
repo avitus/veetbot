@@ -38,6 +38,17 @@ class EmailStore(Protocol):
         self, principal: Principal, kind: str, *, after: str | None = None, limit: int = 1000
     ) -> list[EmailRecord]: ...
 
+    async def list_semantic_window(
+        self,
+        principal: Principal,
+        *,
+        account_ids: Sequence[str],
+        since: datetime,
+        until: datetime,
+        after: tuple[datetime, str] | None = None,
+        limit: int = 100,
+    ) -> builtins.list[EmailRecord]: ...
+
     async def list_tasks(
         self,
         principal: Principal,
@@ -54,6 +65,16 @@ class EmailStore(Protocol):
     async def delete(
         self, principal: Principal, kind: str, key: str, *, expected_revision: int
     ) -> None: ...
+
+    async def fence_people_erasure(
+        self, principal: Principal, belief_ids: Sequence[UUID], erased_at: datetime
+    ) -> int:
+        """Fence linked generated copies and invalidate stale projection revisions."""
+        ...
+
+    async def purge_people_erasure(self, principal: Principal) -> bool:
+        """Purge at most 256 fenced payloads; return whether more remain."""
+        ...
 
 
 class EmailRuntimeServices(Protocol):
@@ -144,6 +165,9 @@ class EmailSemanticPort(Protocol):
 
     @property
     def enabled(self) -> bool: ...
+
+    @property
+    def people_enabled(self) -> bool: ...
 
     async def register_source(
         self,

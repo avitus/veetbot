@@ -11,7 +11,7 @@ import signal
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import partial
@@ -141,6 +141,7 @@ from agent_core.adapters.persistence.notifications import (
     PostgresDeviceRegistry,
     PostgresNotificationOutbox,
 )
+from agent_core.adapters.persistence.people import InMemoryPeopleStore, PostgresPeopleStore
 from agent_core.adapters.persistence.persona_repositories import (
     PostgresPersonaStore,
 )
@@ -257,6 +258,10 @@ from agent_core.application.notification_dispatcher import (
 )
 from agent_core.application.notification_producer import NotificationProducer
 from agent_core.application.notification_worker import NotificationWorker
+from agent_core.application.people import PublicPeopleService
+from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
+from agent_core.application.people_erasure import PeopleErasureService
+from agent_core.application.people_identity import PeopleIdentityService
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -290,6 +295,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     NotificationService as PublicNotificationServiceContract,
+)
+from agent_core.application.services import (
+    PeopleService as PublicPeopleServiceContract,
 )
 from agent_core.application.services import (
     PersonaService as PublicPersonaServiceContract,
@@ -364,7 +372,7 @@ from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits
 from agent_core.domain.errors import ConflictError, NotFoundError
-from agent_core.domain.events import NewEvent, ProcessEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
     EgressMode,
@@ -372,6 +380,7 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
+from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
     Capability,
     FakeModelScript,
@@ -423,6 +432,7 @@ from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
+    PeopleAssistedCandidateExtractor,
     distillation_evidence_matches,
 )
 from agent_core.memory.email_semantics import (
@@ -437,6 +447,7 @@ from agent_core.memory.formation import (
     GovernedMemoryService,
     HighRecallCandidateExtractor,
 )
+from agent_core.memory.people_legacy import link_existing_beliefs
 from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
@@ -507,8 +518,13 @@ from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
-from agent_core.tools.memory_remember import LegacyMemoryRememberTool, MemoryRememberTool
+from agent_core.tools.memory_remember import (
+    LegacyMemoryRememberTool,
+    MemoryRememberTool,
+    PeopleMemoryRememberTool,
+)
 from agent_core.tools.memory_search import MemorySearchTool
+from agent_core.tools.people import PeopleContextTool, PeopleHistoryTool, PeopleSearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
@@ -554,6 +570,7 @@ class ApplicationServices:
     persona: PublicPersonaServiceContract
     email: EmailExperienceService
     calls: CallService | None = None
+    people: PublicPeopleServiceContract | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -584,10 +601,12 @@ class Composition:
     skill_reviews: SkillBackgroundReview
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
+    people_erasure: PeopleErasureService
     memory_retriever: HybridMemoryRetriever
     memory_profiles: MemoryProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
+    local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
 
 @dataclass(frozen=True, slots=True)
@@ -751,7 +770,8 @@ def _memory_uow_repositories(
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
     memories = memories or InMemoryMemoryStore(clock)
     episodes = episodes or InMemoryIntegratedEpisodeStore()
-    traces = traces or InMemoryTraceStore()
+    people = InMemoryPeopleStore(clock, memories)
+    traces = traces or InMemoryTraceStore(people)
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
     devices = InMemoryDeviceRegistry()
@@ -784,6 +804,7 @@ def _memory_uow_repositories(
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
         memories=memories,
+        people=people,
         episodes=episodes,
         traces=traces,
         knowledge=knowledge,
@@ -821,6 +842,7 @@ def _memory_uow_repositories(
         personas=InMemoryPersonaStore(),
         email=InMemoryEmailStore(),
         calls=InMemoryCallStore(),
+        people=people,
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -865,7 +887,8 @@ def _postgres_repository_factory(
         invocations = PostgresToolInvocationRepository(session, runs)
         memories = PostgresMemoryStore(session, clock)
         episodes = PostgresIntegratedEpisodeStore(session)
-        traces = PostgresTraceStore(session)
+        people = PostgresPeopleStore(session, clock)
+        traces = PostgresTraceStore(session, people)
         knowledge = PostgresKnowledgeStore(session, clock)
         schedules = PostgresScheduleRepository(session)
         devices = PostgresDeviceRegistry(session)
@@ -878,7 +901,7 @@ def _postgres_repository_factory(
             browser_authentications=PostgresBrowserAuthenticationRepository(session),
             process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
-            session_deletions=PostgresSessionDeletionRepository(session),
+            session_deletions=PostgresSessionDeletionRepository(session, people, traces),
             runs=runs,
             events=events,
             invocations=invocations,
@@ -906,6 +929,7 @@ def _postgres_repository_factory(
             personas=PostgresPersonaStore(session),
             email=PostgresEmailStore(session),
             calls=PostgresCallStore(session),
+            people=people,
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,
@@ -2035,6 +2059,7 @@ async def _compose(
     memory_provider_evaluation_mode: bool,
     memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
+    memory_people_evaluation_mode: bool,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
@@ -2259,6 +2284,7 @@ async def _compose(
             agent.model_policy in NON_ROUTED_MODEL_POLICIES
             or memory_provider_evaluation_mode
             or memory_distillation_evaluation_mode
+            or memory_people_evaluation_mode
         )
         else memory_profiles.formation.model_policy
     )
@@ -2272,6 +2298,7 @@ async def _compose(
         memory_mode is not MemoryProviderExtractionMode.OFF
         or memory_provider_evaluation_mode
         or memory_distillation_evaluation_mode
+        or memory_people_evaluation_mode
     ):
         try:
             if extraction_model_policy in NON_ROUTED_MODEL_POLICIES:
@@ -2292,6 +2319,7 @@ async def _compose(
             if (
                 memory_provider_evaluation_mode
                 or memory_distillation_evaluation_mode
+                or memory_people_evaluation_mode
                 or memory_mode is MemoryProviderExtractionMode.REQUIRED
             ):
                 raise
@@ -2312,6 +2340,7 @@ async def _compose(
                 if (
                     memory_provider_evaluation_mode
                     or memory_distillation_evaluation_mode
+                    or memory_people_evaluation_mode
                     or memory_mode is MemoryProviderExtractionMode.REQUIRED
                 ):
                     raise ConfigurationError(
@@ -2338,6 +2367,18 @@ async def _compose(
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_evaluation_mode"
+            elif memory_people_evaluation_mode:
+                assert extraction_provider is not None
+                memory_extractor = PeopleAssistedCandidateExtractor(
+                    provider=extraction_provider,
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    fallback=HighRecallCandidateExtractor(),
+                )
+                selection_outcome = "evaluation"
+                selection_reason = "explicit_people_evaluation_mode"
             elif memory_distillation_evaluation_mode:
                 assert extraction_provider is not None
                 memory_extractor = NemoriAssistedCandidateExtractor(
@@ -2350,6 +2391,23 @@ async def _compose(
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_distillation_evaluation_mode"
+            elif settings.people_enabled and settings.memory_formation_policy_pin in (
+                None,
+                MemoryFormationPolicyPin.PEOPLE,
+            ):
+                # ADR-0101: quality evidence measures People; it does not gate access.
+                assert extraction_provider is not None
+                memory_extractor = PeopleAssistedCandidateExtractor(
+                    provider=extraction_provider,
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    fallback=HighRecallCandidateExtractor(),
+                )
+                memory_policy_version = "formation@11"
+                selection_outcome = "activated"
+                selection_reason = "people_default"
             else:
                 selected_evidence = None
                 selected_distillation_evidence = None
@@ -2403,7 +2461,10 @@ async def _compose(
                 )
                 selected_provider_policy = PROVIDER_FORMATION_POLICY_VERSION
                 for evidence_path in evidence_paths:
-                    if policy_pin in provider_pins:
+                    if policy_pin in (
+                        *provider_pins,
+                        MemoryFormationPolicyPin.PEOPLE,
+                    ):
                         break
                     try:
                         candidate_distillation_evidence = load_memory_distillation_evidence(
@@ -2435,7 +2496,10 @@ async def _compose(
                     provider_policies: tuple[str, ...] = (PROVIDER_FORMATION_POLICY_VERSION,)
                 elif policy_pin is MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED:
                     provider_policies = (REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,)
-                elif policy_pin is MemoryFormationPolicyPin.DISTILLATION:
+                elif policy_pin in (
+                    MemoryFormationPolicyPin.DISTILLATION,
+                    MemoryFormationPolicyPin.PEOPLE,
+                ):
                     provider_policies = ()
                 else:
                     provider_policies = (
@@ -2521,6 +2585,8 @@ async def _compose(
                     selection_reason = "matching_evidence"
         if memory_provider_evaluation_mode:
             memory_policy_version = memory_provider_evaluation_policy
+        elif memory_people_evaluation_mode:
+            memory_policy_version = "formation@11"
         elif memory_distillation_evaluation_mode:
             memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
     selection_identity = ":".join(
@@ -2583,7 +2649,11 @@ async def _compose(
                 created_at=clock.now(),
             )
         )
-    if not memory_provider_evaluation_mode and not memory_distillation_evaluation_mode:
+    if not (
+        memory_provider_evaluation_mode
+        or memory_distillation_evaluation_mode
+        or memory_people_evaluation_mode
+    ):
         memory_extractor = AttributedCommunicationCandidateExtractor(
             memory_extractor or DeterministicCandidateExtractor()
         )
@@ -2597,10 +2667,89 @@ async def _compose(
         formation_profile=memory_profiles.formation,
         decay_tau_days=memory_profiles.retrieval.decay_tau_days,
         usage=memory_profiles.retrieval.usage,
+        people_enabled=settings.people_enabled,
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
+    if settings.people_enabled:
+        registry.register(PeopleMemoryRememberTool(memory_service))
     registry.register(MemorySearchTool(memory_retriever))
+    people_erasure = PeopleErasureService(uow_factory, clock)
+    people_service = (
+        PublicPeopleService(
+            uow_factory,
+            clock,
+            identity=PeopleIdentityService(uow_factory, clock, ids),
+            erasure=people_erasure,
+            memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
+            legacy_linker=lambda owner, limit, cursor: link_existing_beliefs(
+                uow_factory, clock, owner, limit=limit, cursor=cursor
+            ),
+        )
+        if settings.people_enabled
+        else None
+    )
+    people_import_runner = None
+    if people_service is not None:
+        from agent_core.memory.communication_sources import FormationSourceKind, formation_source
+        from agent_core.memory.people_evidence import implementation_digest
+        from agent_core.runtime.people_imports import (
+            ImportProvider,
+            ImportSlice,
+            PeopleImportRunner,
+        )
+
+        def admitted_people_source(event: EventEnvelope, owner: Principal) -> str | None:
+            source = formation_source(event, owner)
+            if source is None or (
+                source.kind is not FormationSourceKind.OWNER_ASSERTION and source.channel != "sms"
+            ):
+                return None
+            return source.text
+
+        people_service.imports.implementation_identity = implementation_digest
+        people_service.imports.source_text = admitted_people_source
+        people_service.imports.capture_available = memory_policy_version == "formation@11"
+        people_service.imports.queue_priority = async_priority
+
+        def import_memory(worker: ImportSlice) -> GovernedMemoryService:
+            if extraction_model is None:
+                raise ConflictError("People import model is unavailable")
+            selected_provider = effective_providers[extraction_model.provider]
+
+            async def guard(uow: RepositoryUnitOfWork) -> None:
+                await worker.guard(uow)
+
+            return GovernedMemoryService(
+                uow_factory,
+                clock,
+                ids,
+                worker.context.principal,
+                extractor=PeopleAssistedCandidateExtractor(
+                    provider=ImportProvider(worker, selected_provider),
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    commit_guard=guard,
+                    source_isolated=True,
+                ),
+                policy_version="formation@11",
+                people_enabled=True,
+                commit_guard=guard,
+                formation_profile=memory_profiles.formation,
+            )
+
+        people_import_runner = PeopleImportRunner(
+            people_service.imports, import_memory, dispatch_continuations=storage != "memory"
+        )
+    people_retriever = None
+    if people_service is not None:
+        people_context = PeopleContextService(uow_factory, memory_retriever)
+        people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
+        registry.register(PeopleSearchTool(uow_factory, clock))
+        registry.register(PeopleContextTool(people_context))
+        registry.register(PeopleHistoryTool(people_service))
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
     try:
@@ -2733,9 +2882,10 @@ async def _compose(
             estimator,
             clock,
             working_state,
-            memory_retriever,
+            people_retriever or memory_retriever,
             query_former,
             session_project_scope,
+            recall_revision=None if people_retriever is None else people_retriever.revision,
         )
         compactor = StructuredCompactor(
             estimator,
@@ -2961,13 +3111,35 @@ async def _compose(
                 await delegation_joins.after_run(run_id)
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
+            if people_import_runner is not None:
+                await people_import_runner.after_run(run_id, principal)
+            await people_erasure.resume_pending(principal)
 
         def email_semantics(context: RunContext) -> EmailSemanticFormationService:
+            from agent_core.memory.email_people import EmailPeopleFormationService
+            from agent_core.memory.email_people_evidence import email_evidence_policy
+
+            if settings.people_enabled:
+                return EmailPeopleFormationService(
+                    uow_factory,
+                    clock,
+                    ids,
+                    context.principal,
+                    provider=context.resolved_model.provider,
+                    model=context.resolved_model.model,
+                )
+            # A retained People quality artifact must not reactivate an explicit shutdown.
+            evidence_path = settings.email_semantic_evidence
+            if (
+                evidence_path is not None
+                and email_evidence_policy(evidence_path) == "email-semantic@2"
+            ):
+                evidence_path = None
             evidence = (
                 None
-                if settings.email_semantic_evidence is None
+                if evidence_path is None
                 else load_email_semantic_evidence(
-                    settings.email_semantic_evidence,
+                    evidence_path,
                     provider=context.resolved_model.provider,
                     model=context.resolved_model.model,
                     build_ref=settings.release_id,
@@ -2983,8 +3155,70 @@ async def _compose(
                 evidence=evidence,
             )
 
+        if people_import_runner is not None and people_service is not None:
+            from agent_core.context.rendering import envelope_items
+            from agent_core.domain.people import PeopleImportJob
+            from agent_core.memory.email_people import EmailPeopleFormationService
+            from agent_core.runtime.people_email_imports import PeopleEmailImportProcessor
+            from agent_core.runtime.people_mailbox_imports import PeopleMailboxImporter
+
+            def import_email(
+                worker: ImportSlice, job: PeopleImportJob
+            ) -> PeopleEmailImportProcessor:
+                selected = email_semantics(worker.context)
+                if not isinstance(selected, EmailPeopleFormationService) or not selected.enabled:
+                    raise ConflictError("Email People import is unavailable")
+
+                async def guard(uow: RepositoryUnitOfWork) -> None:
+                    await worker.guard(uow)
+
+                return PeopleEmailImportProcessor(
+                    worker,
+                    EmailPeopleFormationService(
+                        uow_factory,
+                        clock,
+                        ids,
+                        worker.context.principal,
+                        provider=worker.context.resolved_model.provider,
+                        model=worker.context.resolved_model.model,
+                        import_window=(job.scope.since, job.scope.until),
+                        import_guard=guard,
+                    ),
+                    envelope=envelope_items,
+                    check_budget=public_services.email._check_budget,
+                    provider=effective_providers[worker.context.resolved_model.provider],
+                )
+
+            people_import_runner.email_factory = import_email
+
+            def discover_email(worker: ImportSlice, job: PeopleImportJob) -> PeopleMailboxImporter:
+                processor = import_email(worker, job)
+                return PeopleMailboxImporter(
+                    worker,
+                    job,
+                    registry=registry,
+                    service=public_services.email,
+                    semantics=processor.semantics,
+                    render_context=render_email_context,
+                    selected=processor.selected,
+                )
+
+            people_import_runner.mailbox_factory = discover_email
+            people_service.imports.email_capture_available = True
+
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
             """Recognize persisted typed work even when its public feature is disabled."""
+            if people_import_runner is None:
+                async with uow_factory() as uow:
+                    typed_session = await uow.sessions.get(
+                        context.run.session_id, context.principal
+                    )
+                if typed_session.metadata.get("purpose") == "people-import":
+                    raise ConflictError("People imports are disabled")
+            if people_import_runner is not None:
+                imported = await people_import_runner(context)
+                if imported is not None:
+                    return imported
             if not settings.email_mode_enabled:
                 task = await public_services.email.get_task(context.principal, context.run.id)
                 if task is None:
@@ -3050,6 +3284,56 @@ async def _compose(
             if storage == "memory"
             else PostgresRunDispatcher()
         )
+        local_import_tasks: set[asyncio.Task[None]] = set()
+        if people_service is not None:
+            if storage == "memory":
+
+                async def resume_import(run_id: UUID, delay: float) -> None:
+                    try:
+                        await clock.sleep(delay)
+                        await dispatch_import(run_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "people_import_dispatch_failed",
+                            extra={"error_class": type(exc).__name__},
+                        )
+
+                async def dispatch_import(run_id: UUID) -> None:
+                    current: UUID | None = run_id
+                    while current is not None:
+                        await dispatcher.dispatch(current)
+                        async with uow_factory() as uow:
+                            run = await uow.runs.get(current, principal)
+                            source = await uow.sessions.get(run.session_id, principal)
+                            job_id = UUID(source.metadata["people_import_job_id"])
+                            job = await people_service.imports._get(
+                                uow,
+                                principal,
+                                job_id,
+                                Sensitivity.RESTRICTED,
+                            )
+                            continuation = (
+                                await uow.runs.get(job.run_id, principal)
+                                if job.run_id is not None and job.run_id != current
+                                else None
+                            )
+                        current = None
+                        if job.state == "queued" and continuation is not None:
+                            delay = (
+                                (continuation.scheduled_for - clock.now()).total_seconds()
+                                if continuation.scheduled_for is not None
+                                else 0
+                            )
+                            if delay > 0:
+                                task = asyncio.create_task(resume_import(continuation.id, delay))
+                                local_import_tasks.add(task)
+                                task.add_done_callback(local_import_tasks.discard)
+                            else:
+                                current = continuation.id
+
+                people_service.imports.dispatch = dispatch_import
+            else:
+                people_service.imports.dispatch = dispatcher.dispatch
         if settings.delegation_enabled:
             delegation_joins = DelegationJoin(
                 uow_factory=uow_factory,
@@ -3303,6 +3587,8 @@ async def _compose(
             await artifact_writers.sweep_expired()
             await trajectory_service.sweep_once()
 
+        people_erasure.set_cleanup(cleanup_email_artifacts)
+
         archive_approval_service = PublicApprovalService(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
@@ -3327,6 +3613,7 @@ async def _compose(
             notifications=notification_inbox,
             surfaces=surface_management,
             memory=PublicMemoryService(uow_factory=uow_factory),
+            people=people_service,
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
             calls=call_service,
             email=EmailExperienceService(
@@ -3356,6 +3643,8 @@ async def _compose(
                 archive_self_approval_enabled=ruleset.self_approval_enabled,
             ),
         )
+        if people_service is not None:
+            people_service.imports.account_servers = public_services.email.account_servers
         if settings.email_mode_enabled:
             registry.register(EmailContextTool(public_services.email))
             registry.register(EmailFeedbackTool(public_services.email))
@@ -3457,6 +3746,7 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
@@ -3476,10 +3766,12 @@ async def _compose(
                 skill_reviews=skill_reviews,
                 tool_pipeline=pipeline,
                 memory=memory_service,
+                people_erasure=people_erasure,
                 memory_retriever=memory_retriever,
                 memory_profiles=memory_profiles,
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
+                local_import_tasks=local_import_tasks,
             ),
             list(effective_providers.values()),
         )
@@ -3668,6 +3960,7 @@ async def build(
     memory_provider_evaluation_mode: bool = False,
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
+    memory_people_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
 
@@ -3675,20 +3968,41 @@ async def build(
     effective_settings = settings or load_settings()
     validate_settings(effective_settings)
     if (
-        (memory_provider_evaluation_mode or memory_distillation_evaluation_mode)
+        (
+            memory_provider_evaluation_mode
+            or memory_distillation_evaluation_mode
+            or memory_people_evaluation_mode
+        )
         and effective_settings.memory_provider_extraction_mode
         is MemoryProviderExtractionMode.REQUIRED
     ):
         raise ConfigurationError(
             "memory extraction evaluation and activation are mutually exclusive"
         )
-    if memory_provider_evaluation_mode and memory_distillation_evaluation_mode:
+    if (
+        sum(
+            (
+                memory_provider_evaluation_mode,
+                memory_distillation_evaluation_mode,
+                memory_people_evaluation_mode,
+            )
+        )
+        > 1
+    ):
         raise ConfigurationError("memory extraction evaluation modes are mutually exclusive")
     if (
-        memory_provider_evaluation_mode or memory_distillation_evaluation_mode
+        memory_provider_evaluation_mode
+        or memory_distillation_evaluation_mode
+        or memory_people_evaluation_mode
     ) and effective_settings.deployment_mode is DeploymentMode.PRODUCTION:
         raise ConfigurationError(
             "provider memory extraction evaluation mode is unavailable in production"
+        )
+    if memory_people_evaluation_mode and (
+        storage != "memory" or not effective_settings.people_enabled
+    ):
+        raise ConfigurationError(
+            "People evaluation requires isolated memory storage and People enabled"
         )
     if (
         effective_settings.deployment_mode is DeploymentMode.PRODUCTION
@@ -3899,6 +4213,11 @@ async def build(
         "memory.remember",
         "memory.search",
         "memory.recall_episodes",
+        *(
+            ["people.search", "people.context", "people.history"]
+            if effective_settings.people_enabled
+            else []
+        ),
         *(["email.context", "email.feedback"] if effective_settings.email_mode_enabled else []),
         *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
         "knowledge.search",
@@ -4177,6 +4496,7 @@ async def build(
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
             memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
+            memory_people_evaluation_mode=memory_people_evaluation_mode,
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,
@@ -4189,6 +4509,9 @@ async def build(
         yield composition
     finally:
         if composition is not None:
+            for import_task in tuple(composition.local_import_tasks):
+                import_task.cancel()
+            await asyncio.gather(*composition.local_import_tasks, return_exceptions=True)
             try:
                 await composition.mcp.close()
             except Exception as exc:

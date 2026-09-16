@@ -361,7 +361,12 @@ the previous person or topic value; person feedback requires an explicit choice.
 Learning controls expose pause/resume, scoped resets and explicit source
 exclusion. Draft edits autosave
 with optimistic revisions; conflicts preserve local and server versions, and
-draft history can restore earlier text into the editor. The Writing style menu
+draft history can restore earlier text into the editor. Typing continues while a
+save is in flight, so Review & Send settles the newest revision through bounded
+save attempts before freezing one, and reports a save that will not settle rather
+than freezing text the owner cannot see. A failed owner action is reported beside
+the control that caused it, and a failed mail read with the conversation it could
+not refresh; an action refused far from its button reads as no action at all. The Writing style menu
 can explicitly endorse the displayed wording as an example after saving any
 edits; a save conflict prevents endorsement. The action binds the current draft
 revision and preserves the learning pause state. The learning pane discloses
@@ -370,7 +375,12 @@ Coverage counts describe threads retrieved, not completed semantic analysis.
 Review & Send verifies
 the approval's exact tool/account, provider thread, recipients, subject and body
 against the frozen draft before presenting the existing approve-once action.
-The client never invokes Gmail or substitutes a retry send after uncertainty.
+Because the approval view truncates a string over 512 characters, a reply longer
+than that is verified through the published `argument_digests` entry for that
+argument, which proves the whole value rather than the retained prefix; a
+truncated argument with no digest stays unverifiable and is refused rather than
+presented. The client never invokes Gmail or substitutes a retry send after
+uncertainty.
 
 Mail and unsaved edits stay in process memory; there is no durable offline mail
 cache or authoritative offline write queue. A connection change, forgotten

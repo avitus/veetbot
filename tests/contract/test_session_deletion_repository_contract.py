@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.memory.in_memory import (
     InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
@@ -28,6 +29,7 @@ from agent_core.adapters.persistence.notifications import (
     InMemoryDeviceRegistry,
     InMemoryNotificationOutbox,
 )
+from agent_core.adapters.persistence.people import InMemoryPeopleStore
 from agent_core.adapters.persistence.schedules import InMemoryScheduleRepository
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
@@ -85,6 +87,7 @@ async def _repository() -> tuple[
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
         memories=InMemoryMemoryStore(clock),
+        people=InMemoryPeopleStore(FixedClock(NOW)),
         episodes=episodes,
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),

@@ -9,15 +9,26 @@ import AppKit
 /// because a belief outlives the session that formed it.
 public struct MemoryBrowserView: View {
     @ObservedObject var model: MemoryViewModel
+    @StateObject private var people = PeopleViewModel()
+    @State private var collection = "memories"
+    private let sessionID: UUID?
     @Environment(\.dismiss) private var dismiss
 
-    public init(model: MemoryViewModel) {
+    public init(model: MemoryViewModel, sessionID: UUID? = nil) {
         self.model = model
+        self.sessionID = sessionID
     }
 
     public var body: some View {
         NavigationView {
-            content
+            VStack(spacing: 0) {
+                Picker("Memory collection", selection: $collection) {
+                    Text("Memories").tag("memories")
+                    Text("People").tag("people")
+                }.pickerStyle(.segmented).padding()
+                if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID) }
+                else { content }
+            }
                 .navigationTitle("Memory")
                 // No accessibility identifier is attached here: `.searchable`
                 // hoists its field into the navigation bar chrome, which is
@@ -27,25 +38,26 @@ public struct MemoryBrowserView: View {
                 // the way it reaches any search bar: `app.searchFields`.
                 .searchable(
                     text: Binding(
-                        get: { model.searchText },
-                        set: { model.setSearchText($0) }
+                        get: { collection == "people" ? people.searchText : model.searchText },
+                        set: { if collection == "people" { people.setSearchText($0) } else { model.setSearchText($0) } }
                     ),
-                    prompt: "Search memories"
+                    prompt: collection == "people" ? "Search people" : "Search memories"
                 )
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") { dismiss() }
                     }
                     ToolbarItem(placement: .primaryAction) {
-                        statusFilterMenu
+                        if collection == "memories" { statusFilterMenu }
                     }
                     ToolbarItem(placement: .primaryAction) {
-                        typeFilterMenu
+                        if collection == "memories" { typeFilterMenu }
                     }
                 }
         }
         .accessibilityIdentifier("memory.browser")
         .task { await model.reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .peopleConnectionChanged)) { _ in dismiss() }
         #if os(macOS)
         .frame(
             minWidth: 560,

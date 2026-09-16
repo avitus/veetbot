@@ -1057,6 +1057,15 @@ content removal and prevent reimport. Exported artifact copies require the
 existing artifact deletion/retry machinery; a pending byte deletion is reported
 as pending, never as successful erasure. No generic API gains event editing.
 
+People-derived copies in other sessions also receive a durable read/write fence
+and bounded cleanup receipts. Snapshot trace references are captured before
+source deletion, so frozen plans, later replies, and generated documents remain
+discoverable after the original People rows disappear. Receipts retain only
+opaque suppression keys and cleanup cursors; owner-confirmed beliefs stay outside
+Email-derived belief suppression. The source response stays `cleanup_pending`
+while either byte deletion or People copy cleanup remains outstanding, including
+on retries after its source rows are gone.
+
 
 ### Semantic activation and passage provenance
 

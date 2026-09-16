@@ -36,6 +36,7 @@ from agent_core.domain.email import (
     EmailDraftEdit,
     EmailDraftStatus,
     EmailFeedback,
+    EmailImportBudget,
     EmailLearningState,
     EmailMessage,
     EmailOperation,
@@ -840,6 +841,18 @@ class EmailExperienceService:
                 monthly_spent += task.settled_cost
                 if created.date() == now.date():
                     daily_spent += task.settled_cost
+        async for record in records(store, principal, "people_import_budget"):
+            imported = EmailImportBudget.model_validate(record.payload)
+            if imported.settled_cost is None:
+                reserved += imported.reservation
+            elif record.created_at >= now - timedelta(days=30):
+                created = record.created_at.astimezone(UTC)
+                settled.append((created, imported.settled_cost))
+                day = created.date().isoformat()
+                spent_by_day[day] = spent_by_day.get(day, Decimal(0)) + imported.settled_cost
+                monthly_spent += imported.settled_cost
+                if created.date() == now.date():
+                    daily_spent += imported.settled_cost
         if (
             daily_spent + reserved + amount <= self.budget_limits.daily_cost
             and monthly_spent + reserved + amount <= self.budget_limits.monthly_cost
@@ -2705,7 +2718,12 @@ class EmailExperienceService:
             remaining = await uow.session_deletions.erase_email_source(
                 principal, account_id, provider_id, message_ids, now
             )
-            status = "cleanup_pending" if remaining.get("pending_artifacts", 0) else "erased"
+            status = (
+                "cleanup_pending"
+                if remaining.get("pending_artifacts", 0)
+                or remaining.get("pending_people_cleanup", 0)
+                else "erased"
+            )
             await self._put_data(
                 uow.email, principal, "excluded_source", source_key, {**data, "status": status}
             )
@@ -2724,6 +2742,7 @@ class EmailExperienceService:
             "source_id": source_key,
             "status": status,
             "pending_artifacts": remaining.get("pending_artifacts", 0),
+            "pending_people_cleanup": remaining.get("pending_people_cleanup", 0),
         }
 
     async def _cache_records(self, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:

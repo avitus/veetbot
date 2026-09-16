@@ -6,6 +6,7 @@ from typing import Any
 
 from agent_core.domain.memory import BeliefType, MemoryAuthority, Portability, Sensitivity
 from agent_core.domain.messages import TextPart
+from agent_core.domain.people_tools import RememberPeopleArgs
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
     ToolExecutionContext,
@@ -112,3 +113,39 @@ class LegacyMemoryRememberTool(MemoryRememberTool):
     """Compatibility registration for sessions pinned before the 1.0.1 patch."""
 
     spec = MemoryRememberTool.spec.model_copy(update={"version": "1.0.0"}, deep=True)
+
+
+class PeopleMemoryRememberTool(MemoryRememberTool):
+    """Optional validated People references; old pinned tool versions stay frozen."""
+
+    spec = MemoryRememberTool.spec.model_copy(
+        update={
+            "version": "2.0.0",
+            "input_schema": {
+                key: value
+                for key, value in RememberPeopleArgs.model_json_schema().items()
+                if key != "title"
+            },
+            "description": ("Remember an owner-sourced belief with optional person links."),
+        },
+        deep=True,
+    )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        parsed = RememberPeopleArgs.model_validate(arguments)
+        if not parsed.person_refs:
+            return await super().execute(
+                {key: value for key, value in arguments.items() if key != "person_refs"}, context
+            )
+        belief = await self._service.remember_people(
+            parsed,
+            session_id=context.session_id,
+            run_id=context.run_id,
+            principal=context.principal,
+            origin_trust=context.origin_trust,
+        )
+        return ToolResult(
+            ok=True,
+            content=[TextPart(text=f"Remembered as [m:{str(belief.id)[:8]}].")],
+            structured={"belief_id": str(belief.id), "status": belief.status.value},
+        )

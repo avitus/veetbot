@@ -18,7 +18,13 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import build_prefix
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import ContextOverflow
-from agent_core.domain.memory import MemoryCorrection, RecallQuery, RecallResult
+from agent_core.domain.memory import (
+    MemoryCorrection,
+    RecallQuery,
+    RecallResult,
+    Sensitivity,
+    TracedPersonContext,
+)
 from agent_core.domain.messages import ModelLimits, ResolvedModel
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.memory.profiles import SnapshotProfiles
@@ -26,7 +32,7 @@ from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
-from tests.contract.memory_fixtures import formation_stack, memory
+from tests.contract.memory_fixtures import formation_stack, memory, trace
 from tests.contract.support import NOW, agent, memory_stack, principal, session
 from tests.unit.test_web_tools import FakeWebProvider
 
@@ -86,6 +92,37 @@ async def test_context_planner_persists_and_rotates_a_session_plan() -> None:
     assert rotated.prefix_sha256 == prefix_rotated.prefix_sha256
     assert conflict_rotated.epoch == 4
     assert conflict_rotated.model_id == "fake:other"
+
+
+async def test_context_planner_rebuilds_when_a_snapshot_trace_disappears() -> None:
+    clock, factory, _service, retriever = await formation_stack()
+    belief = memory(statement="Sam prefers morning meetings")
+    async with factory() as uow:
+        await uow.memories.upsert_belief(belief)
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text()
+    )
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        memory_retriever=retriever,
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    original = await planner.plan(session(), agent(), principal(), model)
+    assert belief.statement in original.memory_snapshot
+    async with factory() as uow:
+        await uow.traces.erase_people(principal(), [], [belief.id])
+    current = await planner.current(session().id)
+    assert current is not None and not current.memory_snapshot
+    rebuilt = await planner.plan(session(), agent(), principal(), model)
+    assert rebuilt.epoch == original.epoch + 1
+    assert rebuilt.snapshot_id != original.snapshot_id
+    assert belief.statement in rebuilt.memory_snapshot
 
 
 async def test_context_planner_reconciles_device_tools_before_reusing_a_cached_plan() -> None:
@@ -553,8 +590,9 @@ async def test_context_planner_rejects_a_persona_over_its_cap() -> None:
 
 
 class _SpyRetriever:
-    def __init__(self) -> None:
+    def __init__(self, result: RecallResult | None = None) -> None:
         self.queries: list[RecallQuery] = []
+        self.result = result
 
     async def corrections(
         self,
@@ -578,7 +616,7 @@ class _SpyRetriever:
     ) -> RecallResult:
         del measure_rendered_tokens
         self.queries.append(query)
-        return RecallResult(
+        return self.result or RecallResult(
             items=[],
             rendered="",
             tokens=0,
@@ -586,6 +624,52 @@ class _SpyRetriever:
             trace_id=UUID(int=999),
             watermark=0,
         )
+
+
+async def test_context_planner_preserves_people_only_snapshot() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    person = TracedPersonContext(
+        record_id=UUID(int=801),
+        revision=1,
+        person_ids=[UUID(int=801)],
+        kind="person",
+        text="Maya is the owner's sister.",
+        sensitivity=Sensitivity.SENSITIVE,
+    )
+    snapshot = RecallResult(
+        items=[],
+        people=[person],
+        rendered='<person-context trust="memory">Maya is the owner\'s sister.</person-context>',
+        tokens=24,
+        truncated=False,
+        trace_id=UUID(int=999),
+        watermark=37,
+    )
+    async with factory() as uow:
+        await uow.traces.record(
+            trace().model_copy(update={"id": snapshot.trace_id, "people": [person]})
+        )
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        yaml.safe_load(
+            (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text()
+        ),
+        policy_version="contract-policy@1",
+        memory_retriever=_SpyRetriever(snapshot),
+    )
+    plan = await planner.plan(
+        session(),
+        agent(),
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+    assert plan.memory_snapshot == snapshot.rendered
+    assert plan.snapshot_id == snapshot.trace_id
+    assert plan.snapshot_watermark == 37
 
 
 @pytest.mark.parametrize(

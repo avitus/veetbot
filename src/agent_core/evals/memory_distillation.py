@@ -48,6 +48,7 @@ from agent_core.memory.equivalence import (
     subject_matches,
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.models import ModelProvider
 
 CORPUS_PATH = MEMORY_DISTILLATION_CORPUS_PATH
 HOLDOUT_PATH = MEMORY_DISTILLATION_HOLDOUT_PATH
@@ -57,7 +58,7 @@ EVALUATION_SCOPE = "memory-distillation-evaluation"
 MINIMUM_SEED_POOL_SIZE = 25
 MINIMUM_EVIDENCE_DISPOSITION_PRECISION = 0.75
 
-PolicyVersion = Literal["formation@7", "formation@8", "formation@9"]
+PolicyVersion = Literal["formation@7", "formation@8", "formation@9", "formation@11"]
 _POLICIES: tuple[PolicyVersion, ...] = ("formation@7", "formation@8", "formation@9")
 
 _BUILD_REF = re.compile(r"^[0-9a-f]{40}$")
@@ -571,7 +572,7 @@ def _policy_metrics(
     cost = sum((Decimal(arm.provider_cost_usd) for arm in arms), Decimal(0))
     return DistillationPolicyMetrics(
         policy_version=policy_version,
-        scoring="strict" if policy_version == "formation@9" else "lenient",
+        scoring="strict" if policy_version in {"formation@9", "formation@11"} else "lenient",
         expected=expected,
         matched=matched,
         predicted=predicted,
@@ -601,6 +602,12 @@ def _evaluation_settings(settings: Settings, artifact_root: Path) -> Settings:
         memory_provider_extraction_mode=MemoryProviderExtractionMode.OFF,
         memory_provider_extraction_evidence=None,
         artifact_root=artifact_root,
+        email_enabled=False,
+        email_mode_enabled=False,
+        email_semantic_evidence=None,
+        call_enabled=False,
+        call_ingress_enabled=False,
+        call_notifications_enabled=False,
     )
 
 
@@ -729,6 +736,7 @@ async def _evaluate_case(
     policy_profile: str,
     policy_version: PolicyVersion,
     seeds: list[SeedBelief] | None = None,
+    model_provider_overrides: dict[str, ModelProvider] | None = None,
 ) -> DistillationArmResult:
     principal = Principal(
         tenant_id="evaluation",
@@ -739,13 +747,15 @@ async def _evaluate_case(
     bootstrap = importlib.import_module("agent_core.bootstrap")
     distillation = importlib.import_module("agent_core.memory.distillation")
     async with bootstrap.build(
-        settings=settings,
+        settings=replace(settings, people_enabled=policy_version == "formation@11"),
         storage="memory",
         principal=principal,
         policy_profile=policy_profile,
         model_policy=model_policy,
         memory_provider_evaluation_mode=policy_version == "formation@8",
         memory_distillation_evaluation_mode=policy_version == "formation@9",
+        memory_people_evaluation_mode=policy_version == "formation@11",
+        model_provider_overrides=model_provider_overrides,
     ) as composition:
         seeded = await seed_prior_beliefs(composition, seeds or [], principal=principal)
         session_id = await composition.sessions.create()
@@ -797,7 +807,7 @@ async def _evaluate_case(
         represented_units = 0
         represented_units_verified = 0
         cost = Decimal(0)
-        if policy_version == "formation@9" and owned:
+        if policy_version in {"formation@9", "formation@11"} and owned:
             expected_calls = 3 * len(distillation.plan_segments(owned))
             audit = composition.memory.extractor_audit
             dispositions = dict(getattr(audit, "coverage_dispositions", {}) or {})
@@ -832,7 +842,7 @@ async def _evaluate_case(
         score=score_distillation_case(
             case,
             beliefs,
-            closed_fields=policy_version == "formation@9",
+            closed_fields=policy_version in {"formation@9", "formation@11"},
             evidence_units=evidence_units,
             evidence_units_formed=evidence_units_formed,
         ),
@@ -866,13 +876,14 @@ def require_committed_tree(repository_root: Path, build_ref: str) -> None:
     """Refuse to label evidence with a commit the evaluated files do not match.
 
     The build reference is what a later reader reproduces from, so it must be
-    the checked-out HEAD and no tracked file may differ from it.
+    the checked-out HEAD and no tracked or untracked input may differ from it.
+    Ignored runtime outputs remain outside the versioned input set.
     """
 
     head = _git_output(repository_root, "rev-parse", "HEAD")
     if head != build_ref:
         raise ValueError("build ref must name the checked-out HEAD of the evaluated tree")
-    if _git_output(repository_root, "status", "--porcelain", "--untracked-files=no"):
+    if _git_output(repository_root, "status", "--porcelain", "--untracked-files=all"):
         raise ValueError("the evaluated tree has uncommitted changes; commit before evaluating")
 
 

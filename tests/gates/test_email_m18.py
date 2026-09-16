@@ -1275,8 +1275,10 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
     assert tool_tokens <= 6_000
 
 
+@pytest.mark.parametrize("email_mode", [False, True])
 async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
     tmp_path: Path,
+    email_mode: bool,
 ) -> None:
     """Two Gmail catalogs retain explicit capabilities within both context caps."""
     settings = replace(
@@ -1284,6 +1286,7 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
             {
                 **_base_environment(),
                 "AGENT_EMAIL_ENABLED": "1",
+                "AGENT_EMAIL_MODE_ENABLED": "1" if email_mode else "0",
                 "GMAIL_ACCOUNTS_FILE": str(_accounts_manifest(tmp_path)),
             }
         ),
@@ -1323,7 +1326,7 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
         plan = await composition.executor._context_planner.current(session_id)
         agent = composition.sessions._default_agent
 
-    assert terminal.status is RunStatus.COMPLETED
+    assert terminal.status is RunStatus.COMPLETED, terminal.failure
     assert plan is not None
     assert provider.fetches == ["https://example.org/ada"]
     assert {
@@ -1334,10 +1337,16 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
         "workspace.write_text",
         "workspace.list_files",
         "schedule.update",
+        "people.search",
+        "people.context",
+        "people.history",
     }.issubset(plan.tool_names)
-    assert len(plan.tool_specs) == 30
+    assert len(plan.tool_specs) <= 30
     assert plan.tool_names == tuple(sorted(plan.tool_names))
-    assert "mcp.gmail_read.search_threads" in plan.tool_names
+    if email_mode:
+        assert {"email.context", "email.feedback"}.issubset(plan.tool_names)
+    else:
+        assert "mcp.gmail_read.search_threads" in plan.tool_names
     estimator = ConservativeTokenEstimator()
     prefix = build_prefix(agent, plan.tool_specs)
     assert (
@@ -1563,6 +1572,7 @@ async def test_token_and_raw_upstream_text_never_cross_the_mcp_result() -> None:
 
 def _email_settings() -> Settings:
     return Settings(
+        people_enabled=False,  # Frozen pre-People Gmail contract.
         database_url="postgresql+asyncpg://localhost/email-m18",
         deployment_mode=DeploymentMode.DEVELOPMENT,
         auth_mode=AuthMode.DEV,

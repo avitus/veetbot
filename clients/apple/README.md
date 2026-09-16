@@ -96,6 +96,17 @@ opening and switching durable historical transcripts and starting a new
 conversation. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
 or credential.
+The keyboard-dismissal case holds its fake submission pending until teardown,
+so a slow accessibility query cannot consume the response-delay window.
+
+The People accessibility audit uses the app's Large text preference on Mac and
+the largest accessibility Dynamic Type category on iPhone and iPad. The Mac
+debug fixture reads `VEETBOT_UI_TEST_TEXT_SIZE` into isolated appearance defaults,
+leaving the owner's preferences untouched and avoiding positional AppKit launch
+arguments. UIKit's content-size launch preference is restricted to the iOS test
+targets.
+Person-profile empty states use primary text contrast so missing history and
+coverage remain readable at enlarged text sizes.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
@@ -130,3 +141,7 @@ keyboard reopened to write the next message.
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute
 the Swift Testing suite when `swift test` builds without discovering tests.
+
+People identity-evidence paging retains the final fetched page and stops when a
+server cursor repeats. If saving during Review & Send makes a draft stale, the
+composer asks the owner to refresh the thread and review the draft again.

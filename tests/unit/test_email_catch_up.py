@@ -28,6 +28,35 @@ from tests.gates.test_email_runtime_scheduling_m26 import _unchanged_mailbox
 NOW = datetime(2026, 9, 14, 5, tzinfo=UTC)
 
 
+@pytest.mark.parametrize("settled", [None, "39.5"])
+async def test_people_import_costs_share_email_aggregate_budget(settled: str | None) -> None:
+    from agent_core.domain.email import EmailRecord
+
+    async with email_client() as (app, client):
+        service = await prepare(app)
+        service.clock = FixedClock(NOW)
+        service.budget_limits = EmailBudgetLimits(daily_cost=Decimal(40), monthly_cost=Decimal(400))
+        async with app.uow_factory() as uow:
+            await uow.email.put(
+                EmailRecord(
+                    tenant_id=app.principal.tenant_id,
+                    principal_id=app.principal.principal_id,
+                    kind="people_import_budget",
+                    key="attempt-1",
+                    revision=1,
+                    created_at=NOW,
+                    updated_at=NOW,
+                    payload={"reservation": "39.5", "settled_cost": settled},
+                ),
+                expected_revision=0,
+            )
+        response = await client.post("/v1/email/refresh", json={})
+        assert response.status_code == 402
+        details = response.json()["error"]["details"]
+        assert Decimal(details["daily_spent"]) == Decimal(settled or "0")
+        assert Decimal(details["daily_reserved"]) == Decimal("39.5" if settled is None else "0")
+
+
 @pytest.mark.parametrize("legacy_window", [0, 1, 2])
 async def test_history_never_continues_beyond_ninety_days(legacy_window: int) -> None:
     """Replace legacy discovery cursors with the owner-authorized ninety-day query."""

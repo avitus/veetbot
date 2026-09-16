@@ -1293,6 +1293,7 @@ policy.profile.loaded       policy-and-approvals.md
 model.response.failed       model-gateway.md
 context.plan.created        context-engine.md
 context.epoch.rotated       context-engine.md
+context.snapshot.used       context-engine.md
 context.compacted           context-engine.md
 context.working_state.updated  context-engine.md
 context.budget.pressure     context-engine.md

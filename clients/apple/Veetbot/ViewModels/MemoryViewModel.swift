@@ -50,7 +50,7 @@ public final class MemoryViewModel: ObservableObject {
     }
 
     public static func makeDefaultAPIClient() async -> VeetbotAPIClient? {
-        #if DEBUG && os(iOS)
+        #if DEBUG && !SWIFT_PACKAGE
         if let fixtureClient = ConversationNavigationUITestFixture.makeMemoryAPIClientIfRequested()
         {
             return fixtureClient

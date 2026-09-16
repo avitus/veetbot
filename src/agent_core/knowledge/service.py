@@ -174,67 +174,67 @@ class KnowledgeService:
         turn_id: UUID | None = None,
         surface_id: str = "private",
     ) -> KnowledgeResult:
-        authorized = query.tenant_id == self._principal.tenant_id and (
-            query.principal_id == self._principal.principal_id
-        )
-        if not authorized:
-            passages: list[RetrievedPassage] = []
-        else:
-            async with self._uow_factory() as uow:
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
+            authorized = query.tenant_id == self._principal.tenant_id and (
+                query.principal_id == self._principal.principal_id
+            )
+            if not authorized:
+                passages: list[RetrievedPassage] = []
+            else:
                 passages = await uow.knowledge.search(query)
-        selected: list[RetrievedPassage] = []
-        tokens = 0
-        for passage in passages:
-            cost = token_estimate(_passage_xml(passage))
-            if len(selected) >= query.max_passages or tokens + cost > query.budget_tokens:
-                continue
-            selected.append(passage)
-            tokens += cost
-        rendered = render_knowledge(selected, as_of=query.as_of or self._clock.now())
-        trace_id = self._ids.new_id()
-        recall_query = RecallQuery(
-            tenant_id=self._principal.tenant_id,
-            principal_id=self._principal.principal_id,
-            current_scope=query.current_scope or "general",
-            text=query.text,
-            profile=RecallProfile.TASK,
-            budget_tokens=query.budget_tokens,
-            max_items=query.max_passages,
-            min_score=query.min_score,
-            sensitivity_ceiling=query.sensitivity_ceiling,
-        )
-        trace = RecallTrace(
-            id=trace_id,
-            tenant_id=self._principal.tenant_id,
-            principal_id=self._principal.principal_id,
-            session_id=session_id,
-            run_id=run_id,
-            turn_id=turn_id,
-            moment=RecallMoment.IN_TURN,
-            query=recall_query,
-            surface_id=surface_id,
-            sensitivity_ceiling=query.sensitivity_ceiling,
-            rendered=rendered,
-            rendered_sha256=hashlib.sha256(rendered.encode()).hexdigest(),
-            candidates=len(passages),
-            passages=[
-                TracedPassage(
-                    chunk_id=passage.chunk_id,
-                    document_id=passage.document_id,
-                    title=passage.title,
-                    heading_path=list(passage.heading_path),
-                    text=passage.text,
-                    sensitivity=passage.sensitivity,
-                )
-                for passage in selected
-            ],
-            retrieval_policy_version=KNOWLEDGE_POLICY_VERSION,
-            created_at=self._clock.now(),
-            operator_fields_expire_at=(
-                self._clock.now() + timedelta(days=self._trace_retention.operator_retention_days)
-            ),
-        )
-        async with self._uow_factory() as uow:
+            selected: list[RetrievedPassage] = []
+            tokens = 0
+            for passage in passages:
+                cost = token_estimate(_passage_xml(passage))
+                if len(selected) >= query.max_passages or tokens + cost > query.budget_tokens:
+                    continue
+                selected.append(passage)
+                tokens += cost
+            rendered = render_knowledge(selected, as_of=query.as_of or self._clock.now())
+            trace_id = self._ids.new_id()
+            recall_query = RecallQuery(
+                tenant_id=self._principal.tenant_id,
+                principal_id=self._principal.principal_id,
+                current_scope=query.current_scope or "general",
+                text=query.text,
+                profile=RecallProfile.TASK,
+                budget_tokens=query.budget_tokens,
+                max_items=query.max_passages,
+                min_score=query.min_score,
+                sensitivity_ceiling=query.sensitivity_ceiling,
+            )
+            trace = RecallTrace(
+                id=trace_id,
+                tenant_id=self._principal.tenant_id,
+                principal_id=self._principal.principal_id,
+                session_id=session_id,
+                run_id=run_id,
+                turn_id=turn_id,
+                moment=RecallMoment.IN_TURN,
+                query=recall_query,
+                surface_id=surface_id,
+                sensitivity_ceiling=query.sensitivity_ceiling,
+                rendered=rendered,
+                rendered_sha256=hashlib.sha256(rendered.encode()).hexdigest(),
+                candidates=len(passages),
+                passages=[
+                    TracedPassage(
+                        chunk_id=passage.chunk_id,
+                        document_id=passage.document_id,
+                        title=passage.title,
+                        heading_path=list(passage.heading_path),
+                        text=passage.text,
+                        sensitivity=passage.sensitivity,
+                    )
+                    for passage in selected
+                ],
+                retrieval_policy_version=KNOWLEDGE_POLICY_VERSION,
+                created_at=self._clock.now(),
+                operator_fields_expire_at=(
+                    self._clock.now()
+                    + timedelta(days=self._trace_retention.operator_retention_days)
+                ),
+            )
             await uow.traces.record(trace)
             await uow.events.append(
                 NewEvent(
@@ -248,16 +248,16 @@ class KnowledgeService:
                     },
                 )
             )
-        return KnowledgeResult(
-            passages=selected,
-            rendered=rendered,
-            tokens=token_estimate(rendered),
-            truncated=len(selected) < len(passages),
-            trace_id=trace_id,
-        )
+            return KnowledgeResult(
+                passages=selected,
+                rendered=rendered,
+                tokens=token_estimate(rendered),
+                truncated=len(selected) < len(passages),
+                trace_id=trace_id,
+            )
 
     async def delete(self, document_id: UUID) -> None:
-        async with self._uow_factory() as uow:
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
             sources = await uow.knowledge.delete(document_id, self._principal)
             await uow.traces.mark_document_deleted(self._principal.tenant_id, document_id)
             for source in sources:

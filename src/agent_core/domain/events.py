@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -26,6 +27,26 @@ TOOL_RESULT_EVENTS = frozenset(
 CONVERSATION_MESSAGE_EVENTS = frozenset({"user.message.created", "assistant.message.completed"})
 SCHEDULE_INSTRUCTION_EVENT_TYPE = "user.message.created"
 SCHEDULE_INSTRUCTION_ACTOR_TYPE = "scheduler"
+
+
+def validate_event_window(
+    session_ids: Sequence[UUID],
+    since: datetime,
+    until: datetime,
+    after: tuple[datetime, int] | None,
+    limit: int,
+) -> None:
+    if (
+        not 1 <= len(session_ids) <= 100
+        or len(set(session_ids)) != len(session_ids)
+        or type(limit) is not int
+        or not 1 <= limit <= 256
+    ):
+        raise ValueError("invalid bounded event window")
+    if since.tzinfo is None or until.tzinfo is None or since >= until:
+        raise ValueError("event window requires an aware positive date range")
+    if after is not None and (after[0].tzinfo is None or after[1] < 1):
+        raise ValueError("invalid event window cursor")
 
 
 class NewEvent(BaseModel):
