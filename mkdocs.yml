@@ -98,6 +98,7 @@ nav:
       - Memory Read API & Browser: plan/memory-read-api-and-browser.md
       - Adaptive Memory Distillation: plan/adaptive-memory-distillation.md
       - Persona Surface: plan/persona-surface.md
+      - Chat Thread Folders: plan/thread-folders.md
       - Email Integration: plan/email-integration.md
       - Client Modes and Email Experience: plan/email-experience.md
       - Device Channel & SMS: plan/device-channel-and-sms.md
@@ -223,4 +224,5 @@ nav:
       - ADR-0099 Verifiable approval argument redaction: adr/0099-verifiable-approval-argument-redaction.md
       - ADR-0100 People and relationship memory: adr/0100-people-and-relationship-memory.md
       - ADR-0101 People availability: adr/0101-people-availability-without-evaluation-gates.md
+      - ADR-0102 Chat thread folders: adr/0102-chat-thread-folders.md
   - Changelog: changelog.md

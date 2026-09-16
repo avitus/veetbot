@@ -1,0 +1,73 @@
+# Canonical gate registry entries for the thread-folder area (Milestone 29).
+- id: gate.folder.schema_additive
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**The schema is additive and both stores agree.** The migration creates the folder, membership, and proposal tables with their constraints and indexes, downgrades cleanly, reads a pre-migration session as unfiled, and the folder store passes one contract suite on both adapters with tenant and principal as predicates."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.crud_invariants
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Folder invariants hold.** Names are unique per principal on the case-folded key with `conflict`, refused when empty, over 64 characters, or failing a hazard scan with `malformed_request`; rename preserves membership; delete unfiles every member and withdraws its open proposals in one transaction; and every write records an event."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.move_semantics
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Move semantics are exact.** Filing and unfiling are idempotent; a foreign or unknown folder or session is an indistinguishable 404; an email, operational, scheduled, or delegated session is `invalid_state` with reason `session_not_chat`; and ADR-0050 session deletion leaves no membership behind."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.proposal_eligibility
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Proposal eligibility is closed.** Only the maintenance pass proposes, only over unfiled chat sessions with titles, only at or above the configured threshold for a new folder, and never over a session already named by an open proposal; scheduled, delegated, and email sessions and sub-threshold groups never yield a proposal."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.bounded_open_set
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**The open set is bounded and disjoint.** At most `max_open` proposals are open per principal, no session is named by two of them, further candidates wait, and resolution or withdrawal frees the slot."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.decline_durable
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Decline is durable.** A declined content key, and any candidate whose member set is a near duplicate of a declined proposal's for the same kind and target, is never proposed again — across re-derivation, a provider change, or a fallback run."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.withdrawal
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Withdrawal follows the cause.** Deleting, moving, or filing a member, deleting the target folder, or an owner taking the proposed name withdraws the open proposal in the causing transaction with its reason, and the pass withdraws any it finds stale."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.grounded_grouping
+  milestone: 29
+  kind: property
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Grouping is grounded and falls back.** Model output is validated against the closed schema and grounded to the pass's inputs; an unknown member, a duplicate, a sub-threshold new folder, and an over-length or hazardous name are dropped; and a resolution, transport, budget, schema, or parse failure yields the deterministic lexical result, which is identical for identical input."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.accept_atomic
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Acceptance is atomic and idempotent.** Accept creates or targets the folder, files the still-eligible members, withdraws competing proposals, and resolves the proposal last in one unit of work; racing accept and decline yield exactly one terminal state and the loser sees `conflict`; accepting an accepted proposal replays."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.routes_exact_scope
+  milestone: 29
+  kind: structural
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Routes carry exact scopes and mount under the flag.** Every folder route requires exactly `session.read` or `session.write` and mounts only under `AGENT_THREAD_FOLDERS_API_ENABLED`; with the flag unset the route inventory is unchanged and the session routes differ only by the additive `folder_id`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.content_free
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Organization text stays out of prompts and logs.** No session metadata key enters the grouping call, folder names and proposal text never render in a conversation prompt — the frozen prefix hash is identical with and without folders — and every event, log line, and audit carries identifiers and counts only."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.folder.native_degradation
+  milestone: 29
+  kind: case
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**The native sidebar degrades and reconciles.** Against a server without the flag the sidebar renders the flat index with no error and no folder control; against one with it, folder sections, the cached `folder_id`, and the proposal rows reconcile with the authoritative index, and the server's value wins."
+  check: tests/gates/pending.py::pending_gate

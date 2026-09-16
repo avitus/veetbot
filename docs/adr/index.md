@@ -110,3 +110,4 @@ implementation without one.
 - [ADR-0099 — Approval argument redaction stays verifiable (Accepted)](0099-verifiable-approval-argument-redaction.md)
 - [ADR-0100 — People and relationship memory (Accepted; Milestone 28)](0100-people-and-relationship-memory.md)
 - [ADR-0101 — People availability without evaluation gates (Accepted)](0101-people-availability-without-evaluation-gates.md)
+- [ADR-0102 — Chat thread folders and grouping proposals (Accepted; Milestone 29)](0102-chat-thread-folders.md)

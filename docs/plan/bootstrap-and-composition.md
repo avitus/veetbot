@@ -1429,3 +1429,15 @@ People adapter receives its memory store so directory relationship filtering
 can check belief privacy before pagination; PostgreSQL applies the equivalent
 scoped join. The detailed contract is
 [people-and-relationships.md](people-and-relationships.md).
+
+## Milestone 29 thread folder composition
+
+`AGENT_THREAD_FOLDERS_API_ENABLED` defaults to off and gates both the folder
+router and the proposal sweep. The composition root loads the checked-in
+`folders/profiles.yaml` document, constructs the folder service over the
+unit-of-work factory, and — only when the flag is set and `proposals.enabled`
+is true — builds the model-assisted grouper over the model router and
+providers with the lexical grouper as its fallback, and registers the proposal
+pass as a maintenance sweep on its own timer. Its seven knobs join the
+executable inventory when the implementation lands. The detailed contract is
+[thread-folders.md](thread-folders.md).

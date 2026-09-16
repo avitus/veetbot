@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 31 subject specifications declare 520 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 529
-declarations, 526 registry entries once the 3 aliases are subtracted.
+The 32 subject specifications declare 532 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 541
+declarations, 538 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1620,6 +1620,25 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 36 gate.people.release_evidence case 28
 ```
 
+### Chat thread folders
+
+[thread-folders.md](thread-folders.md) declares twelve Milestone 29 gates.
+
+```text
+1 gate.folder.schema_additive case 29
+2 gate.folder.crud_invariants case 29
+3 gate.folder.move_semantics case 29
+4 gate.folder.proposal_eligibility case 29
+5 gate.folder.bounded_open_set case 29
+6 gate.folder.decline_durable case 29
+7 gate.folder.withdrawal case 29
+8 gate.folder.grounded_grouping property 29
+9 gate.folder.accept_atomic case 29
+10 gate.folder.routes_exact_scope structural 29
+11 gate.folder.content_free case 29
+12 gate.folder.native_degradation case 29
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1715,6 +1734,7 @@ milestone  new gates  cumulative  the earliest of them
                                   shared semantic memory and lifecycle
 27                14         490  Bland calling and public correspondence intake
 28                36         526  People identity, temporal relationships, history and governed recall
+29                12         538  chat thread folders, owner-resolved grouping proposals, grounded grouping
 ```
 
 Two facts fall out of the table and both are worth stating rather than

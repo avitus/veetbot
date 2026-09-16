@@ -2101,3 +2101,16 @@ and both People and belief watermarks into its cursor. Import discovery uses
 its own owner-bound cursor and restores an existing job without widening its
 source scope. Static import and operation routes precede dynamic person IDs.
 The two `/v1/memories` routes remain read-only.
+
+## Milestone 29 thread folder routes
+
+[thread-folders.md](thread-folders.md#the-routes) owns the nine folder routes
+and their request and response contracts: folder create, list, read, rename
+and delete under `/v1/folders`, proposal list, accept and decline under
+`/v1/folders/proposals`, and `PUT /v1/sessions/{session_id}/folder`. They are
+absent unless `AGENT_THREAD_FOLDERS_API_ENABLED=1` and require the existing
+`session.read` or `session.write` scope; no new scope enters the vocabulary.
+`SessionView` gains an additive nullable `folder_id` on every route that
+returns it. All folder responses carry `Cache-Control: private, no-store`,
+and a foreign or unknown folder, proposal or session is an indistinguishable
+404.
