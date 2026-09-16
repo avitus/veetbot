@@ -301,6 +301,9 @@ refresh. Cancellation and responses from an old connection do not become
 visible connection errors. Refresh failures survive successful cached reads
 until a refresh completes; a recovered thread read clears its own error while
 preserving errors from editing, feedback or send actions.
+Messages appear as soon as the thread response arrives, even when an older
+server requires a separate draft read. Foreground polling reuses a pending initial
+thread read from the same activation instead of replacing it with another request.
 Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
@@ -333,6 +336,10 @@ client retains confirmed mailbox state, row order and unsaved replies, and
 keeps other rows actionable. Pending rows stay hidden through refreshes and
 status checks resume when Email reopens. An archived conversation found in
 Other mail can be moved back to its originating account's Inbox.
+Archiving from the reading pane clears it immediately and opens the next visible
+conversation, or the previous one when archiving the last row. With no remaining
+rows, the pane becomes empty. Loading the successor does not wait for archive
+admission or completion, and a later archive failure does not replace the new selection.
 
 The reading column separates the attention summary, original conversation and
 reply composer. Why this matters and Improve priorities expand on demand, while
@@ -354,7 +361,12 @@ the previous person or topic value; person feedback requires an explicit choice.
 Learning controls expose pause/resume, scoped resets and explicit source
 exclusion. Draft edits autosave
 with optimistic revisions; conflicts preserve local and server versions, and
-draft history can restore earlier text into the editor. The Writing style menu
+draft history can restore earlier text into the editor. Typing continues while a
+save is in flight, so Review & Send settles the newest revision through bounded
+save attempts before freezing one, and reports a save that will not settle rather
+than freezing text the owner cannot see. A failed owner action is reported beside
+the control that caused it, and a failed mail read with the conversation it could
+not refresh; an action refused far from its button reads as no action at all. The Writing style menu
 can explicitly endorse the displayed wording as an example after saving any
 edits; a save conflict prevents endorsement. The action binds the current draft
 revision and preserves the learning pause state. The learning pane discloses
@@ -363,7 +375,12 @@ Coverage counts describe threads retrieved, not completed semantic analysis.
 Review & Send verifies
 the approval's exact tool/account, provider thread, recipients, subject and body
 against the frozen draft before presenting the existing approve-once action.
-The client never invokes Gmail or substitutes a retry send after uncertainty.
+Because the approval view truncates a string over 512 characters, a reply longer
+than that is verified through the published `argument_digests` entry for that
+argument, which proves the whole value rather than the retained prefix; a
+truncated argument with no digest stays unverifiable and is refused rather than
+presented. The client never invokes Gmail or substitutes a retry send after
+uncertainty.
 
 Mail and unsaved edits stay in process memory; there is no durable offline mail
 cache or authoritative offline write queue. A connection change, forgotten

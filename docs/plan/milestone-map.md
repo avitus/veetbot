@@ -1605,7 +1605,7 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 21 gate.people.api_boundaries case 28
 22 gate.people.tool_schemas case 28
 23 gate.people.governed_writes case 28
-24 gate.people.default_off case 28
+24 gate.people.default_available case 28
 25 gate.people.erasure case 28
 26 gate.people.egress case 28
 27 gate.people.email_history_bound case 28

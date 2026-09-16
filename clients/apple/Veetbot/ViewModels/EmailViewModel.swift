@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -79,6 +80,7 @@ public final class EmailViewModel: ObservableObject {
     private var generation = UUID()
     private var listRequest = UUID()
     private var selectionRequest = UUID()
+    private var threadRead: (id: UUID, activation: UUID?)?
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var refreshTask: Task<Void, Never>?
@@ -134,6 +136,12 @@ public final class EmailViewModel: ObservableObject {
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
     /// Keeps an unresolved owner-action failure visible even when a later thread read fails or recovers.
     public var draftError: String? { draftActionError ?? threadReadError }
+    /// An owner action that failed, so a refusal can be shown beside the control that
+    /// caused it. Reporting it only above the conversation leaves the action looking
+    /// inert, because the button that triggered it is far below.
+    public var draftActionMessage: String? { draftActionError }
+    /// A failed mail read, reported with the conversation it could not refresh.
+    public var threadReadMessage: String? { threadReadError }
     public var canReview: Bool {
         guard let draft else { return false }
         return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
@@ -169,6 +177,7 @@ public final class EmailViewModel: ObservableObject {
         activation = UUID()
         listRequest = UUID()
         selectionRequest = UUID()
+        threadRead = nil
         refreshTask?.cancel()
         operationTask?.cancel()
         autosaveTask?.cancel()
@@ -501,6 +510,7 @@ public final class EmailViewModel: ObservableObject {
     /// Clears thread presentation and its errors without discarding draft edits stored by draft ID.
     public func clearSelection() {
         selectionRequest = UUID()
+        threadRead = nil
         isLoadingThread = false
         selectedThreadID = nil
         thread = nil
@@ -526,6 +536,8 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         let mailboxVersions = archiveVersions
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
+        if refreshOnly, approvalID == nil, thread == nil,
+           threadRead?.id == id, threadRead?.activation == foreground { return }
         if !refreshOnly {
             clearSelection()
             selectedThreadID = id
@@ -533,13 +545,20 @@ public final class EmailViewModel: ObservableObject {
         guard selectedThreadID == id else { return }
         let requestID = UUID()
         selectionRequest = requestID
+        threadRead = (id, foreground)
         isLoadingThread = thread == nil
-        defer { if selectionRequest == requestID { isLoadingThread = false } }
+        defer {
+            if selectionRequest == requestID {
+                threadRead = nil
+                isLoadingThread = false
+            }
+        }
         do {
             let response = try await api.emailThread(id)
             guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
             let result = preservingArchiveState(response, since: mailboxVersions)
             thread = result
+            isLoadingThread = false
             observeArchive(result)
             if let returnedDraft = result.draft { mergeDraft(returnedDraft) }
             else if let draftID = result.draftID {
@@ -703,9 +722,22 @@ public final class EmailViewModel: ObservableObject {
     /// Saves edits and proposes the exact draft for approval, retaining accepted work if Email is hidden.
     public func prepareSend() async {
         guard canReview, let api = makeAPIClient() else { return }
-        autosaveTask?.cancel()
-        if currentEdit?.isDirty == true, !(await saveDraft()) { return }
-        guard let draft, currentEdit?.isDirty == false, !draft.stale else { return }
+        // Typing continues while a save is in flight, so a save can succeed and still
+        // leave the edit dirty, holding back the very text the owner asked to send.
+        // Settle the newest revision before freezing one, bounding the attempts so
+        // continuous typing cannot spin here.
+        for _ in 0..<3 {
+            autosaveTask?.cancel()
+            guard currentEdit?.isDirty == true else { break }
+            guard await saveDraft() else { return }
+        }
+        guard let draft, !draft.stale else { return }
+        // Never freeze a revision that is not the text on screen; a stalled save is
+        // reported instead of leaving the action looking like it did nothing.
+        guard currentEdit?.isDirty == false else {
+            draftActionError = "Your most recent edits are still saving. Review and send again."
+            return
+        }
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
@@ -767,7 +799,21 @@ public final class EmailViewModel: ObservableObject {
     public func closeReview() { review = nil; reviewDraft = nil }
 
     private func approvalMatchesDraft(_ approval: ApprovalView, draft: EmailDraftView) -> Bool {
+        /// Verifies one frozen argument against the draft.
+        ///
+        /// The approval view truncates a long string, so comparing it to the full
+        /// local value can never succeed. A published digest is then the only exact
+        /// evidence, and it is authoritative wherever it exists — it covers the whole
+        /// value, not just the prefix the view carries. Without one, a value that no
+        /// longer compares equal stays refused rather than presented unverified.
+        func textMatches(_ key: String, _ expected: String) -> Bool {
+            if let digest = approval.argumentDigests?[key] {
+                return digest == Self.sha256Hex(expected)
+            }
+            return approval.arguments[key]?.stringValue == expected
+        }
         func addressesMatch(_ key: String, _ expected: [String]) -> Bool {
+            if approval.argumentDigests?[key] != nil { return textMatches(key, expected.joined(separator: ", ")) }
             guard let value = approval.arguments[key], value != .null else { return key != "to" && expected.isEmpty }
             if let text = value.stringValue { return text == expected.joined(separator: ", ") }
             guard let entries = value.arrayValue else { return false }
@@ -779,9 +825,12 @@ public final class EmailViewModel: ObservableObject {
             let toolName = draft.sendToolName, toolName == "mcp.\(serverID).send_message", approval.toolName == toolName,
             let providerThreadID = draft.providerThreadID,
             approval.arguments["thread_id"]?.stringValue == providerThreadID else { return false }
-        return approval.arguments["subject"]?.stringValue == draft.subject
-            && approval.arguments["body"]?.stringValue == draft.body
+        return textMatches("subject", draft.subject) && textMatches("body", draft.body)
             && addressesMatch("to", draft.to) && addressesMatch("cc", draft.cc) && addressesMatch("bcc", draft.bcc)
+    }
+
+    private static func sha256Hex(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     public func discussionSession() async -> UUID? {

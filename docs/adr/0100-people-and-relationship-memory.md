@@ -1,10 +1,12 @@
-# ADR-0099: People and relationship memory
+# ADR-0100: People and relationship memory
 
 - Status: Accepted — owner authorized Milestone 28 implementation on 2026-09-15
 - Date: 2026-09-15
 - Related: ADR-0018, ADR-0019, ADR-0045, ADR-0050, ADR-0069, ADR-0070,
   ADR-0077, ADR-0079, ADR-0090, ADR-0092, ADR-0096
 - Design: [People and relationship memory](../plan/people-and-relationships.md)
+
+Activation and rollout are amended by [ADR-0101](0101-people-availability-without-evaluation-gates.md).
 
 ## Context
 

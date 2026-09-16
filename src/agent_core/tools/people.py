@@ -34,7 +34,7 @@ def _spec(name: str, description: str, schema: dict[str, Any], output: dict[str,
         name=name,
         version="1.0.0",
         description=description,
-        input_schema=schema,
+        input_schema={key: value for key, value in schema.items() if key != "title"},
         output_schema=output,
         required_scopes={"people.read"},
         side_effect=SideEffectClass.NONE,
@@ -50,8 +50,7 @@ def _spec(name: str, description: str, schema: dict[str, Any], output: dict[str,
 class PeopleSearchTool:
     spec = _spec(
         "people.search",
-        "Find permitted identities by exact name, contextual alias or channel "
-        "endpoint; ambiguity is explicit.",
+        "Resolve names, aliases or endpoints; preserve ambiguity.",
         PeopleSearchArgs.model_json_schema(),
         PeopleSearchResult.model_json_schema(),
     )
@@ -149,7 +148,7 @@ class PeopleContextTool:
 class PeopleHistoryTool:
     spec = _spec(
         "people.history",
-        "Page attributed interaction history across owned sources for a selected person.",
+        "Page a person's attributed interactions.",
         PeopleHistoryArgs.model_json_schema(),
         PeopleHistoryResult.model_json_schema(),
     )

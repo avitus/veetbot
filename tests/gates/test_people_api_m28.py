@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any, Literal
 
 import httpx
+import pytest
 
 from agent_core.api import create_app
 from agent_core.bootstrap import build
@@ -13,12 +14,23 @@ from tests.contract.support import principal, session
 from tests.integration.m2_support import memory_settings
 
 
-async def test_people_api_defaults_off() -> None:
-    async with build(settings=memory_settings(), storage="memory") as app:
+@pytest.mark.parametrize("shutdown", [False, True])
+async def test_people_api_available_by_default_with_explicit_shutdown(shutdown: bool) -> None:
+    from agent_core.config import load_settings
+    from tests.unit.test_config import base_environment
+
+    values = base_environment()
+    if shutdown:
+        values["AGENT_PEOPLE_ENABLED"] = "0"
+    configured = load_settings(values)
+    async with build(
+        settings=replace(memory_settings(), people_enabled=configured.people_enabled),
+        storage="memory",
+    ) as app:
         schema = create_app(
             app.services, app.settings, app.principal, app.new_request_id, app.readiness_probe
         ).openapi()
-        assert not any(path.startswith("/v1/people") for path in schema["paths"])
+        assert any(path.startswith("/v1/people") for path in schema["paths"]) is not shutdown
 
 
 async def test_people_directory_filters_before_pagination_and_binds_cursor() -> None:

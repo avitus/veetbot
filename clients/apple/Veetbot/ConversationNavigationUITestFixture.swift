@@ -1,5 +1,8 @@
 #if DEBUG
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 
 enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
@@ -13,6 +16,26 @@ enum ConversationNavigationUITestFixture {
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
         ConversationNavigationUITestURLProtocol.resetEmail()
+        #if os(macOS)
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
+            let availableAfter = Date().addingTimeInterval(
+                ProcessInfo.processInfo.arguments.contains("--ui-testing-delayed-window") ? 2 : 0
+            )
+            Task { @MainActor in
+                for _ in 0..<40 {
+                    if Date() >= availableAfter,
+                        let window = NSApp.windows.first(where: { $0.canBecomeMain })
+                    {
+                        window.setFrame(
+                            NSRect(x: 100, y: 100, width: 1000, height: 700), display: true
+                        )
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+        }
+        #endif
 
         let suiteName = "com.veetbot.apple.ui-tests"
         guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
@@ -58,6 +81,7 @@ enum ConversationNavigationUITestFixture {
 }
 
 private final class ConversationNavigationUITestURLProtocol: URLProtocol {
+    private var pendingResponse: DispatchWorkItem?
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailRevision = 1
@@ -266,13 +290,18 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             "POST",
             "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/messages"
         ):
-            statusCode = 202
-            body =
-                "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-send-failure") {
+                statusCode = 400
+                body = #"{"error":{"code":"invalid_request","message":"Submission rejected","details":{},"request_id":"ui-test"}}"#
+            } else {
+                statusCode = 202
+                body = "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
+            }
         case ("GET", "/v1/runs/\(Self.runID)/events"):
             statusCode = 200
-            body = """
-                id: 1
+            body = ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools")
+                ? Self.mixedToolEvents : """
+                id: 3
                 event: run.completed
                 data: {"run_id":"\(Self.runID)"}
 
@@ -347,12 +376,27 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let deliver = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Data(body.utf8))
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        pendingResponse = deliver
+        let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
+        let isSubmission = request.httpMethod == "POST" && url.path.hasSuffix("/messages")
+        let isRunStream = url.path == "/v1/runs/\(Self.runID)/events"
+        if slowChat && (isSubmission || isRunStream) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: deliver)
+        } else {
+            deliver.perform()
+        }
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        pendingResponse?.cancel()
+        pendingResponse = nil
+    }
 
     private func requestJSON() -> [String: Any] {
         var data = request.httpBody ?? Data()
@@ -422,6 +466,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         return """
             {"id":"\(emailApprovalID)","run_id":"\(emailRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"\(sent ? "APPROVED" : "PENDING")","tool_name":"mcp.gmail_work_send.send_message","action_summary":"Send the exact reply","arguments":{"thread_id":"provider-thread","to":"alex@example.test","cc":null,"bcc":null,"subject":"Re: Board agenda","body":\(escapedBody)},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
             """
+    }
+
+    /// Synthetic mixed Gmail activity exercises expansion without mailbox contents or credentials.
+    private static var mixedToolEvents: String {
+        var frames = (1...20).map { index in
+            let name = index.isMultiple(of: 2)
+                ? "mcp.gmail_read.get_thread" : "mcp.gmail_work_read.search_threads"
+            let event = index > 14 ? "tool.call.failed" : "tool.call.completed"
+            return "id: \(index + 2)\nevent: \(event)\ndata: {\"call_id\":\"gmail-\(index)\",\"name\":\"\(name)\",\"arguments\":{\"query\":\"example \(index)\"},\"result_item\":{\"content\":[{\"type\":\"text\",\"text\":\"Example result \(index)\"}],\"is_error\":false,\"trust\":\"external_untrusted\"}}\n\n"
+        }
+        frames.append("id: 23\nevent: assistant.message.completed\ndata: {\"message\":{\"kind\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Your answer is visible below the tool summary.\"}]}}\n\n")
+        frames.append("id: 24\nevent: run.completed\ndata: {\"run_id\":\"\(runID)\"}\n\n")
+        return frames.joined()
     }
 
     private static let firstSessionJSON = """

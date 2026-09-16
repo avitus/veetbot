@@ -8,9 +8,13 @@ from agent_core.domain.tools import ToolSpec
 
 
 def _compact_schema(schema: dict[str, Any], label: str) -> dict[str, Any]:
-    """Omit generated label repetitions without removing meaningful schema annotations."""
+    """Omit repeated labels and empty default annotations; preserve validation keywords."""
 
     result = dict(schema)
+    # These annotations add no choice beyond omission of an optional argument.
+    # The pinned ToolSpec retains defaults for runtime validation and replay.
+    if "default" in result and result["default"] in (None, [], {}):
+        result.pop("default")
     title = result.get("title")
 
     def normalize(value: str) -> str:

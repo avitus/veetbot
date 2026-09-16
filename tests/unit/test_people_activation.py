@@ -1,9 +1,10 @@
-"""Changed People extraction activates only on its own passing evidence tuple."""
+"""People availability is independent from honest, versioned quality evidence."""
 
 from pathlib import Path
 
 import pytest
 
+from agent_core.application.people import PublicPeopleService
 from agent_core.config import MemoryFormationPolicyPin
 
 
@@ -66,7 +67,7 @@ def test_people_evidence_cannot_reuse_legacy_distillation_artifact() -> None:
         loader(artifact)
 
 
-async def test_pinned_people_does_not_activate_matching_legacy_evidence(
+async def test_pinned_people_does_not_claim_legacy_evidence_as_certification(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:
     import json
@@ -101,8 +102,9 @@ async def test_pinned_people_does_not_activate_matching_legacy_evidence(
     )
     async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
         selections = await uow.process_events.list("memory.provider_extraction.selection")
-        assert selections[0].payload["outcome"] == "deterministic_fallback"
-        assert selections[0].payload["reason"] == "pinned_policy_unevidenced"
+        assert selections[0].payload["outcome"] == "activated"
+        assert selections[0].payload["reason"] == "people_default"
+        assert selections[0].payload["evidence_build_ref"] is None
 
 
 def test_people_activation_rejects_unmeasured_reasoning_configuration(
@@ -180,23 +182,26 @@ def test_activation_requires_both_shipped_corpora_to_be_reviewed(
     assert people_evidence.reviewed_corpora() is (review_status == "reviewed")
 
 
-async def test_malformed_email_people_evidence_fails_as_configuration_error(tmp_path: Path) -> None:
+async def test_malformed_quality_artifacts_do_not_disable_people(tmp_path: Path) -> None:
     from dataclasses import replace
 
     from agent_core.bootstrap import build
-    from agent_core.config import ConfigurationError
     from tests.integration.m2_support import memory_settings
 
     artifact = tmp_path / "bad-email-evidence.json"
     artifact.write_text("{invalid")
-    with pytest.raises(ConfigurationError, match=r"email.*evidence"):
-        async with build(
-            settings=replace(
-                memory_settings(), people_enabled=True, email_semantic_evidence=artifact
-            ),
-            storage="memory",
-        ):
-            pass
+    async with build(
+        settings=replace(
+            memory_settings(),
+            people_enabled=True,
+            email_semantic_evidence=artifact,
+            memory_provider_extraction_evidence=artifact,
+        ),
+        storage="memory",
+    ) as app:
+        assert app.memory._policy_version == "formation@11"
+        assert isinstance(app.services.people, PublicPeopleService)
+        assert app.services.people.imports.email_capture_available
 
 
 def test_email_activation_rejects_stale_nested_corpora(
@@ -283,3 +288,48 @@ def test_email_activation_rejects_stale_nested_corpora(
                 policy_profile="test",
                 policy_version="test",
             )
+
+
+def test_people_available_by_default_and_required_mode_needs_no_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import agent_core.config as config
+    from tests.unit.test_config import base_environment
+
+    monkeypatch.setattr(config, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", tmp_path)
+    for mode in ("auto", "required"):
+        settings = config.load_settings(
+            {**base_environment(), "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": mode}
+        )
+        assert settings.people_enabled
+        assert settings.memory_provider_extraction_evidence is None
+
+
+@pytest.mark.parametrize("mode", ["auto", "required"])
+@pytest.mark.parametrize("pin", [None, MemoryFormationPolicyPin.PEOPLE])
+async def test_people_capture_and_imports_available_without_evaluation_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pin: MemoryFormationPolicyPin | None, mode: str
+) -> None:
+    from dataclasses import replace
+
+    import agent_core.config as config
+    from agent_core.bootstrap import build
+    from tests.integration.m2_support import memory_settings
+
+    monkeypatch.setattr(config, "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT", tmp_path)
+    settings = replace(
+        memory_settings(),
+        people_enabled=True,
+        memory_formation_policy_pin=pin,
+        memory_provider_extraction_mode=config.MemoryProviderExtractionMode(mode),
+    )
+    async with build(settings=settings, storage="memory") as app, app.uow_factory() as uow:
+        assert app.memory._policy_version == "formation@11"
+        assert app.memory.extractor_name.startswith("people-assisted-v1")
+        assert isinstance(app.services.people, PublicPeopleService)
+        assert app.services.people.imports.capture_available
+        assert app.services.people.imports.email_capture_available
+        selections = await uow.process_events.list("memory.provider_extraction.selection")
+        assert selections[0].payload["outcome"] == "activated"
+        assert selections[0].payload["reason"] == "people_default"
+        assert selections[0].payload["evidence_build_ref"] is None

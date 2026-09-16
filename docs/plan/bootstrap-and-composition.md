@@ -1383,9 +1383,10 @@ the plan's text stands with an annotation rather than a replacement.
     against a real port rather than in the abstract.
 
 
-## Email semantic activation evidence
+## Legacy Email semantic activation evidence
 
-Milestone 26 adds `Settings.email_semantic_evidence`, read from
+With People explicitly disabled, the legacy Milestone 26 policy uses
+`Settings.email_semantic_evidence`, read from
 `AGENT_EMAIL_SEMANTIC_EVIDENCE`. It is an optional path to a reviewed semantic
 email evaluation artifact. The composition selects evidence for the resolved
 provider/model and exact release identity using the mechanism in
@@ -1412,14 +1413,14 @@ See [setup](../bland-setup.md) for the complete configuration and role inventory
 
 ## Milestone 28 People composition
 
-`AGENT_PEOPLE_ENABLED` defaults to false and controls People capture, public
-management routes, the three read tools, and automatic context integration.
-Owner/source/session erasure remains wired when the surface is disabled. The
-flag does not activate an extraction policy: `formation@11` and
-`email-semantic@2` each require current evidence for their exact source,
-provider/model, policy, implementation, and corpus versions. The existing
-`AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE` and Email evidence settings supply
-the artifacts; no credentials or private corpus is embedded in configuration.
+`AGENT_PEOPLE_ENABLED` defaults to true and controls People capture, public
+management routes, read tools, and automatic context integration. Explicitly
+setting it to zero stops new work while owner/source/session erasure stays wired.
+Under ADR-0101, `formation@11` is selected without evaluation artifacts when no
+legacy formation policy is pinned. `email-semantic@2` is used whenever People
+is enabled; existing Email credentials, source permissions and budgets apply.
+The evidence settings remain available for legacy policies and quality reporting;
+missing or stale People evaluation artifacts cannot disable functionality.
 
 The composition root connects People services to governed corrections, recall,
 and import formation through ports. It injects source admission, implementation

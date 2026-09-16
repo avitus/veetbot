@@ -433,7 +433,7 @@ class ImportSlice:
             service = factory(self) if events else None
             email = email_factory(self, job) if email_factory is not None and mail else None
             if mail and email is None:
-                raise ImportStoppedError("evaluated email import worker is unavailable")
+                raise ImportStoppedError("email import worker is unavailable")
             ordered: list[tuple[datetime, str, EventEnvelope | EmailRecord]] = [
                 (event.created_at, f"chat:{event.id:020d}", event) for event in events
             ] + [

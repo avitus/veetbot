@@ -41,6 +41,7 @@ from agent_core.domain.memory import (
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
+    recall_query_terms,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
@@ -248,7 +249,7 @@ class InMemoryMemoryStore:
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
-        term_lexemes = lexical_term_lexemes(lexical_query_terms(query.text))
+        term_lexemes = lexical_term_lexemes(recall_query_terms(query.text))
         subjects = {subject.casefold() for subject in query.subjects}
         async with self._lock:
             result = []
@@ -291,6 +292,8 @@ class InMemoryMemoryStore:
                     continue
                 if record.store_position <= query.min_store_position:
                     continue
+                if not query.include_provisional and record.status is MemoryStatus.PROVISIONAL:
+                    continue
                 if (
                     not query.include_superseded
                     and query.as_of is None
@@ -317,10 +320,11 @@ class InMemoryMemoryStore:
                 ):
                     continue
                 if (
-                    term_lexemes
+                    (query.text is not None or subjects or query.structured_belief_types)
                     and query.include_ids is None
                     and record.id not in query.expand_ids
                     and record.subject.casefold() not in subjects
+                    and record.belief_type not in query.structured_belief_types
                 ):
                     text = f"{record.subject} {record.statement}"
                     if not lexical_text_matches(term_lexemes, text):

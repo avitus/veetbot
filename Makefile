@@ -96,6 +96,7 @@ test-apple-ui:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleIdentityPreviewRemainsReviewableAfterEditorCloses \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleMailboxImportPreviewShowsExplicitCoverage \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleForgetExplainsSourceRetentionAndPendingCleanup \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailModeAndExactDraftApprovalOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailCanBeCheckedOffFromInboxWithoutOpeningThread \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailDetailArchiveDisplaysNextConversation \

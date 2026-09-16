@@ -30,6 +30,14 @@ help?” The production greeting uses the owner's chosen public name and explain
 that the conversation is transcribed and shared with them. Audio recording is
 disabled by default; transcription is still part of the service.
 
+The reviewed configuration distinguishes `assistant_name` (default `Veetbot`)
+from `public_name`, the owner the assistant represents, and from `voice`, the
+provider voice selection. Both inbound greetings and outbound instructions use
+the assistant and owner names: “Hi, I'm Willow, Andy's assistant.” AI identity
+and transcription disclosure follow that introduction. All three values are
+included in the configuration revision that binds outbound approval; renaming
+the assistant requires a fresh approval and an inbound configuration readback.
+
 The initial receptionist collects the caller's stated name, organization if
 relevant, reason for calling, requested callback details, and any stated deadline.
 It confirms these details and says it will pass the message along. It does not

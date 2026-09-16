@@ -15,13 +15,25 @@ People browser use the same records and the same evidence rules.
 
 The owner approved implementation on 2026-09-15. This document specifies
 **Milestone 28**, an independent workstream under accepted
-[ADR-0099](../adr/0099-people-and-relationship-memory.md). It expands the
+[ADR-0100](../adr/0100-people-and-relationship-memory.md). It expands the
 [engineering plan](engineering-plan.md) only for People-specific identity,
 temporal relationships, person-linked history, and governed People edits.
 The verified sequential ceiling stays at Milestone 12. Historical imports,
 provider evaluation spend, PR creation, merging, and deployment retain the
 explicit scope described below. The implementation and its 36 gates remain
 in progress until their evidence is complete.
+
+### Availability amendment
+
+Under [ADR-0101](../adr/0101-people-availability-without-evaluation-gates.md),
+People is enabled by default with its complete implemented functionality.
+Automatic Chat and Email formation and scoped imports require no evaluation
+artifact, reviewed corpus, private acceptance run or pilot allowlist. The quality
+requirements below measure milestone completion; they do not block runtime
+availability or release. Explicit shutdown, provider availability, authorization,
+source admission, privacy, correction, erasure and finite budgets remain enforced.
+This amendment supersedes earlier activation-gating statements in the historical
+implementation checkpoint.
 
 ### The product promise
 
@@ -368,7 +380,7 @@ and bounded retry path. Corrections win races with imports and background work.
 Do not modify evaluated `formation@9`, `formation@10`, or `email-semantic@1`
 in place. Introduce a successor owner-formation policy and a separately evaluated
 email policy with person-aware outputs. The successor owner policy is `formation@11` and the email policy is
-`email-semantic@2`; both require fresh activation evidence. Deterministic indexing of existing
+`email-semantic@2`; both are available without evaluation artifacts under ADR-0101. Deterministic indexing of existing
 beliefs has its own linker version and does not claim new semantic knowledge.
 
 For owner distillation, keep the three-call segmented shape: integration,
@@ -545,13 +557,14 @@ revisions with a short expiry; applying does not silently broaden the preview.
 Use the existing error envelope and cache-control conventions. No raw addresses,
 names, content, or credentials in errors or operational logs.
 
-Use `AGENT_PEOPLE_ENABLED` as the default-off master switch for new
+Use `AGENT_PEOPLE_ENABLED` as the default-on operational switch for new
 formation, linking, routes, tools, and context integration; disabling it retains
 existing data and keeps cleanup workers operational. An optional API exposure
 switch can be added only if deployment requires separate control. Worker
-formation also requires its own matching policy evidence. The existing `/v1/memories` routes
+formation selects `formation@11` when People is enabled and no legacy policy is pinned.
+Email selects `email-semantic@2`; neither requires an evaluation artifact. The existing `/v1/memories` routes
 remain GET-only. Person-linked corrections are an explicit new public write
-capability authorized by ADR-0099; Milestone 17's read-only contract remains intact.
+capability authorized by ADR-0100; Milestone 17's read-only contract remains intact.
 
 ## 10. Correction, privacy, and erasure
 
@@ -731,7 +744,7 @@ artifacts. The phases are implementation slices of one proposed milestone.
 | 5. Shared retrieval and tools | `application/people.py`, memory query extensions, bounded history query, People tools, context/trace integration and bootstrap wiring. | Person context improves the baseline task within unchanged prompt budgets; ambiguous names, filtered edges, and frozen-prefix tests pass. |
 | 6. Email integration and HTTP | Bridge to `application/email.py`, `runtime/email_tasks.py`, `memory/email_semantics.py`; `api/people.py`, read/write scopes, import routes and source evidence access. | Same verified person works across both Gmail accounts and Chat; email feedback/reply identity is unchanged; route auth/retry/failure matrix passes. |
 | 7. Native People experience | `PeopleModels`, `PeopleAPIClient`, `PeopleViewModel`, list/detail/history/correction views, and Memory/Email navigation in `clients/apple`. | Browse, correct, split, and forget from iPhone/iPad/Mac; concurrent edits and mid-pagination errors preserve coherent UI state. |
-| 8. Evaluation and bounded activation | `evals/` People corpus, formation/retrieval comparisons, performance/cost calibration, private owner acceptance, evidence bundle, runbook. | All local and quality requirements pass on the candidate head; source policy activates only with matching evidence. Hosted release evidence remains phase 9. |
+| 8. Evaluation and bounded activation | `evals/` People corpus, formation/retrieval comparisons, performance/cost calibration, private owner acceptance, evidence bundle, runbook. | Record measured quality and costs without using evidence artifacts to gate availability. Hosted release evidence remains phase 9. |
 | 9. Release and verification | Exact-head hosted review/CI and separately authorized deployment using `docs/deployment.md`; post-deploy identity and bounded owner smoke. | Public release identity and both backend/native behavior match the reviewed revision; no gate advances solely on local success. |
 
 All `domain/`, `ports/`, `application/`, `memory/`, `api/`, and adapter paths in
@@ -741,7 +754,7 @@ are `tests/unit/test_people_*.py`, `tests/contract/test_people_*.py`,
 `tests/integration/test_people_*.py`, `tests/gates/test_people_*.py`, and
 `clients/apple/Tests/VeetbotCoreTests/People*Tests.swift` plus native UI coverage.
 
-Phase dependencies: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9. Native view work
+Phase dependencies: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 9; quality measurement in phase 8 proceeds independently of availability under ADR-0101. Native view work
 can begin against frozen API fixtures after phase 1; it cannot ship before
 phases 2 and 6. Email bridges can proceed after source and identity contracts
 stabilize. No coordination should create competing writers to shared beliefs.
@@ -778,7 +791,7 @@ all inherited memory, email, context, policy, and native gates.
 | P21 | HTTP/tool happy path, malformed inputs, missing/wrong scopes, unavailable sources, failures, retries, and limits are covered. |
 | P22 | Tool schemas advertise every bound enforced at execution; pinned old sessions remain compatible and revocations apply at invocation. |
 | P23 | Public People writes reach governed memory, require owner intent and exact targets, and leave `/v1/memories` read-only. |
-| P24 | New configuration flags/scopes are documented and inventoried; disabled features expose no routes/tools or new formation. |
+| P24 | People is available by default without evaluation artifacts; explicit shutdown hides routes/tools and stops new formation while preserving cleanup. |
 | P25 | Forget/source/session/principal erasure removes derived influence, handles shared evidence, fences running work, and survives restore. |
 | P26 | Auxiliary extraction egress retains current sensitivity filtering; no directory or protected alias leaks through diagnostics. |
 | P27 | Ninety-day automatic email boundary survives the People bridge; older import requires an explicit bounded request. |
@@ -790,7 +803,7 @@ all inherited memory, email, context, policy, and native gates.
 | P33 | Person-aware formation meets the quality floors below and preserves inherited formation/semantic-policy thresholds. |
 | P34 | Retrieval and end-to-end person tasks meet the quality floors below without regressions in ordinary memory tasks. |
 | P35 | Representative load and cost tests meet budgets, expose truncation/backlog, and preserve interactive responsiveness. |
-| P36 | Version-bound activation evidence, private owner acceptance, exact-head CI/review, and authorized release smoke are complete. |
+| P36 | Quality evidence and owner feedback remain honestly reported; exact-head CI/review and authorized release smoke are complete without evaluation-gated availability. |
 
 ### Datasets and scoring
 
@@ -833,10 +846,9 @@ Owner-approved release floors for Milestone 28:
 
 Run provider cases at least three times; report per-run and aggregate scores,
 subgroup counts, abstentions, model/reasoning configuration, cost, and uncertainty.
-No holdout-driven prompt tuning; a failed run stays recorded. Source-policy
-activation binds provider/model, schema, extractor/linker/resolver versions,
+No holdout-driven prompt tuning; a failed run stays recorded. Published quality evidence binds provider/model, schema, extractor/linker/resolver versions,
 scorer and corpus digests, implementation/build identity, and applicable source
-policy. Old release artifacts cannot activate changed extraction behavior.
+policy. Old artifacts cannot certify changed extraction behavior; artifacts do not control availability.
 
 After synthetic gates pass, conduct a private owner evaluation over 20–30
 selected people covering family, friends, and professional relationships, with
@@ -865,14 +877,15 @@ the selected source/policy tuple. No unlimited import or per-person LLM loop.
 Deliver a useful vertical slice in this order: people formed from new owner
 speech, correctable identity, cross-session history, contextual recall, then
 Gmail integration and the full native experience. Every enabled slice includes
-its correction and erasure path. Activation is explicit and evidence-bound;
-the current formation policy is not replaced before the successor passes.
+its correction and erasure path. ADR-0101 makes the complete implemented People
+experience available by default, including automatic Chat and Email formation.
 
-Use a feature-off schema release, deterministic linking, an explicitly scoped
-owner evaluation, and an authorized production activation. Stage checks do not
-silently alter the existing Milestone 21 activation contract. On failure,
-disable the new source policy/read integration, preserve source records and
-audit evidence, and restore the last compatible evidenced configuration.
+Release the additive schema and complete functionality through the normal
+review/CI process. Quality measurements and private owner feedback can continue
+without gating feature availability. Explicit imports retain their finite scope
+and budgets. On failure, use the operational switch or a compatible legacy policy,
+preserve source records and audit evidence, and roll forward or back only to a
+schema-compatible build.
 
 | Main risk | Mitigation and evidence |
 | --- | --- |
@@ -992,8 +1005,8 @@ Each gate belongs to Milestone 28; pending checks are not passing evidence.
 23. **Governed writes.** Public People writes reach governed memory, require owner intent and exact targets, and leave `/v1/memories` read-only.
    Registered as `gate.people.governed_writes`. **M28.**
 
-24. **Default off.** New configuration flags/scopes are documented and inventoried; disabled features expose no routes/tools or new formation.
-   Registered as `gate.people.default_off`. **M28.**
+24. **Default availability.** People is available by default without evaluation artifacts; explicit shutdown hides routes/tools and stops new formation while preserving cleanup.
+   Registered as `gate.people.default_available`. **M28.**
 
 25. **Erasure.** Forget/source/session/principal erasure removes derived influence, handles shared evidence, fences running work, and survives restore.
    Registered as `gate.people.erasure`. **M28.**
@@ -1028,7 +1041,7 @@ Each gate belongs to Milestone 28; pending checks are not passing evidence.
 35. **Performance.** Representative load and cost tests meet budgets, expose truncation/backlog, and preserve interactive responsiveness.
    Registered as `gate.people.performance`. **M28.**
 
-36. **Release evidence.** Version-bound activation evidence, private owner acceptance, exact-head CI/review, and authorized release smoke are complete.
+36. **Release evidence.** Quality evidence and owner feedback remain honestly reported; exact-head CI/review and authorized release smoke are complete without evaluation-gated availability.
    Registered as `gate.people.release_evidence`. **M28.**
 
 ## Implementation checkpoint: 2026-09-15
@@ -1201,7 +1214,8 @@ authorize policy activation or production delivery.
   verifies the provider reservation journal and all repeat floors, and requires
   separate permitted owner-acceptance aggregates bound to the exact run digest.
   Both ordinary-memory corpus digests are bound into activation evidence.
-  Runtime activation rejects unreviewed People corpora even when hashes match.
+  Quality certification rejects unreviewed People corpora even when hashes match;
+  ADR-0101 removes this restriction from runtime availability.
   The independent Email corpus has 60 development and 60 holdout scenarios.
   `agent eval email-people` validates or scores it offline; its budgeted `--run`
   compares the actual email-semantic@1 and email-semantic@2 assessment paths in
@@ -1360,3 +1374,20 @@ path, account identity, recipient filters, date boundaries, multiple slices,
 body passages, record caps, cancellation, and retry before chronological analysis.
 No production mailbox import has run. Gates remain pending until their whole
 contract is proved, including the remaining boundaries.
+
+### Default availability amendment — ADR-0101
+
+The owner explicitly removed People functionality gates and authorized delivery
+to `dev` plus a `dev` to `main` pull request. People now defaults on; normal
+`auto` and `required` modes select `formation@11` without artifacts, and Email
+uses `email-semantic@2` without a semantic evidence file. Scoped imports use the
+same production adapters without evaluation-only overrides. Evaluation artifact
+validation remains available for honest quality reports, not runtime enablement.
+
+The implementation retains explicit operational shutdown and legacy policy pins,
+authorization and source admission, attribution, sensitivity and egress checks,
+correction/erasure and finite source/cost budgets. The production owner setup
+includes `people.read` and `people.write`. Existing installations must add these
+scopes to the configured owner credential and start a new tool-catalog session.
+No benchmark, paid provider comparison or private owner acceptance is claimed
+complete by this amendment. Hosted review and release evidence remain separate.

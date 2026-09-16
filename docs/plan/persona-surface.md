@@ -222,7 +222,7 @@ The snapshot side is specified in
 [memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md): the
 session-open snapshot query excludes, as a hard predicate, every belief whose
 persona entry stands, because the persona row already carries it at higher
-trust and a forty-item core (memory-retrieval-and-ranking.md:156) cannot
+trust and a forty-item core (memory-retrieval-and-ranking.md:162) cannot
 afford duplicates. Eligibility returns the moment the entry is removed.
 In-turn recall and explicit search are unfiltered. Because snapshot
 membership changes, the implementing change re-records the deterministic
@@ -299,7 +299,7 @@ the memory browser's is.
 ## Safety
 
 - **Secrets are refused at write time, everywhere.** The system prompt must
-  not contain secrets (engineering-plan.md:4195), and the persona is system
+  not contain secrets (engineering-plan.md:4197), and the persona is system
   prompt. CLI, HTTP, and affirmation all run the secret-material scan before
   persistence; a credential-shaped value is a refusal, not a warning.
 - **Injection is scanned at load.** Persona text passes the same

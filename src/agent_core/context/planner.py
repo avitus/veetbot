@@ -41,7 +41,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@8"
+BUILDER_VERSION = "context-builder@9"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
@@ -350,20 +350,30 @@ class EventContextPlanner:
         configured_order = {
             name: index for index, name in enumerate(dict.fromkeys(agent.enabled_tools))
         }
-        tools = sorted(
-            sorted(
-                tools,
-                key=lambda tool: (
-                    configured_order.get(tool.name, len(configured_order)),
-                    tool.name,
-                ),
-            )[:maximum_tools],
-            key=lambda tool: tool.name,
+        candidates = sorted(
+            tools,
+            key=lambda tool: (configured_order.get(tool.name, len(configured_order)), tool.name),
         )
+        model_id = f"{model.provider}:{model.model}"
+        selected_tools: list[ToolSpec] = []
+        for tool in candidates:
+            if len(selected_tools) == maximum_tools:
+                break
+            proposed = sorted([*selected_tools, tool], key=lambda item: item.name)
+            if tool.name not in configured_order:
+                proposed_prefix = build_prefix(agent, proposed)
+                token_count = self._estimator.estimate(
+                    proposed_prefix[2:], model_id
+                ) + self._estimator.estimate_tools(proposed, model_id)
+                if token_count > int(tool_config["max_tokens"]):
+                    continue
+            # Explicit capabilities still fail at plan time if they cannot fit.
+            # Discovery fills only the remaining item and token capacity.
+            selected_tools.append(tool)
+        tools = sorted(selected_tools, key=lambda tool: tool.name)
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
-        model_id = f"{model.provider}:{model.model}"
         base_prefix = build_prefix(agent, tools)
         persona_prefix = build_prefix(agent, tools, persona=persona_text)
         catalog_prefix = build_prefix(agent, tools, catalog_metadata, persona=persona_text)

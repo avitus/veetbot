@@ -31,6 +31,8 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallMoment,
+    RecallProfile,
     RecallResult,
     RejectionKind,
     Sensitivity,
@@ -907,7 +909,25 @@ async def test_decay_moves_a_store_position_only_when_it_closes_the_belief() -> 
         confidence=0.2,
     )
     snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
-    assert {idle.id, weak.id} <= {item.belief_id for item in snapshot.items}
+    assert snapshot.items == []
+    # Existing retrieval@3 snapshots could contain provisional beliefs. Keep
+    # exercising their retirement corrections without asking the repaired
+    # snapshot path to create a snapshot it now deliberately forbids.
+    legacy = await retriever.recall(
+        recall_query(text=None, profile=RecallProfile.CORE), session_id=SESSION_ID
+    )
+    assert {idle.id, weak.id} <= {item.belief_id for item in legacy.items}
+    async with factory() as uow:
+        stored = await uow.traces.get(legacy.trace_id, principal())
+        await uow.traces.record(
+            stored.model_copy(
+                update={
+                    "id": UUID(int=999),
+                    "moment": RecallMoment.SNAPSHOT,
+                    "retrieval_policy_version": "retrieval@3",
+                }
+            )
+        )
 
     clock.advance(timedelta(days=31))
     assert (await service.decay()) == DecayResult(decayed=1, retired=1)
@@ -919,7 +939,7 @@ async def test_decay_moves_a_store_position_only_when_it_closes_the_belief() -> 
     assert beliefs[weak.id].store_position > snapshot.watermark
 
     corrections = await retriever.corrections(
-        snapshot_id=snapshot.trace_id, watermark=snapshot.watermark
+        snapshot_id=UUID(int=999), watermark=snapshot.watermark
     )
     assert [item.belief_id for item in corrections] == [weak.id]
 

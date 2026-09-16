@@ -20,6 +20,7 @@ CONFIGURATION_FIELDS = frozenset(
         "account_id",
         "phone_number",
         "public_name",
+        "assistant_name",
         "public_profile",
         "voice",
         "max_duration_minutes",
@@ -140,9 +141,16 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
             except BlandError:
                 return _error("bland.platform_required")
             task = (
-                "You are an AI assistant making a single call on behalf of "
+                "You are "
+                + str(configuration["assistant_name"])
+                + ", an AI assistant making a single call on behalf of "
                 + str(configuration["public_name"])
-                + ". Introduce yourself as an AI assistant and explain that the call is "
+                + ". Introduce yourself with: Hi, I'm "
+                + str(configuration["assistant_name"])
+                + ", "
+                + str(configuration["public_name"])
+                + "'s assistant. "
+                "Then disclose that you are an AI assistant and explain that the call is "
                 "transcribed for that person. Pursue only the approved objective below. "
                 "Use only the disclosed facts. You have no access to private tools, accounts, "
                 "or memories. Do not make purchases, bookings, transfers, or commitments. "

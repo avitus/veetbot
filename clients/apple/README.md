@@ -111,13 +111,21 @@ transcript from the shared core before attaching to the active or latest run.
 The client uses persisted session sequences to prevent the latest run's replay
 from duplicating messages already restored from the transcript.
 
-Adjacent successful completions of the same tool are displayed as one counted
-activity bundle. Expanding the bundle retains access to every call's arguments
-and result, including its individual risk. The collapsed bundle uses the
-highest risk among its calls. Messages, different tools, approvals, failures,
-denials, uncertain outcomes, and error results remain separate activity items.
-On iOS, a successfully submitted composer message dismisses the software keyboard. A
-failed submission restores the draft without dismissing the keyboard.
+Adjacent terminal tool calls share one compact, expandable summary, including
+alternating tools or Gmail accounts and mixed successful/failed outcomes. The
+summary shows total calls and outcome counts together and uses the highest risk.
+Expanding reveals every exact tool name, status, argument, result, and individual
+risk. Messages, unknown names, approvals, unfinished calls, denials, and uncertain
+outcomes remain separate. Error results are counted as failed, including when the
+wire event says completed; corrected retries retain their specific status.
+On iOS, tapping Send or pressing Return immediately clears the submitted draft
+and dismisses the software keyboard, before waiting for the server. A persistent
+activity row above the composer shows **Sending…** during submission, then
+**Working…** or **Reasoning…** while the accepted run is active, even when the
+transcript is scrolled away from the bottom. The indicator clears when work ends
+or needs input. A failed submission restores the draft if the composer is still
+empty, without overwriting newer text. A delayed success does not dismiss a
+keyboard reopened to write the next message.
 
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute

@@ -1,4 +1,4 @@
-"""Synthetic evaluated-mode fixtures exercise the new source adapter, never activation."""
+"""Synthetic sources exercise the production People Email adapter and its boundaries."""
 
 from typing import Any
 
@@ -21,12 +21,6 @@ from tests.contract.people_fixtures import PeopleFields
 from tests.contract.support import ids, principal
 
 
-class EvaluatedFixture(EmailPeopleFormationService):
-    @property
-    def enabled(self) -> bool:
-        return True
-
-
 @pytest.mark.parametrize("state", ["proposed", "open", "completed", "cancelled", "uncertain"])
 @pytest.mark.parametrize("draft", [True, False])
 async def test_unsent_email_draft_cannot_establish_a_committed_action(
@@ -44,7 +38,7 @@ async def test_unsent_email_draft_cannot_establish_a_committed_action(
     factory, legacy, source, _, _ = await semantic_stack(
         body=body, label_ids=["DRAFT"] if draft else ["INBOX"]
     )
-    service = EvaluatedFixture(
+    service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
     fact = EmailPeopleFact.model_validate(
@@ -121,7 +115,7 @@ async def test_import_recovers_only_revision_bound_original_passages() -> None:
     async def guard(uow: RepositoryUnitOfWork) -> None:
         return None
 
-    service = EvaluatedFixture(
+    service = EmailPeopleFormationService(
         factory,
         legacy._clock,
         ids(),
@@ -157,7 +151,7 @@ async def test_email_people_reuses_source_and_keeps_attributed_tentative_authori
     factory, legacy, source, _fact, _ = await semantic_stack(
         age=3, body="Alex is Maya's colleague."
     )
-    service = EvaluatedFixture(
+    service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
     mentions = [
@@ -242,12 +236,12 @@ async def test_email_people_satisfies_shared_authority_contract_and_keeps_older_
     from tests.contract.test_email_semantic_port_contract import assert_email_semantic_port
 
     factory, legacy, source, fact, _ = await semantic_stack(age=3)
-    service = EvaluatedFixture(
+    service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
     await assert_email_semantic_port(service, source, fact)
     factory, legacy, source, fact, _ = await semantic_stack(age=91)
-    service = EvaluatedFixture(
+    service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
     assert await service.form(source, [fact]) == []
@@ -287,7 +281,7 @@ async def test_email_headers_link_confirmed_sender_to_observed_history(
     from tests.contract.support import NOW
 
     factory, legacy, source, _fact, _ = await semantic_stack(age=3, **headers)
-    service = EvaluatedFixture(
+    service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
     common: PeopleFields = {
@@ -365,14 +359,14 @@ async def test_email_headers_link_confirmed_sender_to_observed_history(
         )
 
 
-async def test_email_people_remains_disabled_without_its_evidence() -> None:
+async def test_email_people_forms_without_evaluation_evidence() -> None:
     factory, legacy, source, fact, _ = await semantic_stack()
     service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
-    assert not service.enabled and not service.people_enabled
+    assert service.enabled and service.people_enabled
     await service.register_source(source)
-    assert await service.form(source, [fact]) == []
+    assert len(await service.form(source, [fact])) == 1
 
 
 def test_people_assessment_schema_keeps_quote_offsets_local_and_old_schema_frozen() -> None:
@@ -396,7 +390,7 @@ async def test_old_email_requires_an_explicit_date_window_and_active_import_guar
     from datetime import timedelta
 
     factory, legacy, source, old_fact, _ = await semantic_stack(age=200)
-    ordinary = EvaluatedFixture(
+    ordinary = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
     assert await ordinary.form(source, [old_fact]) == []
@@ -405,7 +399,7 @@ async def test_old_email_requires_an_explicit_date_window_and_active_import_guar
     async def guard(uow: RepositoryUnitOfWork) -> None:
         guarded.append(True)
 
-    imported = EvaluatedFixture(
+    imported = EmailPeopleFormationService(
         factory,
         legacy._clock,
         ids(),

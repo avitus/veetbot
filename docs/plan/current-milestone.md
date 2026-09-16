@@ -449,8 +449,11 @@ owner configuration and external verification.
 
 ## Milestone 28: People and relationship memory
 
-The owner authorized implementation on 2026-09-15 under ADR-0099.
+The owner authorized implementation on 2026-09-15 under ADR-0100.
 [People and relationship memory](people-and-relationships.md) specifies
 36 gates, stable identities, temporal relationships, source-linked history,
 governed formation/retrieval, correction/erasure and the native People surface.
 This independent workstream is in progress; the verified ceiling remains 12.
+
+ADR-0101 removes evaluation-dependent People availability; the complete implemented
+feature is enabled by default while quality measurement continues.

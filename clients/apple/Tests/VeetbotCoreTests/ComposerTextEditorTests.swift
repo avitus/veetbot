@@ -11,7 +11,7 @@ import UIKit
 
 @Suite struct ComposerTextEditorTests {
     @Test
-    func testChatDismissesIOSKeyboardOnlyAfterSuccessfulSend() throws {
+    func testChatDismissesIOSKeyboardBeforeWaitingForSend() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -23,13 +23,18 @@ import UIKit
         let submitStart = try #require(source.range(of: "private func submitDraft()"))
         let submission = String(source[submitStart.lowerBound...])
         let send = try #require(submission.range(of: "let sent = await model.send(message)"))
-        let success = try #require(submission.range(of: "if sent {"))
-        let successBody = try bracedBody(in: submission, startingAt: success)
-        let dismissal = "UIApplication.shared.sendAction("
+        let admission = try #require(submission.range(of: "guard canSendDraft else { return }"))
+        let task = try #require(submission.range(of: "Task {"))
+        let dismissal = try #require(submission.range(of: "UIApplication.shared.sendAction("))
+        let failure = try #require(submission.range(of: "if !sent && model.composerText.isEmpty {"))
+        let failureBody = try bracedBody(in: submission, startingAt: failure)
 
-        #expect(send.lowerBound < success.lowerBound)
-        #expect(successBody.contains(dismissal))
-        #expect(submission.components(separatedBy: dismissal).count == 2)
+        #expect(admission.lowerBound < dismissal.lowerBound)
+        #expect(dismissal.lowerBound < task.lowerBound)
+        #expect(task.lowerBound < send.lowerBound)
+        #expect(send.lowerBound < failure.lowerBound)
+        #expect(failureBody.contains("model.composerText = message"))
+        #expect(submission.components(separatedBy: "UIApplication.shared.sendAction(").count == 2)
     }
 
     private func bracedBody(
@@ -57,7 +62,7 @@ import UIKit
             cursor = source.index(after: cursor)
         }
 
-        Issue.record("Unbalanced success branch in ChatView.submitDraft")
+        Issue.record("Unbalanced branch in ChatView.submitDraft")
         return source[source.endIndex..<source.endIndex]
     }
 

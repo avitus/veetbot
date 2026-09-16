@@ -8,11 +8,21 @@ This runbook covers the People schema, controlled import, evaluation, and
 application rollback. It does not authorize production changes or source access.
 The governing contract is [People and relationships](plan/people-and-relationships.md).
 
-## Feature-off installation and rollback
+## Installation and rollback
 
 The schema revision is `c28d52ea7301`. Apply it using the existing deployment
-migration step. Leave `AGENT_PEOPLE_ENABLED=0` and retain the previously evidenced
-memory policy until the candidate's activation evidence is complete.
+migration step. People is enabled by default under ADR-0101. Leave
+`AGENT_MEMORY_FORMATION_POLICY_PIN` empty (or select `formation@11`) and use
+`AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` or `required` with the configured
+memory provider. No People or Email semantic evidence artifact is required.
+Existing Email setup and exact source scopes still apply. Add `people.read` and
+`people.write` to the owner's authenticated scopes for the browser and tools.
+Open a new conversation to receive the current tool catalog.
+
+Automatic Chat formation, attributed Email formation, contextual recall, native
+browsing/correction/forgetting and explicitly scoped history imports are available
+together. Set `AGENT_PEOPLE_ENABLED=0` only for an operational shutdown; an older
+explicit formation pin intentionally selects that legacy implementation.
 
 Disabling People hides its routes, tools, and contextual recall and stops new
 capture. Existing derived data and source provenance remain stored. Erasure
@@ -278,18 +288,18 @@ overwrite an existing output. Publication creates a reviewable artifact; it does
 not change the running configuration or authorize production activation.
 
 Synthetic corpus structure and a completed runner are not activation evidence.
-The current People labels remain unreviewed. Activation additionally requires
+The current People labels remain unreviewed. Quality certification additionally requires
 independent review of the exact fact spans, organization and person endpoints,
 calendar precision, and all six product question categories. Structural corpus
 validation and scripted-provider tests do not establish extraction quality.
 The source labels were expanded before the first provider comparison; both
 corpus digests must be recorded from the actual candidate checkout.
-Activation also requires passing quality/boundary gates, the permitted aggregate
+Quality certification also requires passing quality/boundary gates, the permitted aggregate
 results of the private owner evaluation, and a version-bound publication bundle.
 Obtain explicit source access and spending authorization before that private
 20–30-person, 50-task evaluation. Keep its source material and judgments outside
-the repository. Production activation and release follow their separate approval
-and exact-head review/CI requirements.
+the repository. Quality artifacts do not gate runtime availability. Release follows its authorized
+exact-head review/CI process. No separate hosted evaluation environment is required.
 
 ### Pending physical cleanup
 

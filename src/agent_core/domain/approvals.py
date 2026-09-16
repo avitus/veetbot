@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent_core.domain.policies import ActionKind, PolicyDecision, RiskLevel
 
@@ -44,6 +44,10 @@ class ApprovalRequest(BaseModel):
     action_summary: str
     tool_name: str | None = None
     arguments: dict[str, Any]
+    # SHA-256 of each argument the view truncated for length, so a client holding
+    # the original can still verify it exactly. Absent for short and for
+    # sensitivity-redacted values. Older records carry none.
+    argument_digests: dict[str, str] = Field(default_factory=dict)
     normalized_arguments_hash: str
     required_scopes: set[str]
     agent_version: str

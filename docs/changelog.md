@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-15 — Personal-context memory retrieval repair
+
+- Session snapshots exclude provisional beliefs before candidate limits, keeping
+  recent uncertain profile entries from crowding out confirmed personal facts.
+  Provisional beliefs remain available to in-turn recall and deliberate search.
+- Automatic and deliberate belief searches ignore common English function words,
+  so matches on "the" alone cannot fill the recall budget. Literal browsing and
+  knowledge search retain their existing matching behavior.
+- Explicit questions about the owner's profile combine words with bounded
+  structured lookup, so paraphrased personal details remain retrievable without
+  relying on provisional snapshots. The unchanged 66-probe benchmark recalls
+  58 needed facts instead of 57, with irrelevant recalls falling from 159 to 119
+  and no per-probe recall regression.
+- `memory.search` guides the model to look up missing personal context before
+  asking the user to repeat it, using the needed fact rather than only the topic
+  of the question. Existing session snapshots remain frozen for their context epoch.
+
 ## 2026-09-13 — Website Access redirect failures are actionable
 
 - A website that redirects the login page to an origin the profile does not

@@ -56,12 +56,12 @@ milestones:
     status: in_progress
     authorized_on: '2026-09-15'
     design: docs/plan/people-and-relationships.md
-    adr: docs/adr/0099-people-and-relationship-memory.md
+    adr: docs/adr/0100-people-and-relationship-memory.md
     gates_registered: 36
     authorized_scope:
     - Stable owner-scoped people, identifiers, directed temporal relationships and person-linked history
     - Governed source-aware formation, retrieval, corrections, erasure and bounded imports
-    - Shared Chat, Email and native People experience with evidence-bound activation
+    - Shared Chat, Email and native People experience available by default under ADR-0101
     deferred_scope:
     - General graph inference, new source providers, rich SMS and call-derived semantics
     - Unbounded historical import, automatic outreach and provider enrichment

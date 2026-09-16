@@ -4091,13 +4091,15 @@ and automatic call-derived memory remain excluded.
 
 ### Milestone 28: People and relationship memory
 
-The owner authorized implementation on 2026-09-15 under ADR-0099. Implement
+The owner authorized implementation on 2026-09-15 under ADR-0100. Implement
 [people-and-relationships.md](people-and-relationships.md): stable owner-scoped
 person identity and reversible repairs; directed temporal relationships and
 bounded organization references; source-backed facts, interactions and
 commitments; indexed cross-session history; shared governed Chat/Email recall;
 scoped People APIs, native browsing and correction; complete erasure, bounded
-imports and version-bound quality evidence. The design declares 36 gates.
+imports and version-bound quality evidence. The design declares 36 gates. ADR-0101 makes all implemented People functionality
+available by default without evaluation artifacts; quality evidence measures
+completion and does not control runtime availability or release.
 
 This admits the People-specific portion of roadmap B6, including a relational
 temporal graph with one-hop retrieval and person-linked history. Direct

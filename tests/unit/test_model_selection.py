@@ -53,9 +53,7 @@ async def test_requested_models_resolve_with_verified_pricing_and_limits(
 
 
 @pytest.mark.parametrize("chat_policy", ["astra", "flagship", "fable"])
-async def test_chat_defaults_keep_sol_release_evidenced_memory(
-    tmp_path: Path, chat_policy: str
-) -> None:
+async def test_chat_defaults_keep_sol_people_memory(tmp_path: Path, chat_policy: str) -> None:
     settings = load_settings(
         {
             "DATABASE_URL": "postgresql+asyncpg://localhost/unused",
@@ -90,19 +88,20 @@ async def test_chat_defaults_keep_sol_release_evidenced_memory(
     assert selections[0].payload["model_policy"] == "balanced"
     assert selections[0].payload["model"] == "gpt-5.6-sol"
     assert selections[0].payload["outcome"] == "activated"
-    assert selections[0].payload["evidence_source"] == "release"
-    assert selections[0].payload["formation_policy_version"] == "formation@9"
+    assert selections[0].payload["evidence_source"] is None
+    assert selections[0].payload["reason"] == "people_default"
+    assert selections[0].payload["formation_policy_version"] == "formation@11"
 
 
 @pytest.mark.parametrize(
     ("memory_policy", "mode", "expected_reason"),
     [
-        ("astra", "auto", "no_matching_evidence"),
+        ("astra", "auto", "people_default"),
         ("missing-policy", "auto", "model_resolution_failed"),
         ("missing-policy", "off", "configured_off"),
     ],
 )
-async def test_memory_policy_overlay_preserves_evidence_and_off_boundaries(
+async def test_memory_policy_overlay_preserves_availability_and_off_boundaries(
     tmp_path: Path, memory_policy: str, mode: str, expected_reason: str
 ) -> None:
     overlay = tmp_path / "memory" / "profiles.yaml"
@@ -134,12 +133,16 @@ async def test_memory_policy_overlay_preserves_evidence_and_off_boundaries(
         selection = (await uow.process_events.list("memory.provider_extraction.selection"))[0]
     assert selection.payload["reason"] == expected_reason
     assert selection.payload["outcome"] == (
-        "disabled" if mode == "off" else "deterministic_fallback"
+        "disabled"
+        if mode == "off"
+        else "activated"
+        if memory_policy == "astra"
+        else "deterministic_fallback"
     )
     assert selection.payload["model_policy"] == memory_policy
     assert provider.requests == []
 
-    if mode == "auto":
+    if mode == "auto" and memory_policy == "missing-policy":
         from dataclasses import replace
 
         from agent_core.config import MemoryProviderExtractionMode
@@ -153,7 +156,7 @@ async def test_memory_policy_overlay_preserves_evidence_and_off_boundaries(
                 model_policy="fable",
                 model_provider_overrides={"openai": provider},
             ):
-                pytest.fail("required mode activated an unresolved or unevidenced memory model")
+                pytest.fail("required mode activated an unresolved memory model")
 
 
 @pytest.mark.parametrize("distillation", [False, True])

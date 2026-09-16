@@ -13,7 +13,6 @@ from agent_core.domain.email import EmailAccount
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import PeopleImportJob, PeopleQuery
 from agent_core.domain.people_imports import PeopleImportRequest
-from agent_core.memory.email_people import EmailPeopleFormationService
 from tests.gates.test_email_m18 import _email_settings
 from tests.gates.test_email_runtime_m26 import _mailbox_factory
 
@@ -45,12 +44,6 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
     from agent_core.domain.messages import FakeModelScript, ScriptedTurn
     from tests.gates.test_email_runtime_m26 import _assessment_turn
 
-    monkeypatch.setattr(EmailPeopleFormationService, "enabled", property(lambda self: True))
-    monkeypatch.setattr(
-        "agent_core.memory.email_people_evidence.load_email_people_evidence", lambda *a, **kw: None
-    )
-    evidence = tmp_path / "fixture.json"
-    evidence.write_text('{"policy_version":"email-semantic@2"}')
     now = SystemClock().now()
     sent_at = (now - timedelta(days=200)).replace(microsecond=0)
     message: dict[str, Any] = {
@@ -169,10 +162,9 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
         SystemClock(),
     )
     async with build(
-        settings=replace(_email_settings(), people_enabled=True, email_semantic_evidence=evidence),
+        settings=replace(_email_settings(), people_enabled=True),
         storage="memory",
         mcp_client_factory=mailbox,
-        memory_people_evaluation_mode=True,
         model_provider_overrides={"fake": provider},
     ) as app:
         owner = app.principal

@@ -148,3 +148,31 @@ async def test_history_tool_has_closed_public_output_and_shared_token_bound() ->
         {item["id"] for item in result.structured["items"]}
         & {item["id"] for item in second.structured["items"]}
     )
+
+
+def test_provider_schema_compacts_empty_defaults_without_changing_validation() -> None:
+    from agent_core.model.tool_definitions import tool_definition
+    from agent_core.tools.memory_remember import PeopleMemoryRememberTool
+
+    spec = PeopleMemoryRememberTool.spec
+    original = spec.model_dump(mode="json")
+    schema = tool_definition(spec)["parameters"]
+    assert "default" not in schema["properties"]["portability"]
+    assert schema["properties"]["sensitivity"]["default"] == "internal"
+    instances = [
+        {"statement": "Maya likes tea", "subject": "Maya", "scope": "user"},
+        {"statement": "Maya likes tea", "subject": "Maya", "scope": "user", "portability": None},
+        {
+            "statement": "Maya likes tea",
+            "subject": "Maya",
+            "scope": "user",
+            "sensitivity": "private",
+        },
+        {"statement": "Maya likes tea", "subject": "Maya", "scope": "user", "person_refs": [{}]},
+        {"statement": "", "subject": "Maya", "scope": "user"},
+    ]
+    for instance in instances:
+        assert jsonschema.Draft202012Validator(schema).is_valid(instance) == (
+            jsonschema.Draft202012Validator(spec.input_schema).is_valid(instance)
+        )
+    assert spec.model_dump(mode="json") == original

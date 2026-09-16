@@ -125,7 +125,7 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
-    people_enabled: bool = False
+    people_enabled: bool = True
     persona_api_enabled: bool = False
     delegation_enabled: bool = False
     device_channel_enabled: bool = False
@@ -1152,7 +1152,10 @@ def validate_settings(
         and not settings.people_enabled
     ):
         raise ConfigurationError("formation@11 requires AGENT_PEOPLE_ENABLED")
-    if settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED:
+    if settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED and not (
+        settings.people_enabled
+        and settings.memory_formation_policy_pin in (None, MemoryFormationPolicyPin.PEOPLE)
+    ):
         evidence_paths = provider_extraction_evidence_paths(settings)
         if not evidence_paths:
             raise ConfigurationError(
@@ -1541,7 +1544,7 @@ def _load_settings(
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
-    people_enabled = _parse_flag(values, "AGENT_PEOPLE_ENABLED")
+    people_enabled = _parse_flag({"AGENT_PEOPLE_ENABLED": "1", **values}, "AGENT_PEOPLE_ENABLED")
     persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")

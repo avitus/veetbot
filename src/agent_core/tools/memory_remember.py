@@ -121,11 +121,12 @@ class PeopleMemoryRememberTool(MemoryRememberTool):
     spec = MemoryRememberTool.spec.model_copy(
         update={
             "version": "2.0.0",
-            "input_schema": RememberPeopleArgs.model_json_schema(),
-            "description": (
-                "Remember an owner-sourced belief, optionally linked "
-                "to exact revision-checked people."
-            ),
+            "input_schema": {
+                key: value
+                for key, value in RememberPeopleArgs.model_json_schema().items()
+                if key != "title"
+            },
+            "description": ("Remember an owner-sourced belief with optional person links."),
         },
         deep=True,
     )

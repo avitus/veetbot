@@ -271,17 +271,21 @@ it, which never yields because a third `skill.load` fails instead.
 
 After authorization and session-environment filtering, tools explicitly named in
 `AgentSpec.enabled_tools` receive slots first, in first-occurrence order. Discovered
-tools fill the remaining slots in name order. The selected set is then sorted by
-name for stable rendering. Adding an MCP account must not evict an explicitly
+tools fill the remaining slots in name order when their complete definitions fit
+both the item and token caps. An oversized discovered definition is skipped;
+explicitly enabled capabilities still fail at plan time if they exceed the token
+cap. The selected set is then sorted by name for stable rendering. Adding an MCP account must not evict an explicitly
 enabled web, clock, or workspace capability merely because its name sorts earlier.
 The item and token ceilings still apply; excess discovered tools require a narrower
-catalog or explicit agent configuration. Builder version `context-builder@7`
+catalog or explicit agent configuration. Builder version `context-builder@9`
 rebuilds older plans through the ordinary logged epoch rotation, so existing
 sessions recover the configured capabilities without replacing their history.
 
 The token side of the tool-definition cap measures the conservative larger form
 of the **model-visible** provider contract: name, description, and input schema
-plus provider framing. The complete pinned `ToolSpec` still participates in the
+plus provider framing. Provider serialization omits redundant generated titles
+and empty default annotations while retaining every validation keyword and
+meaningful non-empty default. The complete pinned `ToolSpec` still participates in the
 prefix hash and replay identity, but its output schema, policy classification,
 timeouts, and execution limits are not sent to the model and therefore do not
 consume this prompt class. A session-bound capability is also a runtime-environment

@@ -206,6 +206,7 @@ def _approval_view(approval: ApprovalRequest) -> ApprovalView:
         tool_name=approval.tool_name,
         action_summary=approval.action_summary,
         arguments=dict(approval.arguments),
+        argument_digests=dict(approval.argument_digests),
         risk=approval.risk.value.upper(),
         policy_reason=approval.policy_reason,
         expires_at=approval.expires_at,

@@ -440,9 +440,9 @@ private struct EmailThreadScreen: View {
                         VStack(alignment: .leading, spacing: 24) {
                             threadHeader(thread)
                             attentionSummary(thread)
-                            if let error = model.draftError {
+                            if let error = model.threadReadMessage {
                                 Label(error, systemImage: "exclamationmark.circle").foregroundColor(.red)
-                                    .accessibilityIdentifier("email.action-error")
+                                    .accessibilityIdentifier("email.read-error")
                             }
                             conversation(thread)
                             draftEditor.id("reply")
@@ -740,6 +740,12 @@ private struct EmailThreadScreen: View {
                     Button("Review & Send") { Task { await model.prepareSend() } }
                         .buttonStyle(.borderedProminent).tint(AppTheme.turquoise).controlSize(.large)
                         .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
+                }
+                // A refused send belongs next to the control that asked for it; above the
+                // conversation it reads as the button having done nothing.
+                if let error = model.draftActionMessage {
+                    Label(error, systemImage: "exclamationmark.circle").foregroundColor(.red)
+                        .appFont(.callout).accessibilityIdentifier("email.action-error")
                 }
                 if draft.approvalID != nil && !edit.isDirty && draft.status == "awaiting_approval" {
                     Button("Open pending approval") { Task { await model.loadReview() } }.disabled(draft.stale)

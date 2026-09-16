@@ -35,12 +35,22 @@ chosen a number and public name. This example contains placeholders:
   "account_id": "primary",
   "phone_number": "+14155550100",
   "public_name": "OWNER'S APPROVED PUBLIC NAME",
+  "assistant_name": "Veetbot",
   "public_profile": "Take messages only. No additional public facts are approved.",
   "voice": "maya",
   "max_duration_minutes": 5,
   "webhook_url": "https://YOUR_API_HOST/webhooks/bland"
 }
 ```
+
+`public_name` names the owner; `assistant_name` names the voice assistant and
+defaults to `Veetbot` when omitted. `voice` selects the provider voice independently.
+For example, owner `Andy`, assistant `Willow` and voice `Willow` produce
+“Hi, I'm Willow, Andy's assistant,” followed by AI and transcription disclosure.
+The same identity is included in approved outbound call instructions. Deploy a
+release supporting `assistant_name` before adding the field; older releases
+reject it. Upgrading to the explicit assistant identity changes the normalized
+configuration revision, so obtain fresh approvals for any pending calls.
 
 The file is a bounded, closed schema. Keep it writable only by the operator.
 Its SHA-256 revision pins the outbound approval; restart the application and

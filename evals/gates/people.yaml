@@ -154,12 +154,12 @@
   statement: Public People writes reach governed memory, require owner intent and exact targets, and leave
     `/v1/memories` read-only.
   check: tests/gates/pending.py::pending_gate
-- id: gate.people.default_off
+- id: gate.people.default_available
   milestone: 28
   kind: case
   spec: docs/plan/people-and-relationships.md#hard-gates
-  statement: New configuration flags/scopes are documented and inventoried; disabled features expose no
-    routes/tools or new formation.
+  statement: People is available by default without evaluation artifacts; explicit shutdown hides routes/tools
+    and stops new formation while preserving cleanup.
   check: tests/gates/pending.py::pending_gate
 - id: gate.people.erasure
   milestone: 28
@@ -242,6 +242,6 @@
   milestone: 28
   kind: case
   spec: docs/plan/people-and-relationships.md#hard-gates
-  statement: Version-bound activation evidence, private owner acceptance, exact-head CI/review, and authorized
-    release smoke are complete.
+  statement: Quality evidence and owner feedback remain honestly reported; exact-head CI/review and authorized
+    release smoke are complete without evaluation-gated availability.
   check: tests/gates/pending.py::pending_gate

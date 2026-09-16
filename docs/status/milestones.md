@@ -226,7 +226,12 @@ live routing is unchanged.
 
 ### Milestone 28 — People and relationship memory
 
-Thirty-six gates; independent workstream under ADR-0099.
+Thirty-six gates; independent workstream under ADR-0100.
+
+ADR-0101 makes the complete implemented Milestone 28 People experience available
+by default. Quality measurements remain open evidence work, without gating runtime
+functionality or release. Production delivery still follows exact-head CI/review.
+
 
 - [ ] Review complete temporal/source-erasure gate coverage and worst-case initial-fence latency
 - [ ] Finish native accessibility, load/contention and signed restore verification

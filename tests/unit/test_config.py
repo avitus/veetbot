@@ -717,6 +717,7 @@ def test_provider_memory_extraction_refuses_required_mode_without_evaluation_evi
     )
     values = {
         **base_environment(),
+        "AGENT_PEOPLE_ENABLED": "0",
         "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
     }
 
@@ -735,6 +736,7 @@ def test_provider_memory_extraction_refuses_failed_evaluation_evidence(tmp_path:
         load_settings(
             {
                 **base_environment(),
+                "AGENT_PEOPLE_ENABLED": "0",
                 "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
                 "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(evidence),
             }
@@ -749,6 +751,7 @@ def test_provider_memory_extraction_normalizes_non_utf8_evidence_failure(tmp_pat
         load_settings(
             {
                 **base_environment(),
+                "AGENT_PEOPLE_ENABLED": "0",
                 "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
                 "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(evidence),
             }
@@ -770,6 +773,7 @@ def test_legacy_provider_memory_enablement_remains_fail_closed(
         load_settings(
             {
                 **base_environment(),
+                "AGENT_PEOPLE_ENABLED": "0",
                 "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "1",
             }
         )

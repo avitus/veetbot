@@ -40,6 +40,77 @@ def test_receptionist_payload_contains_only_reviewed_public_profile() -> None:
     assert payload["transfer_phone_number"] is None and payload["fallback_number"] is None
 
 
+def test_named_assistant_inbound_introduction_and_configuration() -> None:
+    from scripts.prepare_bland_profile import receptionist_payload
+
+    original = call_configuration()
+    assert original.assistant_name == "Veetbot"
+    config = CallConfiguration.model_validate(
+        {
+            **original.model_dump(),
+            "assistant_name": "Willow",
+            "public_name": "Andy",
+            "voice": "Willow",
+        }
+    )
+    payload = receptionist_payload(config)
+    assert payload["first_sentence"] == (
+        "Hi, I'm Willow, Andy's assistant. I'm an AI assistant, and this call is "
+        "transcribed and shared with Andy. How can I help?"
+    )
+    assert "Willow" in payload["prompt"]
+    assert payload["voice"] == "Willow"
+    assert payload["metadata"]["veetbot_configuration_revision"] == config.revision
+    renamed = CallConfiguration.model_validate({**config.model_dump(), "assistant_name": "Rowan"})
+    assert renamed.revision != config.revision
+    for invalid in ("", " ", "x" * 129):
+        with pytest.raises(ValueError):
+            CallConfiguration.model_validate({**config.model_dump(), "assistant_name": invalid})
+
+
+async def test_named_assistant_outbound_identity_and_approval_revision() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "success", "call_id": CALL_ID})
+
+    config = CallConfiguration.model_validate(
+        {
+            **call_configuration().model_dump(),
+            "assistant_name": "Willow",
+            "public_name": "Andy",
+            "voice": "Willow",
+        }
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = BlandClient(KEY, NUMBER, http_client=http)
+        server = create_server("call", client, config.model_dump())
+        args = {
+            "phone_number": RECIPIENT,
+            "from_number": NUMBER,
+            "brief": "Ask whether the repair is ready.",
+            "disclosed_facts": "Ticket 12.",
+            "config_revision": config.revision,
+            "request_id": CALL_ID,
+        }
+        result = await server.call_tool("start_call", args)
+        assert isinstance(result, CallToolResult) and not result.is_error
+        payload = json.loads(requests[-1].content)
+        assert "Hi, I'm Willow, Andy's assistant." in payload["task"]
+        assert "AI assistant" in payload["task"] and "transcribed" in payload["task"]
+        assert payload["voice"] == "Willow"
+        assert config.public_profile not in payload["task"]
+
+        renamed = CallConfiguration.model_validate(
+            {**config.model_dump(), "assistant_name": "Rowan"}
+        )
+        server = create_server("call", client, renamed.model_dump())
+        rejected = await server.call_tool("start_call", args)
+        assert isinstance(rejected, CallToolResult) and rejected.is_error
+        assert len(requests) == 1
+
+
 async def test_call_rosters_and_approved_configuration() -> None:
     requests: list[httpx.Request] = []
 

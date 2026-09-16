@@ -350,7 +350,6 @@ from agent_core.config import (
     load_config_document,
     load_memory_distillation_evidence,
     load_notification_worker_settings,
-    load_people_formation_evidence,
     load_provider_extraction_evidence,
     load_schedule_worker_settings,
     load_settings,
@@ -447,11 +446,6 @@ from agent_core.memory.formation import (
     DeterministicCandidateExtractor,
     GovernedMemoryService,
     HighRecallCandidateExtractor,
-)
-from agent_core.memory.people_evidence import (
-    PEOPLE_CORPUS_PATH,
-    PEOPLE_HOLDOUT_PATH,
-    people_evidence_matches,
 )
 from agent_core.memory.people_legacy import link_existing_beliefs
 from agent_core.memory.profiles import MemoryProfiles
@@ -2397,10 +2391,26 @@ async def _compose(
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_distillation_evaluation_mode"
+            elif settings.people_enabled and settings.memory_formation_policy_pin in (
+                None,
+                MemoryFormationPolicyPin.PEOPLE,
+            ):
+                # ADR-0101: quality evidence measures People; it does not gate access.
+                assert extraction_provider is not None
+                memory_extractor = PeopleAssistedCandidateExtractor(
+                    provider=extraction_provider,
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    fallback=HighRecallCandidateExtractor(),
+                )
+                memory_policy_version = "formation@11"
+                selection_outcome = "activated"
+                selection_reason = "people_default"
             else:
                 selected_evidence = None
                 selected_distillation_evidence = None
-                selected_people_evidence = None
                 evidence_paths = provider_extraction_evidence_paths(settings)
                 policy_pin = settings.memory_formation_policy_pin
                 # An artifact activates only for the corpus this tree ships;
@@ -2445,45 +2455,13 @@ async def _compose(
                     logger.warning("memory_operator_evidence_build_mismatch")
                     return False
 
-                if settings.people_enabled and policy_pin in (
-                    None,
-                    MemoryFormationPolicyPin.PEOPLE,
-                ):
-                    for evidence_path in evidence_paths:
-                        try:
-                            candidate_people_evidence = load_people_formation_evidence(
-                                evidence_path
-                            )
-                        except ConfigurationError:
-                            continue
-                        if people_evidence_matches(
-                            candidate_people_evidence,
-                            extraction_model,
-                            agent.policy_profile,
-                            ruleset.policy_version,
-                            corpus_sha256=shipped_corpus_sha256(PEOPLE_CORPUS_PATH)
-                            or "unavailable",
-                            holdout_sha256=shipped_corpus_sha256(PEOPLE_HOLDOUT_PATH)
-                            or "unavailable",
-                            ordinary_corpus_sha256=distillation_corpus_sha256,
-                            ordinary_holdout_sha256=distillation_holdout_sha256,
-                        ) and operator_artifact_is_bound(
-                            evidence_path, candidate_people_evidence.build_ref
-                        ):
-                            selected_people_evidence = candidate_people_evidence
-                            evidence_source = (
-                                "operator"
-                                if evidence_path == settings.memory_provider_extraction_evidence
-                                else "release"
-                            )
-                            break
                 provider_pins = (
                     MemoryFormationPolicyPin.PROVIDER_ASSISTED,
                     MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED,
                 )
                 selected_provider_policy = PROVIDER_FORMATION_POLICY_VERSION
                 for evidence_path in evidence_paths:
-                    if selected_people_evidence is not None or policy_pin in (
+                    if policy_pin in (
                         *provider_pins,
                         MemoryFormationPolicyPin.PEOPLE,
                     ):
@@ -2518,7 +2496,7 @@ async def _compose(
                     provider_policies: tuple[str, ...] = (PROVIDER_FORMATION_POLICY_VERSION,)
                 elif policy_pin is MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED:
                     provider_policies = (REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,)
-                elif selected_people_evidence is not None or policy_pin in (
+                elif policy_pin in (
                     MemoryFormationPolicyPin.DISTILLATION,
                     MemoryFormationPolicyPin.PEOPLE,
                 ):
@@ -2557,11 +2535,7 @@ async def _compose(
                                 break
                         if selected_evidence is not None:
                             break
-                if (
-                    selected_people_evidence is None
-                    and selected_distillation_evidence is None
-                    and selected_evidence is None
-                ):
+                if selected_distillation_evidence is None and selected_evidence is None:
                     if memory_mode is MemoryProviderExtractionMode.REQUIRED:
                         raise ConfigurationError(
                             "provider-backed memory extraction requires matching "
@@ -2575,19 +2549,7 @@ async def _compose(
                     )
                 else:
                     assert extraction_provider is not None
-                    if selected_people_evidence is not None:
-                        memory_extractor = PeopleAssistedCandidateExtractor(
-                            provider=extraction_provider,
-                            resolved_model=extraction_model,
-                            uow_factory=uow_factory,
-                            clock=clock,
-                            ids=ids,
-                            fallback=HighRecallCandidateExtractor(),
-                        )
-                        memory_policy_version = "formation@11"
-                        evidence_build_ref = selected_people_evidence.build_ref
-                        evidence_corpus_sha256 = selected_people_evidence.corpus_sha256
-                    elif selected_distillation_evidence is not None:
+                    if selected_distillation_evidence is not None:
                         memory_extractor = NemoriAssistedCandidateExtractor(
                             provider=extraction_provider,
                             resolved_model=extraction_model,
@@ -3154,41 +3116,30 @@ async def _compose(
             await people_erasure.resume_pending(principal)
 
         def email_semantics(context: RunContext) -> EmailSemanticFormationService:
-            if settings.email_semantic_evidence is not None:
-                from agent_core.memory.email_people import EmailPeopleFormationService
-                from agent_core.memory.email_people_evidence import (
-                    email_evidence_policy,
-                    load_email_people_evidence,
-                )
+            from agent_core.memory.email_people import EmailPeopleFormationService
+            from agent_core.memory.email_people_evidence import email_evidence_policy
 
-                if email_evidence_policy(settings.email_semantic_evidence) == "email-semantic@2":
-                    people_evidence = (
-                        load_email_people_evidence(
-                            settings.email_semantic_evidence,
-                            provider=context.resolved_model.provider,
-                            model=context.resolved_model.model,
-                            build_ref=settings.release_id,
-                            model_policy=context.resolved_model.policy_name,
-                            policy_profile=context.agent.policy_profile,
-                            policy_version=ruleset.policy_version,
-                        )
-                        if settings.people_enabled
-                        else None
-                    )
-                    return EmailPeopleFormationService(
-                        uow_factory,
-                        clock,
-                        ids,
-                        context.principal,
-                        provider=context.resolved_model.provider,
-                        model=context.resolved_model.model,
-                        evidence=people_evidence,
-                    )
+            if settings.people_enabled:
+                return EmailPeopleFormationService(
+                    uow_factory,
+                    clock,
+                    ids,
+                    context.principal,
+                    provider=context.resolved_model.provider,
+                    model=context.resolved_model.model,
+                )
+            # A retained People quality artifact must not reactivate an explicit shutdown.
+            evidence_path = settings.email_semantic_evidence
+            if (
+                evidence_path is not None
+                and email_evidence_policy(evidence_path) == "email-semantic@2"
+            ):
+                evidence_path = None
             evidence = (
                 None
-                if settings.email_semantic_evidence is None
+                if evidence_path is None
                 else load_email_semantic_evidence(
-                    settings.email_semantic_evidence,
+                    evidence_path,
                     provider=context.resolved_model.provider,
                     model=context.resolved_model.model,
                     build_ref=settings.release_id,
@@ -3216,7 +3167,7 @@ async def _compose(
             ) -> PeopleEmailImportProcessor:
                 selected = email_semantics(worker.context)
                 if not isinstance(selected, EmailPeopleFormationService) or not selected.enabled:
-                    raise ConflictError("evaluated Email People import is unavailable")
+                    raise ConflictError("Email People import is unavailable")
 
                 async def guard(uow: RepositoryUnitOfWork) -> None:
                     await worker.guard(uow)
@@ -3230,7 +3181,6 @@ async def _compose(
                         worker.context.principal,
                         provider=worker.context.resolved_model.provider,
                         model=worker.context.resolved_model.model,
-                        evidence=selected._people_evidence,
                         import_window=(job.scope.since, job.scope.until),
                         import_guard=guard,
                     ),
@@ -3254,23 +3204,7 @@ async def _compose(
                 )
 
             people_import_runner.mailbox_factory = discover_email
-            if settings.email_semantic_evidence is not None:
-                from agent_core.memory.email_people_evidence import (
-                    email_evidence_policy,
-                    load_email_people_evidence,
-                )
-
-                if email_evidence_policy(settings.email_semantic_evidence) == "email-semantic@2":
-                    load_email_people_evidence(
-                        settings.email_semantic_evidence,
-                        provider=resolved_model.provider,
-                        model=resolved_model.model,
-                        build_ref=settings.release_id,
-                        model_policy=resolved_model.policy_name,
-                        policy_profile=agent.policy_profile,
-                        policy_version=ruleset.policy_version,
-                    )
-                    people_service.imports.email_capture_available = True
+            people_service.imports.email_capture_available = True
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
             """Recognize persisted typed work even when its public feature is disabled."""

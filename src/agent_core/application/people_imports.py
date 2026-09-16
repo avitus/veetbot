@@ -320,7 +320,8 @@ class PeopleImportService:
                     )
                 ):
                     raise ConflictError(
-                        "the selected source policy lacks current People evaluation evidence"
+                        "the selected source policy is unavailable "
+                        "or the import configuration changed"
                     )
                 if self.dispatch is None:
                     raise ConflictError("People import worker is unavailable")

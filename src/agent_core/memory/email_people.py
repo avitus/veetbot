@@ -90,11 +90,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
 
     @property
     def enabled(self) -> bool:
-        from agent_core.memory.email_people_evidence import matches_email_people
-
-        return self._people_evidence is not None and matches_email_people(
-            self._people_evidence, provider=self._provider, model=self._model
-        )
+        # Composition selects this source policy explicitly; evaluation artifacts
+        # remain quality reports rather than runtime capability switches (ADR-0101).
+        return True
 
     @property
     def people_enabled(self) -> bool:
@@ -105,7 +103,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
     ) -> EmailSemanticSource | None:
         """Recover the next retained passage and verify it against immutable source events."""
         if self._import_window is None or not self.enabled:
-            raise ConflictError("evaluated historical email capture is unavailable")
+            raise ConflictError("historical email capture is unavailable")
         if (
             record.tenant_id != self._principal.tenant_id
             or record.principal_id != self._principal.principal_id
@@ -207,7 +205,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
     ) -> None:
         """Retain verified provenance before chronological analysis, without projections."""
         if not self.enabled or self._import_window is None:
-            raise ConflictError("evaluated historical email capture is unavailable")
+            raise ConflictError("historical email capture is unavailable")
         async with (
             self._uow_factory() as uow,
             uow.email.lock(self._principal),
