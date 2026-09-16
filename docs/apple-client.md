@@ -32,7 +32,10 @@ in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
 Email journeys cover mode switching, feedback, editing, learning controls and
 compact-trait navigation on both simulator families.
-Both targets run in the required CircleCI Apple job.
+`make test-apple-ui` runs `make test-apple-ui-macos`, then
+`make test-apple-ui-ios`. CircleCI runs `make test-apple` and the Mac cases in
+the required `apple` job, and the simulator cases in the required `apple-ios`
+job at the same time.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
 Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
@@ -185,7 +188,9 @@ authoritative index are verified with scoped point reads under a bounded
 concurrency limit before they are pruned. Those point reads prevent
 activity-driven movement between keyset pages from looking like a deletion
 without serializing a large history into one request per round trip. Confirmed
-pruning also clears the process-local artifact cache.
+pruning also clears the process-local artifact cache. People audit and import
+sessions are not conversations: the sidebar skips them and prunes cached copies
+without deleting them on the server, because they carry People evidence.
 Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
@@ -356,9 +361,9 @@ client retains confirmed mailbox state, row order and unsaved replies, and
 keeps other rows actionable. Pending rows stay hidden through refreshes and
 status checks resume when Email reopens. An archived conversation found in
 Other mail can be moved back to its originating account's Inbox.
-Archiving from the reading pane clears it immediately and opens the next visible
-conversation, or the previous one when archiving the last row. With no remaining
-rows, the pane becomes empty. Loading the successor does not wait for archive
+Archiving the open conversation, from its inbox row or the reading pane, clears
+the pane immediately and opens the next visible conversation, or the previous one
+when archiving the last row. With no remaining rows, the pane becomes empty. Loading the successor does not wait for archive
 admission or completion, and a later archive failure does not replace the new selection.
 
 The reading column separates the attention summary, original conversation and

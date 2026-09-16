@@ -37,7 +37,7 @@ public struct PersonaEditorView: View {
         .accessibilityIdentifier("persona.editor")
         .task { await model.load() }
         #if os(macOS)
-        .frame(
+        .sheetFrame(
             minWidth: 520,
             idealWidth: 640,
             maxWidth: .infinity,

@@ -207,6 +207,12 @@ public struct SessionView: Codable, Identifiable, Sendable {
         folderID = try container.decodeIfPresent(UUID.self, forKey: .folderID)
         folderSupported = container.contains(.folderID)
     }
+
+    /// People audit anchors and import workers are sessions, not conversations.
+    var isPeopleOperational: Bool {
+        guard let purpose = metadata["purpose"]?.stringValue else { return false }
+        return purpose == "people-management" || purpose == "people-import"
+    }
 }
 
 public enum BrowserProfileStatus: String, Codable, Hashable, Sendable {

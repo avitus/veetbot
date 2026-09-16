@@ -169,7 +169,7 @@ struct AddPersonView: View {
                         .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-        }.frame(minWidth: 320, minHeight: 220)
+        }.peopleModalFrame(.form, minHeight: 220, idealHeight: 280)
     }
     private func save() async {
         saving = true
@@ -187,7 +187,7 @@ struct AddPersonView: View {
     }
 }
 
-private struct PeopleImportHistoryView: View {
+struct PeopleImportHistoryView: View {
     @StateObject private var model = PeopleImportViewModel()
     let initialSessionID: UUID?
     @Environment(\.dismiss) private var dismiss
@@ -298,7 +298,6 @@ private struct PeopleImportHistoryView: View {
                 ScrollView { importForm }
             }
             .padding()
-            .frame(minWidth: 500)
             #else
             NavigationView {
                 importForm
@@ -308,7 +307,7 @@ private struct PeopleImportHistoryView: View {
             .navigationViewStyle(.stack)
             #endif
         }
-        .frame(minWidth: 360, minHeight: 450)
+        .peopleModalFrame(.reading, minHeight: 450, idealHeight: 640)
         .task { if let initialSessionID { selected.insert(initialSessionID) }; await model.loadImports(); await model.loadSessions(); await model.loadAccounts() }
         .task(id: "\(model.job?.id.uuidString ?? ""):\(model.job?.isActive == true):\(scenePhase == .active)") {
             guard scenePhase == .active else { return }
@@ -345,6 +344,26 @@ struct PeopleList<Content: View>: View {
         #else
         List { content() }
         #endif
+    }
+}
+
+/// Opening widths for People modals.
+enum PeopleModalWidth {
+    /// Short editors: adding a person, an alias, or a fact correction.
+    case form
+    /// Conversation lists, transcripts, and identity evidence.
+    case reading
+
+    var macMinimum: CGFloat { self == .form ? 560 : 680 }
+    var ideal: CGFloat { self == .form ? 600 : 760 }
+}
+
+extension View {
+    /// Frames a People sheet with `sheetFrame`, so both its macOS 15 ideal
+    /// width and its earlier-release minimum are readable.
+    func peopleModalFrame(_ width: PeopleModalWidth, minHeight: CGFloat, idealHeight: CGFloat) -> some View {
+        sheetFrame(minWidth: 320, macMinWidth: width.macMinimum, idealWidth: width.ideal, maxWidth: .infinity,
+                   minHeight: minHeight, idealHeight: idealHeight, maxHeight: .infinity)
     }
 }
 

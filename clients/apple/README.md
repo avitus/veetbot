@@ -41,6 +41,10 @@ automatically and apply immediately throughout the client. On macOS, configured
 clients use a separate settings window that resizes in both dimensions and
 remembers its frame. The main and settings windows persist their sizes and
 positions independently; system text sizing remains the default.
+On Mac, sheets open at readable widths: 640 points for Persona, 600 for email
+draft history and send review, and 540 for call results and email learning.
+Before macOS 15, which ignores a sheet's ideal size, they open at their 480- to
+520-point minimums.
 On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
@@ -97,7 +101,11 @@ conversation, and the `--ui-testing-folders` journeys file, rename, accept and
 decline conversation folders while the default fixture proves an older server
 stays flat. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
-or credential.
+or credential. It runs `make test-apple-ui-macos` and then
+`make test-apple-ui-ios`; either target runs alone when only one platform
+family changed. Each UI case sets its launch arguments and environment before
+calling `app.launch()` once. Terminate and relaunch only in a case that tests
+relaunch behavior.
 The keyboard-dismissal case holds its fake submission pending until teardown,
 so a slow accessibility query cannot consume the response-delay window.
 
@@ -109,6 +117,10 @@ arguments. UIKit's content-size launch preference is restricted to the iOS test
 targets.
 Person-profile empty states use primary text contrast so missing history and
 coverage remain readable at enlarged text sizes.
+On Mac, People sheets open at readable widths: 600 points for short editors and
+760 points for the import history, source conversations, and identity repair.
+Before macOS 15, which ignores a sheet's ideal size, they open at their 560- and
+680-point minimums.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the

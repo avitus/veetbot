@@ -839,6 +839,8 @@ public final class ChatViewModel: ObservableObject {
             let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
             for session in page.items {
+                // A cached People session left unlisted is pruned below.
+                guard !session.isPeopleOperational else { continue }
                 serverIDs.insert(session.id)
                 serverSpeaksFolders = serverSpeaksFolders || session.folderSupported
                 guard !removedHistorySessionIDs.contains(session.id),
@@ -869,6 +871,13 @@ public final class ChatViewModel: ObservableObject {
         var prunedHistory = false
         for resolution in missingResolutions {
             switch resolution {
+            case .found(let session) where session.isPeopleOperational:
+                // The session backs People data, so it is hidden locally, never deleted.
+                try await historyStore.delete(sessionID: session.id)
+                guard historyReconciliationID == reconciliationID else { return }
+                if selectedSessionID == session.id {
+                    resetSelectedSession()
+                }
             case .found(let session):
                 guard !removedHistorySessionIDs.contains(session.id),
                     !deletingHistorySessionIDs.contains(session.id)

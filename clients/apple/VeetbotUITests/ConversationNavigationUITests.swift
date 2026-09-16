@@ -1,4 +1,7 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 final class ConversationNavigationUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -8,7 +11,8 @@ final class ConversationNavigationUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments.append("--ui-testing-conversation-navigation")
-        app.launch()
+        // Each case adds its fixture options and then launches once; launching
+        // here would make those cases pay for a second launch.
     }
 
     override func tearDown() {
@@ -18,7 +22,6 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Twenty mixed calls occupy one compact row; each original result remains expandable.
     func testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails() {
-        app.terminate()
         app.launchArguments.append("--ui-testing-mixed-tools")
         #if os(macOS)
         // Exercise discovery after the original one-shot resize deadline.
@@ -123,7 +126,6 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// The detail checkbox replaces the archived message with the next conversation's actual content.
     func testEmailDetailArchiveDisplaysNextConversation() {
-        app.terminate()
         app.launchArguments.append("--ui-testing-email-archive-next")
         app.launch()
         let mode = app.buttons["mode.email"]
@@ -151,8 +153,43 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Please review the agenda before Friday."].exists)
     }
 
+    /// Checking off the open conversation's inbox row also moves the reading pane to the next conversation.
+    func testEmailRowArchiveOfOpenConversationDisplaysNext() throws {
+        #if os(iOS)
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone,
+                      "Compact navigation covers the inbox while a conversation is open")
+        #endif
+        app.launchArguments.append("--ui-testing-email-archive-next")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        mode.click()
+        #else
+        mode.tap()
+        #endif
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        row.click()
+        #else
+        row.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        let check = app.buttons["email.handled.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        #if os(macOS)
+        check.click()
+        #else
+        check.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Here is the next email to read."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Please review the agenda before Friday."].exists)
+    }
+
     /// Removes a row immediately without progress messages, then finds its confirmed state in Other mail.
     func testEmailCanBeCheckedOffFromInboxWithoutOpeningThread() {
+        app.launch()
         let mode = app.buttons["mode.email"]
         XCTAssertTrue(mode.waitForExistence(timeout: 10))
         #if os(macOS)
@@ -186,7 +223,6 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// A failed Gmail operation restores the optimistically removed row with an explicit retryable outcome.
     func testEmailArchiveFailurePreservesInboxRow() {
-        app.terminate()
         app.launchArguments.append("--ui-testing-email-archive-failure")
         app.launch()
         let mode = app.buttons["mode.email"]
@@ -219,12 +255,12 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Verifies the reading and reply flow with normal platform appearance.
     func testEmailReadingKeepsFeedbackOptionalAndReplyReachable() {
+        app.launch()
         checkEmailReadingFlow()
     }
 
     /// Exercises the same native controls with a deterministic dark appearance.
     func testEmailReadingInDarkAppearance() {
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_COLOR_SCHEME"] = "dark"
         app.launch()
         checkEmailReadingFlow()
@@ -399,7 +435,6 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testPeopleAccessibilityAtLargeText() throws {
         continueAfterFailure = true
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
         #if os(macOS)
@@ -481,11 +516,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testPeopleEvidencePreservesTheOpenConversation() {
         #if os(macOS)
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
-        app.launch()
         #endif
+        app.launch()
         app.activate()
         let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(historical.waitForExistence(timeout: 10))
@@ -526,11 +560,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testPeopleForgetExplainsSourceRetentionAndPendingCleanup() {
         #if os(macOS)
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
-        app.launch()
         #endif
+        app.launch()
         app.activate()
         let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(historical.waitForExistence(timeout: 10))
@@ -571,11 +604,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testPeopleMailboxImportPreviewShowsExplicitCoverage() {
         #if os(macOS)
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
-        app.launch()
         #endif
+        app.launch()
         app.activate()
         let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(historical.waitForExistence(timeout: 10))
@@ -625,11 +657,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testPeopleIdentityPreviewRemainsReviewableAfterEditorCloses() {
         #if os(macOS)
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
-        app.launch()
         #endif
+        app.launch()
         app.activate()
         let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(historical.waitForExistence(timeout: 10))
@@ -679,7 +710,6 @@ final class ConversationNavigationUITests: XCTestCase {
 
     #if os(iOS)
     func testEmailCompactTraitNavigationReturnsToSelectedInbox() {
-        app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_SIZE_CLASS"] = "compact"
         app.launch()
         let emailMode = app.buttons["mode.email"]
@@ -698,6 +728,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testEmailLearningControlsShowCurrentState() {
+        app.launch()
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
         emailMode.tap()
@@ -712,6 +743,7 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Exercises handled state, feedback, editing and exact-send approval on the native thread screen.
     func testEmailThreadFeedbackEditingAndExplicitSend() {
+        app.launch()
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
         emailMode.tap()
@@ -744,6 +776,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testEmailModePreservesAnUnsentChatMessage() {
+        app.launch()
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
         ]
@@ -766,6 +799,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testHistoricalAndNewConversationRowsOpenChat() {
+        app.launch()
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
         ]
@@ -790,6 +824,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testSwitchesBetweenHistoricalConversations() {
+        app.launch()
         let firstRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
         ]
@@ -814,7 +849,6 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false, holdSubmission: Bool = false) {
-        app.terminate()
         app.launchArguments.append("--ui-testing-chat-slow-send")
         if fails { app.launchArguments.append("--ui-testing-chat-send-failure") }
         if holdSubmission { app.launchArguments.append("--ui-testing-chat-hold-submission") }
@@ -882,6 +916,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testMemoryBrowserListsAndOpensDetail() {
+        app.launch()
         openSidebarDestination(identifier: "sidebar.memory")
 
         XCTAssertTrue(
@@ -903,6 +938,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testScheduleBrowserListsAndOpensPointReadDetail() {
+        app.launch()
         openSidebarDestination(identifier: "sidebar.schedules")
 
         XCTAssertTrue(
@@ -924,6 +960,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testScheduleBrowserMakesRecentTerminalHistoryAccessible() {
+        app.launch()
         openSidebarDestination(identifier: "sidebar.schedules")
 
         XCTAssertTrue(
@@ -943,6 +980,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testOverflowMenuOpensPersonaEditor() {
+        app.launch()
         openSidebarDestination(identifier: "sidebar.persona")
 
         XCTAssertTrue(
@@ -951,6 +989,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testWebsiteAccessCreatesARecoverableBrowserHandoff() {
+        app.launch()
         openSidebarDestination(identifier: "sidebar.settings")
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
 
@@ -988,6 +1027,7 @@ final class ConversationNavigationUITests: XCTestCase {
     #if os(macOS)
     /// Prevents implicit person feedback and stale values from crossing feedback scopes.
     func testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets() {
+        app.launch()
         activate(app.buttons["mode.email"])
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
@@ -1072,7 +1112,6 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Launch the five-priority email fixture in a deterministic Mac window.
     private func launchFullEmailInbox() {
-        app.terminate()
         app.launchArguments.append("--ui-testing-email-full-inbox")
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1200,900"
         app.launch()
@@ -1082,6 +1121,7 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Reproduces the default CI window and keeps mode, reply and Chat controls inside its bounds.
     func testEmailReadingAtDefaultMacWindowSize() {
+        app.launch()
         let initialWindow = app.windows.firstMatch
         XCTAssertTrue(initialWindow.waitForExistence(timeout: 10))
         let initialFrame = initialWindow.frame
@@ -1115,6 +1155,7 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Exercises Mac thread attention and approval controls through actual native interactions.
     func testEmailModeAndExactDraftApprovalOnMac() {
+        app.launch()
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
         emailMode.click()
@@ -1139,6 +1180,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testMainWindowSizePersistsAcrossApplicationRestart() {
+        app.launch()
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
         let initialFrame = window.frame
