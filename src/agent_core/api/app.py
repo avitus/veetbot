@@ -40,6 +40,7 @@ from agent_core.application.services import (
     DeviceIngestService,
     DeviceService,
     EmailService,
+    FolderService,
     MemoryReadService,
     NotificationService,
     PeopleService,
@@ -70,6 +71,7 @@ from agent_core.domain.devices import (
     device_routing_issue,
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
+from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.notifications import NotificationKind
 from agent_core.domain.persona import (
@@ -93,6 +95,8 @@ from agent_core.domain.views import (
     DeviceInvocationList,
     DeviceInvocationResultView,
     DeviceView,
+    FolderProposalView,
+    FolderView,
     MemoryView,
     NotificationInboxItem,
     Page,
@@ -186,6 +190,9 @@ class ApplicationServices(Protocol):
     def persona(self) -> PersonaService: ...
 
     @property
+    def folders(self) -> FolderService: ...
+
+    @property
     def email(self) -> EmailService: ...
 
     @property
@@ -208,6 +215,26 @@ class UpdatePersonaRequest(BaseModel):
 
     expected_version: int = Field(ge=0)
     entries: list[UpdatePersonaEntryRequest] = Field(max_length=PERSONA_MAX_ENTRIES)
+
+
+class FolderNameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=256)
+
+
+class SetSessionFolderRequest(BaseModel):
+    """`folder_id` is required so a client cannot unfile by omitting it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    folder_id: UUID | None
+
+
+class AcceptFolderProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class CreateSessionRequest(BaseModel):
@@ -1686,6 +1713,137 @@ def create_app(
 
     if settings.persona_api_enabled:
         app.include_router(persona_router)
+
+    folder_router = APIRouter()
+
+    @folder_router.post(
+        "/v1/folders",
+        status_code=201,
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def create_folder(
+        body: FolderNameRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> FolderView:
+        """Create an owner-named folder for chat conversations."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.create(authenticated, name=body.name)
+
+    @folder_router.get(
+        "/v1/folders",
+        openapi_extra={"required_scope": "session.read"},
+    )
+    async def list_folders(
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.read")],
+    ) -> Page[FolderView]:
+        """List the principal's folders with their conversation counts."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.list(authenticated)
+
+    # The proposal routes precede the folder-identifier routes so that
+    # `proposals` is never parsed as a folder identifier.
+    @folder_router.get(
+        "/v1/folders/proposals",
+        openapi_extra={"required_scope": "session.read"},
+    )
+    async def list_folder_proposals(
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.read")],
+        state: FolderProposalState | None = FolderProposalState.PROPOSED,
+    ) -> Page[FolderProposalView]:
+        """List grouping proposals, open ones by default."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.proposals(authenticated, state=state)
+
+    @folder_router.post(
+        "/v1/folders/proposals/{proposal_id}/accept",
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def accept_folder_proposal(
+        proposal_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.write")],
+        body: AcceptFolderProposalRequest | None = None,
+    ) -> FolderProposalView:
+        """File the proposal's conversations under the owner's explicit acceptance."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.accept(
+            authenticated, proposal_id, name=None if body is None else body.name
+        )
+
+    @folder_router.post(
+        "/v1/folders/proposals/{proposal_id}/decline",
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def decline_folder_proposal(
+        proposal_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> FolderProposalView:
+        """Decline a proposal durably; the grouping is never offered again."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.decline(authenticated, proposal_id)
+
+    @folder_router.get(
+        "/v1/folders/{folder_id}",
+        openapi_extra={"required_scope": "session.read"},
+    )
+    async def get_folder(
+        folder_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.read")],
+    ) -> FolderView:
+        """Read one owned folder."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.get(authenticated, folder_id)
+
+    @folder_router.patch(
+        "/v1/folders/{folder_id}",
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def rename_folder(
+        folder_id: UUID,
+        body: FolderNameRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> FolderView:
+        """Rename an owned folder; membership is untouched."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.rename(authenticated, folder_id, name=body.name)
+
+    @folder_router.delete(
+        "/v1/folders/{folder_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def delete_folder(
+        folder_id: UUID,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> Response:
+        """Delete an owned folder; its conversations return to the unfiled state."""
+        await services.folders.delete(authenticated, folder_id)
+        return Response(status_code=204)
+
+    @folder_router.put(
+        "/v1/sessions/{session_id}/folder",
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def set_session_folder(
+        session_id: UUID,
+        body: SetSessionFolderRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> SessionView:
+        """File a chat conversation in a folder, or unfile it with an explicit null."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.folders.move_session(
+            authenticated, session_id, folder_id=body.folder_id
+        )
+
+    if settings.thread_folders_api_enabled:
+        app.include_router(folder_router)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

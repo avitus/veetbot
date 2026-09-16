@@ -30,6 +30,14 @@ from agent_core.domain.events import (
     ProcessEvent,
     is_schedule_instruction_event,
 )
+from agent_core.domain.folders import (
+    FolderProposal,
+    FolderProposalState,
+    FolderWithdrawalReason,
+    ThreadFolder,
+    folder_name_key,
+    normalize_folder_name,
+)
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -1634,6 +1642,263 @@ class InMemoryCapabilityEvaluationRepository:
                 (cost for started_at, cost in self._attempt_costs.values() if started_at >= since),
                 start=Decimal("0"),
             )
+
+
+class InMemoryFolderStore:
+    """Contract-backed folder, membership, and proposal store."""
+
+    def __init__(self) -> None:
+        self._folders: dict[UUID, ThreadFolder] = {}
+        # session_id -> (folder_id, tenant_id, principal_id, added_at)
+        self._memberships: dict[UUID, tuple[UUID, str, str, datetime]] = {}
+        self._proposals: dict[UUID, FolderProposal] = {}
+        self._lock = asyncio.Lock()
+
+    def _owned_folder(self, folder_id: UUID, principal: Principal) -> ThreadFolder:
+        folder = self._folders.get(folder_id)
+        if (
+            folder is None
+            or folder.tenant_id != principal.tenant_id
+            or folder.principal_id != principal.principal_id
+        ):
+            raise NotFoundError(f"folder {folder_id} not found")
+        return folder
+
+    def _name_taken(
+        self, tenant_id: str, principal_id: str, key: str, *, except_id: UUID | None = None
+    ) -> bool:
+        return any(
+            folder.tenant_id == tenant_id
+            and folder.principal_id == principal_id
+            and folder.id != except_id
+            and folder_name_key(folder.name) == key
+            for folder in self._folders.values()
+        )
+
+    def _owned_membership(
+        self, session_id: UUID, principal: Principal
+    ) -> tuple[UUID, str, str, datetime] | None:
+        membership = self._memberships.get(session_id)
+        if (
+            membership is None
+            or membership[1] != principal.tenant_id
+            or membership[2] != principal.principal_id
+        ):
+            return None
+        return membership
+
+    async def create_folder(self, folder: ThreadFolder) -> ThreadFolder:
+        async with self._lock:
+            if folder.id in self._folders:
+                raise ConflictError(f"folder {folder.id} already exists", reason="folder_exists")
+            if self._name_taken(
+                folder.tenant_id, folder.principal_id, folder_name_key(folder.name)
+            ):
+                raise ConflictError(
+                    f"folder name {folder.name!r} is taken", reason="folder_name_taken"
+                )
+            self._folders[folder.id] = folder
+            return folder
+
+    async def get_folder(self, folder_id: UUID, principal: Principal) -> ThreadFolder:
+        async with self._lock:
+            return self._owned_folder(folder_id, principal)
+
+    async def list_folders(self, principal: Principal) -> list[ThreadFolder]:
+        async with self._lock:
+            rows = [
+                folder
+                for folder in self._folders.values()
+                if folder.tenant_id == principal.tenant_id
+                and folder.principal_id == principal.principal_id
+            ]
+            return sorted(rows, key=lambda folder: (folder_name_key(folder.name), folder.id.int))
+
+    async def count_folders(self, principal: Principal) -> int:
+        return len(await self.list_folders(principal))
+
+    async def thread_counts(self, principal: Principal) -> dict[UUID, int]:
+        async with self._lock:
+            counts = {
+                folder.id: 0
+                for folder in self._folders.values()
+                if folder.tenant_id == principal.tenant_id
+                and folder.principal_id == principal.principal_id
+            }
+            for folder_id, tenant_id, principal_id, _added_at in self._memberships.values():
+                if (
+                    folder_id in counts
+                    and tenant_id == principal.tenant_id
+                    and principal_id == principal.principal_id
+                ):
+                    counts[folder_id] += 1
+            return counts
+
+    async def rename_folder(
+        self,
+        folder_id: UUID,
+        principal: Principal,
+        *,
+        name: str,
+        updated_at: datetime,
+    ) -> ThreadFolder:
+        async with self._lock:
+            folder = self._owned_folder(folder_id, principal)
+            normalized = normalize_folder_name(name)
+            if self._name_taken(
+                folder.tenant_id,
+                folder.principal_id,
+                folder_name_key(normalized),
+                except_id=folder.id,
+            ):
+                raise ConflictError(
+                    f"folder name {normalized!r} is taken", reason="folder_name_taken"
+                )
+            renamed = folder.model_copy(update={"name": normalized, "updated_at": updated_at})
+            self._folders[folder_id] = renamed
+            return renamed
+
+    async def delete_folder(self, folder_id: UUID, principal: Principal) -> None:
+        async with self._lock:
+            self._owned_folder(folder_id, principal)
+            del self._folders[folder_id]
+            for session_id in [
+                session_id
+                for session_id, membership in self._memberships.items()
+                if membership[0] == folder_id
+            ]:
+                del self._memberships[session_id]
+
+    async def folder_of(
+        self, session_ids: Sequence[UUID], principal: Principal
+    ) -> dict[UUID, UUID]:
+        async with self._lock:
+            result: dict[UUID, UUID] = {}
+            for session_id in session_ids:
+                membership = self._owned_membership(session_id, principal)
+                if membership is not None:
+                    result[session_id] = membership[0]
+            return result
+
+    async def members_of(self, folder_id: UUID, principal: Principal) -> list[UUID]:
+        async with self._lock:
+            self._owned_folder(folder_id, principal)
+            rows = [
+                (membership[3], session_id.int, session_id)
+                for session_id, membership in self._memberships.items()
+                if membership[0] == folder_id
+            ]
+            return [session_id for _added_at, _order, session_id in sorted(rows)]
+
+    async def set_membership(
+        self,
+        session_id: UUID,
+        principal: Principal,
+        *,
+        folder_id: UUID | None,
+        added_at: datetime,
+    ) -> UUID | None:
+        async with self._lock:
+            if folder_id is not None:
+                self._owned_folder(folder_id, principal)
+            previous = self._owned_membership(session_id, principal)
+            previous_folder = previous[0] if previous is not None else None
+            if folder_id is None:
+                if previous is not None:
+                    del self._memberships[session_id]
+                return previous_folder
+            if previous_folder == folder_id:
+                return previous_folder
+            self._memberships[session_id] = (
+                folder_id,
+                principal.tenant_id,
+                principal.principal_id,
+                added_at,
+            )
+            return previous_folder
+
+    async def propose(self, proposal: FolderProposal) -> FolderProposal:
+        async with self._lock:
+            for existing in self._proposals.values():
+                if (
+                    existing.tenant_id != proposal.tenant_id
+                    or existing.principal_id != proposal.principal_id
+                    or existing.content_key != proposal.content_key
+                ):
+                    continue
+                if existing.state is FolderProposalState.PROPOSED:
+                    return existing
+                if existing.state in (
+                    FolderProposalState.DECLINED,
+                    FolderProposalState.ACCEPTED,
+                ):
+                    raise ConflictError(
+                        f"grouping {proposal.content_key} has a durable {existing.state} proposal",
+                        reason="proposal_key_durable",
+                    )
+            self._proposals[proposal.id] = proposal
+            return proposal
+
+    async def get_proposal(self, proposal_id: UUID, principal: Principal) -> FolderProposal:
+        async with self._lock:
+            return self._owned_proposal(proposal_id, principal)
+
+    def _owned_proposal(self, proposal_id: UUID, principal: Principal) -> FolderProposal:
+        proposal = self._proposals.get(proposal_id)
+        if (
+            proposal is None
+            or proposal.tenant_id != principal.tenant_id
+            or proposal.principal_id != principal.principal_id
+        ):
+            raise NotFoundError(f"folder proposal {proposal_id} not found")
+        return proposal
+
+    async def list_proposals(
+        self,
+        principal: Principal,
+        *,
+        state: FolderProposalState | None = None,
+    ) -> list[FolderProposal]:
+        async with self._lock:
+            rows = [
+                proposal
+                for proposal in self._proposals.values()
+                if proposal.tenant_id == principal.tenant_id
+                and proposal.principal_id == principal.principal_id
+                and (state is None or proposal.state is state)
+            ]
+            return sorted(
+                rows, key=lambda proposal: (-proposal.created_at.timestamp(), proposal.id.int)
+            )
+
+    async def resolve_proposal(
+        self,
+        proposal_id: UUID,
+        principal: Principal,
+        *,
+        state: FolderProposalState,
+        resolved_at: datetime,
+        resulting_folder_id: UUID | None = None,
+        withdrawal_reason: FolderWithdrawalReason | None = None,
+    ) -> FolderProposal:
+        async with self._lock:
+            proposal = self._owned_proposal(proposal_id, principal)
+            if proposal.state is not FolderProposalState.PROPOSED:
+                raise ConflictError(
+                    f"folder proposal {proposal_id} is already {proposal.state}",
+                    reason="proposal_resolved",
+                )
+            resolved = FolderProposal.model_validate(
+                {
+                    **proposal.model_dump(),
+                    "state": state,
+                    "resolved_at": resolved_at,
+                    "resulting_folder_id": resulting_folder_id,
+                    "withdrawal_reason": withdrawal_reason,
+                }
+            )
+            self._proposals[proposal_id] = resolved
+            return resolved
 
 
 class InMemoryPersonaStore:

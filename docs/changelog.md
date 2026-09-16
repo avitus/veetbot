@@ -15,6 +15,23 @@ title: Changelog
 - Opening a thread in Chat or starting its first draft still pins the full skill
   catalog, but server discovery now happens before the lock is taken.
 
+## 2026-09-16 — Faster native Apple CI lane
+
+- The Apple CI gate now runs on two macOS executors at once: `apple` runs the
+  Swift unit tests and the macOS UI cases, and `apple-ios` runs the iPhone and
+  iPad cases. Release packaging requires both. No test was removed.
+- `make test-apple-ui` now runs the new `make test-apple-ui-macos` and
+  `make test-apple-ui-ios` targets in turn, so either platform family can run
+  alone.
+- UI cases set their fixture options before a single launch instead of
+  launching in `setUp` and relaunching, which saves one app launch per affected
+  case on every destination.
+- The Email status-polling test runs its bounded backoff in virtual time and
+  also asserts the backoff delays, removing about thirty seconds of real
+  waiting from `make test-apple`.
+- Each Apple job uploads its result bundles as one archive instead of thousands
+  of files.
+
 ## 2026-09-16 — Archiving the open email from its row advances the reading pane
 
 - In the Apple client's Email mode, checking off the open conversation in the

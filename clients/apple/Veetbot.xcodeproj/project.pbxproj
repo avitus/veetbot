@@ -47,6 +47,8 @@
 		100000000000000000000027 /* ScheduleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* ScheduleDetailView.swift */; };
 		100000000000000000000028 /* PersonaViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* PersonaViewModel.swift */; };
 		100000000000000000000029 /* PersonaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* PersonaEditorView.swift */; };
+		1000000000000000000000D1 /* ConversationFolders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D1 /* ConversationFolders.swift */; };
+		1000000000000000000000D2 /* ConversationFolderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D2 /* ConversationFolderViews.swift */; };
 		10000000000000000000002A /* SmsIntegrationPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SmsIntegrationPreferences.swift */; };
 		10000000000000000000002B /* DeviceInvocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* DeviceInvocationService.swift */; };
 		10000000000000000000002C /* SmsComposeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* SmsComposeSheet.swift */; };
@@ -120,6 +122,8 @@
 		200000000000000000000028 /* ScheduleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleDetailView.swift; sourceTree = "<group>"; };
 		200000000000000000000029 /* PersonaViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaViewModel.swift; sourceTree = "<group>"; };
 		20000000000000000000002A /* PersonaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaEditorView.swift; sourceTree = "<group>"; };
+		2000000000000000000000D1 /* ConversationFolders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolders.swift; sourceTree = "<group>"; };
+		2000000000000000000000D2 /* ConversationFolderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolderViews.swift; sourceTree = "<group>"; };
 		20000000000000000000002B /* SmsIntegrationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsIntegrationPreferences.swift; sourceTree = "<group>"; };
 		20000000000000000000002C /* DeviceInvocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInvocationService.swift; sourceTree = "<group>"; };
 		20000000000000000000002D /* SmsComposeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsComposeSheet.swift; sourceTree = "<group>"; };
@@ -250,6 +254,7 @@
 				20000000000000000000000F /* ChatViewModel.swift */,
 				200000000000000000000023 /* MemoryViewModel.swift */,
 				200000000000000000000029 /* PersonaViewModel.swift */,
+				2000000000000000000000D1 /* ConversationFolders.swift */,
 				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
 				2000000000000000000000A3 /* EmailViewModel.swift */,
@@ -273,6 +278,7 @@
 				200000000000000000000024 /* MemoryBrowserView.swift */,
 				200000000000000000000025 /* MemoryDetailView.swift */,
 				20000000000000000000002A /* PersonaEditorView.swift */,
+				2000000000000000000000D2 /* ConversationFolderViews.swift */,
 				200000000000000000000027 /* ScheduleBrowserView.swift */,
 				200000000000000000000028 /* ScheduleDetailView.swift */,
 				20000000000000000000002D /* SmsComposeSheet.swift */,
@@ -436,6 +442,7 @@
 				10000000000000000000000F /* ChatViewModel.swift in Sources */,
 				100000000000000000000022 /* MemoryViewModel.swift in Sources */,
 				100000000000000000000028 /* PersonaViewModel.swift in Sources */,
+				1000000000000000000000D1 /* ConversationFolders.swift in Sources */,
 				100000000000000000000025 /* ScheduleViewModel.swift in Sources */,
 				100000000000000000000010 /* RunStateReducer.swift in Sources */,
 				100000000000000000000011 /* ActivityViews.swift in Sources */,
@@ -448,6 +455,7 @@
 				100000000000000000000023 /* MemoryBrowserView.swift in Sources */,
 				100000000000000000000024 /* MemoryDetailView.swift in Sources */,
 				100000000000000000000029 /* PersonaEditorView.swift in Sources */,
+				1000000000000000000000D2 /* ConversationFolderViews.swift in Sources */,
 				100000000000000000000026 /* ScheduleBrowserView.swift in Sources */,
 				100000000000000000000027 /* ScheduleDetailView.swift in Sources */,
 				10000000000000000000002C /* SmsComposeSheet.swift in Sources */,

@@ -1451,7 +1451,8 @@ import SwiftUI
     /// Sustained failure stops after three status reads, including past the next backoff deadline.
     @Test func testOperationPollingExhaustsBoundedRetriesWithoutSubmittingAnotherRefresh() async throws {
         let requests = EmailRequestRecorder()
-        let model = try makeModel { request in
+        let backoff = StatusBackoffRecorder()
+        let model = try makeModel(statusBackoff: { backoff.append($0) }) { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "RUNNING")) }
@@ -1465,10 +1466,11 @@ import SwiftUI
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 3)
-        // A fourth exponential-backoff attempt would arrive after sixteen
-        // more seconds. Wait past that boundary to prove the retry cap.
-        try await Task.sleep(nanoseconds: 17_000_000_000)
+        // Backoff completes at once here, so a fourth attempt would follow the
+        // third failure within milliseconds instead of sixteen seconds later.
+        try await Task.sleep(nanoseconds: 1_000_000_000)
         #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 3)
+        #expect(backoff.snapshot == [2, 4, 8].map { $0 * 1_000_000_000 })
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
         #expect(model.errorMessage != nil)
     }
@@ -1993,6 +1995,7 @@ import SwiftUI
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,
+        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
@@ -2003,7 +2006,9 @@ import SwiftUI
             configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
-        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now)
+        return EmailViewModel(
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff
+        )
     }
 
     private static let accountsJSON = """
@@ -2116,6 +2121,14 @@ private final class EmailRequestRecorder: @unchecked Sendable {
     private var values: [URLRequest] = []
     func append(_ value: URLRequest) { lock.withLock { values.append(value) } }
     var snapshot: [URLRequest] { lock.withLock { values } }
+}
+
+/// Records each requested status-read wait and returns at once, keeping backoff in virtual time.
+private final class StatusBackoffRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [UInt64] = []
+    func append(_ value: UInt64) { lock.withLock { values.append(value) } }
+    var snapshot: [UInt64] { lock.withLock { values } }
 }
 
 private final class EmailTestURLProtocol: URLProtocol {

@@ -127,6 +127,7 @@ class Settings:
     memory_api_enabled: bool = False
     people_enabled: bool = True
     persona_api_enabled: bool = False
+    thread_folders_api_enabled: bool = False
     delegation_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
@@ -219,6 +220,7 @@ SHIPPED_CONFIGS = (
     "runtime/limits.yaml",
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
+    "folders/profiles.yaml",
 )
 # The design corpus declares 168 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
@@ -406,6 +408,15 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "snapshots.child.max_tokens",
             "snapshots.child.max_window_ratio",
             "traces.operator_retention_days",
+        ),
+        "folders/profiles.yaml": (
+            "proposals.enabled",
+            "proposals.threshold",
+            "proposals.max_open",
+            "proposals.interval_seconds",
+            "proposals.model_policy",
+            "proposals.similarity_threshold",
+            "proposals.max_members",
         ),
     }
 )
@@ -1546,6 +1557,7 @@ def _load_settings(
     memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
     people_enabled = _parse_flag({"AGENT_PEOPLE_ENABLED": "1", **values}, "AGENT_PEOPLE_ENABLED")
     persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
+    thread_folders_api_enabled = _parse_flag(values, "AGENT_THREAD_FOLDERS_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
     device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
@@ -1792,6 +1804,7 @@ def _load_settings(
         memory_api_enabled=memory_api_enabled,
         people_enabled=people_enabled,
         persona_api_enabled=persona_api_enabled,
+        thread_folders_api_enabled=thread_folders_api_enabled,
         delegation_enabled=delegation_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,

@@ -13,7 +13,8 @@ endif
 
 .PHONY: install format lint typecheck test check db-up migrate client-build \
 	test-static test-contract test-fast test-integration test-live \
-	test-sandbox test-apple test-apple-ui test-deploy sandbox-image \
+	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-ios \
+	test-deploy sandbox-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website
 
@@ -60,31 +61,34 @@ test-live:
 	@RUN_LIVE_MODEL_TESTS=1 uv run pytest -m live; \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
 
-test-apple:
-	@apple_developer_dir="$${DEVELOPER_DIR:-$$(xcode-select --print-path)}"; \
+# Native targets need full Xcode: Command Line Tools can compile a Swift
+# Testing bundle without executing it and cannot run UI tests.
+APPLE_FULL_XCODE = apple_developer_dir="$${DEVELOPER_DIR:-$$(xcode-select --print-path)}"; \
 	if ! printf '%s' "$$apple_developer_dir" | grep -q '\.app/Contents/Developer$$' \
 		&& test -d /Applications/Xcode.app/Contents/Developer; then \
 		apple_developer_dir=/Applications/Xcode.app/Contents/Developer; \
 	fi; \
 	if ! printf '%s' "$$apple_developer_dir" | grep -q '\.app/Contents/Developer$$'; then \
-		echo 'test-apple requires a full Xcode installation; Command Line Tools only compiles without executing Swift Testing suites.' >&2; \
+		echo '$@ requires a full Xcode installation; Command Line Tools only compiles without executing tests.' >&2; \
 		exit 1; \
-	fi; \
+	fi
+APPLE_RESULTS_RUN_DIR = apple_results_root="$${APPLE_TEST_RESULTS_DIR:-$${TMPDIR:-/tmp}/veetbot-apple-test-results}"; \
+	apple_results_run_dir="$$apple_results_root/run-$$(date -u +%Y%m%d-%H%M%S)-$$$$"; \
+	mkdir -p "$$apple_results_run_dir"
+
+test-apple:
+	@$(APPLE_FULL_XCODE); \
 	DEVELOPER_DIR="$$apple_developer_dir" swift test --package-path clients/apple
 
+# Mac UI tests drive the real desktop, so the families never overlap locally;
+# CI runs each target on its own executor at the same time.
 test-apple-ui:
-	@apple_developer_dir="$${DEVELOPER_DIR:-$$(xcode-select --print-path)}"; \
-	if ! printf '%s' "$$apple_developer_dir" | grep -q '\.app/Contents/Developer$$' \
-		&& test -d /Applications/Xcode.app/Contents/Developer; then \
-		apple_developer_dir=/Applications/Xcode.app/Contents/Developer; \
-	fi; \
-	if ! printf '%s' "$$apple_developer_dir" | grep -q '\.app/Contents/Developer$$'; then \
-		echo 'test-apple-ui requires a full Xcode installation.' >&2; \
-		exit 1; \
-	fi; \
-	apple_results_root="$${APPLE_TEST_RESULTS_DIR:-$${TMPDIR:-/tmp}/veetbot-apple-test-results}"; \
-	apple_results_run_dir="$$apple_results_root/run-$$(date -u +%Y%m%d-%H%M%S)-$$$$"; \
-	mkdir -p "$$apple_results_run_dir"; \
+	@$(MAKE) --no-print-directory test-apple-ui-macos
+	@$(MAKE) --no-print-directory test-apple-ui-ios
+
+test-apple-ui-macos:
+	@$(APPLE_FULL_XCODE); \
+	$(APPLE_RESULTS_RUN_DIR); \
 	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test -quiet \
 		-project clients/apple/Veetbot.xcodeproj \
 		-scheme Veetbot \
@@ -108,14 +112,24 @@ test-apple-ui:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarShowsFivePrioritiesWithoutScrolling \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarResizesWithItsDivider \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testOlderServerSidebarStaysFlatWithoutFolderControls \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderSectionsGroupConversations \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testNewFolderSheetCreatesAFolder \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingAFolderThroughItsMenuUpdatesTheSection \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAcceptingASuggestedFolderFilesTheConversation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testDecliningASuggestedFolderRemovesIt \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
-		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM= || exit $$?; \
+		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
+
+test-apple-ui-ios:
+	@$(APPLE_FULL_XCODE); \
+	$(APPLE_RESULTS_RUN_DIR); \
 	iphone_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone")]; print(max(candidates)[1] if candidates else "")'); \
 	ipad_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPad")]; print(max(candidates)[1] if candidates else "")'); \
 	if test -z "$$iphone_device_id" -o -z "$$ipad_device_id"; then \
-		echo 'test-apple-ui requires available iPhone and iPad simulator runtimes.' >&2; \
+		echo '$@ requires available iPhone and iPad simulator runtimes.' >&2; \
 		exit 1; \
 	fi; \
 	apple_ui_tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/veetbot-apple-ui.XXXXXX"); \
