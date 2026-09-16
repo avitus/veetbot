@@ -18,6 +18,13 @@ title: Changelog
   draft reads, refresh selection and imports withhold expired bodies before
   the sweep reaches them, and never send one to the model.
 
+## 2026-09-16 — Bland request URLs stay out of service logs
+
+- The Bland MCP servers no longer write a line for each Bland request to the
+  API and worker journals. Those lines exposed provider call IDs, the configured
+  phone number and call-history query values. Warnings and errors from the
+  servers still reach the journal.
+
 ## 2026-09-16 — Email reads no longer wait for archive and refresh admission
 
 - Archiving a conversation or starting an Email refresh no longer starts the
