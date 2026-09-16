@@ -1,4 +1,7 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 final class ConversationNavigationUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -146,6 +149,41 @@ final class ConversationNavigationUITests: XCTestCase {
         action.click()
         #else
         action.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Here is the next email to read."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Please review the agenda before Friday."].exists)
+    }
+
+    /// Checking off the open conversation's inbox row also moves the reading pane to the next conversation.
+    func testEmailRowArchiveOfOpenConversationDisplaysNext() throws {
+        #if os(iOS)
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone,
+                      "Compact navigation covers the inbox while a conversation is open")
+        #endif
+        app.terminate()
+        app.launchArguments.append("--ui-testing-email-archive-next")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        #if os(macOS)
+        mode.click()
+        #else
+        mode.tap()
+        #endif
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        row.click()
+        #else
+        row.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        let check = app.buttons["email.handled.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        #if os(macOS)
+        check.click()
+        #else
+        check.tap()
         #endif
         XCTAssertTrue(app.staticTexts["Here is the next email to read."].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Please review the agenda before Friday."].exists)

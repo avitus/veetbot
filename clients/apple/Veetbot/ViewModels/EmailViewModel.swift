@@ -908,7 +908,8 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Supplies one-action consent and retains the same request after an uncertain admission response.
-    public func setThreadArchived(_ thread: EmailThreadView, archived: Bool, advanceSelection: Bool = false) async {
+    /// Archiving the selected thread from its row or its detail advances the reading pane.
+    public func setThreadArchived(_ thread: EmailThreadView, archived: Bool) async {
         guard let api = makeAPIClient(), !archiveSubmitting.contains(thread.id) else { return }
         guard archiveUnavailableReason(for: thread) == nil else {
             archiveErrors[thread.id] = archiveUnavailableReason(for: thread)
@@ -926,8 +927,10 @@ public final class EmailViewModel: ObservableObject {
         archiveVersions[thread.id] = UUID()
         archiveSubmitting.insert(thread.id)
         let visible = items
+        // Advancing clears the detail, which may hold newer confirmed mailbox state than its row.
+        let detail = self.thread?.id == thread.id ? self.thread : nil
         if request.archived { archiveHiddenThreads.insert(thread.id) }
-        if advanceSelection, request.archived, selectedThreadID == thread.id {
+        if request.archived, selectedThreadID == thread.id {
             let next: EmailThreadView?
             if let index = visible.firstIndex(where: { $0.id == thread.id }) {
                 next = visible.dropFirst(index + 1).first ?? visible.prefix(index).last
@@ -954,7 +957,7 @@ public final class EmailViewModel: ObservableObject {
                 targetArchived: request.archived, status: "pending", error: nil)
             if let index = inboxItems.firstIndex(where: { $0.id == thread.id }) { inboxItems[index].archiveOperation = pending }
             if self.thread?.id == thread.id { self.thread?.archiveOperation = pending }
-            let current = self.thread?.id == thread.id ? self.thread : inboxItems.first { $0.id == thread.id }
+            let current = self.thread?.id == thread.id ? self.thread : detail ?? inboxItems.first { $0.id == thread.id }
             archiveStates[thread.id] = ArchiveMailboxState(inInbox: current?.inInbox ?? thread.inInbox,
                 operation: pending, dismissedRevision: current?.dismissedRevision ?? thread.dismissedRevision)
             archiveVersions[thread.id] = UUID()

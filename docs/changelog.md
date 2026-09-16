@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Archiving the open email from its row advances the reading pane
+
+- In the Apple client's Email mode, checking off the open conversation in the
+  inbox list now clears the reading pane and opens the next visible
+  conversation, or the previous one at the end of the list, as the reading
+  pane's own checkbox already did. Previously the archived conversation stayed
+  open until another row was chosen. Archiving any other row still keeps the
+  current selection.
+
 ## 2026-09-16 — Adding a person no longer adds a conversation
 
 - The conversation index hides the sessions that anchor native People writes

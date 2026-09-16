@@ -80,13 +80,13 @@ the archive request and durable operation finish asynchronously. Normal progress
 and successful completion are silent; other rows remain actionable. Keep the
 last confirmed mailbox state separate from this optimistic presentation, retain
 draft edits, and restore the row with an actionable error if admission, status
-retrieval, or execution fails or the outcome is uncertain. Archiving from thread
-detail immediately clears that detail and opens the next visible conversation
-in the current list order, falling back to the previous conversation at the end
-of the list or an empty pane when none remain. Loading the next conversation
-does not wait for archive admission or completion. A later archive failure
-restores its row without replacing the owner's new selection. Row checkboxes
-and move-to-Inbox actions retain their existing selection behavior.
+retrieval, or execution fails or the outcome is uncertain. Archiving the open
+conversation, from its row or its detail, immediately clears that detail and
+opens the next visible conversation in the current list order, falling back to
+the previous conversation at the end of the list or an empty pane when none
+remain. Loading the next conversation does not wait for archive admission or
+completion. A later archive failure restores its row without replacing the
+owner's new selection. Archiving another row and move-to-Inbox keep the selection.
 Projection refreshes must not resurrect a pending row; reopening Email resumes
 status reads without another archive request. Preserve unread state,
 other labels, and importance feedback. New correspondence is assessed again.
