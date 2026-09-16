@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Gmail request URLs stay out of service logs
+
+- The Gmail MCP servers no longer write a line for each Google request to the
+  API and worker journals. Those lines exposed search queries, which can hold
+  names, addresses and subject text, as well as Gmail thread and message IDs.
+  Warnings and errors from the servers still reach the journal.
+
 ## 2026-09-16 — Cheaper Email listing, admission and body retention
 
 - The Email inbox list reads thread summaries without message content, and
