@@ -350,7 +350,9 @@ final class ConversationNavigationUITests: XCTestCase {
         field.typeKey("a", modifierFlags: .command)
         #endif
         field.typeText(text)
-        activate(element("folder.save"))
+        // iOS exposes a toolbar item's identifier on both the item container and
+        // its button, so an untyped query finds two elements; ask for the button.
+        activate(app.buttons["folder.save"])
     }
 
     /// The default fixture is an older server whose index has no `folder_id`

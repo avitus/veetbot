@@ -80,7 +80,7 @@ milestones:
       detail: 349 package tests including the folder grouping, wire model, transport, store and view-model cases (local, 2026-09-16).
     - check: xcodebuild test -project clients/apple/Veetbot.xcodeproj -scheme Veetbot -destination platform=macOS with the five folder journeys (tests/native/test_folders_m29.py::test_folder_native_journeys)
       outcome: pass
-      detail: Folder sections and the flat older-server sidebar, the new-folder sheet, rename through the context menu, and accepting and declining a suggested folder, on macOS (local, 2026-09-16); iPhone and iPad simulator runs of these journeys are not yet recorded.
+      detail: Folder sections and the flat older-server sidebar, the new-folder sheet, rename through the context menu, and accepting and declining a suggested folder, on macOS (local, 2026-09-16); the five iOS journeys also pass on the iPhone 17 Pro and iPad Air 11-inch (M4) simulators, iOS 26.5, through xcodebuild test-without-building (local, 2026-09-16) after the Save tap switched to a button-typed query.
   '28':
     title: People and relationship memory
     status: in_progress
