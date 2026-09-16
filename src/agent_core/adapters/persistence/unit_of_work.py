@@ -25,6 +25,7 @@ from agent_core.ports.devices import (
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.email import EmailStore
 from agent_core.ports.events import EventRepository, ProcessEventRepository
+from agent_core.ports.folders import FolderStore
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
@@ -105,6 +106,7 @@ class UnitOfWorkRepositories:
     episodes: IntegratedEpisodeStore
     traces: TraceStore
     personas: PersonaStore
+    folders: FolderStore
     email: EmailStore
     calls: CallStore
     people: PeopleStore
@@ -168,6 +170,7 @@ class MemoryUnitOfWork:
         self.episodes = repositories.episodes
         self.traces = repositories.traces
         self.personas = repositories.personas
+        self.folders = repositories.folders
         self.email = repositories.email
         self.calls = repositories.calls
         self.people = repositories.people
@@ -287,6 +290,7 @@ class PostgresUnitOfWork:
         self.episodes = repositories.episodes
         self.traces = repositories.traces
         self.personas = repositories.personas
+        self.folders = repositories.folders
         self.email = repositories.email
         self.calls = repositories.calls
         self.people = repositories.people

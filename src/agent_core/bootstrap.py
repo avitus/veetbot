@@ -106,6 +106,7 @@ from agent_core.adapters.persistence.device_channel import (
     PostgresDeviceInvocationStore,
 )
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
+from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -114,6 +115,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
     InMemoryExportConsentRepository,
+    InMemoryFolderStore,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
     InMemoryPersonaStore,
@@ -840,6 +842,7 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        folders=InMemoryFolderStore(),
         email=InMemoryEmailStore(),
         calls=InMemoryCallStore(),
         people=people,
@@ -927,6 +930,7 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            folders=PostgresFolderStore(session),
             email=PostgresEmailStore(session),
             calls=PostgresCallStore(session),
             people=people,

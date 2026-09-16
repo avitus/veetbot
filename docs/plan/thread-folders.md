@@ -214,7 +214,7 @@ process event with a stable derivation key and a content-free payload.
 - **Move** takes a session and a folder identifier or null. The session must
   be owned and must be a chat session — its metadata carries none of
   `email_thread_id`, `email_operational`, `schedule_id`, or `run_kind` — or
-  the request is `invalid_state` with `details.reason = "session_not_chat"`.
+  the request is `conflict` with `details.reason = "session_not_chat"`.
   The folder, when given, must be owned. Moving to the folder a session is
   already in, or unfiling an unfiled session, is a 200 with no event. A real
   change upserts or deletes the membership row, withdraws every open proposal
@@ -244,8 +244,8 @@ and takes at most the free slots when it is not. Review must stay a minute's
 work, or it will not happen and the sidebar fills with suggestions nobody
 reads. Proposals are disjoint: no session is named by two open proposals.
 
-**Decline is durable, and content-keyed.** A declined proposal's content key
-is never proposed again — not by the next pass, not by a provider change,
+**Decline is durable, and content-keyed.** A declined or accepted proposal's
+content key is never proposed again — not by the next pass, not by a provider change,
 not by a fallback run. Because a grouping re-derives with new identifiers
 every pass, the key is the grouping itself: the kind, the target, and the
 sorted member set. The pass also refuses a candidate whose member set is a
@@ -542,7 +542,7 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
    `gate.folder.crud_invariants`, case. **M29.**
 3. **Move semantics are exact.** Filing and unfiling are idempotent; a
    foreign or unknown folder or session is an indistinguishable 404; an
-   email, operational, scheduled, or delegated session is `invalid_state`
+   email, operational, scheduled, or delegated session is `conflict`
    with reason `session_not_chat`; and ADR-0050 session deletion leaves no
    membership behind. Registered as `gate.folder.move_semantics`, case.
    **M29.**

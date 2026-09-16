@@ -15,7 +15,7 @@
   milestone: 29
   kind: case
   spec: docs/plan/thread-folders.md#hard-gates
-  statement: "**Move semantics are exact.** Filing and unfiling are idempotent; a foreign or unknown folder or session is an indistinguishable 404; an email, operational, scheduled, or delegated session is `invalid_state` with reason `session_not_chat`; and ADR-0050 session deletion leaves no membership behind."
+  statement: "**Move semantics are exact.** Filing and unfiling are idempotent; a foreign or unknown folder or session is an indistinguishable 404; an email, operational, scheduled, or delegated session is `conflict` with reason `session_not_chat`; and ADR-0050 session deletion leaves no membership behind."
   check: tests/gates/pending.py::pending_gate
 - id: gate.folder.proposal_eligibility
   milestone: 29
