@@ -753,6 +753,9 @@ async def test_large_erasure_does_not_exceed_the_postgres_parameter_limit() -> N
                 "target": target.id,
                 "now": NOW,
             }
+            # Bound setup as well as erasure so an accidental fixture scan
+            # cannot consume the hosted job's entire no-output allowance.
+            await session.execute(text("SET LOCAL statement_timeout = '30s'"))
             await session.execute(
                 text("""
                 INSERT INTO people_heads
@@ -764,6 +767,9 @@ async def test_large_erasure_does_not_exceed_the_postgres_parameter_limit() -> N
             """),
                 parameters,
             )
+            # This uncommitted bulk load cannot receive autovacuum statistics.
+            # Refresh each parent before the next stage validates its FKs.
+            await session.execute(text("ANALYZE people_heads"))
             await session.execute(
                 text("""
                 INSERT INTO people_revisions (tenant_id, principal_id, entity_id, revision, kind,
@@ -782,6 +788,7 @@ async def test_large_erasure_does_not_exceed_the_postgres_parameter_limit() -> N
             """),
                 parameters,
             )
+            await session.execute(text("ANALYZE people_revisions"))
             await session.execute(
                 text("""
                 INSERT INTO people_links
@@ -792,6 +799,7 @@ async def test_large_erasure_does_not_exceed_the_postgres_parameter_limit() -> N
             """),
                 parameters,
             )
+            await session.execute(text("ANALYZE people_links"))
             ids = [target.id, *(UUID(f"10000000-0000-0000-0000-{i:012d}") for i in range(1, 33001))]
             assert await store.erase(owner, ids) == 33001
             assert await store.get(owner, target.id, ceiling=Sensitivity.RESTRICTED) is None

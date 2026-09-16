@@ -242,6 +242,9 @@ synthetic application records before migration round trips too, considering only
 tables present in an empty or older schema and retaining `alembic_version`.
 Production downgrade guards remain enforced; tests of populated migrations
 create their own records after isolation and verify that data loss is refused.
+Large SQL fixtures refresh planner statistics between related-table insert
+stages inside one transaction and bound setup statements with a finite timeout.
+This keeps synthetic foreign-key validation from dominating the behavior tested.
 
 `db-up` waits. `docker compose up -d` returns as soon as the container
 is created, which is several seconds before PostgreSQL accepts

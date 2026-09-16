@@ -12,6 +12,19 @@ enum ConversationNavigationUITestFixture {
     static let scheduleID = "00000000-0000-0000-0000-000000000654"
     static let scheduleHistoryID = "00000000-0000-0000-0000-000000000656"
 
+    static func makeAppearanceIfRequested() -> AppearancePreferences? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument),
+            let rawSize = ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_TEXT_SIZE"],
+            let size = AppTextSize(rawValue: rawSize)
+        else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.appearance"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        defaults.removePersistentDomain(forName: suiteName)
+        let preferences = AppearancePreferences(defaults: defaults)
+        preferences.textSize = size
+        return preferences
+    }
+
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }

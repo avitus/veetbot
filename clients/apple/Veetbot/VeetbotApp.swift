@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct VeetbotApp: App {
     @StateObject private var model: ChatViewModel
-    @StateObject private var appearance = AppearancePreferences()
+    @StateObject private var appearance: AppearancePreferences
     @StateObject private var smsIntegration = SmsIntegrationPreferences()
     #if os(iOS)
     @UIApplicationDelegateAdaptor(NotificationApplicationDelegate.self)
@@ -19,8 +19,13 @@ struct VeetbotApp: App {
             wrappedValue: ConversationNavigationUITestFixture.makeModelIfRequested()
                 ?? ChatViewModel()
         )
+        _appearance = StateObject(
+            wrappedValue: ConversationNavigationUITestFixture.makeAppearanceIfRequested()
+                ?? AppearancePreferences()
+        )
         #else
         _model = StateObject(wrappedValue: ChatViewModel())
+        _appearance = StateObject(wrappedValue: AppearancePreferences())
         #endif
     }
 

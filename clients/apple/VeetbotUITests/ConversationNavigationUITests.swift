@@ -308,7 +308,9 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
         #if os(macOS)
-        app.launchArguments += ["-veetbot.appearance.textSize", "large"]
+        // Set the preference in isolated fixture defaults without passing a
+        // positional argument that AppKit can interpret as a document to open.
+        app.launchEnvironment["VEETBOT_UI_TEST_TEXT_SIZE"] = "large"
         #else
         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         #endif
