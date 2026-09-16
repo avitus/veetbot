@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
+import sys
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -14,12 +17,13 @@ from mcp.types import CallToolResult
 from pydantic import ValidationError
 
 from agent_core.adapters.mcp.scripted import ScriptedMCPClient
+from agent_core.adapters.mcp.sdk import SDKMCPClient
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.api import create_app
 from agent_core.bootstrap import build
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.email import EmailDraftEdit
-from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
+from agent_core.domain.mcp import MCPCallResult, MCPServerConfig, MCPTransport
 from agent_core.domain.messages import (
     FakeModelScript,
     ScriptedToolCall,
@@ -34,7 +38,8 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
 from agent_core.evals.email_quality import EmailQualityCorpus, score_email_quality
 from agent_core.tools.email_context import EmailContextTool
-from gmail_mcp.client import GmailClient
+from gmail_mcp.client import GmailClient, GmailCredential
+from gmail_mcp.constants import GOOGLE_SCOPES
 from gmail_mcp.server import create_server
 from tests.gates.test_email_chat_m26 import context
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
@@ -284,6 +289,47 @@ async def _internal_api_error() -> None:
         assert MAIL_CANARY not in response.text and DRAFT_CANARY not in response.text
 
 
+async def _gmail_child_log(tmp_path: Path) -> None:
+    """The real stdio entrypoint keeps request URLs out of the stderr it inherits."""
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "email_stdio_server.py"
+    stderr_path = tmp_path / "gmail-read.stderr"
+    credential = GmailCredential(
+        client_id="fixture-client",
+        client_secret="unused",
+        refresh_token="unused",
+        scope=GOOGLE_SCOPES["read"],
+        account_id="personal",
+    )
+    config = MCPServerConfig(
+        tenant_id="tenant-a",
+        server_id="gmail_personal_read",
+        transport=MCPTransport.STDIO,
+        endpoint=shlex.join(
+            [sys.executable, str(fixture), "read", "personal", f"--entrypoint={stderr_path}"]
+        ),
+        operator_configured=True,
+    )
+    # A wide console keeps any leaked URL on one line for the assertions below.
+    environment = {"GMAIL_MCP_CREDENTIAL": credential.as_json(), "COLUMNS": "4096"}
+    async with SDKMCPClient(config, None, environment) as client:
+        result = await client.call_tool(
+            "search_threads",
+            {"query": f"in:inbox from:colleague@example.test {MAIL_CANARY}", "max_results": 25},
+        )
+    assert not result.is_error
+    stderr = stderr_path.read_text(encoding="utf-8")
+    assert "gmail child capture probe" in stderr
+    for value in (
+        "HTTP Request",
+        "googleapis.com",
+        "q=",
+        "shared-thread",
+        "colleague",
+        MAIL_CANARY,
+    ):
+        assert value not in stderr
+
+
 def _label_only_eval() -> None:
     for collection in ("threads", "style", "memory"):
         for field in ("body", "subject", "email_address", "draft", "learned_preference"):
@@ -314,13 +360,18 @@ def _label_only_eval() -> None:
         "upstream_secret",
         "internal_api_error",
         "label_only_eval",
+        "gmail_child_log",
     ],
 )
-async def test_email_privacy_boundaries(boundary: str, caplog: pytest.LogCaptureFixture) -> None:
+async def test_email_privacy_boundaries(
+    boundary: str, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
     """One registered gate executes all distinct privacy and authority boundaries."""
     caplog.set_level(logging.DEBUG)
     if boundary == "label_only_eval":
         _label_only_eval()
+    elif boundary == "gmail_child_log":
+        await _gmail_child_log(tmp_path)
     else:
         await {
             "hostile_mail": _hostile_mail,

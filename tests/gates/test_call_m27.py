@@ -1,13 +1,18 @@
 """Bland calling boundary tests; no test dials a telephone number."""
 
 import json
+import shlex
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from mcp.types import CallToolResult
 
+from agent_core.adapters.mcp.sdk import SDKMCPClient
 from agent_core.domain.calls import CallConfiguration
+from agent_core.domain.mcp import MCPServerConfig, MCPTransport
 from bland_mcp.client import BlandClient
 from bland_mcp.server import create_server
 from tests.contract.test_bland_client_contract import CALL_ID, KEY, NUMBER, RECIPIENT
@@ -289,3 +294,39 @@ def test_private_key_bootstrap_uses_a_hidden_prompt_and_never_overwrites(
     with pytest.raises(SystemExit):
         main(["bootstrap", "--output-file", str(path)])
     assert path.read_text() == KEY + "\n"
+
+
+async def test_bland_child_stderr_carries_no_provider_request_lines(tmp_path: Path) -> None:
+    """The real stdio entrypoint keeps request URLs out of the stderr its parent journals."""
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "bland_stdio_server.py"
+    stderr_path = tmp_path / "bland-read.stderr"
+    config = MCPServerConfig(
+        tenant_id="tenant-a",
+        server_id="bland_read",
+        transport=MCPTransport.STDIO,
+        endpoint=shlex.join([sys.executable, str(fixture), str(stderr_path)]),
+        operator_configured=True,
+    )
+    credential = {"api_key": KEY, "configuration": call_configuration().model_dump()}
+    # A wide console keeps any leaked URL on one line for the assertions below.
+    environment = {"BLAND_MCP_CREDENTIAL": json.dumps(credential), "COLUMNS": "4096"}
+    async with SDKMCPClient(config, None, environment) as client:
+        call = await client.call_tool("provider_get_call", {"provider_call_id": CALL_ID})
+        page = await client.call_tool(
+            "provider_list_calls",
+            {"inbound": True, "start_date": "2026-09-01T12:34:56+00:00"},
+        )
+    assert not call.is_error and not page.is_error
+    stderr = stderr_path.read_text(encoding="utf-8")
+    assert "bland child capture probe" in stderr
+    for value in (
+        "HTTP Request",
+        "api.bland.ai",
+        "/calls",
+        CALL_ID,
+        "start_date",
+        "2026-09-01",
+        NUMBER.removeprefix("+"),
+        KEY,
+    ):
+        assert value not in stderr

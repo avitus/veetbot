@@ -31,6 +31,10 @@ SESSION_RESERVED_METADATA_KEYS = frozenset(
     }
 )
 DEFAULT_PROJECT_SCOPE = "general"
+SESSION_PURPOSE_METADATA_KEY = "purpose"
+# People audit anchors and import workers are sessions, not conversations; the
+# conversation index hides them like email operational sessions.
+PEOPLE_OPERATIONAL_SESSION_PURPOSES = ("people-management", "people-import")
 
 
 def project_scope(metadata: Mapping[str, Any]) -> str:

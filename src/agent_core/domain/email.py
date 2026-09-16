@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from email.utils import getaddresses
 from enum import StrEnum
@@ -16,6 +16,7 @@ from agent_core.domain.email_semantics import EmailSemanticFact
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
 EMAIL_HISTORY_DAYS = 90
+EMAIL_BODY_RETENTION = timedelta(days=30)
 
 
 class EmailValue(BaseModel):
@@ -331,6 +332,36 @@ def addresses(values: list[str]) -> list[str]:
     return result
 
 
+def body_cutoff(now: datetime) -> datetime:
+    """Bodies last accessed, or drafts settled, at or before this instant have expired."""
+    return now - EMAIL_BODY_RETENTION
+
+
+def retained_thread(thread: EmailThread, cutoff: datetime) -> EmailThread:
+    """Expire only this conversation, before a read can renew its access time."""
+    if thread.last_accessed_at > cutoff or not any(message.body for message in thread.messages):
+        return thread
+    return thread.model_copy(
+        update={
+            "messages": [
+                message.model_copy(update={"body": "", "complete": False})
+                for message in thread.messages
+            ],
+            "complete": False,
+            "source_fingerprint": "",
+            "assessment_version": "",
+        }
+    )
+
+
+def draft_expired(draft: EmailDraft, cutoff: datetime) -> bool:
+    """Unsent owner edits remain retained regardless of age."""
+    return (
+        draft.status in {EmailDraftStatus.SENT, EmailDraftStatus.DISCARDED}
+        and draft.updated_at <= cutoff
+    )
+
+
 def feedback_matches(feedback: EmailFeedback, thread: EmailThread) -> bool:
     if feedback.undone_at is not None:
         return False
@@ -360,9 +391,9 @@ def apply_feedback(
                 "reason": "The dated event no longer needs attention.",
             }
         )
-    for item in sorted(feedback, key=lambda value: (value.created_at, str(value.id))):
-        if not feedback_matches(item, thread):
-            continue
+    # Listing applies feedback to every cached thread; most match nothing, so match first.
+    matching = [item for item in feedback if feedback_matches(item, thread)]
+    for item in sorted(matching, key=lambda value: (value.created_at, str(value.id))):
         updates: dict[str, object] = {
             "reason": item.explanation or f"Your {item.target} preference"
         }

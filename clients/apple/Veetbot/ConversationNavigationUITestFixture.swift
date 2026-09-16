@@ -11,6 +11,12 @@ enum ConversationNavigationUITestFixture {
     static let memoryID = "00000000-0000-0000-0000-000000000321"
     static let scheduleID = "00000000-0000-0000-0000-000000000654"
     static let scheduleHistoryID = "00000000-0000-0000-0000-000000000656"
+    /// Milestone 29 folders: served only under this argument so every other
+    /// journey keeps an older-server index without a `folder_id` key.
+    static let foldersLaunchArgument = "--ui-testing-folders"
+    static let folderID = "00000000-0000-0000-0000-000000000F01"
+    static let proposedFolderID = "00000000-0000-0000-0000-000000000F02"
+    static let proposalID = "00000000-0000-0000-0000-000000000E01"
 
     static func makeAppearanceIfRequested() -> AppearancePreferences? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument),
@@ -29,6 +35,7 @@ enum ConversationNavigationUITestFixture {
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
         ConversationNavigationUITestURLProtocol.resetEmail()
+        ConversationNavigationUITestURLProtocol.resetFolders()
         #if os(macOS)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
             let availableAfter = Date().addingTimeInterval(
@@ -106,6 +113,28 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     /// Keeps pending visible across XCTest's initial accessibility poll before confirming the fake Gmail result.
     private static let emailArchiveCompletionRead = 4
     private static var emailArchived = false
+    private static let folderLock = NSLock()
+    private static var folderName = "Travel"
+    private static var folderDeleted = false
+    private static var createdFolderName: String?
+    private static var proposalResolved = false
+    private static var sessionFolders: [String: String] = [:]
+    private static var foldersEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.foldersLaunchArgument)
+    }
+    /// Starts each folder journey with one folder holding the second conversation
+    /// and one open new-folder proposal over the first.
+    static func resetFolders() {
+        folderLock.lock()
+        defer { folderLock.unlock() }
+        folderName = "Travel"
+        folderDeleted = false
+        createdFolderName = nil
+        proposalResolved = false
+        sessionFolders = foldersEnabled
+            ? [ConversationNavigationUITestFixture.secondSessionID: ConversationNavigationUITestFixture.folderID]
+            : [:]
+    }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
         emailLock.lock()
@@ -333,6 +362,56 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                   {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Second historical answer loaded"}]}
                 ],"next_cursor":null}
                 """
+        case ("GET", "/v1/folders"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"ui-test"}}"#
+                break
+            }
+            statusCode = 200
+            body = "{\"items\":[\(Self.folderItemsJSON)],\"next_cursor\":null}"
+        case ("GET", "/v1/folders/proposals"):
+            statusCode = 200
+            let open = Self.folderLock.withLock { Self.foldersEnabled && !Self.proposalResolved }
+            body = "{\"items\":[\(open ? Self.proposalJSON(state: "proposed", resultingFolderID: nil) : "")],\"next_cursor\":null}"
+        case ("POST", "/v1/folders"):
+            let name = requestJSON()["name"] as? String ?? "New Folder"
+            Self.folderLock.withLock { Self.createdFolderName = name }
+            statusCode = 201
+            body = Self.folderJSON(id: ConversationNavigationUITestFixture.proposedFolderID, name: name)
+        case ("PATCH", "/v1/folders/\(ConversationNavigationUITestFixture.folderID)"):
+            let name = requestJSON()["name"] as? String ?? "Travel"
+            Self.folderLock.withLock { Self.folderName = name }
+            statusCode = 200
+            body = Self.folderJSON(id: ConversationNavigationUITestFixture.folderID, name: name)
+        case ("DELETE", "/v1/folders/\(ConversationNavigationUITestFixture.folderID)"):
+            Self.folderLock.withLock {
+                Self.folderDeleted = true
+                Self.sessionFolders = Self.sessionFolders.filter { $0.value != ConversationNavigationUITestFixture.folderID }
+            }
+            statusCode = 204
+            body = ""
+        case ("POST", "/v1/folders/proposals/\(ConversationNavigationUITestFixture.proposalID)/accept"):
+            Self.folderLock.withLock {
+                Self.proposalResolved = true
+                Self.createdFolderName = "Lisbon Trip"
+                Self.sessionFolders[ConversationNavigationUITestFixture.firstSessionID] = ConversationNavigationUITestFixture.proposedFolderID
+            }
+            statusCode = 200
+            body = Self.proposalJSON(state: "accepted", resultingFolderID: ConversationNavigationUITestFixture.proposedFolderID)
+        case ("POST", "/v1/folders/proposals/\(ConversationNavigationUITestFixture.proposalID)/decline"):
+            Self.folderLock.withLock { Self.proposalResolved = true }
+            statusCode = 200
+            body = Self.proposalJSON(state: "declined", resultingFolderID: nil)
+        case ("PUT", "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/folder"),
+            ("PUT", "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)/folder"):
+            let sessionID = url.pathComponents[3]
+            let target = requestJSON()["folder_id"] as? String
+            Self.folderLock.withLock {
+                if let target { Self.sessionFolders[sessionID] = target } else { Self.sessionFolders.removeValue(forKey: sessionID) }
+            }
+            statusCode = 200
+            body = sessionID == ConversationNavigationUITestFixture.firstSessionID ? Self.firstSessionJSON : Self.secondSessionJSON
         case ("GET", "/v1/memories"):
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             guard query.contains(URLQueryItem(name: "ceiling", value: "restricted")) else {
@@ -499,13 +578,58 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         return frames.joined()
     }
 
-    private static let firstSessionJSON = """
-        {"id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Historical chat","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":null}
-        """
+    private static var firstSessionJSON: String {
+        sessionJSON(
+            id: ConversationNavigationUITestFixture.firstSessionID,
+            title: "Historical chat",
+            createdAt: "2026-08-14T00:00:00Z",
+            updatedAt: "2026-08-14T00:04:00Z"
+        )
+    }
 
-    private static let secondSessionJSON = """
-        {"id":"\(ConversationNavigationUITestFixture.secondSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Second historical chat","metadata":{},"created_at":"2026-08-13T00:00:00Z","updated_at":"2026-08-13T00:04:00Z","active_run_id":null,"last_run_id":null}
-        """
+    private static var secondSessionJSON: String {
+        sessionJSON(
+            id: ConversationNavigationUITestFixture.secondSessionID,
+            title: "Second historical chat",
+            createdAt: "2026-08-13T00:00:00Z",
+            updatedAt: "2026-08-13T00:04:00Z"
+        )
+    }
+
+    /// A Milestone 29 index always carries `folder_id`, null included; the
+    /// older-server index of every other journey omits the key.
+    private static func sessionJSON(id: String, title: String, createdAt: String, updatedAt: String) -> String {
+        var folderField = ""
+        if foldersEnabled {
+            let folder = folderLock.withLock { sessionFolders[id] }
+            folderField = ",\"folder_id\":" + (folder.map { "\"\($0)\"" } ?? "null")
+        }
+        return """
+            {"id":"\(id)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"\(title)","metadata":{},"created_at":"\(createdAt)","updated_at":"\(updatedAt)","active_run_id":null,"last_run_id":null\(folderField)}
+            """
+    }
+
+    private static func folderJSON(id: String, name: String) -> String {
+        let count = folderLock.withLock { sessionFolders.values.filter { $0 == id }.count }
+        return """
+            {"id":"\(id)","name":"\(name)","thread_count":\(count),"created_at":"2026-09-16T12:00:00Z","updated_at":"2026-09-16T12:00:00Z"}
+            """
+    }
+
+    private static var folderItemsJSON: String {
+        let (deleted, name, created) = folderLock.withLock { (folderDeleted, folderName, createdFolderName) }
+        var items: [String] = []
+        if !deleted { items.append(folderJSON(id: ConversationNavigationUITestFixture.folderID, name: name)) }
+        if let created { items.append(folderJSON(id: ConversationNavigationUITestFixture.proposedFolderID, name: created)) }
+        return items.joined(separator: ",")
+    }
+
+    private static func proposalJSON(state: String, resultingFolderID: String?) -> String {
+        let resulting = resultingFolderID.map { "\"\($0)\"" } ?? "null"
+        return """
+            {"id":"\(ConversationNavigationUITestFixture.proposalID)","kind":"new_folder","proposed_name":"Lisbon Trip","target_folder_id":null,"member_session_ids":["\(ConversationNavigationUITestFixture.firstSessionID)"],"rationale":null,"derivation":"lexical","state":"\(state)","withdrawal_reason":null,"resulting_folder_id":\(resulting),"created_at":"2026-09-16T12:00:00Z","resolved_at":null}
+            """
+    }
 
     private static let personJSON = """
         {"id":"00000000-0000-0000-0000-000000000777","revision":1,"display_name":"Maya","state":"active","pinned":false,"sensitivity":"sensitive","support_ids":[]}

@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -10,7 +11,18 @@ from bland_mcp.client import BlandClient, BlandError
 from bland_mcp.server import create_server
 
 
+def _quiet_transport_logging() -> None:
+    """Keep request lines out of the stderr the parent forwards to its journal.
+
+    The SDK server configures the root logger at INFO, where HTTPX logs every
+    request URL. Those URLs carry provider call identifiers and query values.
+    """
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def main(argv: list[str] | None = None) -> None:
+    _quiet_transport_logging()
     parser = argparse.ArgumentParser(prog="python -m bland_mcp")
     parser.add_argument("--mode", choices=("read", "call"))
     commands = parser.add_subparsers(dest="command")

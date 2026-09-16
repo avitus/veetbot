@@ -81,9 +81,12 @@ import SwiftUI
     }
     #endif
 
-    /// Detail archiving advances in visible order before admission and retains edits if the write fails.
-    @Test(arguments: [0, 1, 2, 3, 4], ["failed", "completed"])
-    func testDetailArchiveAdvancesBeforeAdmission(selectedIndex: Int, outcome: String) async throws {
+    /// Archiving the selected thread from its row or detail advances in visible order before admission
+    /// and retains edits if the write fails.
+    @Test(arguments: [0, 1, 2, 3, 4], ["failed-detail", "completed-detail", "failed-row", "completed-row"])
+    func testSelectedArchiveAdvancesBeforeAdmission(selectedIndex: Int, gesture: String) async throws {
+        let outcome = String(gesture.prefix { $0 != "-" })
+        let fromRow = gesture.hasSuffix("-row")
         let admission = EmailArchiveResponseGate()
         let nextRead = EmailArchiveResponseGate()
         let requests = EmailRequestRecorder()
@@ -120,8 +123,8 @@ import SwiftUI
         await model.reload()
         await model.openThread(selected)
         model.changeEdit(\.body, to: "Keep this unsent draft")
-        let row = try #require(model.thread)
-        let archiving = Task { await model.setThreadArchived(row, archived: true, advanceSelection: true) }
+        let snapshot = try #require(fromRow ? model.items.first { $0.id == selected } : model.thread)
+        let archiving = Task { await model.setThreadArchived(snapshot, archived: true) }
         try await waitForEmailTestCondition { admission.isWaiting }
         #expect(model.selectedThreadID == next)
         #expect(model.thread == nil)
@@ -244,17 +247,19 @@ import SwiftUI
         try await waitForEmailTestCondition { admission.isWaiting }
         #expect(model.items.map(\.id) == [otherID])
         #expect(model.archiveMessage(for: first) == nil)
-        #expect(model.thread?.inInbox == true)
-        #expect(model.currentEdit?.body == "Keep my unsent reply")
+        #expect(model.selectedThreadID == otherID)
+        #expect(model.edits[draftID]?.body == "Keep my unsent reply")
         #expect(model.canArchive(next))
         await model.reload(preserveOrder: true)
         #expect(model.items.map(\.id) == [otherID])
         await model.setThreadArchived(next, archived: true)
         #expect(model.items.isEmpty)
+        #expect(model.selectedThreadID == nil)
         admission.release()
         await archiving.value
         #expect(model.items.isEmpty)
-        #expect(model.archiveMessage(for: try #require(model.thread)) == nil)
+        #expect(model.thread == nil)
+        #expect(model.archiveMessage(for: first) == nil)
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2)
     }
 
@@ -286,13 +291,14 @@ import SwiftUI
         let archiving = Task { await model.setThreadArchived(row, archived: true) }
         try await waitForEmailTestCondition { statusRead.isWaiting }
         #expect(model.items.isEmpty)
-        #expect(model.archiveMessage(for: try #require(model.thread)) == nil)
+        #expect(model.thread == nil, "Archiving the only selected row empties the reading pane")
+        #expect(model.archiveMessage(for: row) == nil)
         statusRead.release()
         await archiving.value
         #expect(model.items.count == (outcome == "completed" ? 0 : 1))
-        #expect((model.archiveMessage(for: try #require(model.thread)) == nil) == (outcome == "completed"))
-        #expect(model.currentEdit?.body == "My draft survives")
-        #expect(model.selectedThreadID == threadID)
+        #expect((model.items.first.flatMap(model.archiveMessage(for:)) == nil) == (outcome == "completed"))
+        #expect(model.edits[draftID]?.body == "My draft survives")
+        #expect(model.selectedThreadID == nil, "A restored row must not replace the owner's new selection")
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
     }
 
@@ -326,8 +332,8 @@ import SwiftUI
         #expect(body["idempotency_key"] as? String == command.value(forHTTPHeaderField: "Idempotency-Key"))
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("dismiss") })
         #expect(model.items.isEmpty)
-        #expect(model.currentEdit?.body == "Preserve my unfinished reply")
-        #expect(model.selectedThreadID == threadID)
+        #expect(model.edits[draftID]?.body == "Preserve my unfinished reply")
+        #expect(model.selectedThreadID == nil)
     }
 
     /// An unsupported mailbox cannot borrow archive support from another connected account.
@@ -563,9 +569,13 @@ import SwiftUI
         await model.openThread(threadID)
         #expect(model.thread?.isArchived == true)
         await model.setThreadArchived(gestureSnapshot, archived: true)
-        #expect(model.thread?.archiveOperation?.status == "pending")
-        #expect(model.thread?.isArchived == true)
-        #expect(model.thread?.inInbox == false)
+        #expect(model.thread == nil)
+        // The list still projects the stale Inbox state; the unresolved request keeps the detail's newer state.
+        await model.reload(preserveOrder: true)
+        let row = try #require(model.items.first { $0.id == threadID })
+        #expect(row.archiveOperation?.status == "pending")
+        #expect(row.isArchived == true)
+        #expect(row.inInbox == false)
     }
 
     /// An erased thread's resource error cannot disable archive for a different thread in the same account.
@@ -683,8 +693,11 @@ import SwiftUI
         await first.value
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
         #expect(model.items.isEmpty)
+        #expect(model.selectedThreadID == nil)
+        await model.openThread(threadID)
         #expect(model.thread?.archiveOperation?.targetArchived == true)
         #expect(model.thread?.inInbox == true)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
     }
 
     /// Archiving one row cannot discard the body read for a different selected conversation.
@@ -1438,7 +1451,8 @@ import SwiftUI
     /// Sustained failure stops after three status reads, including past the next backoff deadline.
     @Test func testOperationPollingExhaustsBoundedRetriesWithoutSubmittingAnotherRefresh() async throws {
         let requests = EmailRequestRecorder()
-        let model = try makeModel { request in
+        let backoff = StatusBackoffRecorder()
+        let model = try makeModel(statusBackoff: { backoff.append($0) }) { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if request.url!.path.hasSuffix("refresh") { return (200, self.operationJSON(status: "RUNNING")) }
@@ -1452,10 +1466,11 @@ import SwiftUI
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 3)
-        // A fourth exponential-backoff attempt would arrive after sixteen
-        // more seconds. Wait past that boundary to prove the retry cap.
-        try await Task.sleep(nanoseconds: 17_000_000_000)
+        // Backoff completes at once here, so a fourth attempt would follow the
+        // third failure within milliseconds instead of sixteen seconds later.
+        try await Task.sleep(nanoseconds: 1_000_000_000)
         #expect(requests.snapshot.filter { $0.url!.path.contains("/operations/") }.count == 3)
+        #expect(backoff.snapshot == [2, 4, 8].map { $0 * 1_000_000_000 })
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
         #expect(model.errorMessage != nil)
     }
@@ -1980,6 +1995,7 @@ import SwiftUI
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,
+        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
@@ -1990,7 +2006,9 @@ import SwiftUI
             configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
-        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now)
+        return EmailViewModel(
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff
+        )
     }
 
     private static let accountsJSON = """
@@ -2103,6 +2121,14 @@ private final class EmailRequestRecorder: @unchecked Sendable {
     private var values: [URLRequest] = []
     func append(_ value: URLRequest) { lock.withLock { values.append(value) } }
     var snapshot: [URLRequest] { lock.withLock { values } }
+}
+
+/// Records each requested status-read wait and returns at once, keeping backoff in virtual time.
+private final class StatusBackoffRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [UInt64] = []
+    func append(_ value: UInt64) { lock.withLock { values.append(value) } }
+    var snapshot: [UInt64] { lock.withLock { values } }
 }
 
 private final class EmailTestURLProtocol: URLProtocol {

@@ -352,6 +352,14 @@ terminal for the session and mid-session 401s run the adapter's bounded
 ladder, both exactly as [tool-system.md](tool-system.md) already specifies for
 every MCP server.
 
+The server's stderr is not a private channel: the API or worker process that
+spawns the child passes on its own stderr, so anything the child logs lands in
+that service's journal. The
+package therefore holds HTTP transport logging at warning level. At the SDK's
+default informational level, every request line would carry the search query
+and provider identifiers, which
+[email-experience.md](email-experience.md) keeps out of operational logs.
+
 ### Retryability splits on the classification, not on the status code
 
 A blanket "rate limits and 5xx are retryable" would be correct for a read

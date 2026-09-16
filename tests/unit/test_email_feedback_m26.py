@@ -105,3 +105,46 @@ def test_person_feedback_ignores_malformed_senders(senders: list[str], expected:
         created_at=NOW,
     )
     assert apply_feedback(thread, [feedback], now=NOW).priority == expected
+
+
+def test_latest_matching_feedback_wins_whatever_the_input_order() -> None:
+    """Judgments apply oldest first; unrelated or undone feedback never takes a turn."""
+    from datetime import timedelta
+
+    thread = EmailThread(
+        id=UUID(int=1),
+        account_id="work",
+        provider_thread_id="t1",
+        subject="Board",
+        senders=["Alex <alex@example.test>"],
+        topics=["board"],
+        updated_at=NOW,
+        last_accessed_at=NOW,
+    )
+
+    def item(
+        number: int, judgment: str, target: str, value: str, *, minutes: int, undone: bool = False
+    ) -> EmailFeedback:
+        return EmailFeedback.model_validate(
+            {
+                "id": UUID(int=number),
+                "thread_id": UUID(int=99) if target != "thread" else thread.id,
+                "target": target,
+                "judgment": judgment,
+                "target_values": [value],
+                "explanation": f"feedback {number}",
+                "created_at": NOW + timedelta(minutes=minutes),
+                "undone_at": NOW if undone else None,
+            }
+        )
+
+    feedback = [
+        item(5, "important", "topic", "hiring", minutes=9),
+        item(4, "important", "topic", "board", minutes=8, undone=True),
+        item(3, "less_important", "person", "alex@example.test", minutes=2),
+        item(2, "important", "thread", str(thread.id), minutes=1),
+        item(6, "important", "topic", "board", minutes=2),
+    ]
+    for order in (feedback, list(reversed(feedback))):
+        selected = apply_feedback(thread, order, now=NOW)
+        assert (selected.priority, selected.reason) == (1.0, "feedback 6")

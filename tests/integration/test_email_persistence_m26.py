@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -47,6 +47,27 @@ async def test_postgres_email_store_satisfies_the_shared_contract() -> None:
         await assert_email_store_contract(PostgresEmailStore(session))
         await email_import_window_contract(PostgresEmailStore(session))
         await session.commit()
+
+
+async def test_postgres_thread_summaries_omit_content_and_mask_pending_erasure() -> None:
+    from tests.contract.test_email_store_contract import thread_record, thread_summary_contract
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        store = PostgresEmailStore(session)
+        await thread_summary_contract(store)
+        await store.put(thread_record("summary-erased"), expected_revision=0)
+        await session.execute(
+            update(EmailRecordRow)
+            .where(EmailRecordRow.kind == "thread", EmailRecordRow.key == "summary-erased")
+            .values(erasure_pending=True)
+        )
+        [erased] = await store.list_thread_summaries(principal(), after="summary-c")
+        full = await store.get(principal(), "thread", "summary-erased")
+        assert full is not None
+        assert erased.payload == {k: v for k, v in full.payload.items() if k != "messages"}
+        assert erased.payload["reason"] == "Related People memory was erased."
+        await session.rollback()
 
 
 async def test_email_records_roll_back_with_the_owning_transaction() -> None:

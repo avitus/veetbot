@@ -1193,7 +1193,13 @@ authorize policy activation or production delivery.
   replace the remaining manual accessibility matrix. The CLI exposes the
   corresponding management and import operations. Saved imports can be reopened on another
   device with their original scope, audit session, and current revision. Active
-  progress refreshes while the import screen is in the foreground. A connection
+  progress refreshes while the import screen is in the foreground. Native
+  import previews, and People writes made without a selected conversation,
+  anchor their audit trail in a session marked
+  `purpose: people-management`; import workers use
+  `purpose: people-import`. The conversation index excludes both before cursor
+  limits, and native clients prune cached copies, so adding a person never adds
+  a conversation. Both remain readable by ID, and neither is deleted. A connection
   change dismisses People presentations, clears their transient data and pending
   retries, and prevents in-flight responses from restoring the old connection.
 - Frozen synthetic development and holdout corpora and a paired observation

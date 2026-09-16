@@ -1272,6 +1272,85 @@ import Testing
         return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    private func stubStatus(_ statusCode: Int, body: String) {
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+    }
+
+    @Test
+    func testFolderListsDegradeWhenTheServerLacksTheRouter() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let client = try makeClient(token: "valid")
+        for statusCode in [404, 405] {
+            stubStatus(
+                statusCode,
+                body: #"{"error":{"code":"not_found","message":"Not found.","details":{},"request_id":"old"}}"#
+            )
+            do {
+                _ = try await client.listFolders()
+                Issue.record("expected the folder list to degrade on \(statusCode)")
+            } catch let error as VeetbotAPIClientError {
+                guard case .foldersUnavailable = error else {
+                    Issue.record("unexpected compatibility error: \(error)")
+                    return
+                }
+                #expect(error.errorDescription == "This server does not support conversation folders yet.")
+            }
+            do {
+                _ = try await client.listFolderProposals()
+                Issue.record("expected the proposal list to degrade on \(statusCode)")
+            } catch let error as VeetbotAPIClientError {
+                guard case .foldersUnavailable = error else {
+                    Issue.record("unexpected compatibility error: \(error)")
+                    return
+                }
+            }
+        }
+    }
+
+    @Test
+    func testFolderMutationsKeepTheirAPIErrors() async throws {
+        defer { StubURLProtocol.handler = nil }
+        stubStatus(
+            409,
+            body: #"{"error":{"code":"conflict","message":"folder name 'Work' is taken","details":{"reason":"folder_name_taken"},"request_id":"r"}}"#
+        )
+        let client = try makeClient(token: "valid")
+        do {
+            _ = try await client.renameFolder(UUID(), name: "Work")
+            Issue.record("expected a conflict")
+        } catch let HTTPTransportError.api(error) {
+            #expect(error.code == .conflict)
+            #expect(error.statusCode == 409)
+        }
+    }
+
+    @Test
+    func testSetSessionFolderSendsAnExplicitNullBody() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let recorder = WebsiteLoginRequestRecorder()
+        let sessionID = UUID()
+        StubURLProtocol.handler = { request in
+            recorder.record(request)
+            let response = try #require(
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            let body = #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Loose","metadata":{},"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01Z","active_run_id":null,"last_run_id":null,"folder_id":null}"#
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid")
+        let session = try await client.setSessionFolder(sessionID, folderID: nil)
+        #expect(session.folderID == nil)
+        let sent = try #require(recorder.matching(method: "PUT", path: "/v1/sessions/\(sessionID.uuidString)/folder").first)
+        #expect(sent.body.map { String(decoding: $0, as: UTF8.self) } == #"{"folder_id":null}"#)
+    }
+
     private func makeClient(token: String) throws -> VeetbotAPIClient {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
         let sessionConfiguration = URLSessionConfiguration.ephemeral
@@ -1357,4 +1436,39 @@ private final class StubURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+/// Records folder requests with their bodies, which a stream-backed request
+/// exposes only through `httpBodyStream`.
+private final class WebsiteLoginRequestRecorder: @unchecked Sendable {
+    struct Entry: Sendable {
+        let method: String
+        let path: String
+        let body: Data?
+    }
+
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    func record(_ request: URLRequest) {
+        var body = request.httpBody
+        if body == nil, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var collected = Data()
+            var buffer = [UInt8](repeating: 0, count: 1_024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                collected.append(buffer, count: count)
+            }
+            body = collected
+        }
+        let entry = Entry(method: request.httpMethod ?? "", path: request.url?.path ?? "", body: body)
+        lock.withLock { entries.append(entry) }
+    }
+
+    func matching(method: String, path: String) -> [Entry] {
+        lock.withLock { entries.filter { $0.method == method && $0.path == path } }
+    }
 }

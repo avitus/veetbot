@@ -238,6 +238,34 @@ extension View {
     func appCodeFont(_ style: Font.TextStyle = .caption) -> some View {
         modifier(AppCodeFontModifier(textStyle: style))
     }
+
+    /// Frames sheet content so a Mac sheet opens at `idealWidth`. macOS 15
+    /// honors a sheet's ideal size only with fitted presentation sizing;
+    /// earlier releases open the sheet at its minimum, so `macMinWidth` must
+    /// be readable by itself. iOS keeps the compact `minWidth`.
+    @ViewBuilder
+    func sheetFrame(
+        minWidth: CGFloat,
+        macMinWidth: CGFloat? = nil,
+        idealWidth: CGFloat,
+        maxWidth: CGFloat? = nil,
+        minHeight: CGFloat,
+        idealHeight: CGFloat? = nil,
+        maxHeight: CGFloat? = nil
+    ) -> some View {
+        #if os(macOS)
+        let framed = frame(
+            minWidth: macMinWidth ?? minWidth, idealWidth: idealWidth, maxWidth: maxWidth,
+            minHeight: minHeight, idealHeight: idealHeight, maxHeight: maxHeight
+        )
+        if #available(macOS 15, *) { framed.presentationSizing(.fitted) } else { framed }
+        #else
+        frame(
+            minWidth: minWidth, idealWidth: idealWidth, maxWidth: maxWidth,
+            minHeight: minHeight, idealHeight: idealHeight, maxHeight: maxHeight
+        )
+        #endif
+    }
 }
 
 struct VeetbotBrandMark: View {

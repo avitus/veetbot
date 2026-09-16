@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:631` named `ApprovalService` as one of
+`bootstrap-and-composition.md:632` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4449-4526`
+Section 28 of the plan is not empty — `engineering-plan.md:4475-4552`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -580,7 +580,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1427`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4524` requires a container-escape attempt as
+    `engineering-plan.md:4550` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -1544,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4528-4685` for links to other documents returned
+`engineering-plan.md:4554-4711` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1765,7 +1765,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2642` against
-    `model-gateway.md:1810` and `milestone-map.md:1782`. The map
+    `model-gateway.md:1810` and `milestone-map.md:1802`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1774,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4524` requires a test the harness's case set
+    `engineering-plan.md:4550` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1899,3 +1899,15 @@ lands; no quality or production requirement is marked complete by admission.
 
 ADR-0101 makes all implemented People features available by default. Pending
 quality measurements do not gate runtime functionality or release.
+
+## Milestone 29: Chat thread folders
+
+The owner authorized [thread-folders.md](thread-folders.md) on 2026-09-16
+under ADR-0102. Twelve gates are registered in a new `gate.folder.*` area for
+the additive schema, folder invariants, move semantics, closed proposal
+eligibility, the bounded open set, durable decline, withdrawal, grounded
+grouping with a deterministic fallback, atomic acceptance, exact scopes under
+the flag, content-free prompts and logs, and native degradation. The design
+touches no roadmap item: it adds no embedding, no retrieval arm and no memory
+read. Every gate is bound to an executable check as of 2026-09-16; hosted CI,
+review and delivery evidence remain open and the verified ceiling remains 12.
