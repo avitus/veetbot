@@ -151,9 +151,11 @@ activation; results from an earlier activation cannot update the newly opened vi
 A successful thread read clears an earlier read error without clearing an
 unresolved draft-edit or send error.
 Thread detail reads apply retention only to the requested conversation and its
-draft. They do not sweep unrelated threads, drafts or draft histories. Inbox
-scans do not hold the principal mutation lock; pending archive reconciliation
-re-reads its one target under a short lock before applying an outcome. Clients
+draft. They do not sweep unrelated threads, drafts or draft histories, and
+neither does admitting an operation or endorsing a writing example. Inbox
+scans read thread summaries without message content and do not hold the
+principal mutation lock; pending archive reconciliation re-reads its one target
+under a short lock before applying an outcome. Clients
 reuse an in-flight initial thread read during foreground polling within the same
 activation, and display received messages without waiting for a separate draft
 response. Archive navigation clears the old content before loading its successor.
@@ -1003,7 +1005,9 @@ records in `email_records`, keyed by tenant, principal, kind and opaque key.
 The closed application DTO supplies each JSON payload; revision, created time
 and updated time are explicit columns. The repository never returns mutable
 aliases into stored payloads. Key-ordered pagination accepts an exclusive `after`
-key and a limit from one to one thousand. `put` compares the exact existing
+key and a limit from one to one thousand. A thread-summary read pages the same
+thread records with `messages` omitted; PostgreSQL drops them in the query, so
+listing neither transfers nor decodes message bodies. `put` compares the exact existing
 revision (zero means absent), requires the new revision to be expected plus one,
 and raises a conflict without mutation on a mismatch. Delete likewise requires
 the exact positive existing revision; missing or foreign records conflict.
@@ -1018,12 +1022,15 @@ in-memory unit of work retains its documented deterministic, non-transactional
 scope. Immutable draft and feedback histories use independently keyed records,
 not destructive rewriting of a prior revision's content.
 
-The existing maintenance worker performs mailbox-wide body retention. It scans
-in pages of at most 100 records outside the mutation lock, then re-reads each
-expired candidate in a separate short locked transaction before erasing it.
-Draft-history deletion also rechecks the current parent draft's retention state.
-Foreground reads still enforce the thirty-day rule on their requested content,
-so a delayed maintenance sweep cannot expose or renew an expired body.
+The existing maintenance worker performs mailbox-wide body retention, at most
+once an hour. It scans in pages of at most 100 records outside the mutation
+lock, then re-reads each expired candidate in a separate short locked
+transaction before erasing it. Draft-history deletion also rechecks the current
+parent draft's retention state. Request paths never run this sweep. Instead,
+every reader of cached content enforces the thirty-day rule on what it reads:
+point reads of a thread or draft, the refresh task's selection of mail to fetch
+again or assess, and an import's comparison with its cached copy. A delayed
+maintenance sweep therefore cannot expose or renew an expired body.
 
 ### Source-content erasure mechanism
 

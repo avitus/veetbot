@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Cheaper Email listing, admission and body retention
+
+- The Email inbox list reads thread summaries without message content, and
+  PostgreSQL drops the bodies in the query. On a PostgreSQL copy with 4,044
+  production-sized threads, a priority page fell from about 850 ms to about
+  260 ms. Owner feedback is sorted only for the threads it matches.
+- Admitting refresh, draft, send and archive operations, and endorsing a writing
+  example, no longer scan every cached thread, draft and draft revision first.
+  On the same data, admission fell from about 800 ms to about 4 ms.
+- The maintenance worker's email body sweep runs once an hour instead of on
+  every five-second pass. The thirty-day body window is unchanged: thread and
+  draft reads, refresh selection and imports withhold expired bodies before
+  the sweep reaches them, and never send one to the model.
+
 ## 2026-09-15 — Personal-context memory retrieval repair
 
 - Session snapshots exclude provisional beliefs before candidate limits, keeping

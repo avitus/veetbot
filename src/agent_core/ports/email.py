@@ -38,6 +38,16 @@ class EmailStore(Protocol):
         self, principal: Principal, kind: str, *, after: str | None = None, limit: int = 1000
     ) -> list[EmailRecord]: ...
 
+    async def list_thread_summaries(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        """Key-ordered `thread` records whose payloads omit `messages`.
+
+        Inbox listing never needs message content, so an adapter may avoid
+        reading or decoding it.
+        """
+        ...
+
     async def list_semantic_window(
         self,
         principal: Principal,

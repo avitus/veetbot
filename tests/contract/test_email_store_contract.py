@@ -193,6 +193,55 @@ async def test_email_import_pages_are_scoped_and_chronological() -> None:
         await email_import_window_contract(uow.email)
 
 
+def thread_record(key: str) -> EmailRecord:
+    return record(key).model_copy(
+        update={
+            "kind": "thread",
+            "payload": {
+                "id": key,
+                "subject": f"Subject {key}",
+                "senders": ["sender@example.test"],
+                "messages": [{"id": f"{key}-1", "body": "Private body"}],
+            },
+        }
+    )
+
+
+async def thread_summary_contract(store: EmailStore) -> None:
+    """Listing reads every thread field except message content, in key-ordered pages."""
+    for key in ("summary-c", "summary-a", "summary-b"):
+        await store.put(thread_record(key), expected_revision=0)
+    await store.put(record("summary-draft"), expected_revision=0)
+    read = getattr(store, "list_thread_summaries", None)
+    assert read is not None, "the inbox list needs a thread reader that omits message content"
+    first = await read(principal(), limit=2)
+    assert [row.key for row in first] == ["summary-a", "summary-b"]
+    assert [row.key for row in await read(principal(), after="summary-b")] == ["summary-c"]
+    expected = thread_record("summary-a")
+    assert first[0] == expected.model_copy(
+        update={"payload": {k: v for k, v in expected.payload.items() if k != "messages"}}
+    )
+    first[0].payload["senders"].append("changed@example.test")
+    [again] = await read(principal(), limit=1)
+    assert again.payload["senders"] == ["sender@example.test"]
+    stored = await store.get(principal(), "thread", "summary-a")
+    assert stored is not None and stored.payload["messages"] == expected.payload["messages"]
+    for owner in (
+        principal().model_copy(update={"principal_id": "foreign"}),
+        principal().model_copy(update={"tenant_id": "foreign"}),
+    ):
+        assert await read(owner) == []
+    for boundary in (0, -1, 1001):
+        with pytest.raises(ValueError):
+            await read(principal(), limit=boundary)
+
+
+async def test_thread_summaries_omit_message_content() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await thread_summary_contract(uow.email)
+
+
 async def semantic_source_timestamp_contract(store: EmailStore) -> None:
     """Both stores validate active sources before any insert or revision change."""
     from datetime import timezone

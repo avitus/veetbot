@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -28,23 +29,20 @@ async def test_postgres_mailbox_scan_does_not_block_thread_read(
     ) as app:
         thread, draft = await seed_mail(app)
         scanning, release = asyncio.Event(), asyncio.Event()
-        original = PostgresEmailStore.list
+        # The inbox reads summaries; maintenance pages full thread records.
+        scan = "list_thread_summaries" if background == "inbox" else "list"
+        original = getattr(PostgresEmailStore, scan)
 
         async def held_scan(
-            store: PostgresEmailStore,
-            owner: Principal,
-            kind: str,
-            *,
-            after: str | None = None,
-            limit: int = 1000,
+            store: PostgresEmailStore, owner: Principal, *kind: str, **page: Any
         ) -> list[EmailRecord]:
-            page = await original(store, owner, kind, after=after, limit=limit)
-            if kind == "thread" and not scanning.is_set():
+            rows: list[EmailRecord] = await original(store, owner, *kind, **page)
+            if kind in {(), ("thread",)} and not scanning.is_set():
                 scanning.set()
                 await release.wait()
-            return page
+            return rows
 
-        monkeypatch.setattr(PostgresEmailStore, "list", held_scan)
+        monkeypatch.setattr(PostgresEmailStore, scan, held_scan)
         service = app.services.email
         work = asyncio.create_task(
             service.threads(principal) if background == "inbox" else service.expire_cache(principal)
