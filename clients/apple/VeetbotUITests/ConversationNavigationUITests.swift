@@ -233,6 +233,280 @@ final class ConversationNavigationUITests: XCTestCase {
         add(attachment)
     }
 
+    func testPeopleAccessibilityAtLargeText() throws {
+        continueAfterFailure = true
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        app.activate()
+        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        XCTAssertTrue(app.buttons["chat.people"].waitForExistence(timeout: 5))
+        var unlocatedBaseline: [String: Int] = [:]
+        #if os(macOS)
+        if #available(macOS 14, *) {
+            try app.performAccessibilityAudit { issue in
+                let attachment = XCTAttachment(string: "\(issue.compactDescription): \(issue.element?.debugDescription ?? "No element")")
+                attachment.name = "Background accessibility baseline"
+                attachment.lifetime = .keepAlways
+                self.add(attachment)
+                if issue.element == nil {
+                    unlocatedBaseline["\(issue.auditType.rawValue):\(issue.compactDescription)", default: 0] += 1
+                }
+                return true
+            }
+        }
+        #endif
+        activate(app.buttons["chat.people"])
+        let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
+        let browser = app.descendants(matching: .any)["people.browser"]
+        XCTAssertTrue(browser.waitForExistence(timeout: 5))
+        if #available(macOS 14, iOS 17, *) {
+            try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
+            #if !os(macOS)
+            for _ in 0..<10 where !person.exists || !person.isHittable { browser.swipeUp() }
+            #endif
+            XCTAssertTrue(person.waitForExistence(timeout: 5))
+            activate(person)
+            XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
+            try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
+        } else {
+            XCTFail("People accessibility verification requires the platform accessibility auditor")
+        }
+    }
+
+    @available(macOS 14, iOS 17, *)
+    private func auditPeopleSurface(unlocatedBaseline: [String: Int]) throws {
+        #if os(macOS)
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.exists)
+        var remainingBaseline = unlocatedBaseline
+        #endif
+        try app.performAccessibilityAudit { issue in
+            let attachment = XCTAttachment(string: "\(issue.compactDescription): \(issue.element?.debugDescription ?? "No element")")
+            attachment.name = "People accessibility element"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            #if os(macOS)
+            // XCTest also audits the dimmed parent and app-wide Touch Bar.
+            // Keep those findings as attachments; this test owns the People sheet.
+            guard let element = issue.element else {
+                let key = "\(issue.auditType.rawValue):\(issue.compactDescription)"
+                guard remainingBaseline[key, default: 0] > 0 else { return false }
+                remainingBaseline[key, default: 0] -= 1
+                return true
+            }
+            let inSheet = sheet.descendants(matching: element.elementType).allElementsBoundByIndex.contains {
+                $0.frame == element.frame && $0.identifier == element.identifier && $0.label == element.label
+            }
+            return !inSheet
+            #else
+            return false
+            #endif
+        }
+    }
+
+    func testPeopleEvidencePreservesTheOpenConversation() {
+        #if os(macOS)
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        app.launch()
+        #endif
+        app.activate()
+        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        let people = app.buttons["chat.people"]
+        XCTAssertTrue(people.waitForExistence(timeout: 5))
+        activate(people)
+        let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
+        XCTAssertTrue(person.waitForExistence(timeout: 5))
+        activate(person)
+        XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
+        let source = app.buttons["View source"].firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        if !source.isHittable {
+            #if os(macOS)
+            let scrolls = app.sheets.firstMatch.scrollViews
+            let detailScroll = scrolls.element(boundBy: scrolls.count - 1)
+            for _ in 0..<6 where !source.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+            #else
+            scrollUntilVisible(source)
+            #endif
+        }
+        activate(source)
+        XCTAssertTrue(app.descendants(matching: .any)["people.source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Maya is my sister."].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "People original source"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        activate(app.buttons["people.conversation.close"])
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        activate(close)
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat.people"].isHittable)
+    }
+
+    func testPeopleForgetExplainsSourceRetentionAndPendingCleanup() {
+        #if os(macOS)
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        app.launch()
+        #endif
+        app.activate()
+        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        XCTAssertTrue(app.buttons["chat.people"].waitForExistence(timeout: 5))
+        activate(app.buttons["chat.people"])
+        let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
+        XCTAssertTrue(person.waitForExistence(timeout: 5))
+        activate(person)
+        let forget = app.buttons["Forget person…"]
+        XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
+        #if os(macOS)
+        let scrolls = app.sheets.firstMatch.scrollViews
+        let detailScroll = scrolls.element(boundBy: scrolls.count - 1)
+        // SwiftUI may report an offscreen scroll child as hittable. Bring its
+        // complete frame into the viewport before exercising the action.
+        for _ in 0..<6 where !forget.isHittable || !detailScroll.frame.contains(forget.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
+        #else
+        scrollUntilVisible(forget)
+        #endif
+        activate(forget)
+        XCTAssertTrue(app.staticTexts["Forget derived memories about Maya. Original Chat and Email messages remain at their sources."].waitForExistence(timeout: 5))
+        #if os(macOS)
+        let apply = app.windows.buttons["Forget person"]
+        #else
+        let apply = app.buttons["Forget person"]
+        #endif
+        activate(apply)
+        let cleanup = app.buttons["Check cleanup"]
+        XCTAssertTrue(cleanup.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Repair identity…"].exists)
+        activate(cleanup)
+        XCTAssertTrue(app.staticTexts["Derived memories and history have been removed. Original messages remain at their source."].waitForExistence(timeout: 5))
+        XCTAssertFalse(cleanup.exists)
+    }
+
+    func testPeopleMailboxImportPreviewShowsExplicitCoverage() {
+        #if os(macOS)
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        app.launch()
+        #endif
+        app.activate()
+        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        XCTAssertTrue(app.buttons["chat.people"].waitForExistence(timeout: 5))
+        activate(app.buttons["chat.people"])
+        let open = app.buttons["Import history"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        activate(open)
+        #if os(macOS)
+        let mailbox = app.checkBoxes["people.import.mailbox"]
+        let account = app.checkBoxes["people.import.account.work"]
+        #else
+        let mailbox = app.switches["people.import.mailbox"].firstMatch
+        let account = app.switches["people.import.account.work"].firstMatch
+        #endif
+        XCTAssertTrue(mailbox.waitForExistence(timeout: 5))
+        #if os(macOS)
+        activate(mailbox)
+        #else
+        mailbox.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        #endif
+        XCTAssertTrue((mailbox.value as? String) == "1" || (mailbox.value as? Int) == 1)
+        #if os(iOS)
+        scrollUntilVisible(account)
+        #endif
+        XCTAssertTrue(account.waitForExistence(timeout: 5))
+        #if os(macOS)
+        activate(account)
+        #else
+        account.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        #endif
+        XCTAssertTrue((account.value as? String) == "1" || (account.value as? Int) == 1)
+        let preview = app.buttons["Preview import"]
+        #if os(macOS)
+        let scrolls = app.sheets.firstMatch.scrollViews
+        let importScroll = scrolls.element(boundBy: scrolls.count - 1)
+        for _ in 0..<6 where !preview.isHittable { importScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        #else
+        scrollUntilVisible(preview)
+        #endif
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        activate(preview)
+        XCTAssertTrue(app.staticTexts["Selected mailbox history"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Start import"].exists)
+    }
+
+    func testPeopleIdentityPreviewRemainsReviewableAfterEditorCloses() {
+        #if os(macOS)
+        app.terminate()
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        app.launch()
+        #endif
+        app.activate()
+        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        activate(app.buttons["chat.people"])
+        let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
+        XCTAssertTrue(person.waitForExistence(timeout: 5))
+        activate(person)
+        let repair = app.buttons["Repair identity…"]
+        XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
+        #if os(macOS)
+        let scrolls = app.sheets.firstMatch.scrollViews
+        let detailScroll = scrolls.element(boundBy: scrolls.count - 1)
+        for _ in 0..<6 where !repair.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        #else
+        scrollUntilVisible(repair)
+        #endif
+        XCTAssertTrue(repair.waitForExistence(timeout: 5))
+        activate(repair)
+        let destination = app.buttons["people.identity.destination.00000000-0000-0000-0000-000000000782"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        activate(destination)
+        activate(app.buttons["Preview"])
+        #if os(macOS)
+        let apply = app.windows.buttons["Apply change"]
+        #else
+        let apply = app.buttons["Apply change"]
+        #endif
+        XCTAssertTrue(apply.waitForExistence(timeout: 5), "The editor must close before its preview asks for confirmation")
+        activate(apply)
+        let saved = app.staticTexts["Identity change saved."]
+        #if os(macOS)
+        for _ in 0..<6 where !saved.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        #else
+        scrollUntilVisible(saved)
+        #endif
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        let undo = app.buttons["Preview undo"]
+        #if os(macOS)
+        for _ in 0..<6 where !undo.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        #else
+        scrollUntilVisible(undo)
+        #endif
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+    }
+
     #if os(iOS)
     func testEmailCompactTraitNavigationReturnsToSelectedInbox() {
         app.terminate()

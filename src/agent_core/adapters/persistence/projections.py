@@ -15,6 +15,7 @@ from agent_core.adapters.persistence.conversation import (
     conversation_items,
 )
 from agent_core.adapters.persistence.mappers import event_to_domain
+from agent_core.adapters.persistence.people_erasure import redact
 from agent_core.adapters.persistence.sqlalchemy_models import (
     EventRow,
     ProjectionWatermarkRow,
@@ -73,6 +74,21 @@ class PostgresSessionHistoryRepository:
     ) -> ProjectionCursor:
         watermark = cursor.watermark_seq
         session_id = UUID(cursor.scope)
+        # Serialize a projection built from an older event snapshot with erasure.
+        # The event's permanent marker also protects late projection writes.
+        erased = {
+            sequence
+            for sequence, hidden in await self._session.execute(
+                select(EventRow.sequence, EventRow.people_erased)
+                .where(
+                    EventRow.session_id == session_id,
+                    EventRow.sequence.in_([event.sequence for event in events]),
+                )
+                .order_by(EventRow.id)
+                .with_for_update()
+            )
+            if hidden
+        }
         inserts: list[dict[str, Any]] = []
         for event in sorted(events, key=lambda item: (item.sequence, item.id)):
             if event.sequence <= watermark:
@@ -83,7 +99,10 @@ class PostgresSessionHistoryRepository:
                         "session_id": session_id,
                         "sequence": event.sequence,
                         "item_index": index,
-                        "item": CONVERSATION_ADAPTER.dump_python(item, mode="json"),
+                        "item": redact(CONVERSATION_ADAPTER.dump_python(item, mode="json"))
+                        if event.sequence in erased
+                        else CONVERSATION_ADAPTER.dump_python(item, mode="json"),
+                        "erasure_cleaned": event.sequence in erased,
                         "builder_version": self.builder_version,
                     }
                 )
@@ -157,13 +176,19 @@ class PostgresSessionHistoryRepository:
         if cursor.builder_version != self.builder_version:
             await self.rebuild(session_id)
             cursor = await self._cursor(session_id)
-        statement = select(SessionHistoryItemRow).where(
-            SessionHistoryItemRow.session_id == session_id
+        statement = (
+            select(SessionHistoryItemRow, EventRow.people_erased)
+            .outerjoin(
+                EventRow,
+                (EventRow.session_id == SessionHistoryItemRow.session_id)
+                & (EventRow.sequence == SessionHistoryItemRow.sequence),
+            )
+            .where(SessionHistoryItemRow.session_id == session_id)
         )
         if through_sequence is not None:
             statement = statement.where(SessionHistoryItemRow.sequence <= through_sequence)
         rows = (
-            await self._session.scalars(
+            await self._session.execute(
                 statement.order_by(SessionHistoryItemRow.sequence, SessionHistoryItemRow.item_index)
             )
         ).all()
@@ -174,7 +199,10 @@ class PostgresSessionHistoryRepository:
                 if through_sequence is not None
                 else cursor.watermark_seq
             ),
-            items=[CONVERSATION_ADAPTER.validate_python(row.item) for row in rows],
+            items=[
+                CONVERSATION_ADAPTER.validate_python(redact(row.item) if erased else row.item)
+                for row, erased in rows
+            ],
             builder_version=cursor.builder_version,
         )
 

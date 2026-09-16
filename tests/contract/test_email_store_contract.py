@@ -152,3 +152,34 @@ async def test_task_admission_query_preserves_unsettled_reservations() -> None:
     from agent_core.adapters.persistence.email import InMemoryEmailStore
 
     await assert_task_admission_query_preserves_unsettled_reservations(InMemoryEmailStore())
+
+
+async def email_import_window_contract(store: EmailStore) -> None:
+    for key, days, account in [("late", 2, "work"), ("early", 0, "work"), ("foreign", 1, "home")]:
+        await store.put(
+            record(key).model_copy(
+                update={
+                    "kind": "semantic_source",
+                    "payload": {
+                        "account_id": account,
+                        "evidence_at": (NOW + timedelta(days=days)).isoformat(),
+                        "excluded": False,
+                    },
+                }
+            ),
+            expected_revision=0,
+        )
+    read = getattr(store, "list_semantic_window", None)
+    assert read is not None, "historical email imports need a bounded chronological source reader"
+    options = {"account_ids": ["work"], "since": NOW, "until": NOW + timedelta(days=3), "limit": 1}
+    first = await read(principal(), **options)
+    assert [row.key for row in first] == ["early"]
+    second = await read(principal(), after=(NOW, "early"), **options)
+    assert [row.key for row in second] == ["late"]
+    assert await read(principal().model_copy(update={"principal_id": "foreign"}), **options) == []
+
+
+async def test_email_import_pages_are_scoped_and_chronological() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await email_import_window_contract(uow.email)

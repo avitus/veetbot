@@ -194,6 +194,7 @@ class MaintenanceWorker:
         sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_decay: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
+        sweep_people_erasures: Callable[[], Awaitable[int]] | None = None,
         sweep_device_invocations: Callable[[], Awaitable[int]] | None = None,
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
@@ -215,6 +216,7 @@ class MaintenanceWorker:
         self._sweep_memory_consolidation = sweep_memory_consolidation
         self._sweep_memory_decay = sweep_memory_decay
         self._sweep_session_deletions = sweep_session_deletions
+        self._sweep_people_erasures = sweep_people_erasures
         self._sweep_device_invocations = sweep_device_invocations
         self._sweep_terminal_schedules = sweep_terminal_schedules
         if artifact_orphan_interval_seconds <= 0:
@@ -324,6 +326,11 @@ class MaintenanceWorker:
                 await self._sweep_session_deletions()
             except Exception:
                 logger.exception("session artifact deletion retry failed")
+        if self._sweep_people_erasures is not None:
+            try:
+                await self._sweep_people_erasures()
+            except Exception:
+                logger.exception("People erasure retry failed")
         terminal_schedule_sweep_due = (
             self._last_terminal_schedule_sweep_at is None
             or self._clock.now() - self._last_terminal_schedule_sweep_at

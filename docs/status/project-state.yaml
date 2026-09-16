@@ -47,8 +47,29 @@ project:
     - 25
     - 26
     - 27
+    - 28
+
 
 milestones:
+  '28':
+    title: People and relationship memory
+    status: in_progress
+    authorized_on: '2026-09-15'
+    design: docs/plan/people-and-relationships.md
+    adr: docs/adr/0099-people-and-relationship-memory.md
+    gates_registered: 36
+    authorized_scope:
+    - Stable owner-scoped people, identifiers, directed temporal relationships and person-linked history
+    - Governed source-aware formation, retrieval, corrections, erasure and bounded imports
+    - Shared Chat, Email and native People experience with evidence-bound activation
+    deferred_scope:
+    - General graph inference, new source providers, rich SMS and call-derived semantics
+    - Unbounded historical import, automatic outreach and provider enrichment
+    open_items:
+    - Review complete temporal/source-erasure gate coverage and worst-case initial-fence latency
+    - Finish native accessibility, load/contention and signed restore verification
+    - Independently reviewed labels, version-bound quality and private owner evaluation evidence
+    - Exact-head hosted CI and explicitly authorized review and production delivery evidence
   "0":
     title: Repository and engineering foundation
     status: complete

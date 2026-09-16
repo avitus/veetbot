@@ -836,3 +836,61 @@ async def test_corrections_are_empty_when_the_snapshot_trace_is_gone() -> None:
     _clock, _factory, _service, retriever = await formation_stack()
 
     assert await retriever.corrections(snapshot_id=UUID(int=4_242), watermark=0) == []
+
+
+async def test_stable_people_ids_filter_candidates_without_widening_scope() -> None:
+    from tests.contract.support import memory_uow_factory
+
+    clock, factory = await memory_uow_factory()
+    selected = memory().model_copy(update={"subject": "Alex", "statement": "Enjoys chess"})
+    other = selected.model_copy(update={"id": UUID(int=700), "store_position": 2})
+    private = selected.model_copy(
+        update={
+            "id": UUID(int=701),
+            "store_position": 3,
+            "scope": "other-project",
+            "portability": Portability.LOCAL,
+        }
+    )
+    async with factory() as uow:
+        for record in (selected, other, private):
+            await uow.memories.upsert_belief(record)
+        query = recall_query(text=None).model_copy(
+            update={"include_ids": (selected.id, private.id)}
+        )
+        rows = await uow.memories.query(query)
+        assert [r.id for r in rows] == [selected.id]
+        assert await uow.memories.query(query.model_copy(update={"include_ids": ()})) == []
+    result = await HybridMemoryRetriever(
+        factory, clock, SequenceIdFactory([UUID(int=900)]), principal()
+    ).recall(query, session_id=SESSION_ID)
+    assert [r.belief_id for r in result.items] == [selected.id]
+
+
+async def test_people_context_uses_the_same_item_and_token_budget_and_trace() -> None:
+    from agent_core.domain.memory import TracedPersonContext
+    from tests.contract.support import ids, memory_uow_factory
+
+    clock, factory = await memory_uow_factory()
+    retriever = HybridMemoryRetriever(factory, clock, ids(), principal())
+    history = [
+        TracedPersonContext(
+            record_id=UUID(int=800 + i),
+            revision=1,
+            person_ids=[UUID(int=700)],
+            kind="interaction",
+            text="Owner reported a meeting on June 1.",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        for i in range(5)
+    ]
+    result = await retriever.recall(
+        recall_query(text="Sam", max_items=2, budget_tokens=100),
+        session_id=SESSION_ID,
+        people_items=history,
+    )
+    assert 0 < len(result.people) <= 2
+    assert result.tokens <= 100 and result.truncated
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    assert trace.people == result.people and trace.rendered == result.rendered

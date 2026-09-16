@@ -17,6 +17,49 @@ from agent_core.evals.memory_benchmark_live import (
 )
 
 
+def test_people_comparison_cli_requires_spend_and_passes_exact_run_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    recorded: list[dict[str, object]] = []
+
+    async def compare(root: Path, **kwargs: object) -> dict[str, object]:
+        recorded.append(kwargs)
+        return {"activation_evidence": False, "state": "completed"}
+
+    monkeypatch.setitem(
+        sys.modules, "agent_core.evals.people_comparison", SimpleNamespace(run_comparison=compare)
+    )
+    runner = CliRunner()
+    args = [
+        "eval",
+        "people",
+        "--run",
+        "--model-policy",
+        "balanced",
+        "--build-ref",
+        "a" * 40,
+        "--output",
+        str(tmp_path / "result"),
+        "--development-case",
+        "development-001-same_name",
+    ]
+    denied = runner.invoke(app, args)
+    assert denied.exit_code != 0 and recorded == []
+    result = runner.invoke(app, [*args, "--max-cost-usd", "2.50"])
+    assert result.exit_code == 0, result.stdout
+    assert recorded == [
+        {
+            "output": tmp_path / "result",
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "a" * 40,
+            "maximum_cost": Decimal("2.50"),
+            "repeats": 3,
+            "development_case": "development-001-same_name",
+        }
+    ]
+
+
 def test_eval_gates_passes_milestone_and_area_through_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -712,3 +755,42 @@ def test_eval_memory_benchmark_prints_every_incomplete_run_before_the_summary(
     assert "failure_class=ModelStreamError" in detail[0]
     assert "model_calls=1" in detail[0]
     assert "retried=True" in detail[0]
+
+
+def test_people_corpus_command_reports_frozen_population_without_provider_access() -> None:
+    result = CliRunner().invoke(app, ["eval", "people", "--check-corpus"])
+    assert result.exit_code == 0, result.output
+    import json
+
+    report = json.loads(result.stdout)
+    assert report["development_scenarios"] >= 120
+    assert report["holdout_scenarios"] >= 60
+    assert report["labeled_mentions"] >= 1000
+    assert report["collision_cases"] >= 100
+    assert report["provider_calls"] == 0
+    assert report["activation_evidence"] is False
+
+
+def test_people_evidence_cli_requires_acceptance_and_preserves_existing_outputs(
+    tmp_path: Path,
+) -> None:
+    from agent_core.evals.people_release import run_digest
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+    for name in (
+        "run.json",
+        "observations.json",
+        "ordinary-observations.jsonl",
+        "provider-costs.jsonl",
+    ):
+        (directory / name).write_text("{}")
+    runner = CliRunner()
+    args = ["eval", "people-evidence", "--run-directory", str(directory)]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert run_digest(directory) in result.output
+    output = tmp_path / "release.json"
+    denied = runner.invoke(app, [*args, "--output", str(output)])
+    assert denied.exit_code != 0 and "--owner-acceptance" in denied.output
+    assert not output.exists()

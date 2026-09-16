@@ -17,6 +17,7 @@ from agent_core.domain.errors import (
     ChildRunRequiredError,
     ConflictError,
     ContextOverflow,
+    NotFoundError,
     RunCancelledError,
     UserInputRequiredError,
     WorkerFencedError,
@@ -592,6 +593,31 @@ class RunExecutor:
         if self._on_token_complete is not None:
             self._on_token_complete(run_id)
 
+    async def _register_snapshot_use(
+        self,
+        run: Run,
+        plan: ContextPlan,
+        principal: Principal,
+        lease: WorkerLease | None,
+    ) -> None:
+        if not plan.memory_snapshot or plan.snapshot_id is None:
+            return
+        async with self._uow_factory() as uow, uow.people.lock(principal):
+            try:
+                await uow.traces.get(plan.snapshot_id, principal)
+            except NotFoundError as exc:
+                raise RunCancelledError("memory snapshot was erased before use") from exc
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="context.snapshot.used",
+                    actor_type="runtime",
+                    payload={"snapshot_id": str(plan.snapshot_id), "epoch": plan.epoch},
+                ),
+                lease=lease,
+            )
+
     @staticmethod
     def _apply_tool_pins(
         checkpoint_state: RunCheckpoint,
@@ -727,6 +753,7 @@ class RunExecutor:
                     or checkpoint_state.pending_tool_calls
                 ),
             )
+            await self._register_snapshot_use(run, context_plan, principal, lease)
             self._apply_tool_pins(
                 checkpoint_state,
                 context_plan,

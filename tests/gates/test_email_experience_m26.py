@@ -750,3 +750,31 @@ async def test_account_capability_rebinding_preserves_old_evidence_and_new_opera
 
 async def test_refresh_admits_one_durable_typed_task_without_owner_message() -> None:
     await assert_refresh_admits_one_durable_typed_task_without_owner_message()
+
+
+async def test_source_exclusion_reports_pending_people_cleanup_until_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.adapters.persistence.session_deletions import InMemorySessionDeletionRepository
+
+    pending = True
+    original = InMemorySessionDeletionRepository.erase_email_source
+
+    async def pending_copies(self: Any, *args: Any, **kwargs: Any) -> dict[str, int]:
+        result = await original(self, *args, **kwargs)
+        if pending:
+            result["pending_people_cleanup"] = 1
+        return result
+
+    monkeypatch.setattr(InMemorySessionDeletionRepository, "erase_email_source", pending_copies)
+    async with email_client() as (composition, client):
+        thread, _ = await seed_mail(composition)
+        path = f"/v1/email/threads/{thread.id}/exclude"
+        response = await client.post(path, json={"expected_revision": 1})
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "cleanup_pending"
+        assert (await client.get(f"/v1/email/threads/{thread.id}")).status_code == 404
+        pending = False
+        retried = await client.post(path, json={"expected_revision": 1})
+        assert retried.status_code == 200, retried.text
+        assert retried.json()["status"] == "erased"

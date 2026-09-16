@@ -25,6 +25,7 @@ from agent_core.domain.messages import (
     ResolvedModel,
     StopReason,
 )
+from agent_core.domain.people import PeopleCopyCleanup
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -86,6 +87,8 @@ class RunRepository(Protocol):
     async def get(self, run_id: UUID, principal: Principal) -> Run: ...
 
     async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None: ...
+
+    async def has_higher_priority_work(self, principal: Principal, priority: int) -> bool: ...
 
     async def latest_for_session(self, session_id: UUID, principal: Principal) -> Run | None: ...
 
@@ -373,6 +376,16 @@ class MaintenanceRepository(Protocol):
 
 
 class SessionDeletionRepository(Protocol):
+    async def erase_people_copies(
+        self,
+        principal: Principal,
+        record_ids: list[UUID],
+        erased_at: datetime,
+        *,
+        run_ids: Sequence[UUID] = (),
+        purge_generated: bool = True,
+    ) -> PeopleCopyCleanup: ...
+
     async def erase_call_source(
         self, principal: Principal, call_id: str, erased_at: datetime
     ) -> dict[str, int]: ...

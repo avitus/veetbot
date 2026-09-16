@@ -4089,6 +4089,31 @@ hosted review and authorized production delivery. The verified ceiling remains 1
 Private in-call tools, automatic bookings or payments, transfers, SMS, campaigns
 and automatic call-derived memory remain excluded.
 
+### Milestone 28: People and relationship memory
+
+The owner authorized implementation on 2026-09-15 under ADR-0099. Implement
+[people-and-relationships.md](people-and-relationships.md): stable owner-scoped
+person identity and reversible repairs; directed temporal relationships and
+bounded organization references; source-backed facts, interactions and
+commitments; indexed cross-session history; shared governed Chat/Email recall;
+scoped People APIs, native browsing and correction; complete erasure, bounded
+imports and version-bound quality evidence. The design declares 36 gates.
+
+This admits the People-specific portion of roadmap B6, including a relational
+temporal graph with one-hop retrieval and person-linked history. Direct
+owner-stated kinship and owner-confirmed identity persist until corrected,
+retracted or erased; other current claims retain applicable evidence horizons.
+The existing memory HTTP collection remains read-only; People-specific writes
+are explicit governed capabilities. Automatic email learning retains its
+ninety-day boundary; older imports require explicit source/date/budget scope.
+
+Completion requires every declared gate and inherited suite, both repository
+adapters, all Apple lanes, comparative and private owner evaluation, and exact
+head hosted CI/review plus separately authorized production delivery evidence.
+The verified sequential ceiling stays at Milestone 12. New source providers,
+general graph inference, arbitrary history mining, external enrichment,
+automatic outreach and automatic persona changes remain outside this milestone.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

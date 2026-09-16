@@ -811,6 +811,7 @@ Events (extending Section 6.8):
 ```text
 context.plan.created
 context.epoch.rotated
+context.snapshot.used
 context.compacted
 context.working_state.updated
 context.budget.pressure
@@ -820,6 +821,15 @@ context.budget.exceeded
 `context.budget.pressure` records that a yield step ran and which one; it is the
 signal that tells an operator a deployment is chronically over-subscribed before
 `context.budget.exceeded` tells them it has failed.
+
+`context.snapshot.used` binds a run to the opaque recall-trace ID and epoch of
+its nonempty frozen snapshot before provider egress. Registration and snapshot
+plan persistence use the owner People fence, so erasure either discovers the
+dependent run or prevents the stale snapshot from being used. Missing snapshot
+traces invalidate both cached and persisted plans; the next plan rotates the
+epoch and recalls eligible memory again. People erasure redacts the persisted
+snapshot and conservatively fences runs in its session for legacy plans without
+usage events. Explicitly authored persona entries remain a separate source.
 
 ## Failure modes and defenses
 

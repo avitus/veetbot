@@ -37,6 +37,8 @@ PLATFORM_SCOPES = frozenset(
         "surface.read",
         "surface.write",
         "memory.read",
+        "people.read",
+        "people.write",
         "persona.read",
         "persona.write",
         "email.read",

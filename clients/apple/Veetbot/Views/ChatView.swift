@@ -25,6 +25,7 @@ public struct ChatView: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
+    @State private var showingPeople = false
 
     public init(model: ChatViewModel) {
         self.model = model
@@ -141,6 +142,16 @@ public struct ChatView: View {
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)
         }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showingPeople) {
+            PeopleLookupSheet(lookup: PeopleLookup(), sessionID: model.selectedSessionID)
+        }
+        #else
+        .sheet(isPresented: $showingPeople) {
+            PeopleLookupSheet(lookup: PeopleLookup(), sessionID: model.selectedSessionID)
+        }
+        #endif
+        .onChange(of: model.connectionGeneration) { _ in showingPeople = false }
     }
 
     private var header: some View {
@@ -156,6 +167,8 @@ public struct ChatView: View {
                 }
             }
             Spacer()
+            Button { showingPeople = true } label: { Label("People", systemImage: "person.2") }
+                .accessibilityIdentifier("chat.people")
             if state.isRunActive {
                 Button(role: .destructive) {
                     Task { await model.cancelActiveRun() }

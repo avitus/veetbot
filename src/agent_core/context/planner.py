@@ -14,7 +14,12 @@ from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import build_prefix, prefix_bytes
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
-from agent_core.domain.errors import ConflictError, ContextOverflow
+from agent_core.domain.errors import (
+    ConflictError,
+    ContextOverflow,
+    NotFoundError,
+    RunCancelledError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
@@ -108,6 +113,15 @@ class EventContextPlanner:
 
     async def current(self, session_id: UUID) -> ContextPlan | None:
         cached = self._cache.get(session_id)
+        if cached is not None and cached.memory_snapshot and cached.snapshot_id is not None:
+            async with self._uow_factory() as uow:
+                try:
+                    await uow.traces.get(cached.snapshot_id, self._principal)
+                except NotFoundError:
+                    # The durable plan event supplies its sanitized predecessor
+                    # and epoch; a cache cannot outlive source erasure.
+                    self._cache.pop(session_id, None)
+                    cached = None
         if cached is not None:
             self._cache.move_to_end(session_id)
             return cached.model_copy(deep=True)
@@ -133,6 +147,14 @@ class EventContextPlanner:
         if not plans:
             return None
         plan = max(plans, key=lambda candidate: candidate.epoch)
+        if plan.memory_snapshot and plan.snapshot_id is not None:
+            async with self._uow_factory() as uow:
+                try:
+                    await uow.traces.get(plan.snapshot_id, self._principal)
+                except NotFoundError:
+                    # Keep the recorded hash and epoch so plan() rotates the
+                    # prefix instead of reusing an untraceable snapshot.
+                    plan = plan.model_copy(update={"memory_snapshot": "", "snapshot_id": None})
         self._remember(plan)
         return plan.model_copy(deep=True)
 
@@ -504,7 +526,14 @@ class EventContextPlanner:
         candidate_reason = reason
         for _attempt in range(MAX_PLAN_APPEND_ATTEMPTS):
             derivation_key = f"context.plan:{candidate.session_id}:{candidate.epoch}"
-            async with self._uow_factory() as uow:
+            async with self._uow_factory() as uow, uow.people.lock(self._principal):
+                if candidate.memory_snapshot and candidate.snapshot_id is not None:
+                    try:
+                        await uow.traces.get(candidate.snapshot_id, self._principal)
+                    except NotFoundError as exc:
+                        raise RunCancelledError(
+                            "memory snapshot was erased before plan persistence"
+                        ) from exc
                 event = await uow.events.append(
                     NewEvent(
                         session_id=candidate.session_id,

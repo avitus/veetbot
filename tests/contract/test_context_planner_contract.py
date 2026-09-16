@@ -88,6 +88,37 @@ async def test_context_planner_persists_and_rotates_a_session_plan() -> None:
     assert conflict_rotated.model_id == "fake:other"
 
 
+async def test_context_planner_rebuilds_when_a_snapshot_trace_disappears() -> None:
+    clock, factory, _service, retriever = await formation_stack()
+    belief = memory(statement="Sam prefers morning meetings")
+    async with factory() as uow:
+        await uow.memories.upsert_belief(belief)
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text()
+    )
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        memory_retriever=retriever,
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    original = await planner.plan(session(), agent(), principal(), model)
+    assert belief.statement in original.memory_snapshot
+    async with factory() as uow:
+        await uow.traces.erase_people(principal(), [], [belief.id])
+    current = await planner.current(session().id)
+    assert current is not None and not current.memory_snapshot
+    rebuilt = await planner.plan(session(), agent(), principal(), model)
+    assert rebuilt.epoch == original.epoch + 1
+    assert rebuilt.snapshot_id != original.snapshot_id
+    assert belief.statement in rebuilt.memory_snapshot
+
+
 async def test_context_planner_reconciles_device_tools_before_reusing_a_cached_plan() -> None:
     clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(

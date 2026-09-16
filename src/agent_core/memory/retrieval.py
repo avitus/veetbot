@@ -16,6 +16,7 @@ from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
+    SENSITIVITY_ORDER,
     BeliefType,
     EpisodeQuery,
     MemoryAuthority,
@@ -30,10 +31,12 @@ from agent_core.domain.memory import (
     RecallResult,
     RecallTrace,
     Sensitivity,
+    TracedPersonContext,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_tokens,
 )
+from agent_core.domain.people import PeopleQuery, PeopleRecord, referenced_people
 from agent_core.domain.runs import Run
 from agent_core.memory.profiles import (
     DEFAULT_RETRIEVAL_PROFILE,
@@ -42,7 +45,8 @@ from agent_core.memory.profiles import (
     TraceProfile,
 )
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.people import PeopleStore
+from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 RETRIEVAL_POLICY_VERSION = "retrieval@3"
 # Episode search reads the session stream in bounded pages: never the whole
@@ -93,6 +97,10 @@ class DeterministicQueryFormer:
         del run
         fragments = [working_state.objective or "", *working_state.open_questions, message or ""]
         text = " ".join(fragment.strip() for fragment in fragments if fragment.strip())
+        return self.from_text(text, current_scope=current_scope)
+
+    def from_text(self, text: str, *, current_scope: str | None = None) -> list[RecallQuery]:
+        """Share production query formation with source-only evaluation questions."""
         subjects = sorted(_entities(text))
         if not text and not subjects:
             return []
@@ -145,6 +153,9 @@ class HybridMemoryRetriever:
 
         return self._profile
 
+    def current_time(self) -> datetime:
+        return self._clock.now()
+
     async def recall(
         self,
         query: RecallQuery,
@@ -155,6 +166,45 @@ class HybridMemoryRetriever:
         moment: str = "in_turn",
         surface_id: str = "private",
         measure_rendered_tokens: Callable[[str], int] | None = None,
+        people_items: list[TracedPersonContext] | None = None,
+        existing_uow: RepositoryUnitOfWork | None = None,
+    ) -> RecallResult:
+        """Register influence atomically with reads under the owner erasure fence.
+
+        People context supplies its already-fenced unit of work so profile reads
+        and the recall trace share one transaction and never reacquire its lock.
+        """
+
+        async def apply(uow: RepositoryUnitOfWork) -> RecallResult:
+            return await self._recall(
+                query,
+                uow=uow,
+                session_id=session_id,
+                run_id=run_id,
+                turn_id=turn_id,
+                moment=moment,
+                surface_id=surface_id,
+                measure_rendered_tokens=measure_rendered_tokens,
+                people_items=people_items,
+            )
+
+        if existing_uow is not None:
+            return await apply(existing_uow)
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
+            return await apply(uow)
+
+    async def _recall(
+        self,
+        query: RecallQuery,
+        *,
+        uow: RepositoryUnitOfWork,
+        session_id: UUID,
+        run_id: UUID | None,
+        turn_id: UUID | None,
+        moment: str,
+        surface_id: str,
+        measure_rendered_tokens: Callable[[str], int] | None,
+        people_items: list[TracedPersonContext] | None,
     ) -> RecallResult:
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
@@ -174,14 +224,16 @@ class HybridMemoryRetriever:
             records: list[MemoryRecord] = []
             head = 0
         else:
-            async with self._uow_factory() as uow:
-                records = await uow.memories.query(query)
-                # The watermark is the store's own head, read in the same unit
-                # of work as the query: a belief this query did not match still
-                # occupies a position, and calling the highest position the
-                # recall returned the watermark would make every belief above
-                # it look new to the next turn's delta.
-                head = await uow.memories.head_position(self._principal)
+            records = await uow.memories.query(query)
+            if query.people_scope is not None:
+                records = await _identity_scoped_records(uow.people, query, records)
+
+            # The watermark is the store's own head, read in the same unit
+            # of work as the query: a belief this query did not match still
+            # occupies a position, and calling the highest position the
+            # recall returned the watermark would make every belief above
+            # it look new to the next turn's delta.
+            head = await uow.memories.head_position(self._principal)
         # One instant governs the whole recall: time decay, the stale penalty,
         # and the rendered stamp all read the query's as-of or the clock, so a
         # historical query is scored as of the moment it asks about.
@@ -227,6 +279,27 @@ class HybridMemoryRetriever:
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
         measure_tokens = measure_rendered_tokens or _token_estimate
+        # People evidence shares the existing budget. Reserve bounded room before
+        # admitting facts so a busy profile cannot starve its identity and history.
+        eligible_people = [
+            item
+            for item in (people_items or [])
+            if authorized
+            and SENSITIVITY_ORDER[item.sensitivity]
+            <= SENSITIVITY_ORDER[effective_query.sensitivity_ceiling]
+            and not _INJECTION.search(item.text)
+        ]
+        eligible_people.sort(key=lambda item: {"person": 0, "interaction": 1}.get(item.kind, 2))
+        selected_people: list[TracedPersonContext] = []
+        people_rendered = ""
+        for context_item in eligible_people:
+            proposed = people_rendered + "\n" + _person_line(context_item)
+            if (
+                len(selected_people) < min(8, max(1, effective_query.max_items // 2))
+                and measure_tokens(proposed) <= effective_query.budget_tokens * 0.4
+            ):
+                selected_people.append(context_item)
+                people_rendered = proposed
         reserve = _durable_reserve(
             effective_query,
             collapsed,
@@ -241,17 +314,31 @@ class HybridMemoryRetriever:
             # while one is actually still pending, so the reservation never
             # shrinks a snapshot that has no durable belief left to seat.
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
-            candidate_tokens = measure_tokens(render_memory([*selected, item], as_of=now))
+            candidate_tokens = measure_tokens(
+                render_memory([*selected, item], as_of=now) + people_rendered
+            )
             if (
-                len(selected) + held >= effective_query.max_items
+                len(selected) + len(selected_people) + held >= effective_query.max_items
                 or candidate_tokens > effective_query.budget_tokens
             ):
                 dropped.append(item.belief_id)
                 continue
             selected.append(item)
             durable_selected += int(durable)
-        rendered = render_memory(selected, as_of=now)
-        rendered_tokens = measure_tokens(rendered) if selected else 0
+        rendered = render_memory(selected, as_of=now) + people_rendered
+        for person_item in eligible_people:
+            if person_item in selected_people:
+                continue
+            proposed = rendered + "\n" + _person_line(person_item)
+            if (
+                len(selected) + len(selected_people) >= effective_query.max_items
+                or measure_tokens(proposed) > effective_query.budget_tokens
+            ):
+                dropped.append(person_item.record_id)
+                continue
+            selected_people.append(person_item)
+            rendered = proposed
+        rendered_tokens = measure_tokens(rendered) if selected or selected_people else 0
         rendered_bytes = rendered.encode("utf-8")
         trace_id = self._ids.new_id()
         trace = RecallTrace(
@@ -274,29 +361,32 @@ class HybridMemoryRetriever:
             blocked=[item.belief_id for item in selected if item.blocked],
             carried_in=[item.belief_id for item in selected if item.carried],
             beliefs=[item.model_copy(deep=True) for item in selected],
-            retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
+            people=selected_people,
+            retrieval_policy_version="retrieval-people@1"
+            if query.people_scope is not None
+            else RETRIEVAL_POLICY_VERSION,
             created_at=self._clock.now(),
             operator_fields_expire_at=(
                 self._clock.now() + timedelta(days=self._trace_retention.operator_retention_days)
             ),
         )
-        async with self._uow_factory() as uow:
-            await uow.traces.record(trace)
-            await uow.events.append(
-                NewEvent(
-                    session_id=session_id,
-                    run_id=run_id,
-                    event_type="memory.recalled",
-                    actor_type="memory",
-                    payload={
-                        "trace_id": str(trace_id),
-                        "rendered_sha256": trace.rendered_sha256,
-                        "returned": [str(item.belief_id) for item in selected],
-                    },
-                )
+        await uow.traces.record(trace)
+        await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=run_id,
+                event_type="memory.recalled",
+                actor_type="memory",
+                payload={
+                    "trace_id": str(trace_id),
+                    "rendered_sha256": trace.rendered_sha256,
+                    "returned": [str(item.belief_id) for item in selected],
+                },
             )
+        )
         return RecallResult(
             items=selected,
+            people=selected_people,
             rendered=rendered,
             tokens=rendered_tokens,
             truncated=bool(dropped),
@@ -502,7 +592,15 @@ def _score(
         if terms
         else 0
     )
-    structured = 1.0 if record.subject.casefold() in subject_terms else 0
+    structured = (
+        1.0
+        if (
+            record.subject.casefold() in subject_terms
+            or (query.include_ids is not None and record.id in query.include_ids)
+            or record.id in query.expand_ids
+        )
+        else 0
+    )
     arms = []
     if structured:
         arms.append("structured")
@@ -676,3 +774,59 @@ def _entities(text: str) -> set[str]:
 
 def _token_estimate(text: str) -> int:
     return max(1, (len(text.encode("utf-8")) + 3) // 4)
+
+
+def _person_line(item: TracedPersonContext) -> str:
+    return (
+        f'<person-context ref="{item.record_id}" revision="{item.revision}" trust="memory">'
+        f"{html.escape(item.text)}</person-context>"
+    )
+
+
+async def _identity_scoped_records(
+    store: PeopleStore, query: RecallQuery, records: list[MemoryRecord]
+) -> list[MemoryRecord]:
+    """Batch hard identity and privacy checks, including links hidden from the requested surface."""
+    all_links: dict[UUID, list[PeopleRecord]] = defaultdict(list)
+    visible: set[UUID] = set()
+    if not records:
+        return records
+    for offset in range(0, len(records), 1000):
+        belief_ids = [record.id for record in records[offset : offset + 1000]]
+        for ceiling in {Sensitivity.RESTRICTED, query.sensitivity_ceiling}:
+            link_query = PeopleQuery(
+                tenant_id=query.tenant_id,
+                principal_id=query.principal_id,
+                kinds=["memory_link", "relationship", "commitment"],
+                belief_ids=belief_ids,
+                sensitivity_ceiling=ceiling,
+                limit=100,
+                known_at=query.known_at,
+                as_of=query.as_of,
+            )
+            for _ in range(100):
+                page = await store.query(link_query)
+                for link in page[:100]:
+                    if ceiling is Sensitivity.RESTRICTED:
+                        belief_id = getattr(link, "belief_id", None)
+                        if isinstance(belief_id, UUID):
+                            all_links[belief_id].append(link)
+                    if ceiling is query.sensitivity_ceiling:
+                        visible.add(link.id)
+                if len(page) <= 100:
+                    break
+                link_query = link_query.model_copy(update={"after": page[99].id})
+            else:
+                # A bounded scan cannot certify the unscanned identity assignments.
+                return []
+    result = []
+    focal = set(query.people_scope or ())
+    for record in records:
+        links = all_links.get(record.id, [])
+        if links and (
+            any(getattr(link, "unresolved", False) or link.id not in visible for link in links)
+            or not any(referenced_people(link) & focal for link in links)
+        ):
+            continue
+        result.append(record)
+    return result

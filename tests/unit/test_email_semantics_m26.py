@@ -564,3 +564,35 @@ async def test_semantic_enabled_uses_the_initial_implementation_digest(
     )
     assert service.enabled
     assert service.enabled
+
+
+async def test_legacy_email_capture_respects_people_erasure_without_prior_beliefs() -> None:
+    from uuid import uuid4
+
+    from agent_core.domain.people import PeopleErasure
+    from agent_core.domain.people_sources import email_source_id
+
+    factory, service, source, fact, _ = await semantic_stack()
+    async with factory() as uow:
+        await uow.people.put(
+            PeopleErasure(
+                id=uuid4(),
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                created_at=NOW,
+                updated_at=NOW,
+                state="completed",
+                target_id=uuid4(),
+                expected_revisions={},
+                blocked_source_ids=[email_source_id(principal(), source)],
+                expires_at=NOW + timedelta(minutes=10),
+                request_hash="a" * 64,
+            ),
+            expected_revision=0,
+        )
+    with pytest.raises(ConflictError, match="erased"):
+        await service.form(source, [fact])
+    with pytest.raises(ConflictError, match="erased"):
+        await service.register_source(source)
+    async with factory() as uow:
+        assert await uow.memories.list_memories(principal(), include_inactive=True) == []

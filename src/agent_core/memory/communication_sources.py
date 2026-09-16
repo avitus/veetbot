@@ -438,5 +438,6 @@ class AttributedCommunicationCandidateExtractor:
             return MemoryExtractionResult(
                 combined,
                 provider_failure=delegated.provider_failure,
+                people_interactions=delegated.people_interactions,
             )
         return combined

@@ -142,6 +142,10 @@ class EmailSemanticFormationService:
             and self._evidence.implementation_sha256 == self._implementation_sha256
         )
 
+    @property
+    def people_enabled(self) -> bool:
+        return False
+
     async def register_source(
         self,
         source: EmailSemanticSource,
@@ -150,7 +154,11 @@ class EmailSemanticFormationService:
         lease: WorkerLease | None = None,
     ) -> None:
         """Record immutable account-qualified provenance without duplicating the body."""
-        async with self._uow_factory() as uow, uow.email.lock(self._principal):
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
             await self._validate_source(uow, source)
             await self._guard_run(uow, source, run, lease)
             await self._register(uow, source)
@@ -169,7 +177,11 @@ class EmailSemanticFormationService:
             return []
         if len(facts) > 20:
             raise ToolValidationError("semantic email proposal exceeds candidate limit")
-        async with self._uow_factory() as uow, uow.email.lock(self._principal):
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
             await self._validate_source(uow, source)
             await self._guard_run(uow, source, run, lease)
             if run is not None:
@@ -301,6 +313,12 @@ class EmailSemanticFormationService:
         uow: RepositoryUnitOfWork,
         source: EmailSemanticSource,
     ) -> EmailRecord:
+        from agent_core.domain.people_sources import email_source_id
+
+        if await uow.people.source_suppressed(
+            self._principal, email_source_id(self._principal, source)
+        ):
+            raise ConflictError("People email source was erased")
         key = semantic_source_key(source.account_id, source.provider_thread_id, source.message_id)
         current = await uow.email.get(self._principal, "semantic_source", key)
         if current is not None and current.payload.get("excluded"):
@@ -489,7 +507,14 @@ class EmailSemanticFormationService:
     async def exclude_source(self, account_id: str, thread_id: str, message_id: str) -> int:
         """Suppress reformation and forget linked inferred beliefs; retain owner corrections."""
         key = semantic_source_key(account_id, thread_id, message_id)
-        async with self._uow_factory() as uow, uow.email.lock(self._principal):
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
+            await uow.people.erase_email_source(
+                self._principal, account_id, thread_id, frozenset({message_id})
+            )
             current = await uow.email.get(self._principal, "semantic_source", key)
             now = self._clock.now()
             if current is None:
@@ -564,6 +589,7 @@ def semantic_implementation_sha256() -> str:
         "memory/retrieval.py",
         "memory/communication_sources.py",
         "runtime/email_tasks.py",
+        "runtime/email_assessment.py",
         "runtime/email_state.py",
         "application/email.py",
     ):

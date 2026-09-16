@@ -9,6 +9,40 @@ from agent_core.ports.events import EventRepository
 from tests.contract.support import SESSION_ID, memory_stack, principal
 
 
+async def test_import_event_window_orders_owned_sessions_before_bounded_paging() -> None:
+    from tests.contract.support import NOW, session
+
+    clock, sessions, _runs, repository = await memory_stack()
+    second = session().model_copy(update={"id": UUID(int=930)})
+    await sessions.create(second)
+    for source_id in [second.id, SESSION_ID, second.id]:
+        await repository.append(
+            NewEvent(
+                session_id=source_id,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=principal().principal_id,
+                payload={"content": "A source"},
+            )
+        )
+        clock.advance(timedelta(seconds=1))
+    read = getattr(repository, "list_window", None)
+    assert read is not None, "bounded imports need chronological cross-session source paging"
+    options = {
+        "session_ids": [SESSION_ID, second.id],
+        "since": NOW,
+        "until": clock.now(),
+        "limit": 2,
+    }
+    first = await read(principal(), **options)
+    assert [event.session_id for event in first] == [second.id, SESSION_ID]
+    rest = await read(principal(), after=(first[-1].created_at, first[-1].id), **options)
+    assert len(rest) == 1 and rest[0].session_id == second.id
+    with pytest.raises(NotFoundError):
+        await read(principal().model_copy(update={"principal_id": "foreign"}), **options)
+
+
 async def test_event_repository_assigns_gapless_per_session_sequences() -> None:
     _clock, _sessions, _runs, repository = await memory_stack()
     for event_type in ("first", "second"):

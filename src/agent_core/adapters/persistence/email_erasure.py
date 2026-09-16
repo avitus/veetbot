@@ -20,6 +20,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     EventRow,
     IntegratedEpisodeRow,
     KnowledgeDocumentRow,
+    MemoryRevisionRow,
     MemoryRow,
     RecallTraceRow,
     RunRow,
@@ -445,6 +446,16 @@ async def erase_postgres_source(
         "episodes": 0,
         "pending_artifacts": 0,
     }
+    for source_session, source_ids in source_sequences.items():
+        for source_sequence in source_ids:
+            await session.execute(
+                delete(MemoryRevisionRow).where(
+                    MemoryRevisionRow.tenant_id == principal.tenant_id,
+                    MemoryRevisionRow.principal_id == principal.principal_id,
+                    MemoryRevisionRow.payload["source_session_id"].astext == str(source_session),
+                    MemoryRevisionRow.payload["source_event_ids"].contains([source_sequence]),
+                )
+            )
     for trace_row, erased_trace in trace_changes:
         trace_row.trace = erased_trace
     for row in event_rows:
@@ -686,6 +697,16 @@ def erase_memory_source_locked(
         "episodes": 0,
         "pending_artifacts": 0,
     }
+    for belief_id, revisions in list(repository._memories._history.items()):
+        repository._memories._history[belief_id] = [
+            (at, record)
+            for at, record in revisions
+            if not (
+                record.tenant_id == principal.tenant_id
+                and record.principal_id == principal.principal_id
+                and set(record.source_event_ids) & sequences.get(record.source_session_id, set())
+            )
+        ]
     repository._traces._traces.update(trace_changes)
     for sid in affected_sessions:
         updated = []

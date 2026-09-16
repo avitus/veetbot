@@ -1408,3 +1408,23 @@ worker reconciles results and erases expired content; ingress queues signed IDs
 with a receipt-only database role and separate operating-system user. Both
 require production PostgreSQL, a current migration and an explicit owner binding.
 See [setup](../bland-setup.md) for the complete configuration and role inventory.
+
+
+## Milestone 28 People composition
+
+`AGENT_PEOPLE_ENABLED` defaults to false and controls People capture, public
+management routes, the three read tools, and automatic context integration.
+Owner/source/session erasure remains wired when the surface is disabled. The
+flag does not activate an extraction policy: `formation@11` and
+`email-semantic@2` each require current evidence for their exact source,
+provider/model, policy, implementation, and corpus versions. The existing
+`AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE` and Email evidence settings supply
+the artifacts; no credentials or private corpus is embedded in configuration.
+
+The composition root connects People services to governed corrections, recall,
+and import formation through ports. It injects source admission, implementation
+identity, and canonical message wrapping into the import workers. The in-memory
+People adapter receives its memory store so directory relationship filtering
+can check belief privacy before pagination; PostgreSQL applies the equivalent
+scoped join. The detailed contract is
+[people-and-relationships.md](people-and-relationships.md).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -141,10 +142,29 @@ async def _verify_backfill_and_erasure(tmp_path: Path, session_id: UUID, belief_
                 raise AssertionError("session erasure left an integrated episode")
 
 
+async def _export_revision_fixture_before_legacy_downgrade(tmp_path: Path) -> None:
+    """Honor the new history-preservation guard before exercising the older migration."""
+    engine = create_engine(database_settings().database_url)
+    try:
+        async with engine.begin() as connection:
+            rows = (
+                (await connection.execute(text("SELECT payload FROM memory_revisions")))
+                .scalars()
+                .all()
+            )
+            archive = tmp_path / "synthetic-memory-revisions.json"
+            archive.write_text(json.dumps(list(rows)))
+            assert json.loads(archive.read_text()) == list(rows)
+            await connection.execute(text("DELETE FROM memory_revisions"))
+    finally:
+        await engine.dispose()
+
+
 def test_schema_backfill_preserves_history_and_erasure(tmp_path: Path) -> None:
     """A stepwise upgrade preserves belief history and erases derived episodes."""
 
     session_id, belief_id, tenant_id = asyncio.run(_seed_legacy_row(tmp_path))
+    asyncio.run(_export_revision_fixture_before_legacy_downgrade(tmp_path))
     _alembic("downgrade", "b1d9e3f5a720")
     try:
         asyncio.run(_null_lifecycle_fields(belief_id, tenant_id))

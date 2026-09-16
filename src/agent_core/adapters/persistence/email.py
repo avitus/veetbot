@@ -5,19 +5,23 @@ from __future__ import annotations
 import asyncio
 import builtins
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import DateTime, delete, or_, select, update
+from sqlalchemy import DateTime, and_, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.functions import func
 
 from agent_core.adapters.persistence.mappers import email_record_to_domain, email_record_values
+from agent_core.adapters.persistence.people_reference_index import reference_overlap
 from agent_core.adapters.persistence.sqlalchemy_models import EmailRecordRow
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailRecord
+from agent_core.domain.erasure import erased_email_payload
 from agent_core.domain.errors import ConflictError
 
 
@@ -29,6 +33,26 @@ def _validate_limit(limit: int) -> None:
 def _validate_revision(record: EmailRecord, expected_revision: int) -> None:
     if expected_revision < 0 or record.revision != expected_revision + 1:
         raise ConflictError("email record revision does not follow expected revision")
+
+
+def _validate_source_window(
+    account_ids: Sequence[str],
+    since: datetime,
+    until: datetime,
+    after: tuple[datetime, str] | None,
+    limit: int,
+) -> None:
+    if (
+        isinstance(limit, bool)
+        or not 1 <= limit <= 100
+        or not 1 <= len(account_ids) <= 10
+        or len(account_ids) != len(set(account_ids))
+        or since.tzinfo is None
+        or until.tzinfo is None
+        or since >= until
+        or (after is not None and (after[0].tzinfo is None or not after[1]))
+    ):
+        raise ValueError("email import source window is invalid")
 
 
 class InMemoryEmailStore:
@@ -65,6 +89,36 @@ class InMemoryEmailStore:
             key=lambda record: record.key,
         )
         return [record.model_copy(deep=True) for record in selected[:limit]]
+
+    async def list_semantic_window(
+        self,
+        principal: Principal,
+        *,
+        account_ids: Sequence[str],
+        since: datetime,
+        until: datetime,
+        after: tuple[datetime, str] | None = None,
+        limit: int = 100,
+    ) -> builtins.list[EmailRecord]:
+        _validate_source_window(account_ids, since, until, after, limit)
+        selected = []
+        for row in self._records.values():
+            if (
+                row.tenant_id != principal.tenant_id
+                or row.principal_id != principal.principal_id
+                or row.kind != "semantic_source"
+                or row.payload.get("excluded")
+                or row.payload.get("account_id") not in account_ids
+            ):
+                continue
+            raw = row.payload.get("evidence_at")
+            if not isinstance(raw, str):
+                continue
+            at = datetime.fromisoformat(raw)
+            if since <= at < until and (after is None or (at, row.key) > after):
+                selected.append((at, row.key, row))
+        selected.sort(key=lambda value: (value[0], value[1]))
+        return [row.model_copy(deep=True) for _, _, row in selected[:limit]]
 
     async def list_tasks(
         self,
@@ -114,6 +168,65 @@ class InMemoryEmailStore:
             raise ConflictError("email record revision changed or is absent")
         del self._records[address]
 
+    async def fence_people_erasure(
+        self, principal: Principal, belief_ids: Sequence[UUID], erased_at: datetime
+    ) -> int:
+        ids = {str(key) for key in belief_ids}
+        sources = [
+            row
+            for row in self._records.values()
+            if (
+                row.tenant_id == principal.tenant_id
+                and row.principal_id == principal.principal_id
+                and row.kind == "semantic_source"
+                and isinstance(linked := row.payload.get("memory_ids"), list)
+                and ids.intersection(str(key) for key in linked)
+            )
+        ]
+        pairs = {
+            (str(row.payload.get("account_id")), str(row.payload.get("provider_thread_id")))
+            for row in sources
+        }
+        threads = [
+            row
+            for row in self._records.values()
+            if (
+                row.tenant_id == principal.tenant_id
+                and row.principal_id == principal.principal_id
+                and row.kind == "thread"
+                and (str(row.payload.get("account_id")), str(row.payload.get("provider_thread_id")))
+                in pairs
+            )
+        ]
+        keys = {row.key for row in threads}
+        assessments = [
+            row
+            for row in self._records.values()
+            if (
+                row.tenant_id == principal.tenant_id
+                and row.principal_id == principal.principal_id
+                and row.kind == "assessment"
+                and row.key in keys
+            )
+        ]
+        for row in sources + threads:
+            await self.put(
+                row.model_copy(
+                    update={
+                        "revision": row.revision + 1,
+                        "updated_at": erased_at,
+                        "payload": erased_email_payload(row.kind, row.payload),
+                    }
+                ),
+                expected_revision=row.revision,
+            )
+        for row in assessments:
+            await self.delete(principal, row.kind, row.key, expected_revision=row.revision)
+        return len(sources) + len(threads) + len(assessments)
+
+    async def purge_people_erasure(self, principal: Principal) -> bool:
+        return False
+
 
 class PostgresEmailStore:
     """Atomic compare-and-swap records; caller owns transaction and RLS context."""
@@ -137,6 +250,7 @@ class PostgresEmailStore:
                     EmailRecordRow.principal_id == principal.principal_id,
                     EmailRecordRow.kind == kind,
                     EmailRecordRow.key == key,
+                    or_(EmailRecordRow.kind != "assessment", ~EmailRecordRow.erasure_pending),
                 )
                 .execution_options(populate_existing=True)
             )
@@ -151,6 +265,7 @@ class PostgresEmailStore:
             EmailRecordRow.tenant_id == principal.tenant_id,
             EmailRecordRow.principal_id == principal.principal_id,
             EmailRecordRow.kind == kind,
+            or_(EmailRecordRow.kind != "assessment", ~EmailRecordRow.erasure_pending),
         )
         if after is not None:
             query = query.where(EmailRecordRow.key > after)
@@ -165,6 +280,37 @@ class PostgresEmailStore:
             .scalars()
             .all()
         )
+        return [email_record_to_domain(row) for row in rows]
+
+    async def list_semantic_window(
+        self,
+        principal: Principal,
+        *,
+        account_ids: Sequence[str],
+        since: datetime,
+        until: datetime,
+        after: tuple[datetime, str] | None = None,
+        limit: int = 100,
+    ) -> builtins.list[EmailRecord]:
+        _validate_source_window(account_ids, since, until, after, limit)
+        at = EmailRecordRow.payload["evidence_at"].astext.cast(DateTime(timezone=True))
+        query = select(EmailRecordRow).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "semantic_source",
+            ~EmailRecordRow.erasure_pending,
+            EmailRecordRow.payload["account_id"].astext.in_(account_ids),
+            EmailRecordRow.payload["excluded"].astext == "false",
+            at >= since,
+            at < until,
+        )
+        if after is not None:
+            query = query.where(
+                or_(at > after[0], and_(at == after[0], EmailRecordRow.key > after[1]))
+            )
+        rows = (
+            await self._session.scalars(query.order_by(at, EmailRecordRow.key).limit(limit))
+        ).all()
         return [email_record_to_domain(row) for row in rows]
 
     async def list_tasks(
@@ -224,6 +370,7 @@ class PostgresEmailStore:
                         EmailRecordRow.kind == record.kind,
                         EmailRecordRow.key == record.key,
                         EmailRecordRow.revision == expected_revision,
+                        ~EmailRecordRow.erasure_pending,
                     )
                     .values(**values)
                     .returning(EmailRecordRow.key)
@@ -253,3 +400,80 @@ class PostgresEmailStore:
         ).scalar_one_or_none()
         if removed is None:
             raise ConflictError("email record revision changed or is absent")
+
+    async def fence_people_erasure(
+        self, principal: Principal, belief_ids: Sequence[UUID], erased_at: datetime
+    ) -> int:
+        if not belief_ids:
+            return 0
+        source = aliased(EmailRecordRow, name="people_source")
+        supported = (
+            select(source.key)
+            .where(
+                source.tenant_id == principal.tenant_id,
+                source.principal_id == principal.principal_id,
+                source.kind == "semantic_source",
+                reference_overlap("(people_source.payload->'memory_ids')::text", list(belief_ids)),
+                source.payload["account_id"].astext == EmailRecordRow.payload["account_id"].astext,
+                source.payload["provider_thread_id"].astext
+                == EmailRecordRow.payload["provider_thread_id"].astext,
+            )
+            .correlate(EmailRecordRow)
+            .exists()
+        )
+        threads = select(EmailRecordRow.key).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "thread",
+            supported,
+        )
+        changed = await self._session.scalars(
+            update(EmailRecordRow)
+            .where(
+                EmailRecordRow.tenant_id == principal.tenant_id,
+                EmailRecordRow.principal_id == principal.principal_id,
+                ~EmailRecordRow.erasure_pending,
+                or_(
+                    and_(
+                        EmailRecordRow.kind == "semantic_source",
+                        reference_overlap("(payload->'memory_ids')::text", list(belief_ids)),
+                    ),
+                    and_(
+                        EmailRecordRow.kind.in_(["thread", "assessment"]),
+                        EmailRecordRow.key.in_(threads),
+                    ),
+                ),
+            )
+            .values(
+                erasure_pending=True, revision=EmailRecordRow.revision + 1, updated_at=erased_at
+            )
+            .returning(EmailRecordRow.key)
+            .execution_options(synchronize_session=False)
+        )
+        return len(changed.all())
+
+    async def purge_people_erasure(self, principal: Principal) -> bool:
+        scope = (
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.erasure_pending,
+        )
+        rows = (
+            await self._session.scalars(
+                select(EmailRecordRow)
+                .where(*scope)
+                .order_by(EmailRecordRow.kind, EmailRecordRow.key)
+                .limit(256)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        for row in rows:
+            if row.kind == "assessment":
+                await self._session.delete(row)
+            else:
+                row.payload = erased_email_payload(row.kind, row.payload)
+                row.erasure_pending = False
+        await self._session.flush()
+        return bool(
+            await self._session.scalar(select(select(EmailRecordRow.key).where(*scope).exists()))
+        )

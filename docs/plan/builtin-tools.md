@@ -1833,3 +1833,15 @@ and applied status; it never promotes a mail-derived summary to internal trust.
 Cached thread, inbox-row and writing-example results retain separate
 server-authored account/thread/message source wrappers so selective erasure
 can remove one source without deleting another account's context.
+
+
+## Milestone 28 People tools
+
+[people-and-relationships.md](people-and-relationships.md#agent-tools) owns
+`people.search`, `people.context`, and `people.history`. All three require
+`people.read`, are read-only and parallel-safe, return data at memory trust,
+and exist only with `AGENT_PEOPLE_ENABLED=1`. Their closed JSON schemas expose
+all execution bounds. People context shares the ordinary recall budget and
+cannot grant permission to send a message or change an email recipient.
+The governed `memory.remember` surface adds explicit person references only
+while People is enabled; old pinned catalogs retain their prior contract.

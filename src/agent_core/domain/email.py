@@ -29,6 +29,13 @@ class EmailBudgetLimits(EmailValue):
     monthly_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
 
 
+class EmailImportBudget(EmailValue):
+    """A content-free import attempt sharing the ordinary Email allowance."""
+
+    reservation: Decimal = Field(ge=0, allow_inf_nan=False)
+    settled_cost: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
 class EmailRecord(EmailValue):
     """One independently revisioned projection; payloads contain typed values below."""
 

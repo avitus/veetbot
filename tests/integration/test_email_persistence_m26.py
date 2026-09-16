@@ -17,7 +17,11 @@ from agent_core.adapters.persistence.email import PostgresEmailStore
 from agent_core.adapters.persistence.sqlalchemy_models import EmailRecordRow
 from agent_core.domain.errors import ConflictError
 from tests.contract.support import principal
-from tests.contract.test_email_store_contract import assert_email_store_contract, record
+from tests.contract.test_email_store_contract import (
+    assert_email_store_contract,
+    email_import_window_contract,
+    record,
+)
 from tests.integration.m2_support import database_settings
 
 
@@ -41,6 +45,7 @@ async def test_postgres_email_store_satisfies_the_shared_contract() -> None:
     async with database() as engine, create_session_factory(engine)() as session:
         await configure(session)
         await assert_email_store_contract(PostgresEmailStore(session))
+        await email_import_window_contract(PostgresEmailStore(session))
         await session.commit()
 
 

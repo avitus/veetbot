@@ -358,6 +358,12 @@ removed and the tombstone retains a **content hash** rather than the statement, 
 re-derivation can still refuse to re-form it without the platform continuing to hold
 what the user asked it to forget.
 
+Deletion also sanitizes older correction tombstones for that belief or its
+replacement and removes copied influence from generated context and replies.
+Its audit event retains only the opaque belief ID. People-linked deletion uses
+the same durable generated-copy fence and bounded cleanup receipts as forgetting
+a person, without deleting the person or suppressing unrelated original messages.
+
 Rejection rate is also the cheapest formation-quality signal available — corrections
 per hundred rendered beliefs, measured against real usage rather than a rubric.
 

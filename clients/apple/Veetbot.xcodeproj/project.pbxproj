@@ -58,6 +58,13 @@
 		1000000000000000000000A3 /* EmailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A3 /* EmailViewModel.swift */; };
 		1000000000000000000000A4 /* EmailModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A4 /* EmailModeView.swift */; };
 		1000000000000000000000B3 /* CallResultSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000B3 /* CallResultSheet.swift */; };
+		1000000000000000000000C1 /* PeopleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C1 /* PeopleModels.swift */; };
+		1000000000000000000000C2 /* PeopleAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C2 /* PeopleAPIClient.swift */; };
+		1000000000000000000000C3 /* PeopleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C3 /* PeopleViewModel.swift */; };
+		1000000000000000000000C4 /* PeopleDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C4 /* PeopleDetailViewModel.swift */; };
+		1000000000000000000000C5 /* PeopleBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C5 /* PeopleBrowserView.swift */; };
+		1000000000000000000000C6 /* PeopleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C6 /* PeopleDetailView.swift */; };
+		1000000000000000000000C7 /* PeopleEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C7 /* PeopleEditors.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +133,13 @@
 		2000000000000000000000A3 /* EmailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailViewModel.swift; sourceTree = "<group>"; };
 		2000000000000000000000A4 /* EmailModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModeView.swift; sourceTree = "<group>"; };
 		2000000000000000000000B3 /* CallResultSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallResultSheet.swift; sourceTree = "<group>"; };
+		2000000000000000000000C1 /* PeopleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleModels.swift; sourceTree = "<group>"; };
+		2000000000000000000000C2 /* PeopleAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleAPIClient.swift; sourceTree = "<group>"; };
+		2000000000000000000000C3 /* PeopleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleViewModel.swift; sourceTree = "<group>"; };
+		2000000000000000000000C4 /* PeopleDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleDetailViewModel.swift; sourceTree = "<group>"; };
+		2000000000000000000000C5 /* PeopleBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleBrowserView.swift; sourceTree = "<group>"; };
+		2000000000000000000000C6 /* PeopleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleDetailView.swift; sourceTree = "<group>"; };
+		2000000000000000000000C7 /* PeopleEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleEditors.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +192,7 @@
 		400000000000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				2000000000000000000000C1 /* PeopleModels.swift */,
 				200000000000000000000001 /* APIError.swift */,
 				200000000000000000000002 /* APIModels.swift */,
 				200000000000000000000003 /* EventModels.swift */,
@@ -192,6 +207,7 @@
 		400000000000000000000004 /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				2000000000000000000000C2 /* PeopleAPIClient.swift */,
 				200000000000000000000005 /* ConnectionConfiguration.swift */,
 				200000000000000000000006 /* HTTPTransport.swift */,
 				200000000000000000000007 /* VeetbotAPIClient.swift */,
@@ -229,6 +245,8 @@
 		400000000000000000000007 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				2000000000000000000000C4 /* PeopleDetailViewModel.swift */,
+				2000000000000000000000C3 /* PeopleViewModel.swift */,
 				20000000000000000000000F /* ChatViewModel.swift */,
 				200000000000000000000023 /* MemoryViewModel.swift */,
 				200000000000000000000029 /* PersonaViewModel.swift */,
@@ -242,6 +260,9 @@
 		400000000000000000000008 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				2000000000000000000000C7 /* PeopleEditors.swift */,
+				2000000000000000000000C6 /* PeopleDetailView.swift */,
+				2000000000000000000000C5 /* PeopleBrowserView.swift */,
 				20000000000000000000001A /* AppTheme.swift */,
 				200000000000000000000011 /* ActivityViews.swift */,
 				200000000000000000000012 /* ArtifactViewerView.swift */,
@@ -386,6 +407,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1000000000000000000000C7 /* PeopleEditors.swift in Sources */,
+				1000000000000000000000C6 /* PeopleDetailView.swift in Sources */,
+				1000000000000000000000C5 /* PeopleBrowserView.swift in Sources */,
+				1000000000000000000000C4 /* PeopleDetailViewModel.swift in Sources */,
+				1000000000000000000000C3 /* PeopleViewModel.swift in Sources */,
+				1000000000000000000000C2 /* PeopleAPIClient.swift in Sources */,
+				1000000000000000000000C1 /* PeopleModels.swift in Sources */,
 				100000000000000000000001 /* APIError.swift in Sources */,
 				100000000000000000000002 /* APIModels.swift in Sources */,
 				100000000000000000000003 /* EventModels.swift in Sources */,

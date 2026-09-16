@@ -426,6 +426,7 @@ private struct EmailThreadScreen: View {
     @State private var showingRevisions = false
     @State private var showingFeedback = false
     @State private var showingEnvelope = false
+    @State private var peopleLookup: PeopleLookup?
     @FocusState private var focusedField: Field?
 
     /// Keeps reading scrollable while reply and Chat actions remain reachable at the bottom edge.
@@ -499,6 +500,11 @@ private struct EmailThreadScreen: View {
             )
         }
         .sheet(isPresented: $showingRevisions) { EmailRevisionsScreen(model: model) }
+        #if os(iOS)
+        .fullScreenCover(item: $peopleLookup) { lookup in PeopleLookupSheet(lookup: lookup) }
+        #else
+        .sheet(item: $peopleLookup) { lookup in PeopleLookupSheet(lookup: lookup) }
+        #endif
         #if os(iOS)
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
@@ -575,6 +581,14 @@ private struct EmailThreadScreen: View {
                         EmailAvatar(sender: message.sender)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(message.sender).appFont(.callout, weight: .semibold).textSelection(.enabled)
+                            Button {
+                                peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                            } label: {
+                                Label("View in People", systemImage: "person.crop.circle")
+                            }
+                            .buttonStyle(.plain).appFont(.caption)
+                            .accessibilityLabel("View people matching \(message.sender)")
+                            .accessibilityIdentifier("email.sender.people")
                             Text(message.sentAt, format: .dateTime.month(.abbreviated).day().year().hour().minute())
                                 .appFont(.caption).foregroundColor(.secondary)
                         }

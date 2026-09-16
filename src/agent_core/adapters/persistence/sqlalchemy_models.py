@@ -33,6 +33,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from agent_core.adapters.persistence.people_reference_index import INVOCATION_REFERENCE_TEXT
+
 MEMORY_POSITION_SEQUENCE = Sequence("memory_store_position_seq")
 
 NAMING_CONVENTION = {
@@ -122,6 +124,12 @@ class RunRow(Base):
         Index("ix_runs_lease_expires", "lease_expires_at"),
         Index("ix_runs_session_created", "session_id", "created_at"),
         Index(
+            "ix_runs_erasure_pending",
+            "session_id",
+            "id",
+            postgresql_where=text("erasure_pending"),
+        ),
+        Index(
             "ix_runs_queue_claim",
             "status",
             "priority",
@@ -182,6 +190,8 @@ class RunRow(Base):
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    people_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     final_message: Mapped[str | None] = mapped_column(Text)
     export_consent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
@@ -198,8 +208,26 @@ class EventRow(Base):
     __table_args__ = (
         UniqueConstraint("session_id", "sequence", name="uq_events_session_sequence"),
         Index("ix_events_run_id", "run_id", "id"),
+        Index(
+            "ix_events_people_references",
+            text("people_reference_ids(payload::text)"),
+            postgresql_using="gin",
+        ),
+        Index("ix_events_session_created_id", "session_id", "created_at", "id"),
         Index("ix_events_event_type_created", "event_type", "created_at"),
         Index("ix_events_type_session_sequence", "event_type", "session_id", "sequence"),
+        Index(
+            "ix_events_people_erased",
+            "session_id",
+            "sequence",
+            postgresql_where=text("people_erased"),
+        ),
+        Index(
+            "ix_events_erasure_pending",
+            "session_id",
+            "id",
+            postgresql_where=text("erasure_pending"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -215,6 +243,8 @@ class EventRow(Base):
     actor_type: Mapped[str] = mapped_column(Text)
     actor_id: Mapped[str | None] = mapped_column(Text)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    people_erased: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     trace_id: Mapped[str | None] = mapped_column(Text)
     derivation_key: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -244,6 +274,17 @@ class ToolInvocationRow(Base):
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_tool_invocations_idempotency_key"),
         Index("ix_tool_invocations_run_step", "run_id", "step_number"),
+        Index(
+            "ix_invocations_erasure_pending",
+            "session_id",
+            "id",
+            postgresql_where=text("erasure_pending"),
+        ),
+        Index(
+            "ix_invocations_people_references",
+            text(f"people_reference_ids({INVOCATION_REFERENCE_TEXT})"),
+            postgresql_using="gin",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -262,6 +303,8 @@ class ToolInvocationRow(Base):
     risk: Mapped[str] = mapped_column(Text, server_default=text("'low'"))
     attempt_number: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     raw_arguments: Mapped[str] = mapped_column(Text)
+    people_erased: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     arguments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     normalized_arguments_hash: Mapped[str | None] = mapped_column(Text)
     effective_arguments_hash: Mapped[str | None] = mapped_column(Text)
@@ -624,6 +667,7 @@ class SessionHistoryItemRow(Base):
     sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     item_index: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     item: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    erasure_cleaned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     builder_version: Mapped[str] = mapped_column(Text)
 
 
@@ -857,6 +901,7 @@ class MCPToolCatalogRow(Base):
 class MemoryRow(Base):
     __tablename__ = "memories"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "principal_id", "id", name="uq_memories_tenant_principal_id"),
         Index(
             "ix_memories_principal_live_position",
             "tenant_id",
@@ -893,6 +938,9 @@ class MemoryRow(Base):
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(Text)
+    erasure_pending: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     belief_type: Mapped[str] = mapped_column(Text)
     polarity: Mapped[str] = mapped_column(Text)
     portability: Mapped[str] = mapped_column(Text)
@@ -924,6 +972,13 @@ class MemoryRow(Base):
 class IntegratedEpisodeRow(Base):
     __tablename__ = "integrated_episodes"
     __table_args__ = (
+        Index(
+            "ix_episodes_erasure_pending",
+            "tenant_id",
+            "principal_id",
+            "id",
+            postgresql_where=text("erasure_pending"),
+        ),
         UniqueConstraint(
             "tenant_id",
             "principal_id",
@@ -949,10 +1004,38 @@ class IntegratedEpisodeRow(Base):
     source_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source_ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     narrative: Mapped[str] = mapped_column(Text)
+    erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     subjects: Mapped[list[str]] = mapped_column(JSONB)
     integration_policy_version: Mapped[str] = mapped_column(Text)
     derivation_key: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryRevisionRow(Base):
+    __tablename__ = "memory_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "belief_id"],
+            ["memories.tenant_id", "memories.principal_id", "memories.id"],
+            name="fk_memory_revisions_tenant_id_memories",
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_memory_revision_recorded",
+            "tenant_id",
+            "principal_id",
+            "belief_id",
+            "recorded_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
 class MemoryRejectionRow(Base):
@@ -1027,6 +1110,18 @@ class RecallTraceRow(Base):
         Index("ix_recall_traces_turn", "turn_id", "created_at"),
         Index("ix_recall_traces_trace_gin", "trace", postgresql_using="gin"),
         Index("ix_recall_traces_operator_expiry", "operator_fields_expire_at"),
+        Index(
+            "ix_traces_erasure_pending",
+            "tenant_id",
+            "principal_id",
+            "id",
+            postgresql_where=text("erasure_pending"),
+        ),
+        Index(
+            "ix_traces_people_references",
+            text("people_reference_ids(trace::text)"),
+            postgresql_using="gin",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -1037,6 +1132,7 @@ class RecallTraceRow(Base):
     )
     turn_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     trace: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     operator_fields_expire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -1815,6 +1911,19 @@ class EmailRecordRow(Base):
         CheckConstraint("revision > 0", name="email_record_revision_positive"),
         CheckConstraint("jsonb_typeof(payload) = 'object'", name="email_record_payload_object"),
         Index("ix_email_records_owner_updated", "tenant_id", "principal_id", "updated_at"),
+        Index(
+            "ix_email_people_beliefs",
+            text("people_reference_ids((payload->'memory_ids')::text)"),
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_email_erasure_pending",
+            "tenant_id",
+            "principal_id",
+            "kind",
+            "key",
+            postgresql_where=text("erasure_pending"),
+        ),
     )
 
     tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -1823,6 +1932,7 @@ class EmailRecordRow(Base):
     key: Mapped[str] = mapped_column(Text(collation="C"), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -1845,3 +1955,112 @@ class CallRecordRow(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PeopleHeadRow(Base):
+    __tablename__ = "people_heads"
+    __table_args__ = (
+        Index("ix_people_head_sensitivity", "tenant_id", "principal_id", "sensitivity"),
+        Index(
+            "ix_people_head_hidden",
+            "tenant_id",
+            "principal_id",
+            "id",
+            postgresql_where=text("erased OR excluded"),
+        ),
+        CheckConstraint("revision > 0", name="people_head_revision_positive"),
+        CheckConstraint("sensitivity BETWEEN 0 AND 3", name="people_head_sensitivity"),
+        CheckConstraint(
+            "kind IN ('person','identifier','source','mention','memory_link','organization',"
+            "'relationship',"
+            "'interaction','commitment','operation','erasure','import_job')",
+            name="people_head_kind",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    sensitivity: Mapped[int] = mapped_column(Integer)
+    erased: Mapped[bool] = mapped_column(Boolean, default=False)
+    excluded: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PeopleRevisionRow(Base):
+    __tablename__ = "people_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "entity_id"],
+            ["people_heads.tenant_id", "people_heads.principal_id", "people_heads.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("revision > 0", name="people_revision_positive"),
+        CheckConstraint(
+            "jsonb_typeof(payload) = 'object' AND payload->>'kind' = kind",
+            name="people_revision_payload",
+        ),
+        CheckConstraint("sensitivity BETWEEN 0 AND 3", name="people_revision_sensitivity"),
+        Index("ix_people_revision_kind_name", "tenant_id", "principal_id", "kind", "search_text"),
+        Index(
+            "ix_people_revision_belief",
+            "tenant_id",
+            "principal_id",
+            text("(payload->>'belief_id')"),
+        ),
+        Index(
+            "ix_people_revision_history",
+            "tenant_id",
+            "principal_id",
+            "kind",
+            "event_at",
+            "entity_id",
+        ),
+        Index(
+            "ix_people_revision_source_session", "tenant_id", "principal_id", "source_session_id"
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sensitivity: Mapped[int] = mapped_column(Integer)
+    search_text: Mapped[str] = mapped_column(Text)
+    source_session_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class PeopleLinkRow(Base):
+    __tablename__ = "people_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "entity_id", "revision"],
+            [
+                "people_revisions.tenant_id",
+                "people_revisions.principal_id",
+                "people_revisions.entity_id",
+                "people_revisions.revision",
+            ],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "target_id"],
+            ["people_heads.tenant_id", "people_heads.principal_id", "people_heads.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "role IN ('person','source','organization','assignment')", name="people_link_role"
+        ),
+        Index(
+            "ix_people_link_target", "tenant_id", "principal_id", "target_id", "role", "entity_id"
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    target_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    role: Mapped[str] = mapped_column(Text, primary_key=True)

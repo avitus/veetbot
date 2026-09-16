@@ -7,6 +7,7 @@ from typing import Any, Literal, cast
 
 from pydantic import SecretStr
 
+from agent_core.adapters.persistence.people_erasure import redact
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
@@ -49,6 +50,7 @@ from agent_core.domain.devices import (
     PushProvider,
 )
 from agent_core.domain.email import EmailRecord
+from agent_core.domain.erasure import erased_email_payload
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import (
     CostSource,
@@ -175,8 +177,10 @@ def run_to_domain(row: RunRow) -> Run:
         scheduled_for=row.scheduled_for,
         deadline_at=row.deadline_at,
         cancel_requested_at=row.cancel_requested_at,
-        failure=None if row.failure is None else RunFailure.model_validate(row.failure),
-        final_message=row.final_message,
+        failure=None
+        if row.failure is None or row.people_erased_at is not None
+        else RunFailure.model_validate(row.failure),
+        final_message=None if row.people_erased_at is not None else row.final_message,
         export_consent=row.export_consent,
         provider_pin=(
             None if row.provider_pin is None else ProviderPin.model_validate(row.provider_pin)
@@ -444,7 +448,8 @@ def device_registration_idempotency_values(
 
 
 def event_to_domain(row: EventRow, upcasters: EventUpcasterRegistry) -> EventEnvelope:
-    version, payload = upcasters.upcast(row.event_type, row.payload_schema_version, row.payload)
+    value = redact(row.payload) if row.people_erased else row.payload
+    version, payload = upcasters.upcast(row.event_type, row.payload_schema_version, value)
     return EventEnvelope(
         id=row.id,
         session_id=row.session_id,
@@ -478,7 +483,7 @@ def event_values(event: NewEvent, *, sequence: int, created_at: object) -> dict[
 
 
 def invocation_to_domain(row: ToolInvocationRow) -> ToolInvocation:
-    return ToolInvocation(
+    invocation = ToolInvocation(
         id=row.id,
         run_id=row.run_id,
         session_id=row.session_id,
@@ -518,6 +523,11 @@ def invocation_to_domain(row: ToolInvocationRow) -> ToolInvocation:
         ),
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+    return (
+        ToolInvocation.model_validate(redact(invocation.model_dump(mode="json")))
+        if row.people_erased
+        else invocation
     )
 
 
@@ -906,7 +916,9 @@ def email_record_to_domain(row: EmailRecordRow) -> EmailRecord:
         kind=row.kind,
         key=row.key,
         revision=row.revision,
-        payload=deepcopy(row.payload),
+        payload=deepcopy(
+            erased_email_payload(row.kind, row.payload) if row.erasure_pending else row.payload
+        ),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

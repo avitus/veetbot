@@ -37,7 +37,7 @@ class LabelModel(BaseModel):
 class EmailQualityPolicy(LabelModel):
     ranker_version: str = Field(min_length=1, max_length=128)
     style_version: str = Field(min_length=1, max_length=128)
-    semantic_policy_version: Literal["email-semantic@1"]
+    semantic_policy_version: Literal["email-semantic@1", "email-semantic@2"]
     provider: str = Field(min_length=1, max_length=128)
     model: str = Field(min_length=1, max_length=128)
     build_ref: str = Field(pattern=r"^[0-9a-f]{40}$")
