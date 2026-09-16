@@ -107,6 +107,10 @@ arguments. UIKit's content-size launch preference is restricted to the iOS test
 targets.
 Person-profile empty states use primary text contrast so missing history and
 coverage remain readable at enlarged text sizes.
+On Mac, People sheets open at readable widths: 600 points for short editors and
+760 points for the import history, source conversations, and identity repair.
+Before macOS 15, which ignores a sheet's ideal size, they open at their 560- and
+680-point minimums.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
