@@ -254,6 +254,7 @@ from agent_core.application.device_management import (
     NotificationInboxService,
 )
 from agent_core.application.email import EmailExperienceService
+from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.notification_dispatcher import (
     NotificationDispatcher,
     NotificationDispatchUnitOfWorkFactory,
@@ -291,6 +292,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     DeviceService as PublicDeviceServiceContract,
+)
+from agent_core.application.services import (
+    FolderService as PublicFolderServiceContract,
 )
 from agent_core.application.services import (
     MemoryReadService as PublicMemoryReadServiceContract,
@@ -570,6 +574,7 @@ class ApplicationServices:
     surfaces: PublicSurfaceServiceContract
     memory: PublicMemoryReadServiceContract
     persona: PublicPersonaServiceContract
+    folders: PublicFolderServiceContract
     email: EmailExperienceService
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
@@ -3619,6 +3624,7 @@ async def _compose(
             memory=PublicMemoryService(uow_factory=uow_factory),
             people=people_service,
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
             calls=call_service,
             email=EmailExperienceService(
                 uow_factory=uow_factory,
