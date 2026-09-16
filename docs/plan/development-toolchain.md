@@ -267,6 +267,21 @@ runtime downloads and the same discipline applies to the toolchain: if
 a check needs a binary, the binary is a declared dependency or the
 check fails with a message naming what to install.
 
+### Remote validation on a sidecar
+
+`.chunk/config.json` lets the CircleCI `chunk` CLI run the same gate on a
+disposable Linux sidecar. `chunk validate` runs `install` (`make install` and
+`make website-install`) and then `check` (`make check`), both marked remote.
+Its `environment` records how a sidecar is prepared: uv 0.8.6, Node 22.13.1
+and Pandoc, installed and checksum-verified as in CI.
+`validation.sidecarImage` names the prepared snapshot that new sidecars boot
+from. Active-sidecar and validation-pool files under `.chunk/` are
+per-developer and ignored. The sidecar adds no command, so a passing remote
+`make check` satisfies the same criterion as a local run. Run `chunk validate` rather than `chunk sidecar sync`
+from a git worktree: plain sync copies the worktree's `.git` pointer file,
+while validate sends a git bundle into a real repository. Xcode suites
+(`make test-apple`, `make test-apple-ui`) need macOS and stay local.
+
 ## The compose file
 
 One service at Milestone 0.
