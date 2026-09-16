@@ -307,7 +307,11 @@ final class ConversationNavigationUITests: XCTestCase {
         app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #if os(macOS)
+        app.launchArguments += ["-veetbot.appearance.textSize", "large"]
+        #else
         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        #endif
         app.launch()
         app.activate()
         let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]

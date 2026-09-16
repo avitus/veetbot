@@ -97,6 +97,10 @@ conversation. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
 or credential.
 
+The People accessibility audit uses the app's Large text preference on Mac and
+the largest accessibility Dynamic Type category on iPhone and iPad. UIKit's
+content-size launch preference is restricted to the iOS test targets.
+
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
 same `SessionHistoryStore` contract backed by an atomic Application Support JSON
