@@ -1042,7 +1042,7 @@ struct EmailLearningScreen: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(24).frame(minWidth: 300, idealWidth: 540, minHeight: 400, idealHeight: 620)
+        .padding(24).sheetFrame(minWidth: 300, macMinWidth: 480, idealWidth: 540, minHeight: 400, idealHeight: 620)
         .task { await model.loadLearning() }
         .confirmationDialog(
             "Reset email learning?",
@@ -1067,7 +1067,7 @@ struct EmailLearningScreen: View {
     }
 }
 
-private struct EmailRevisionsScreen: View {
+struct EmailRevisionsScreen: View {
     @ObservedObject var model: EmailViewModel
     @Environment(\.dismiss) private var dismiss
     /// Lists saved draft revisions and restores selected wording into the current edit buffer.
@@ -1103,12 +1103,12 @@ private struct EmailRevisionsScreen: View {
                 }
             }
             if let error = model.draftError { Text(error).foregroundColor(.red) }
-        }.padding(24).frame(minWidth: 300, idealWidth: 600, minHeight: 400)
+        }.padding(24).sheetFrame(minWidth: 300, macMinWidth: 520, idealWidth: 600, minHeight: 400)
             .task { await model.loadRevisions() }
     }
 }
 
-private struct EmailSendReview: View {
+struct EmailSendReview: View {
     @ObservedObject var model: EmailViewModel
     /// Shows the frozen envelope and body before the owner explicitly approves or denies this send.
     var body: some View {
@@ -1150,7 +1150,7 @@ private struct EmailSendReview: View {
                         .appFont(.caption).disabled(model.isPerformingAction)
                 }.padding(24)
             }
-        }.frame(minWidth: 300, idealWidth: 600, minHeight: 400, idealHeight: 660)
+        }.sheetFrame(minWidth: 300, macMinWidth: 520, idealWidth: 600, minHeight: 400, idealHeight: 660)
             .background(EmailSurface.card)
     }
 }

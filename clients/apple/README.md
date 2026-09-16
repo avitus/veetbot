@@ -41,6 +41,10 @@ automatically and apply immediately throughout the client. On macOS, configured
 clients use a separate settings window that resizes in both dimensions and
 remembers its frame. The main and settings windows persist their sizes and
 positions independently; system text sizing remains the default.
+On Mac, sheets open at readable widths: 640 points for Persona, 600 for email
+draft history and send review, and 540 for call results and email learning.
+Before macOS 15, which ignores a sheet's ideal size, they open at their 480- to
+520-point minimums.
 On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
