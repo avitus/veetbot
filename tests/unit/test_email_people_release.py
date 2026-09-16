@@ -54,6 +54,33 @@ def test_email_activation_requires_full_ordinary_email_proof() -> None:
         EmailPeopleEvidence.model_validate(email_evidence_fixture())
 
 
+@pytest.mark.parametrize("failure", ["repeats", "holdout", "implementation", "ordinary_corpus"])
+def test_email_evidence_reports_the_mismatched_binding(failure: str) -> None:
+    from agent_core.domain.email_people_evidence import EmailPeopleEvidence
+    from agent_core.evals.email_people_release import assemble_email_evidence
+
+    metadata, scores, ordinary, people = assembly_inputs()
+    data = assemble_email_evidence(
+        metadata, scores, ordinary, people, run_sha256="a" * 64, evaluated_at=NOW
+    ).model_dump(mode="json")
+    if failure == "repeats":
+        data["run_metrics"].append(data["run_metrics"][0])
+        message = "repeat counts must match"
+    elif failure == "holdout":
+        data["holdout_sha256"] = data["corpus_sha256"]
+        message = "development and holdout corpora must differ"
+    elif failure == "implementation":
+        data["ordinary_email"]["candidate_implementation_sha256"] = "f" * 64
+        message = "ordinary Email candidate implementation must match"
+    else:
+        data["ordinary_email"]["candidate_corpus_sha256"] = data["ordinary_email"][
+            "baseline_corpus_sha256"
+        ]
+        message = "ordinary Email baseline and candidate corpora must differ"
+    with pytest.raises(ValueError, match=message):
+        EmailPeopleEvidence.model_validate(data)
+
+
 def assembly_inputs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
     from agent_core.domain.people_evidence import PeopleFormationEvidence
     from agent_core.evals.email_people_ordinary import compare_ordinary_email

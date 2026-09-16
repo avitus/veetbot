@@ -903,9 +903,9 @@ class RecallQuery(BaseModel):
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
     include_ids: tuple[UUID, ...] | None = Field(default=None, max_length=1000)
     expand_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
+    people_scope: tuple[UUID, ...] | None = Field(default=None, max_length=3)
     # Beliefs the persona row already carries at higher trust: a hard snapshot
     # exclusion, never a relevance signal (persona-surface.md).
-    people_scope: tuple[UUID, ...] | None = Field(default=None, max_length=3)
     exclude_ids: tuple[UUID, ...] = ()
 
 

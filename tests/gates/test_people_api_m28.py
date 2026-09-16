@@ -159,6 +159,8 @@ async def test_people_import_runs_selected_empty_history_without_advancing_autom
         assert result.source_read_complete and result.analysis_complete
         assert result.records_read == result.records_processed == 0
         assert result.spent_usd == result.reserved_usd == 0
+        async with app.uow_factory() as uow:
+            assert await uow.memories.consolidation_watermark(source.id, owner) == 0
 
 
 async def test_people_import_preserves_failed_source_and_records_provider_cost() -> None:

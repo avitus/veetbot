@@ -771,6 +771,34 @@ def test_people_corpus_command_reports_frozen_population_without_provider_access
     assert report["activation_evidence"] is False
 
 
+def test_people_evidence_cli_reports_invalid_policy_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from agent_core.config import ConfigurationError
+    from agent_core.evals import people_release
+
+    def invalid_policy(*args: object) -> None:
+        raise ConfigurationError("unknown policy profile: missing-profile")
+
+    monkeypatch.setattr(people_release, "publish_evidence", invalid_policy)
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "people-evidence",
+            "--run-directory",
+            str(tmp_path / "run"),
+            "--owner-acceptance",
+            str(tmp_path / "acceptance.json"),
+            "--output",
+            str(tmp_path / "evidence.json"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "People evidence publication failed: unknown policy profile" in result.stderr
+    assert not (tmp_path / "evidence.json").exists()
+
+
 def test_people_evidence_cli_requires_acceptance_and_preserves_existing_outputs(
     tmp_path: Path,
 ) -> None:

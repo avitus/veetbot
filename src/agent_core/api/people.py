@@ -1,4 +1,4 @@
-"""Default-off People routes with explicit scope, ceiling and retry boundaries."""
+"""People routes with explicit scope, ceiling and retry boundaries."""
 
 from collections.abc import Callable
 from datetime import datetime
@@ -50,6 +50,50 @@ def private_response(response: Response) -> None:
 def _time_range(since: datetime | None, until: datetime | None) -> None:
     if since is not None and until is not None and since >= until:
         raise RequestValidationError([{"loc": ("query", "until"), "type": "value_error"}])
+
+
+def _section_query(
+    section: Literal["relationships", "history", "facts"],
+) -> Callable[..., PeopleSectionQuery]:
+    def query(
+        as_of: AwareDatetime | None = None,
+        known_at: AwareDatetime | None = None,
+        since: AwareDatetime | None = None,
+        until: AwareDatetime | None = None,
+        channel: Literal["chat", "email", "sms"] | None = None,
+        interaction_kind: Literal[
+            "exchange",
+            "meeting",
+            "visit",
+            "introduction",
+            "trip",
+            "milestone",
+            "decision",
+            "disagreement",
+            "other",
+        ]
+        | None = None,
+        unknown_time: Literal["include", "only", "exclude"] = "include",
+        include_inactive: bool = False,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        cursor: Annotated[str | None, Query(max_length=2048)] = None,
+    ) -> PeopleSectionQuery:
+        _time_range(since, until)
+        return PeopleSectionQuery(
+            section=section,
+            as_of=as_of,
+            known_at=known_at,
+            since=since,
+            until=until,
+            channel=channel,
+            interaction_kind=interaction_kind,
+            unknown_time=unknown_time,
+            include_inactive=include_inactive,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    return query
 
 
 def people_router(service: PeopleService, secured: Callable[[str], object]) -> APIRouter:
@@ -216,47 +260,9 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         person_id: UUID,
         authenticated: Annotated[Principal, secured("people.read")],
         ceiling: Sensitivity,
-        as_of: AwareDatetime | None = None,
-        known_at: AwareDatetime | None = None,
-        since: AwareDatetime | None = None,
-        until: AwareDatetime | None = None,
-        channel: Literal["chat", "email", "sms"] | None = None,
-        interaction_kind: Literal[
-            "exchange",
-            "meeting",
-            "visit",
-            "introduction",
-            "trip",
-            "milestone",
-            "decision",
-            "disagreement",
-            "other",
-        ]
-        | None = None,
-        unknown_time: Literal["include", "only", "exclude"] = "include",
-        include_inactive: bool = False,
-        limit: Annotated[int, Query(ge=1, le=100)] = 50,
-        cursor: Annotated[str | None, Query(max_length=2048)] = None,
+        query: Annotated[PeopleSectionQuery, Depends(_section_query("relationships"))],
     ) -> PeopleSectionPage:
-        _time_range(since, until)
-        return await service.section(
-            authenticated,
-            person_id,
-            PeopleSectionQuery(
-                section="relationships",
-                as_of=as_of,
-                known_at=known_at,
-                since=since,
-                until=until,
-                channel=channel,
-                interaction_kind=interaction_kind,
-                unknown_time=unknown_time,
-                include_inactive=include_inactive,
-                limit=limit,
-                cursor=cursor,
-            ),
-            ceiling=ceiling,
-        )
+        return await service.section(authenticated, person_id, query, ceiling=ceiling)
 
     @router.get(
         "/v1/people/{person_id}/history",
@@ -267,47 +273,9 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         person_id: UUID,
         authenticated: Annotated[Principal, secured("people.read")],
         ceiling: Sensitivity,
-        as_of: AwareDatetime | None = None,
-        known_at: AwareDatetime | None = None,
-        since: AwareDatetime | None = None,
-        until: AwareDatetime | None = None,
-        channel: Literal["chat", "email", "sms"] | None = None,
-        interaction_kind: Literal[
-            "exchange",
-            "meeting",
-            "visit",
-            "introduction",
-            "trip",
-            "milestone",
-            "decision",
-            "disagreement",
-            "other",
-        ]
-        | None = None,
-        unknown_time: Literal["include", "only", "exclude"] = "include",
-        include_inactive: bool = False,
-        limit: Annotated[int, Query(ge=1, le=100)] = 50,
-        cursor: Annotated[str | None, Query(max_length=2048)] = None,
+        query: Annotated[PeopleSectionQuery, Depends(_section_query("history"))],
     ) -> PeopleSectionPage:
-        _time_range(since, until)
-        return await service.section(
-            authenticated,
-            person_id,
-            PeopleSectionQuery(
-                section="history",
-                as_of=as_of,
-                known_at=known_at,
-                since=since,
-                until=until,
-                channel=channel,
-                interaction_kind=interaction_kind,
-                unknown_time=unknown_time,
-                include_inactive=include_inactive,
-                limit=limit,
-                cursor=cursor,
-            ),
-            ceiling=ceiling,
-        )
+        return await service.section(authenticated, person_id, query, ceiling=ceiling)
 
     @router.get(
         "/v1/people/{person_id}/facts",
@@ -318,47 +286,9 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         person_id: UUID,
         authenticated: Annotated[Principal, secured("people.read")],
         ceiling: Sensitivity,
-        as_of: AwareDatetime | None = None,
-        known_at: AwareDatetime | None = None,
-        since: AwareDatetime | None = None,
-        until: AwareDatetime | None = None,
-        channel: Literal["chat", "email", "sms"] | None = None,
-        interaction_kind: Literal[
-            "exchange",
-            "meeting",
-            "visit",
-            "introduction",
-            "trip",
-            "milestone",
-            "decision",
-            "disagreement",
-            "other",
-        ]
-        | None = None,
-        unknown_time: Literal["include", "only", "exclude"] = "include",
-        include_inactive: bool = False,
-        limit: Annotated[int, Query(ge=1, le=100)] = 50,
-        cursor: Annotated[str | None, Query(max_length=2048)] = None,
+        query: Annotated[PeopleSectionQuery, Depends(_section_query("facts"))],
     ) -> PeopleSectionPage:
-        _time_range(since, until)
-        return await service.section(
-            authenticated,
-            person_id,
-            PeopleSectionQuery(
-                section="facts",
-                as_of=as_of,
-                known_at=known_at,
-                since=since,
-                until=until,
-                channel=channel,
-                interaction_kind=interaction_kind,
-                unknown_time=unknown_time,
-                include_inactive=include_inactive,
-                limit=limit,
-                cursor=cursor,
-            ),
-            ceiling=ceiling,
-        )
+        return await service.section(authenticated, person_id, query, ceiling=ceiling)
 
     @router.get(
         "/v1/people/{person_id}/identity-evidence",

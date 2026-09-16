@@ -41,7 +41,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@9"
+BUILDER_VERSION = "context-builder@10"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
@@ -422,7 +422,9 @@ class EventContextPlanner:
                 moment=RecallMoment.SNAPSHOT.value,
                 measure_rendered_tokens=measure_memory_tokens,
             )
-        memory_snapshot = "" if snapshot is None or not snapshot.items else snapshot.rendered
+        memory_snapshot = (
+            "" if snapshot is None or not (snapshot.items or snapshot.people) else snapshot.rendered
+        )
         prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot, persona=persona_text)
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)

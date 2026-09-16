@@ -11,7 +11,16 @@ The governing contract is [People and relationships](plan/people-and-relationshi
 ## Installation and rollback
 
 The schema revision is `c28d52ea7301`. Apply it using the existing deployment
-migration step. People is enabled by default under ADR-0101. Leave
+migration step during a maintenance window. Its four GIN indexes on existing
+event, invocation, recall-trace, and email tables use ordinary transactional
+`CREATE INDEX`, which blocks writes while each index is built. Quiesce application
+writers before starting the release and keep them stopped through migration;
+the deployment script does not stop the old processes before `alembic upgrade`.
+Allow for table-size-dependent index build time. Resume service with the release's
+normal restart and readiness checks after migration succeeds. Do not substitute
+`CREATE INDEX CONCURRENTLY` inside this transactional migration.
+
+People is enabled by default under ADR-0101. Leave
 `AGENT_MEMORY_FORMATION_POLICY_PIN` empty (or select `formation@11`) and use
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` or `required` with the configured
 memory provider. No People or Email semantic evidence artifact is required.

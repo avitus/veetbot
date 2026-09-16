@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.persistence import call_erasure
@@ -446,16 +446,24 @@ async def erase_postgres_source(
         "episodes": 0,
         "pending_artifacts": 0,
     }
-    for source_session, source_ids in source_sequences.items():
-        for source_sequence in source_ids:
-            await session.execute(
-                delete(MemoryRevisionRow).where(
-                    MemoryRevisionRow.tenant_id == principal.tenant_id,
-                    MemoryRevisionRow.principal_id == principal.principal_id,
-                    MemoryRevisionRow.payload["source_session_id"].astext == str(source_session),
-                    MemoryRevisionRow.payload["source_event_ids"].contains([source_sequence]),
-                )
+    revision_sources = [
+        and_(
+            MemoryRevisionRow.payload["source_session_id"].astext == str(source_session),
+            MemoryRevisionRow.payload["source_event_ids"].contains([source_sequence]),
+        )
+        for source_session, source_ids in source_sequences.items()
+        for source_sequence in source_ids
+    ]
+    # Bound SQL parameters for large histories while deleting many source matches
+    # per round trip. Keep each session paired with its own event sequence.
+    for offset in range(0, len(revision_sources), 500):
+        await session.execute(
+            delete(MemoryRevisionRow).where(
+                MemoryRevisionRow.tenant_id == principal.tenant_id,
+                MemoryRevisionRow.principal_id == principal.principal_id,
+                or_(*revision_sources[offset : offset + 500]),
             )
+        )
     for trace_row, erased_trace in trace_changes:
         trace_row.trace = erased_trace
     for row in event_rows:

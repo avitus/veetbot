@@ -3,6 +3,14 @@ import Testing
 @testable import VeetbotCore
 
 @Suite @MainActor struct PeopleViewModelTests {
+    @Test func futureFactDateDoesNotTrapTheCorrectionEditor() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let future = now.addingTimeInterval(3600)
+        #expect(PeopleFactEditor.effectiveDateRange(validFrom: future, now: now) == now...now)
+        #expect(PeopleFactEditor.effectiveDateRange(validFrom: now, now: now) == now...now)
+        let past = now.addingTimeInterval(-3600)
+        #expect(PeopleFactEditor.effectiveDateRange(validFrom: past, now: now) == past...now)
+    }
     @Test func commitmentCalendarPrecisionDoesNotInventAnExactDueDay() throws {
         let encoded = """
         {"id":"\(UUID())","revision":1,"debtor":{"kind":"owner"},"beneficiary":{"kind":"person","id":"\(UUID())"},"description":"Send a report","state":"open","due_at":"2026-08-01T00:00:00Z","due_precision":"month","source_timezone":"America/Los_Angeles","support_ids":[]}

@@ -773,8 +773,11 @@ async def test_source_exclusion_reports_pending_people_cleanup_until_retried(
         response = await client.post(path, json={"expected_revision": 1})
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "cleanup_pending"
+        assert response.json()["pending_artifacts"] == 0
+        assert response.json()["pending_people_cleanup"] == 1
         assert (await client.get(f"/v1/email/threads/{thread.id}")).status_code == 404
         pending = False
         retried = await client.post(path, json={"expected_revision": 1})
         assert retried.status_code == 200, retried.text
         assert retried.json()["status"] == "erased"
+        assert retried.json()["pending_people_cleanup"] == 0

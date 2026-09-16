@@ -1162,6 +1162,9 @@ authorize policy activation or production delivery.
   and the belief revision at the requested knowledge cutoff before pagination
   on both adapters. The correction editor accepts
   a past effective date and structured relationship or commitment changes.
+  A future fact start or device clock skew collapses the date picker's range to
+  the current instant instead of constructing an invalid closed range; server
+  validation still controls whether the proposed transition is valid.
   Identity repair supports a separate destination person and selected claim or
   mention assignments; failed pages preserve the current evidence list.
   Original-source views select the exact retained Chat/SMS event or account-

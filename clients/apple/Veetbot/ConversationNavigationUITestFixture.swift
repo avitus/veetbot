@@ -399,6 +399,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
         let isSubmission = request.httpMethod == "POST" && url.path.hasSuffix("/messages")
         let isRunStream = url.path == "/v1/runs/\(Self.runID)/events"
+        if slowChat && isSubmission && ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-hold-submission") {
+            // The keyboard test observes a pending request, independent of how
+            // long XCTest takes to query accessibility. Teardown cancels it.
+            return
+        }
         if slowChat && (isSubmission || isRunStream) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: deliver)
         } else {

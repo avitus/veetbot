@@ -28,6 +28,74 @@ from tests.contract.support import principal
 from tests.integration.m2_support import memory_settings
 
 
+@pytest.mark.parametrize("state", ["completed", "cancelled"])
+async def test_terminal_import_job_blocks_a_new_slice_until_its_run_settles(state: str) -> None:
+    from uuid import uuid4
+
+    from agent_core.domain.errors import ConflictError
+    from agent_core.domain.people import PeopleImportJob
+    from agent_core.domain.runs import RunStatus
+    from tests.contract.support import run
+
+    owner = principal().model_copy(
+        update={"scopes": {"people.read", "people.write", "session.read", "session.write"}}
+    )
+    async with build(
+        settings=replace(memory_settings(), people_enabled=True),
+        storage="memory",
+        principal=owner,
+        memory_people_evaluation_mode=True,
+    ) as app:
+        source = await app.services.sessions.create(owner, "general", {})
+        request = PeopleImportRequest.model_validate(
+            {
+                "phase": "preview",
+                "session_id": source.id,
+                "scope": {
+                    "session_ids": [source.id],
+                    "since": app.clock.now() - timedelta(days=1),
+                    "until": app.clock.now(),
+                    "max_records": 10,
+                    "max_cost_usd": "1",
+                },
+            }
+        )
+        service = app.services.people
+        assert service is not None
+        previous = await service.create_import(
+            owner, request, key="old", ceiling=Sensitivity.SENSITIVE
+        )
+        active = run(status=RunStatus.RUNNING).model_copy(
+            update={"id": uuid4(), "session_id": source.id}
+        )
+        async with app.uow_factory() as uow:
+            await uow.runs.create(active)
+            job = await uow.people.get(owner, previous.id, ceiling=Sensitivity.RESTRICTED)
+            assert isinstance(job, PeopleImportJob)
+            await uow.people.put(
+                job.model_copy(
+                    update={
+                        "state": state,
+                        "run_id": active.id,
+                        "revision": job.revision + 1,
+                    }
+                ),
+                expected_revision=job.revision,
+            )
+        next_job = await service.create_import(
+            owner, request, key="new", ceiling=Sensitivity.SENSITIVE
+        )
+        apply = request.model_copy(
+            update={
+                "phase": "apply",
+                "operation_id": next_job.id,
+                "expected_revision": next_job.revision,
+            }
+        )
+        with pytest.raises(ConflictError, match="another People import is still active"):
+            await service.create_import(owner, apply, key="start", ceiling=Sensitivity.SENSITIVE)
+
+
 @pytest.mark.parametrize("failed_attempts", [1, 2])
 async def test_failed_analysis_retries_its_original_source_without_counting_it_twice(
     failed_attempts: int,

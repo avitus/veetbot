@@ -30,6 +30,8 @@ from tests.gates.test_email_runtime_m26 import _mailbox_factory
         "recipient",
         "cancelled",
         "retry",
+        "non_object_thread",
+        "missing_thread_id",
     ],
 )
 async def test_mailbox_import_fetches_old_source_before_analysis(
@@ -74,6 +76,9 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
         ),
         ("search_threads", {"threads": [{"thread_id": "t1"}], "next_page_token": None}),
     ]
+    malformed = case in {"non_object_thread", "missing_thread_id"}
+    if malformed:
+        values[1][1]["threads"] = ["invalid" if case == "non_object_thread" else {}]
     for index in range(count):
         if index == 6:
             values.append(("get_profile", {"email_address": "owner@example.test"}))
@@ -274,9 +279,9 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
                 )
                 assert sources == []
             return
-        failed = case in {"wrong_account", "changed_body"}
+        failed = case in {"wrong_account", "changed_body"} or malformed
         assert result.state == ("failed" if failed else "completed"), result
-        expected_count = 0 if case == "wrong_account" else count
+        expected_count = 0 if case == "wrong_account" or malformed else count
         assert result.mailbox_records_read == expected_count
         assert result.mailbox_read_complete == (not failed and case != "capped")
         expected_processed = 0 if failed or case == "outside" else count
@@ -302,6 +307,9 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
             job = await uow.people.get(owner, result.id, ceiling=Sensitivity.RESTRICTED)
             assert isinstance(job, PeopleImportJob) and job.run_id is not None
             run = await uow.runs.get(job.run_id, owner)
+            if malformed:
+                assert run.failure is not None
+                assert run.failure.error_class == "ToolTrustRejectedError"
             assert run.tool_call_count <= 8
             sources = await uow.people.query(
                 PeopleQuery(

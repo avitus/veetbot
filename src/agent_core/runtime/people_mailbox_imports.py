@@ -293,7 +293,9 @@ class PeopleMailboxImporter:
                 threads = page.get("threads")
                 if not isinstance(threads, list) or len(threads) > 25:
                     raise ToolTrustRejectedError("mailbox search exceeded its page bound")
-                ids = [item["thread_id"] for item in threads]
+                if any(not isinstance(item, dict) for item in threads):
+                    raise ToolTrustRejectedError("mailbox search returned invalid thread entries")
+                ids = [item.get("thread_id") for item in threads]
                 if any(
                     not isinstance(value, str) or not value or len(value) > 1024 for value in ids
                 ) or len(set(ids)) != len(ids):

@@ -69,10 +69,15 @@ class EmailPeopleEvidence(BaseModel):
         if (
             len(self.run_metrics) != len(self.holdout_metrics)
             or len(self.run_metrics) != self.people.repeats
-            or self.corpus_sha256 == self.holdout_sha256
-            or self.ordinary_email.candidate_implementation_sha256 != self.implementation_sha256
-            or self.ordinary_email.baseline_corpus_sha256
+        ):
+            raise ValueError("email People evidence repeat counts must match")
+        if self.corpus_sha256 == self.holdout_sha256:
+            raise ValueError("email People development and holdout corpora must differ")
+        if self.ordinary_email.candidate_implementation_sha256 != self.implementation_sha256:
+            raise ValueError("ordinary Email candidate implementation must match People evidence")
+        if (
+            self.ordinary_email.baseline_corpus_sha256
             == self.ordinary_email.candidate_corpus_sha256
         ):
-            raise ValueError("email People evidence requires independent holdouts for each repeat")
+            raise ValueError("ordinary Email baseline and candidate corpora must differ")
         return self

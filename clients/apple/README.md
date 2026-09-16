@@ -96,6 +96,8 @@ opening and switching durable historical transcripts and starting a new
 conversation. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
 or credential.
+The keyboard-dismissal case holds its fake submission pending until teardown,
+so a slow accessibility query cannot consume the response-delay window.
 
 The People accessibility audit uses the app's Large text preference on Mac and
 the largest accessibility Dynamic Type category on iPhone and iPad. The Mac

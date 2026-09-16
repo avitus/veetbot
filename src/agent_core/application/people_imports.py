@@ -335,6 +335,8 @@ class PeopleImportService:
                 while True:
                     page = await uow.people.query(jobs)
                     for row in page[:100]:
+                        # A completed/cancelled job can still have a settling worker run.
+                        # The run's terminal state controls admission of another slice.
                         if isinstance(row, PeopleImportJob) and row.run_id is not None:
                             run = await uow.runs.get(row.run_id, owner)
                             if run.status not in TERMINAL_RUN_STATUSES:

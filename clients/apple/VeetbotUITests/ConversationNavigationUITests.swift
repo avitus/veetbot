@@ -718,10 +718,11 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
-    private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false) {
+    private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false, holdSubmission: Bool = false) {
         app.terminate()
         app.launchArguments.append("--ui-testing-chat-slow-send")
         if fails { app.launchArguments.append("--ui-testing-chat-send-failure") }
+        if holdSubmission { app.launchArguments.append("--ui-testing-chat-hold-submission") }
         app.launch()
         let historicalRow = app.descendants(matching: .any)[
             "sidebar.session.00000000-0000-0000-0000-000000000123"
@@ -745,7 +746,8 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testSendingMessageDismissesKeyboard() {
-        submitSlowChatMessage()
+        // Keep acceptance pending even if a hosted accessibility snapshot is slow.
+        submitSlowChatMessage(holdSubmission: true)
         // Predicate expectations delay their first poll; a slow accessibility
         // snapshot can then exhaust this deadline even with the keyboard gone.
         XCTAssertTrue(

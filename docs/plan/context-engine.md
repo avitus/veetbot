@@ -277,9 +277,11 @@ explicitly enabled capabilities still fail at plan time if they exceed the token
 cap. The selected set is then sorted by name for stable rendering. Adding an MCP account must not evict an explicitly
 enabled web, clock, or workspace capability merely because its name sorts earlier.
 The item and token ceilings still apply; excess discovered tools require a narrower
-catalog or explicit agent configuration. Builder version `context-builder@9`
+catalog or explicit agent configuration. Builder version `context-builder@10`
 rebuilds older plans through the ordinary logged epoch rotation, so existing
 sessions recover the configured capabilities without replacing their history.
+A snapshot containing People context is retained even when it contains no ordinary
+beliefs; the epoch rotation also rebuilds older plans that omitted such snapshots.
 
 The token side of the tool-definition cap measures the conservative larger form
 of the **model-visible** provider contract: name, description, and input schema

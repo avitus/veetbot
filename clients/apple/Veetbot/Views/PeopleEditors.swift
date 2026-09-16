@@ -11,6 +11,9 @@ struct PeopleFactEditor: View {
     @State private var relationshipPredicate: String = ""
     @State private var commitmentState: String = ""
     private let predicates = ["parent", "child", "sibling", "relative", "partner", "spouse", "friend", "colleague", "collaborator", "introduced_by", "reports_to", "employment", "founder", "board_member", "investor", "other"]
+    static func effectiveDateRange(validFrom: Date, now: Date = Date()) -> ClosedRange<Date> {
+        min(validFrom, now)...now
+    }
     var body: some View {
         NavigationView {
             Form {
@@ -32,7 +35,7 @@ struct PeopleFactEditor: View {
                 }
                 TextEditor(text: $statement).frame(minHeight: 130).accessibilityLabel("Corrected fact")
                 if operation == "changed" {
-                    DatePicker("When did it change?", selection: $effectiveAt, in: fact.validFrom...Date(), displayedComponents: [.date, .hourAndMinute])
+                    DatePicker("When did it change?", selection: $effectiveAt, in: Self.effectiveDateRange(validFrom: fact.validFrom), displayedComponents: [.date, .hourAndMinute])
                 }
                 Text(operation == "changed" ? "The earlier fact stays in dated history." : "The previous fact is marked incorrect and replaced.").foregroundColor(.secondary)
                 if let error = model.errorMessage { Text(error).foregroundColor(.red) }

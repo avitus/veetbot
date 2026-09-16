@@ -2742,6 +2742,7 @@ class EmailExperienceService:
             "source_id": source_key,
             "status": status,
             "pending_artifacts": remaining.get("pending_artifacts", 0),
+            "pending_people_cleanup": remaining.get("pending_people_cleanup", 0),
         }
 
     async def _cache_records(self, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:

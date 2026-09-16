@@ -39,6 +39,7 @@ def schema_digest() -> str:
 
 
 def implementation_digest() -> str:
+    """Read current code so resumable imports cannot reuse a stale process-cached binding."""
     root = Path(__file__).resolve().parents[1]
     digest = hashlib.sha256()
     paths = {

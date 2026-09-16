@@ -1735,15 +1735,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of four hundred and ninety gates are green before
+2.  **Forty-one of five hundred and twenty-six gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches four hundred and ninety, which is every
-registry entry, at Milestone 27. Six of Milestone 10's gates are
+The cumulative column reaches five hundred and twenty-six, which is every
+registry entry, at Milestone 28. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1758,7 +1758,8 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.schedule.*`, Milestone 24's twelve return to the existing
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
 area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
-entries to the existing email area. Every authorized milestone now has a specification
+entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
+and Milestone 28 adds thirty-six `gate.people.*` entries. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.
