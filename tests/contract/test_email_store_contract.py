@@ -155,7 +155,13 @@ async def test_task_admission_query_preserves_unsettled_reservations() -> None:
 
 
 async def email_import_window_contract(store: EmailStore) -> None:
-    for key, days, account in [("late", 2, "work"), ("early", 0, "work"), ("foreign", 1, "home")]:
+    for key, days, account in [
+        ("late", 2, "work"),
+        ("early", 0, "work"),
+        ("legacy", 1, "work"),
+        ("excluded", 1, "work"),
+        ("foreign", 1, "home"),
+    ]:
         await store.put(
             record(key).model_copy(
                 update={
@@ -163,7 +169,7 @@ async def email_import_window_contract(store: EmailStore) -> None:
                     "payload": {
                         "account_id": account,
                         "evidence_at": (NOW + timedelta(days=days)).isoformat(),
-                        "excluded": False,
+                        **({} if key == "legacy" else {"excluded": key == "excluded"}),
                     },
                 }
             ),
@@ -175,7 +181,9 @@ async def email_import_window_contract(store: EmailStore) -> None:
     first = await read(principal(), **options)
     assert [row.key for row in first] == ["early"]
     second = await read(principal(), after=(NOW, "early"), **options)
-    assert [row.key for row in second] == ["late"]
+    assert [row.key for row in second] == ["legacy"]
+    third = await read(principal(), after=(NOW + timedelta(days=1), "legacy"), **options)
+    assert [row.key for row in third] == ["late"]
     assert await read(principal().model_copy(update={"principal_id": "foreign"}), **options) == []
 
 

@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import DateTime, and_, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.functions import func
@@ -115,6 +116,8 @@ class InMemoryEmailStore:
             if not isinstance(raw, str):
                 continue
             at = datetime.fromisoformat(raw)
+            if at.tzinfo is None or at.utcoffset() is None:
+                raise ValueError("invalid retained email source")
             if since <= at < until and (after is None or (at, row.key) > after):
                 selected.append((at, row.key, row))
         selected.sort(key=lambda value: (value[0], value[1]))
@@ -300,7 +303,7 @@ class PostgresEmailStore:
             EmailRecordRow.kind == "semantic_source",
             ~EmailRecordRow.erasure_pending,
             EmailRecordRow.payload["account_id"].astext.in_(account_ids),
-            EmailRecordRow.payload["excluded"].astext == "false",
+            func.coalesce(EmailRecordRow.payload["excluded"].astext, "false") == "false",
             at >= since,
             at < until,
         )
@@ -308,9 +311,14 @@ class PostgresEmailStore:
             query = query.where(
                 or_(at > after[0], and_(at == after[0], EmailRecordRow.key > after[1]))
             )
-        rows = (
-            await self._session.scalars(query.order_by(at, EmailRecordRow.key).limit(limit))
-        ).all()
+        try:
+            rows = (
+                await self._session.scalars(query.order_by(at, EmailRecordRow.key).limit(limit))
+            ).all()
+        except DBAPIError as exc:
+            if getattr(exc.orig, "sqlstate", None) not in {"22007", "22008"}:
+                raise
+            raise ValueError("invalid retained email source") from exc
         return [email_record_to_domain(row) for row in rows]
 
     async def list_tasks(

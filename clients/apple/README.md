@@ -141,3 +141,7 @@ keyboard reopened to write the next message.
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute
 the Swift Testing suite when `swift test` builds without discovering tests.
+
+People identity-evidence paging retains the final fetched page and stops when a
+server cursor repeats. If saving during Review & Send makes a draft stale, the
+composer asks the owner to refresh the thread and review the draft again.

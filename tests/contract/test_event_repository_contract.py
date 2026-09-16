@@ -9,7 +9,8 @@ from agent_core.ports.events import EventRepository
 from tests.contract.support import SESSION_ID, memory_stack, principal
 
 
-async def test_import_event_window_orders_owned_sessions_before_bounded_paging() -> None:
+@pytest.mark.parametrize("tied", [False, True])
+async def test_import_event_window_orders_owned_sessions_before_bounded_paging(tied: bool) -> None:
     from tests.contract.support import NOW, session
 
     clock, sessions, _runs, repository = await memory_stack()
@@ -26,16 +27,23 @@ async def test_import_event_window_orders_owned_sessions_before_bounded_paging()
                 payload={"content": "A source"},
             )
         )
-        clock.advance(timedelta(seconds=1))
+        if not tied:
+            clock.advance(timedelta(seconds=1))
     read = getattr(repository, "list_window", None)
     assert read is not None, "bounded imports need chronological cross-session source paging"
     options = {
         "session_ids": [SESSION_ID, second.id],
         "since": NOW,
-        "until": clock.now(),
-        "limit": 2,
+        "until": clock.now() + timedelta(seconds=1),
+        "limit": 1 if tied else 2,
     }
     first = await read(principal(), **options)
+    if tied:
+        second_page = await read(principal(), after=(first[-1].created_at, first[-1].id), **options)
+        assert first[0].created_at == second_page[0].created_at
+        assert first[0].sequence == second_page[0].sequence == 1
+        assert first[0].id != second_page[0].id
+        first += second_page
     assert [event.session_id for event in first] == [second.id, SESSION_ID]
     rest = await read(principal(), after=(first[-1].created_at, first[-1].id), **options)
     assert len(rest) == 1 and rest[0].session_id == second.id

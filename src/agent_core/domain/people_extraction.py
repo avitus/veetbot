@@ -27,6 +27,8 @@ class PersonEvidence(Proposal):
 
     @model_validator(mode="after")
     def exact_span_shape(self) -> "PersonEvidence":
+        if self.key == "owner":
+            raise ValueError("owner is a reserved evidence key")
         if self.end - self.start != len(self.text):
             raise ValueError("People evidence offsets must match its exact text")
         return self
@@ -83,6 +85,8 @@ class OrganizationEvidence(Proposal):
 
     @model_validator(mode="after")
     def exact_span(self) -> "OrganizationEvidence":
+        if self.key == "owner":
+            raise ValueError("owner is a reserved evidence key")
         if self.end - self.start != len(self.text) or self.display_name not in self.text:
             raise ValueError("organization requires an exact name span")
         return self

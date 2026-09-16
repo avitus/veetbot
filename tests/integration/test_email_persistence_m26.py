@@ -198,3 +198,26 @@ async def test_postgres_task_admission_query_preserves_unsettled_reservations() 
         await assert_task_admission_query_preserves_unsettled_reservations(
             PostgresEmailStore(session)
         )
+
+
+async def test_invalid_retained_email_date_raises_controlled_validation_error() -> None:
+    from datetime import timedelta
+
+    from tests.contract.support import NOW
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        store = PostgresEmailStore(session)
+        await store.put(
+            record("invalid-date").model_copy(
+                update={
+                    "kind": "semantic_source",
+                    "payload": {"account_id": "work", "evidence_at": "invalid", "excluded": False},
+                }
+            ),
+            expected_revision=0,
+        )
+        with pytest.raises(ValueError, match="invalid retained email source"):
+            await store.list_semantic_window(
+                principal(), account_ids=["work"], since=NOW, until=NOW + timedelta(days=1)
+            )

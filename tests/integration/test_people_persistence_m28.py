@@ -458,14 +458,21 @@ async def test_postgres_bounded_import_source_window_and_protected_decay() -> No
                         payload={"content": "A source"},
                     )
                 )
-                clock.advance(timedelta(seconds=1))
+                # Equal timestamps and per-session sequences still have unique event IDs.
             options: dict[str, Any] = {
                 "session_ids": [first.id, second.id],
                 "since": NOW,
-                "until": clock.now(),
-                "limit": 2,
+                "until": clock.now() + timedelta(seconds=1),
+                "limit": 1,
             }
             page = await uow.events.list_window(owner, **options)
+            tied = await uow.events.list_window(
+                owner, after=(page[-1].created_at, page[-1].id), **options
+            )
+            assert page[0].created_at == tied[0].created_at
+            assert page[0].sequence == tied[0].sequence == 1
+            assert page[0].id != tied[0].id
+            page += tied
             assert [event.session_id for event in page] == [second.id, first.id]
             remaining = await uow.events.list_window(
                 owner, after=(page[-1].created_at, page[-1].id), **options

@@ -24,6 +24,29 @@ from agent_core.runtime.email_tasks import _TaskIO
 from agent_core.runtime.people_imports import ImportSlice, ImportStoppedError
 
 
+def _thread_messages(value: Any) -> list[dict[str, Any]]:
+    """Validate retained and newly fetched untrusted message headers before use."""
+    if not isinstance(value, dict) or not isinstance(value.get("messages"), list):
+        raise ToolTrustRejectedError("mailbox thread has invalid message headers")
+    messages: list[dict[str, Any]] = []
+    for message in value["messages"]:
+        if (
+            not isinstance(message, dict)
+            or not isinstance(message.get("id"), str)
+            or not message["id"]
+            or not isinstance(message.get("from"), str)
+            or not isinstance(message.get("internal_date"), (str, int))
+            or isinstance(message.get("internal_date"), bool)
+        ):
+            raise ToolTrustRejectedError("mailbox thread has invalid message headers")
+        try:
+            datetime.fromtimestamp(int(message["internal_date"]) / 1000, tz=UTC)
+        except (ValueError, OverflowError, OSError) as exc:
+            raise ToolTrustRejectedError("mailbox thread has invalid message date") from exc
+        messages.append(message)
+    return messages
+
+
 class _DiscoveryIO(_TaskIO):
     worker: ImportSlice
 
@@ -168,7 +191,7 @@ class PeopleMailboxImporter:
         )
         matches = [
             message
-            for message in value.get("messages", [])
+            for message in _thread_messages(value)
             if message.get("id") == pending.message_id
         ]
         if len(matches) != 1:
@@ -325,7 +348,7 @@ class PeopleMailboxImporter:
             if progress.thread_page:
                 arguments["page_token"] = progress.thread_page
             page = await self.call(account, "get_thread_page", arguments)
-            messages = page.get("messages")
+            messages = _thread_messages(page)
             if (
                 page.get("thread_id") != thread
                 or not isinstance(messages, list)

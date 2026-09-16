@@ -907,6 +907,26 @@ import SwiftUI
         #expect(model.thread?.isHandled == false)
     }
 
+    /// A stale save response explains why Review & Send cannot create a proposal.
+    @Test func testReviewSendExplainsDraftBecomingStaleDuringSave() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" {
+                return (200, self.draftJSON(revision: 2, body: "Changed body").replacingOccurrences(of: "\"stale\":false", with: "\"stale\":true"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Changed body")
+        await model.prepareSend()
+        #expect(model.draft?.stale == true)
+        #expect(model.draftActionMessage == "This draft is out of date. Refresh the thread and review the draft again.")
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
+    }
+
     /// A failed owner action is reported separately from a failed thread read, so the
     /// composer can show a refusal beside the button that caused it instead of only at
     /// the top of the reading pane, far above the action.

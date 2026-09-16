@@ -207,64 +207,63 @@ class PostgresSessionDeletionRepository:
         message_ids: frozenset[str],
         erased_at: datetime,
     ) -> dict[str, int]:
-        async with self._people.lock(principal):
-            source_ids = await self._people_source_ids(
-                PeopleQuery(
-                    tenant_id=principal.tenant_id,
-                    principal_id=principal.principal_id,
-                    kinds=["source"],
-                    sensitivity_ceiling=Sensitivity.RESTRICTED,
-                    account_id=account_id,
-                    thread_id=thread_id,
-                    message_ids=list(message_ids),
-                    limit=100,
-                )
+        source_ids = await self._people_source_ids(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["source"],
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                account_id=account_id,
+                thread_id=thread_id,
+                message_ids=list(message_ids),
+                limit=100,
             )
-            copy_keys = await self._source_copy_keys(principal, source_ids)
-            result = await erase_postgres_source(
-                self._session, principal, account_id, thread_id, message_ids, erased_at
-            )
-            cleanup_key = email_cleanup_key(principal, account_id, thread_id)
-            await self._erase_source_copies(
-                principal, source_ids, copy_keys, erased_at, request_hash=cleanup_key
-            )
-            await self._people.erase_email_source(principal, account_id, thread_id, message_ids)
-            await self._traces.erase_people(principal, source_ids)
-            pending, artifacts = (
-                await self._session.execute(
-                    select(
-                        func.count(),
-                        func.coalesce(
-                            func.sum(
-                                func.jsonb_array_length(
-                                    PeopleRevisionRow.payload["pending_artifact_ids"]
-                                )
-                            ),
-                            0,
+        )
+        copy_keys = await self._source_copy_keys(principal, source_ids)
+        result = await erase_postgres_source(
+            self._session, principal, account_id, thread_id, message_ids, erased_at
+        )
+        cleanup_key = email_cleanup_key(principal, account_id, thread_id)
+        await self._erase_source_copies(
+            principal, source_ids, copy_keys, erased_at, request_hash=cleanup_key
+        )
+        await self._people.erase_email_source(principal, account_id, thread_id, message_ids)
+        await self._traces.erase_people(principal, source_ids)
+        pending, artifacts = (
+            await self._session.execute(
+                select(
+                    func.count(),
+                    func.coalesce(
+                        func.sum(
+                            func.jsonb_array_length(
+                                PeopleRevisionRow.payload["pending_artifact_ids"]
+                            )
                         ),
-                    )
-                    .select_from(PeopleRevisionRow)
-                    .join(
-                        PeopleHeadRow,
-                        (PeopleHeadRow.tenant_id == PeopleRevisionRow.tenant_id)
-                        & (PeopleHeadRow.principal_id == PeopleRevisionRow.principal_id)
-                        & (PeopleHeadRow.id == PeopleRevisionRow.entity_id)
-                        & (PeopleHeadRow.revision == PeopleRevisionRow.revision),
-                    )
-                    .where(
-                        PeopleHeadRow.tenant_id == principal.tenant_id,
-                        PeopleHeadRow.principal_id == principal.principal_id,
-                        PeopleHeadRow.kind == "erasure",
-                        ~PeopleHeadRow.erased,
-                        PeopleRevisionRow.payload["request_hash"].astext == cleanup_key,
-                        PeopleRevisionRow.payload["state"].astext == "cleanup_pending",
-                    )
+                        0,
+                    ),
                 )
-            ).one()
-            if pending:
-                result["pending_people_cleanup"] = int(pending)
-            result["pending_artifacts"] = max(result.get("pending_artifacts", 0), int(artifacts))
-            return result
+                .select_from(PeopleRevisionRow)
+                .join(
+                    PeopleHeadRow,
+                    (PeopleHeadRow.tenant_id == PeopleRevisionRow.tenant_id)
+                    & (PeopleHeadRow.principal_id == PeopleRevisionRow.principal_id)
+                    & (PeopleHeadRow.id == PeopleRevisionRow.entity_id)
+                    & (PeopleHeadRow.revision == PeopleRevisionRow.revision),
+                )
+                .where(
+                    PeopleHeadRow.tenant_id == principal.tenant_id,
+                    PeopleHeadRow.principal_id == principal.principal_id,
+                    PeopleHeadRow.kind == "erasure",
+                    ~PeopleHeadRow.erased,
+                    PeopleRevisionRow.payload["request_hash"].astext == cleanup_key,
+                    PeopleRevisionRow.payload["state"].astext == "cleanup_pending",
+                )
+            )
+        ).one()
+        if pending:
+            result["pending_people_cleanup"] = int(pending)
+        result["pending_artifacts"] = max(result.get("pending_artifacts", 0), int(artifacts))
+        return result
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
         async with self._people.lock(principal):

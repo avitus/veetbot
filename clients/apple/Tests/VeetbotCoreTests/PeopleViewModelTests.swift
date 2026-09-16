@@ -123,6 +123,28 @@ import Testing
         #expect(model.identityEvidenceError == nil)
     }
 
+    @Test func identityEvidenceRepeatedCursorKeepsNewItemsAndStops() async throws {
+        let first = UUID(), second = UUID()
+        let lock = NSLock(); var requests = 0
+        let client = try makePeopleClient { _ in
+            let count = lock.withLock { requests += 1; return requests }
+            let item = { (id: UUID) in
+                "{\"id\":\"\(id)\",\"revision\":1,\"kind\":\"mention\",\"label\":\"Source mention\",\"support_ids\":[],\"unresolved\":false}"
+            }
+            let rows = count == 1 ? item(first) : item(first) + "," + item(second)
+            return (200, "{\"items\":[\(rows)],\"next_cursor\":\"same\"}")
+        }
+        let model = PeopleDetailViewModel(personID: UUID(), makeAPIClient: { client })
+        await model.loadIdentityEvidence()
+        #expect(model.hasMoreIdentityEvidence)
+        await model.loadIdentityEvidence()
+        #expect(model.identityEvidence.map(\.id) == [first, second])
+        #expect(!model.hasMoreIdentityEvidence)
+        #expect(model.identityEvidenceError == nil)
+        await model.loadIdentityEvidence()
+        #expect(lock.withLock { requests } == 2)
+    }
+
     @Test func removingOneFactKeepsThePersonAndTracksPendingCleanup() async throws {
         let id = UUID(), sessionID = UUID(), factID = UUID(), receiptID = UUID()
         let fact = """

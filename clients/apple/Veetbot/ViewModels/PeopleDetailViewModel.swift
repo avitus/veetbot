@@ -36,7 +36,7 @@ import Foundation
             guard isConnectionValid else { return }
             let page = try await api.peopleIdentityEvidence(personID, cursor: identityEvidenceCursor)
             guard requestID == id else { return }
-            let cursor = try nextPageCursor(page.nextCursor, seen: &identityEvidenceCursors)
+            let cursor = try? nextPageCursor(page.nextCursor, seen: &identityEvidenceCursors)
             var seen = Set(identityEvidence.map(\.id))
             identityEvidence += page.items.filter { seen.insert($0.id).inserted }
             identityEvidenceStarted = true

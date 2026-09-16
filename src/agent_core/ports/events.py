@@ -24,7 +24,10 @@ class EventRepository(Protocol):
         after: tuple[datetime, int] | None = None,
         limit: int = 256,
     ) -> list[EventEnvelope]:
-        """Read a bounded chronological page across explicitly owned source sessions."""
+        """Read owned sessions ordered by (created_at, globally unique event ID).
+
+        ``after`` holds that same pair, never the session-local sequence.
+        """
         ...
 
     async def append(

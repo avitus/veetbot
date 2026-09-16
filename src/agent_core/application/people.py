@@ -537,7 +537,10 @@ class PublicPeopleService:
     ) -> PeoplePage:
         require_scope(principal, "people.read")
         ceiling = self._ceiling(ceiling)
-        normalized = None if not text else normalize_identifier("name", "owner", text)
+        try:
+            normalized = None if not text else normalize_identifier("name", "owner", text)
+        except ValueError as exc:
+            raise ToolValidationError("invalid People directory search") from exc
         if state not in {None, "active", "provisional", "merged"}:
             raise ToolValidationError("invalid People directory state")
         if sort not in {"id", "recent"}:

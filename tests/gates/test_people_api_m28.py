@@ -780,3 +780,22 @@ async def test_identity_evidence_lists_claim_assignments_and_mentions_before_pag
             base_url="http://localhost",
         ) as client:
             assert (await client.get(url, params=query)).status_code == 403
+
+
+@pytest.mark.parametrize("text", [" ", "\t\n", "\u00a0"])
+async def test_people_directory_rejects_blank_search_with_validation_error(text: str) -> None:
+    async with build(
+        settings=replace(memory_settings(), people_enabled=True), storage="memory"
+    ) as app:
+        api = create_app(
+            app.services, app.settings, app.principal, app.new_request_id, app.readiness_probe
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(
+                app=api, raise_app_exceptions=False, client=("127.0.0.1", 1234)
+            ),
+            base_url="http://localhost",
+        ) as client:
+            result = await client.get("/v1/people", params={"ceiling": "sensitive", "text": text})
+        assert result.status_code == 422, result.text
+        assert result.json()["error"]["code"] == "tool_validation_error"

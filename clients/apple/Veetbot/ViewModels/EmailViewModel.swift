@@ -731,7 +731,11 @@ public final class EmailViewModel: ObservableObject {
             guard currentEdit?.isDirty == true else { break }
             guard await saveDraft() else { return }
         }
-        guard let draft, !draft.stale else { return }
+        guard let draft else { return }
+        guard !draft.stale else {
+            draftActionError = "This draft is out of date. Refresh the thread and review the draft again."
+            return
+        }
         // Never freeze a revision that is not the text on screen; a stalled save is
         // reported instead of leaving the action looking like it did nothing.
         guard currentEdit?.isDirty == false else {

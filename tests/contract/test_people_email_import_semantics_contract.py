@@ -25,8 +25,17 @@ from tests.integration.m2_support import memory_settings
 
 
 @pytest.mark.parametrize(
-    "budget_pause,excluded,passages",
-    [(False, False, 1), (True, False, 1), (False, True, 1), (False, False, 4)],
+    "budget_pause,excluded,passages,malformed",
+    [
+        (False, False, 1, None),
+        (True, False, 1, None),
+        (False, True, 1, None),
+        (False, False, 4, None),
+        (False, False, 1, "invalid"),
+        (False, False, 1, "naive"),
+        (False, False, 1, "missing"),
+        (False, False, 1, "reader"),
+    ],
 )
 async def test_email_import_uses_original_date_one_assessment_and_shared_budget(
     monkeypatch: pytest.MonkeyPatch,
@@ -34,6 +43,7 @@ async def test_email_import_uses_original_date_one_assessment_and_shared_budget(
     budget_pause: bool,
     excluded: bool,
     passages: int,
+    malformed: str | None,
 ) -> None:
     import json
     from uuid import uuid4
@@ -242,6 +252,30 @@ async def test_email_import_uses_original_date_one_assessment_and_shared_budget(
         preview = await people.create_import(
             owner, request, key="email-preview", ceiling=Sensitivity.SENSITIVE
         )
+        if malformed:
+            from typing import Any
+
+            from agent_core.adapters.persistence.email import InMemoryEmailStore
+            from agent_core.domain.email import EmailRecord
+
+            original_window = InMemoryEmailStore.list_semantic_window
+
+            async def malformed_page(
+                store: InMemoryEmailStore, *args: Any, **kwargs: Any
+            ) -> list[EmailRecord]:
+                if malformed == "reader":
+                    raise ValueError("invalid retained timestamp")
+                rows = await original_window(store, *args, **kwargs)
+                for row in rows:
+                    if malformed == "missing":
+                        row.payload.pop("evidence_at")
+                    else:
+                        row.payload["evidence_at"] = (
+                            "2026-01-01T00:00:00" if malformed == "naive" else "invalid"
+                        )
+                return rows
+
+            monkeypatch.setattr(InMemoryEmailStore, "list_semantic_window", malformed_page)
         result = await asyncio.wait_for(
             people.create_import(
                 owner,
@@ -257,6 +291,13 @@ async def test_email_import_uses_original_date_one_assessment_and_shared_budget(
             ),
             timeout=5,
         )
+        if malformed:
+            assert result.state == "failed"
+            assert result.error_code == "invalid_source"
+            assert result.records_processed == 0 and result.failures == 1
+            assert not provider.requests
+            assert not result.analysis_complete
+            return
         if excluded:
             assert result.state == "completed" and result.source_read_complete
             assert result.records_processed == 0 and result.records_excluded == 1

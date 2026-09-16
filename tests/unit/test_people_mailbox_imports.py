@@ -32,6 +32,10 @@ from tests.gates.test_email_runtime_m26 import _mailbox_factory
         "retry",
         "non_object_thread",
         "missing_thread_id",
+        "non_object_message",
+        "missing_message_id",
+        "missing_sender",
+        "missing_date",
     ],
 )
 async def test_mailbox_import_fetches_old_source_before_analysis(
@@ -76,8 +80,15 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
         ),
         ("search_threads", {"threads": [{"thread_id": "t1"}], "next_page_token": None}),
     ]
-    malformed = case in {"non_object_thread", "missing_thread_id"}
-    if malformed:
+    malformed = case in {
+        "non_object_thread",
+        "missing_thread_id",
+        "non_object_message",
+        "missing_message_id",
+        "missing_sender",
+        "missing_date",
+    }
+    if case in {"non_object_thread", "missing_thread_id"}:
         values[1][1]["threads"] = ["invalid" if case == "non_object_thread" else {}]
     for index in range(count):
         if index == 6:
@@ -99,12 +110,20 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
             "body_complete": not chunk,
             "next_body_offset": len(message["body"].encode()) if chunk else None,
         }
+        if case in {"missing_message_id", "missing_sender", "missing_date"}:
+            item.pop(
+                {
+                    "missing_message_id": "id",
+                    "missing_sender": "from",
+                    "missing_date": "internal_date",
+                }[case]
+            )
         values.append(
             (
                 "get_thread_page",
                 {
                     "thread_id": "t1",
-                    "messages": [item],
+                    "messages": ["invalid" if case == "non_object_message" else item],
                     "next_page_token": f"page{index + 1}" if index + 1 < count else None,
                 },
             )
@@ -323,3 +342,47 @@ async def test_mailbox_import_fetches_old_source_before_analysis(
             assert "Alex prefers tea" not in job.model_dump_json()
             original = await uow.email.get(owner, "account", account)
             assert original and not original.payload["history_complete"]
+
+
+@pytest.mark.parametrize(
+    "payload", [[], {"messages": [None]}, {"messages": "bad"}, {"messages": [{"id": "m1"}]}]
+)
+async def test_resumed_mailbox_header_rejects_invalid_retained_shapes(payload: Any) -> None:
+    import json
+    from types import SimpleNamespace
+    from typing import cast
+
+    from agent_core.domain.errors import ToolTrustRejectedError
+    from agent_core.domain.events import NewEvent
+    from agent_core.domain.messages import TextPart, ToolResultItem
+    from agent_core.domain.people_imports import PeopleMailboxMessage
+    from agent_core.domain.policies import TrustLevel
+    from agent_core.runtime.people_mailbox_imports import PeopleMailboxImporter
+    from tests.contract.support import SESSION_ID, memory_uow_factory, principal
+
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="tool.call.completed",
+                actor_type="runtime",
+                payload={
+                    "name": "mcp.gmail_read.get_thread_page",
+                    "result_item": ToolResultItem(
+                        call_id="header",
+                        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                        content=[TextPart(text=json.dumps(payload))],
+                    ).model_dump(mode="json"),
+                },
+            )
+        )
+    importer = object.__new__(PeopleMailboxImporter)
+    importer.context = cast(Any, SimpleNamespace(uow_factory=factory, principal=principal()))
+    importer.job = cast(Any, SimpleNamespace(account_servers={"work": {"read": "gmail_read"}}))
+    pending = PeopleMailboxMessage(
+        message_id="m1", header_session_id=SESSION_ID, header_sequence=event.sequence, offset=1
+    )
+    with pytest.raises(ToolTrustRejectedError):
+        await importer.header("work", pending)

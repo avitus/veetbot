@@ -47,7 +47,14 @@ def identifier_occurs(text: str, value: str, kind: str = "name") -> bool:
     """Match a complete identifier, never a substring of another person's name or address."""
     normalized = " ".join(unicodedata.normalize("NFKC", text).casefold().split())
     value = " ".join(unicodedata.normalize("NFKC", value).casefold().split())
-    boundary = r"[\w.+@-]" if kind in {"email", "handle"} else r"\w"
+    if kind == "phone":
+        # An explicit international prefix is required; formatting is not identity.
+        digits = re.sub(r"[ ().-]", "", value)
+        if not re.fullmatch(r"\+[0-9]{7,15}", digits):
+            return False
+        tokens = re.finditer(r"(?<![\w+])\+[0-9](?:[0-9 ().-]*[0-9])?(?![\w+])", normalized)
+        return any(re.sub(r"[ ().-]", "", token.group()) == digits for token in tokens)
+    boundary = r"[\w.+@-]" if kind in {"email", "handle"} else r"[\w'\u2019\u02bc\u2010\u2011-]"
     return bool(
         value and re.search(rf"(?<!{boundary}){re.escape(value)}(?!{boundary})", normalized)
     )

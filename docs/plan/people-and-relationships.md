@@ -224,7 +224,10 @@ not make a forwarded statement about her true.
 5. Keep unresolved candidates when multiple identities fit. Ask a targeted
    question only when choosing is necessary for the current task.
 
-Names, titles, domains, shared contacts, semantic similarity, and an LLM score
+Source matching requires complete identifiers: international phone formatting
+may normalize without accepting fragments, and name hyphens/apostrophes remain
+part of the name. Provider-local evidence keys cannot claim the reserved `owner`
+endpoint. Names, titles, domains, shared contacts, semantic similarity, and an LLM score
 alone cannot merge people. A display name copied from an email is not verified
 identity. A new personal address may create a provisional identity; role
 mailboxes, mailing lists, automated senders, and shared phones remain contact
@@ -708,6 +711,11 @@ search accepts only owner-confirmed email identifiers valid in the selected
 window; exact per-passage matching still applies before analysis. Read failures
 preserve the current cursor for an explicit retry, and cancellation or changed
 account/identity authority prevents subsequent reads and source registration.
+
+Historical Chat import cursors pair the source timestamp with the globally unique
+event ID, not the session-local sequence. Invalid retained email timestamps fail
+the import with `invalid_source` before analysis. Newly fetched and replayed Gmail
+headers undergo the same object, required-field and date validation.
 
 Historical import orders evidence chronologically and preserves original dates.
 A late-imported old assertion cannot supersede a newer owner correction.

@@ -41,6 +41,24 @@ class ImportStoppedError(ConflictError):
     """The job no longer authorizes another provider call or derived write."""
 
 
+class InvalidImportSourceError(ImportStoppedError):
+    """Retained source metadata cannot be ordered or safely analyzed."""
+
+
+def email_evidence_time(record: EmailRecord) -> datetime:
+    """Require an aware source timestamp without exposing source payloads."""
+    try:
+        raw = record.payload["evidence_at"]
+        if not isinstance(raw, str):
+            raise ValueError("timestamp must be text")
+        at = datetime.fromisoformat(raw)
+        if at.tzinfo is None or at.utcoffset() is None:
+            raise ValueError("timestamp must include its time zone")
+        return at
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InvalidImportSourceError("invalid email evidence timestamp") from exc
+
+
 def reservation_cost(request: ModelRequest, model: ResolvedModel) -> Decimal:
     """Reserve the advertised context/output maximum, including cache and reasoning."""
     price = model.pricing
@@ -396,20 +414,23 @@ class ImportSlice:
                     if remaining and job.scope.session_ids and retry_source is None
                     else []
                 )
-                mail = (
-                    await uow.email.list_semantic_window(
-                        context.principal,
-                        account_ids=job.scope.account_ids,
-                        since=job.scope.since,
-                        until=job.scope.until,
-                        after=(job.email_after_at, job.email_after_key)
-                        if job.email_after_at is not None and job.email_after_key is not None
-                        else None,
-                        limit=min(100, remaining),
+                try:
+                    mail = (
+                        await uow.email.list_semantic_window(
+                            context.principal,
+                            account_ids=job.scope.account_ids,
+                            since=job.scope.since,
+                            until=job.scope.until,
+                            after=(job.email_after_at, job.email_after_key)
+                            if job.email_after_at is not None and job.email_after_key is not None
+                            else None,
+                            limit=min(100, remaining),
+                        )
+                        if remaining and job.scope.account_ids and retry_source is None
+                        else []
                     )
-                    if remaining and job.scope.account_ids and retry_source is None
-                    else []
-                )
+                except ValueError as exc:
+                    raise InvalidImportSourceError("invalid retained email source") from exc
                 if retry_source is not None:
                     if retry_source.session_id not in job.scope.session_ids:
                         raise ImportStoppedError("retry source is outside the approved scope")
@@ -438,7 +459,7 @@ class ImportSlice:
                 (event.created_at, f"chat:{event.id:020d}", event) for event in events
             ] + [
                 (
-                    datetime.fromisoformat(str(record.payload["evidence_at"])),
+                    email_evidence_time(record),
                     f"email:{record.key}",
                     record,
                 )
@@ -540,7 +561,7 @@ class ImportSlice:
                 job = await self.read(uow)
                 if job.state == "running":
                     await self.save(uow, job, state="queued", error_code="waiting_for_chat")
-        except ImportStoppedError:
+        except ImportStoppedError as exc:
             async with context.uow_factory() as uow, uow.people.lock(context.principal):
                 job = await self.read(uow)
                 if job.state == "running":
@@ -549,7 +570,9 @@ class ImportSlice:
                         job,
                         state="failed",
                         failures=job.failures + 1,
-                        error_code="authority_changed",
+                        error_code="invalid_source"
+                        if isinstance(exc, InvalidImportSourceError)
+                        else "authority_changed",
                     )
         return finished("People import progress has been saved.")
 
