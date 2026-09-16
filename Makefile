@@ -107,6 +107,11 @@ test-apple-ui:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarShowsFivePrioritiesWithoutScrolling \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarResizesWithItsDivider \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderSectionsGroupConversationsAndOlderServersStayFlat \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testNewFolderSheetCreatesAFolder \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingAFolderThroughItsMenuUpdatesTheSection \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAcceptingASuggestedFolderFilesTheConversation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testDecliningASuggestedFolderRemovesIt \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM= || exit $$?; \
 	iphone_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \

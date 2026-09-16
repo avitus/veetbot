@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:631` named `ApprovalService` as one of
+`bootstrap-and-composition.md:632` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -1909,5 +1909,5 @@ eligibility, the bounded open set, durable decline, withdrawal, grounded
 grouping with a deterministic fallback, atomic acceptance, exact scopes under
 the flag, content-free prompts and logs, and native degradation. The design
 touches no roadmap item: it adds no embedding, no retrieval arm and no memory
-read. Gate bindings remain pending until executable implementation evidence
-lands; the verified ceiling remains 12.
+read. Every gate is bound to an executable check as of 2026-09-16; hosted CI,
+review and delivery evidence remain open and the verified ceiling remains 12.

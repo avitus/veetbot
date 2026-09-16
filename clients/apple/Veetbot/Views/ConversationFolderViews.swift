@@ -16,7 +16,10 @@ enum FolderEditorRequest: Identifiable {
     }
 }
 
-/// A folder section's header: name, count, and the rename/delete actions.
+/// A folder section's header: name and count, with rename and delete in the
+/// context menu (a right-click on Mac, a long press on iPhone and iPad). A
+/// disclosure-group label collapses into one accessibility element on macOS,
+/// so the header is one combined element carrying the folder identifier.
 struct FolderSectionLabel: View {
     let folder: FolderView
     let count: Int
@@ -32,27 +35,16 @@ struct FolderSectionLabel: View {
                 .appFont(.caption)
                 .foregroundColor(.secondary)
                 .accessibilityHidden(true)
-            Menu {
-                Button("Rename…", action: onRename)
-                    .accessibilityIdentifier("sidebar.folder.rename")
-                Button("Delete Folder", role: .destructive, action: onDelete)
-                    .accessibilityIdentifier("sidebar.folder.delete")
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .foregroundColor(.secondary)
-            }
-            .menuIndicator(.hidden)
-            #if os(macOS)
-            .menuStyle(.borderlessButton)
-            #endif
-            .accessibilityLabel("Folder actions for \(folder.name)")
-            .accessibilityIdentifier("sidebar.folder.menu.\(folder.id.uuidString)")
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(folder.name)
         .accessibilityIdentifier("sidebar.folder.\(folder.id.uuidString)")
         .contextMenu {
             Button("Rename…", action: onRename)
+                .accessibilityIdentifier("sidebar.folder.rename")
             Button("Delete Folder", role: .destructive, action: onDelete)
+                .accessibilityIdentifier("sidebar.folder.delete")
         }
     }
 }

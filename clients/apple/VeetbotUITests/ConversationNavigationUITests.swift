@@ -286,6 +286,101 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Activates a control using the platform's native input action.
+    // MARK: - Conversation folders (Milestone 29)
+
+    private static let folderID = "00000000-0000-0000-0000-000000000F01"
+    private static let proposedFolderID = "00000000-0000-0000-0000-000000000F02"
+    private static let proposalID = "00000000-0000-0000-0000-000000000E01"
+
+    private func launchWithFolders() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-folders")
+        app.launch()
+    }
+
+    private func element(_ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any)[identifier]
+    }
+
+    private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval = 5) {
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
+        wait(for: [gone], timeout: timeout)
+    }
+
+    private func typeIntoFolderNameField(_ text: String) {
+        let field = element("folder.name")
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        activate(field)
+        #if os(macOS)
+        field.typeKey("a", modifierFlags: .command)
+        #endif
+        field.typeText(text)
+        activate(element("folder.save"))
+    }
+
+    /// A folder section groups its conversations under a collapsible header, and
+    /// the older-server journey (every other test) shows no folder control at all.
+    func testFolderSectionsGroupConversationsAndOlderServersStayFlat() {
+        let historicalRow = element("sidebar.session.00000000-0000-0000-0000-000000000123")
+        XCTAssertTrue(historicalRow.waitForExistence(timeout: 10))
+        XCTAssertFalse(element("sidebar.new-folder").exists)
+        XCTAssertFalse(element("sidebar.session.move.00000000-0000-0000-0000-000000000123").exists)
+
+        launchWithFolders()
+        XCTAssertTrue(element("sidebar.folder.\(Self.folderID)").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Travel"].exists)
+        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000456").waitForExistence(timeout: 5))
+        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000123").exists)
+        XCTAssertTrue(element("sidebar.new-folder").exists)
+        XCTAssertTrue(element("sidebar.proposal.\(Self.proposalID)").exists)
+    }
+
+    func testNewFolderSheetCreatesAFolder() {
+        launchWithFolders()
+        let newFolder = element("sidebar.new-folder")
+        XCTAssertTrue(newFolder.waitForExistence(timeout: 10))
+        activate(newFolder)
+        typeIntoFolderNameField("Errands")
+        XCTAssertTrue(element("sidebar.folder.\(Self.proposedFolderID)").waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Errands"].exists)
+    }
+
+    #if os(macOS)
+    func testRenamingAFolderThroughItsMenuUpdatesTheSection() {
+        launchWithFolders()
+        let header = element("sidebar.folder.\(Self.folderID)")
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        header.rightClick()
+        let rename = app.menuItems["Rename…"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        rename.click()
+        typeIntoFolderNameField("Trips")
+        XCTAssertTrue(app.staticTexts["Trips"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Travel"].exists)
+    }
+    #endif
+
+    func testAcceptingASuggestedFolderFilesTheConversation() {
+        launchWithFolders()
+        let proposal = element("sidebar.proposal.\(Self.proposalID)")
+        XCTAssertTrue(proposal.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["New folder “Lisbon Trip”"].exists)
+        activate(element("sidebar.proposal.accept.\(Self.proposalID)"))
+        XCTAssertTrue(element("sidebar.folder.\(Self.proposedFolderID)").waitForExistence(timeout: 10))
+        waitForDisappearance(of: proposal)
+        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000123").exists)
+    }
+
+    func testDecliningASuggestedFolderRemovesIt() {
+        launchWithFolders()
+        let proposal = element("sidebar.proposal.\(Self.proposalID)")
+        XCTAssertTrue(proposal.waitForExistence(timeout: 10))
+        activate(element("sidebar.proposal.decline.\(Self.proposalID)"))
+        waitForDisappearance(of: proposal)
+        XCTAssertFalse(element("sidebar.folder.\(Self.proposedFolderID)").exists)
+        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000123").exists)
+    }
+
     private func activate(_ element: XCUIElement) {
         #if os(macOS)
         element.click()

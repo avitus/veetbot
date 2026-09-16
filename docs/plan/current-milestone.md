@@ -72,7 +72,8 @@ title: Current Milestone
   single-parent folders over chat conversations, owner-resolved grouping
   proposals from a maintenance pass, grounded model-assisted grouping with a
   deterministic fallback, scoped routes behind a default-off flag, and the
-  native sidebar. Nothing is implemented; the milestone is in progress.
+  native sidebar. All twelve gates are bound to executable checks; hosted
+  CI, review and delivery evidence remain open and the milestone is in progress.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -474,5 +475,7 @@ single-parent folders as server-owned session state; owner-resolved grouping
 proposals with a bounded open set, durable decline and withdrawal; grounded
 model-assisted grouping with a deterministic lexical fallback; nine routes on
 the session scopes behind a default-off flag; and native sidebar folder
-sections with proposal review. This independent workstream is in progress;
+sections with proposal review. The implementation landed on 2026-09-16 with
+every gate bound to an executable check; exact-head hosted CI, review and
+delivery evidence remain open. This independent workstream is in progress;
 the verified ceiling remains 12.

@@ -432,9 +432,9 @@ every reconciliation, and the list of folders and open proposals is fetched
 with the history and held in memory. The sidebar renders, in order, a
 suggested-folders section with one row per open proposal — the proposed name
 or target, the member titles resolved from the cached history, and accept and
-decline controls — then one collapsible section per folder with a rename and
-delete menu, then the flat history of unfiled conversations, then a
-new-folder control. Each conversation row gains a move menu listing the
+decline controls — then one collapsible section per folder whose context
+menu renames or deletes it, then the flat history of unfiled conversations,
+then a new-folder control. Each conversation row gains a move menu listing the
 folders, an unfile action, and a new-folder action. Creating and renaming use
 a sheet with a text field and an inline error, so a duplicate name or a
 refused value is shown where it was typed; deleting a folder uses the same
@@ -498,7 +498,7 @@ Its seven knobs join the executable inventory and the knob table in
 bootstrap-and-composition.md. One environment key,
 `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and the pass together,
 defaults off, and appears in `.env.example` in the same change
-(bootstrap-and-composition.md:508-513).
+(bootstrap-and-composition.md:509-514).
 
 **Disabling.** Unsetting the flag hides the routes and stops the pass; the
 tables, folders, memberships, and proposals remain, `SessionView.folder_id`
@@ -652,3 +652,21 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
 2. Whether a folder should collapse by default once it exceeds some size.
    The sidebar keeps sections expanded and remembers the owner's choice per
    device; a default can follow the unfiled-share and folder-size metrics.
+
+## Implementation checkpoint: 2026-09-16
+
+The build sequence landed in five commits on the day of authorization. The
+domain types, the `FolderStore` port, both adapters under
+`tests/contract/test_folder_store_contract.py`, and migration `a4f7c1e9d2b3`
+bind gate 1 through the PostgreSQL parity test. The folder service and the nine
+routes bind gates 2, 3, 7, 9, and 10 through
+`tests/gates/test_folder_api_boundary_m29.py`. The lexical grouper, the
+model-assisted grouper, and the pass bind gates 4, 5, 6, 8, and 11 through the
+unit suites under `tests/unit/`, with `tests/gates/test_folder_m29.py`
+exercising the composed pass through the maintenance worker. The native
+sidebar binds gate 12 through `tests/native/test_folders_m29.py`, which runs
+the Swift package cases and the macOS journeys on a full Xcode installation and
+never passes on a skipped lane. The `folders/profiles.yaml` document ships the
+seven knobs of the configuration section and joins the executable inventory.
+Registration is not release evidence: exact-head hosted CI, review, and
+production delivery remain the open items in project state.

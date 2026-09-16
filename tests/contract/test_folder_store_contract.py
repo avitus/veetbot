@@ -6,6 +6,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.persistence.memory import InMemoryFolderStore
+from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.folders import (
     FolderProposal,
@@ -69,7 +70,7 @@ def _store() -> InMemoryFolderStore:
     return InMemoryFolderStore()
 
 
-def _foreign():
+def _foreign() -> Principal:
     return principal().model_copy(update={"principal_id": "other"})
 
 

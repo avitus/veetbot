@@ -93,7 +93,9 @@ Run the test targets from the repository root. Both require full Xcode so a
 Command Line Tools build cannot be mistaken for an executed Swift Testing run.
 `make test-apple-ui` selects available iPhone and iPad simulators and exercises
 opening and switching durable historical transcripts and starting a new
-conversation. Its launch fixture is debug-only, suppresses notification
+conversation, and the `--ui-testing-folders` journeys file, rename, accept and
+decline conversation folders while the default fixture proves an older server
+stays flat. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
 or credential.
 The keyboard-dismissal case holds its fake submission pending until teardown,
@@ -111,7 +113,10 @@ coverage remain readable at enlarged text sizes.
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
 same `SessionHistoryStore` contract backed by an atomic Application Support JSON
-file. Neither store is authoritative server state. The app reconciles both from
+file. Both carry the optional server-assigned folder identifier; the SwiftData
+column is an optional attribute added by automatic lightweight migration, and a
+failed migration falls back to the file store as before. Neither store is
+authoritative server state. The app reconciles both from
 the paginated server session index on connect, foreground entry, and a periodic
 poll. The row action is `Delete Everywhere`: it deletes the authoritative
 session first and removes local state only after the server succeeds. Active

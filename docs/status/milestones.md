@@ -243,11 +243,11 @@ functionality or release. Production delivery still follows exact-head CI/review
 Twelve gates; independent workstream under ADR-0102. Flat, single-parent
 folders over chat conversations as server-owned state; a maintenance pass
 proposes groupings the owner accepts or declines; nothing files a conversation
-without the owner's acceptance.
+without the owner's acceptance. The schema, both store adapters, the manual
+operations, the proposal lifecycle, the grounded grouping with its lexical
+fallback, the routes behind the flag and the native sidebar are implemented
+with every gate bound to an executable check.
 
-- [ ] Land the additive schema, the folder store on both adapters and the manual folder operations
-- [ ] Implement the proposal lifecycle, grounded grouping with the deterministic fallback and the maintenance pass
-- [ ] Deliver the scoped routes, the flag, the native sidebar sections and proposal review
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
 ## Authorized

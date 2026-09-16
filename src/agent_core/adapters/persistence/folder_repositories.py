@@ -205,7 +205,7 @@ class PostgresFolderStore:
                 SessionFolderMembershipRow.principal_id == principal.principal_id,
             )
         )
-        return dict(rows.all())
+        return {row.session_id: row.folder_id for row in rows.all()}
 
     async def members_of(self, folder_id: UUID, principal: Principal) -> list[UUID]:
         await self._owned_folder_row(folder_id, principal)

@@ -169,7 +169,8 @@ The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
 versions predate SwiftData, so iOS 15–16 and macOS 12–13 use an atomic
 Application Support file behind the same store protocol. Both contain only
-`session_id`, title, agent identity, timestamps, and the last known run ID. The
+`session_id`, title, agent identity, timestamps, the last known run ID, and the
+server-assigned folder identifier. The
 client follows pagination until the server returns no next cursor, rejects a
 repeated cursor as an invalid response, and reconciles that complete index after
 connecting, whenever it returns to the foreground, and every 30 seconds while
@@ -188,6 +189,25 @@ pruning also clears the process-local artifact cache.
 Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
+
+Conversation folders (Milestone 29, `thread-folders.md`) are server state the
+sidebar mirrors, never a local organization. The index's `folder_id` is merged
+into the cached row on every reconciliation and the server's value wins, nil
+included, so a move made on another device lands on the next poll. A server
+whose index carries the `folder_id` key is asked for its folders and open
+proposals with the history; both are held in memory only. The sidebar then
+renders suggested folders with accept and decline, one collapsible section per
+folder whose context menu (a right-click on Mac, a long press on iPhone and
+iPad) renames or deletes it, the unfiled history, and a new-folder control,
+and every row gains a move menu listing the folders. Create and
+rename use a sheet whose refused or duplicate name is shown inline, never in
+the global error banner; deleting a folder uses the same confirmation idiom as
+deleting a conversation and says that the conversations return to history.
+Unfiling sends an explicit null, so an omitted field can never unfile a
+conversation. Against a server whose index lacks the key, or that answers 404
+or 405 on the folder list, the client makes no further folder request, keeps
+every control hidden, and renders exactly the flat history; that unavailability
+is contained in reconciliation and never surfaces as an error.
 
 In compact iPhone and iPad layouts, sidebar rows push an activating chat
 destination before selecting a historical session or resetting to a new

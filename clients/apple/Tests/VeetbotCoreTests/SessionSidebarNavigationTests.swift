@@ -209,7 +209,6 @@ import Testing
         }
         for prefix in [
             "sidebar.folder.\\(",
-            "sidebar.folder.menu.\\(",
             "sidebar.session.move.\\(",
             "sidebar.session.move.to.\\(",
             "sidebar.proposal.\\(",

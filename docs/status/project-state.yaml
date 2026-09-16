@@ -67,10 +67,20 @@ milestones:
     - Nested or shared folders, Email-mode threads, automatic filing without acceptance
     - Embeddings or semantic search over threads, folder text in conversation prompts
     open_items:
-    - Land the additive schema, the folder store on both adapters and the manual folder operations
-    - Implement the proposal lifecycle, grounded grouping with the deterministic fallback and the maintenance pass
-    - Deliver the scoped routes, the flag, the native sidebar sections and proposal review
     - Exact-head hosted CI and explicitly authorized review and production delivery evidence
+    evidence:
+    - check: uv run pytest tests/unit/test_folder_domain.py tests/unit/test_folder_clustering.py tests/unit/test_folder_grouping.py tests/unit/test_folder_proposals.py tests/contract/test_folder_store_contract.py tests/gates/test_folder_api_boundary_m29.py tests/gates/test_folder_m29.py
+      outcome: pass
+      detail: Domain, lexical and model-assisted grouping, the pass, the store contract, the nine-route boundary and the composed end-to-end gate on 2026-09-16 (local).
+    - check: uv run pytest tests/integration/test_migrations.py tests/integration/test_folder_postgres_m29.py (DATABASE_URL pointing at the disposable compose PostgreSQL on port 55432)
+      outcome: pass
+      detail: Migration a4f7c1e9d2b3 upgrades with an empty autogenerate diff and round-trips; the PostgreSQL store passes parity including the membership cascade on session deletion (local, 2026-09-16).
+    - check: make test-apple
+      outcome: pass
+      detail: 349 package tests including the folder grouping, wire model, transport, store and view-model cases (local, 2026-09-16).
+    - check: xcodebuild test -project clients/apple/Veetbot.xcodeproj -scheme Veetbot -destination platform=macOS with the five folder journeys (tests/native/test_folders_m29.py::test_folder_native_journeys)
+      outcome: pass
+      detail: Folder sections and the flat older-server sidebar, the new-folder sheet, rename through the context menu, and accepting and declining a suggested folder, on macOS (local, 2026-09-16); iPhone and iPad simulator runs of these journeys are not yet recorded.
   '28':
     title: People and relationship memory
     status: in_progress
