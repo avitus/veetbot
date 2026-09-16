@@ -29,7 +29,8 @@ PACKAGE_CASES = (
     "testSessionViewDecodesFolderIDAbsentNullAndPresent",
 )
 MAC_JOURNEYS = (
-    "testFolderSectionsGroupConversationsAndOlderServersStayFlat",
+    "testOlderServerSidebarStaysFlatWithoutFolderControls",
+    "testFolderSectionsGroupConversations",
     "testNewFolderSheetCreatesAFolder",
     "testRenamingAFolderThroughItsMenuUpdatesTheSection",
     "testAcceptingASuggestedFolderFilesTheConversation",

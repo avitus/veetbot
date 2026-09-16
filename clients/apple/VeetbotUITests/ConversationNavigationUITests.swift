@@ -328,10 +328,9 @@ final class ConversationNavigationUITests: XCTestCase {
     private static let proposedFolderID = "00000000-0000-0000-0000-000000000F02"
     private static let proposalID = "00000000-0000-0000-0000-000000000E01"
 
-    private func launchWithFolders() {
-        app.terminate()
+    /// Every folder journey adds the fixture argument and launches once.
+    private func addFolderFixture() {
         app.launchArguments.append("--ui-testing-folders")
-        app.launch()
     }
 
     private func element(_ identifier: String) -> XCUIElement {
@@ -354,15 +353,22 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(element("folder.save"))
     }
 
-    /// A folder section groups its conversations under a collapsible header, and
-    /// the older-server journey (every other test) shows no folder control at all.
-    func testFolderSectionsGroupConversationsAndOlderServersStayFlat() {
+    /// The default fixture is an older server whose index has no `folder_id`
+    /// key: the sidebar stays flat and shows no folder control at all.
+    func testOlderServerSidebarStaysFlatWithoutFolderControls() {
+        app.launch()
         let historicalRow = element("sidebar.session.00000000-0000-0000-0000-000000000123")
         XCTAssertTrue(historicalRow.waitForExistence(timeout: 10))
         XCTAssertFalse(element("sidebar.new-folder").exists)
         XCTAssertFalse(element("sidebar.session.move.00000000-0000-0000-0000-000000000123").exists)
+        XCTAssertFalse(element("sidebar.proposal.\(Self.proposalID)").exists)
+    }
 
-        launchWithFolders()
+    /// A folder section groups its conversations under a collapsible header
+    /// beside the suggested folders and the new-folder control.
+    func testFolderSectionsGroupConversations() {
+        addFolderFixture()
+        app.launch()
         XCTAssertTrue(element("sidebar.folder.\(Self.folderID)").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Travel"].exists)
         XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000456").waitForExistence(timeout: 5))
@@ -372,7 +378,8 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testNewFolderSheetCreatesAFolder() {
-        launchWithFolders()
+        addFolderFixture()
+        app.launch()
         let newFolder = element("sidebar.new-folder")
         XCTAssertTrue(newFolder.waitForExistence(timeout: 10))
         activate(newFolder)
@@ -383,7 +390,8 @@ final class ConversationNavigationUITests: XCTestCase {
 
     #if os(macOS)
     func testRenamingAFolderThroughItsMenuUpdatesTheSection() {
-        launchWithFolders()
+        addFolderFixture()
+        app.launch()
         let header = element("sidebar.folder.\(Self.folderID)")
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         header.rightClick()
@@ -397,7 +405,8 @@ final class ConversationNavigationUITests: XCTestCase {
     #endif
 
     func testAcceptingASuggestedFolderFilesTheConversation() {
-        launchWithFolders()
+        addFolderFixture()
+        app.launch()
         let proposal = element("sidebar.proposal.\(Self.proposalID)")
         XCTAssertTrue(proposal.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["New folder “Lisbon Trip”"].exists)
@@ -408,7 +417,8 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     func testDecliningASuggestedFolderRemovesIt() {
-        launchWithFolders()
+        addFolderFixture()
+        app.launch()
         let proposal = element("sidebar.proposal.\(Self.proposalID)")
         XCTAssertTrue(proposal.waitForExistence(timeout: 10))
         activate(element("sidebar.proposal.decline.\(Self.proposalID)"))
