@@ -100,6 +100,14 @@ identifies every tool by its exact name with its arguments, result, status, and
 individual risk still accessible. This remains a client presentation change;
 execution, policy, and durable events are unchanged.
 
+## Native test lane split (2026-09-16)
+
+Point 9's hosted lane now runs on two pinned-Xcode macOS executors at once. The
+`apple` job runs `make test-apple` and the macOS UI cases; the `apple-ios` job
+runs the iPhone and iPad cases. Server release packaging requires both jobs, so
+native-client regressions still block delivery. No case was removed; the split
+shortens the lane's wall-clock time by overlapping work that ran in sequence.
+
 ## Consequences
 
 - Apple users gain a native conversation, approval, question, working-state,

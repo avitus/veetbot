@@ -75,6 +75,7 @@ public final class EmailViewModel: ObservableObject {
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let refreshNanoseconds: UInt64
     private let now: () -> Date
+    private let statusBackoff: @Sendable (UInt64) async throws -> Void
     private var active = false
     private var activation = UUID()
     private var generation = UUID()
@@ -109,15 +110,18 @@ public final class EmailViewModel: ObservableObject {
     private var archiveStates: [UUID: ArchiveMailboxState] = [:]
     private var archiveReadErrors: Set<UUID> = []
 
-    /// Inject the API factory, refresh cadence, and clock used for foreground budget pauses.
+    /// Inject the API factory, refresh cadence, clock used for foreground budget pauses,
+    /// and the wait before each refresh-status read.
     public init(
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
         refreshNanoseconds: UInt64 = 60_000_000_000,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
     ) {
         self.makeAPIClient = makeAPIClient
         self.refreshNanoseconds = refreshNanoseconds
         self.now = now
+        self.statusBackoff = statusBackoff
     }
 
     deinit {
@@ -428,7 +432,7 @@ public final class EmailViewModel: ObservableObject {
             while self.acceptsRead(connection: connection, activation: foreground) {
                 do {
                     let delay = UInt64(2 << consecutiveFailures) * 1_000_000_000
-                    try await Task.sleep(nanoseconds: delay)
+                    try await self.statusBackoff(delay)
                     guard self.acceptsRead(connection: connection, activation: foreground), let api = self.makeAPIClient() else { return }
                     let operation = try await api.emailOperation(id)
                     guard self.acceptsRead(connection: connection, activation: foreground) else { return }

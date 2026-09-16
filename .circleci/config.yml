@@ -27,6 +27,23 @@ commands:
           paths:
             - ~/.cache/uv
 
+  store_apple_test_results:
+    parameters:
+      platform:
+        type: string
+    steps:
+      - run:
+          name: Archive Apple test result bundles
+          when: always
+          command: |
+            # One archive uploads in seconds; the bundles hold thousands of files.
+            if [[ -d build/apple-test-results ]]; then
+              COPYFILE_DISABLE=1 tar -cf build/apple-test-results.tar -C build apple-test-results
+            fi
+      - store_artifacts:
+          path: build/apple-test-results.tar
+          destination: apple-test-results-<< parameters.platform >>.tar
+
 jobs:
   public-site:
     docker:
@@ -164,11 +181,22 @@ jobs:
           name: Native Apple client tests
           command: make test-apple
       - run:
-          name: Apple client UI tests
-          command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui
-      - store_artifacts:
-          path: build/apple-test-results
-          destination: apple-test-results
+          name: Apple client macOS UI tests
+          command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui-macos
+      - store_apple_test_results:
+          platform: macos
+
+  apple-ios:
+    macos:
+      xcode: "26.6.0"
+    resource_class: m4pro.medium
+    steps:
+      - checkout
+      - run:
+          name: Apple client iPhone and iPad UI tests
+          command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui-ios
+      - store_apple_test_results:
+          platform: ios
 
   apple-testflight:
     macos:
@@ -525,6 +553,7 @@ workflows:
       - integration
       - sandbox
       - apple
+      - apple-ios
       - apple-signing-smoke:
           context: veetbot-apple-signing
           filters:
@@ -538,6 +567,7 @@ workflows:
             - integration
             - sandbox
             - apple
+            - apple-ios
             - public-site
           filters:
             branches:
