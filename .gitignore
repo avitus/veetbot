@@ -39,3 +39,8 @@ halumem_*
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# chunk active sidecar tracking
+.chunk/sidecar.json
+.chunk/sidecar.*.json
+.chunk/validate-pool.json

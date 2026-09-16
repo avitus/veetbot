@@ -225,6 +225,121 @@ import Testing
     }
 
     @Test
+    func testFolderIDRoundTripsThroughTheFileAndVolatileStores() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let folderID = UUID()
+        let entry = SessionHistoryEntry(
+            sessionID: UUID(),
+            title: "Filed",
+            agentID: "general",
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 2),
+            lastRunID: nil,
+            folderID: folderID
+        )
+        let stores: [any SessionHistoryStore] = [
+            VolatileSessionHistoryStore(),
+            try FileSessionHistoryStore(fileURL: directory.appendingPathComponent("history.json")),
+        ]
+        for store in stores {
+            try await store.upsert(entry)
+            #expect(try await store.list().first?.folderID == folderID)
+            var unfiled = entry
+            unfiled.folderID = nil
+            try await store.upsert(unfiled)
+            #expect(try await store.list().first?.folderID == nil)
+        }
+        let reloaded = try FileSessionHistoryStore(
+            fileURL: directory.appendingPathComponent("history.json")
+        )
+        #expect(await reloaded.list().first?.folderID == nil)
+    }
+
+    @Test
+    func testAHistoryFileWrittenBeforeFoldersStillLoads() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("history.json")
+        try Data(
+            #"[{"sessionID":"00000000-0000-0000-0000-000000000123","title":"Legacy","agentID":"general","createdAt":"2026-08-12T12:00:00Z","updatedAt":"2026-08-12T12:00:01Z","lastRunID":null}]"#
+                .utf8
+        ).write(to: file)
+        let store = try FileSessionHistoryStore(fileURL: file)
+        let entries = await store.list()
+        #expect(entries.map(\.title) == ["Legacy"])
+        #expect(entries.first?.folderID == nil)
+    }
+
+    @MainActor
+    @Test
+    func testMergedHistoryEntryTakesTheServerFolderID() {
+        let sessionID = UUID()
+        let previous = UUID()
+        let next = UUID()
+        let existing = SessionHistoryEntry(
+            sessionID: sessionID,
+            title: "Filed",
+            agentID: "general",
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 10),
+            lastRunID: nil,
+            folderID: previous
+        )
+        func session(folderID: UUID?) -> SessionView {
+            SessionView(
+                id: sessionID,
+                status: .active,
+                agentID: "general",
+                agentVersion: "1",
+                title: "Filed",
+                metadata: [:],
+                createdAt: existing.createdAt,
+                updatedAt: Date(timeIntervalSince1970: 20),
+                activeRunID: nil,
+                lastRunID: nil,
+                folderID: folderID
+            )
+        }
+        let moved = ChatViewModel.mergedHistoryEntry(
+            session: session(folderID: next), existing: existing, lastRunID: nil,
+            suggestedTitle: nil, touchedAt: nil
+        )
+        #expect(moved.folderID == next)
+        #expect(moved.updatedAt == existing.updatedAt)
+        let unfiled = ChatViewModel.mergedHistoryEntry(
+            session: session(folderID: nil), existing: existing, lastRunID: nil,
+            suggestedTitle: nil, touchedAt: nil
+        )
+        #expect(unfiled.folderID == nil)
+    }
+
+    #if XCODE_BUILD
+    @available(macOS 14.0, iOS 17.0, *)
+    @Test
+    func testSwiftDataRecordPersistsAFolderChange() {
+        let entry = SessionHistoryEntry(
+            sessionID: UUID(),
+            title: "Stable",
+            agentID: "general",
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 2),
+            lastRunID: nil
+        )
+        let record = LocalSessionRecord(entry: entry)
+        var filed = entry
+        filed.folderID = UUID()
+        #expect(record.update(from: filed) == true)
+        #expect(record.entry?.folderID == filed.folderID)
+        #expect(record.update(from: filed) == false)
+    }
+    #endif
+
+    @Test
     func testArtifactCacheEvictsLeastRecentlyUsedBytes() async {
         let firstID = UUID()
         let secondID = UUID()

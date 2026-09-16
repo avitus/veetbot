@@ -749,6 +749,7 @@ async def test_refresh_releases_operational_connections_after_each_poll(model_fa
 
 
 async def test_queued_refresh_releases_admission_connections_before_worker_dispatch() -> None:
+    """Admission holds no MCP connection at dispatch; it never opens one (ADR-0103)."""
     from dataclasses import replace
 
     from tests.gates.test_email_m18 import _email_settings
@@ -759,7 +760,7 @@ async def test_queued_refresh_releases_admission_connections_before_worker_dispa
     ) as app:
 
         async def queued(run_id: Any) -> None:
-            assert factory.created and not any(client.entered for client in factory.created)
+            assert not factory.created
 
         app.services.email.dispatch = queued
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -795,12 +796,16 @@ async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_ac
     def factory(
         config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
     ) -> SDKMCPClient:
-        """Only the first worker's work-account read process fails discovery."""
+        """Only the first worker's work-account read process fails discovery.
+
+        Admission starts no server (ADR-0103), so each refresh creates one
+        process per server, all in the worker.
+        """
         creations[config.server_id] += 1
         mode = config.server_id.rsplit("_", 1)[-1]
         account = "work" if config.server_id.startswith("gmail_work_") else "personal"
         command = [sys.executable, str(fixture), mode, account]
-        if config.server_id == "gmail_work_read" and creations[config.server_id] == 2:
+        if config.server_id == "gmail_work_read" and creations[config.server_id] == 1:
             command.append("--unavailable")
         return SDKMCPClient(
             config.model_copy(update={"endpoint": shlex.join(command)}), credential, environment
@@ -838,7 +843,7 @@ async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_ac
             and event.payload.get("reason_code") == "tool.server_unreachable"
             for event in events
         )
-        assert len(creations) == 6 and set(creations.values()) == {2}
+        assert len(creations) == 6 and set(creations.values()) == {1}
 
         second = await app.services.email.submit_task(app.principal, kind="refresh")
         second_run = await app.runs.get(second.run_id)
@@ -861,7 +866,7 @@ async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_ac
             messages = detail["messages"]
             assert isinstance(messages, list) and len(messages) == 1
             assert messages[0]["body"] == "Please approve the board materials."
-        assert set(creations.values()) == {4}
+        assert set(creations.values()) == {2}
 
 
 async def test_no_reply_feedback_prevents_automatic_draft_after_reassessment() -> None:

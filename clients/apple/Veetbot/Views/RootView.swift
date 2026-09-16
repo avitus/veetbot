@@ -396,6 +396,9 @@ private struct SessionSidebar: View {
     @State private var showingPersonaEditor = false
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
+    @State private var collapsedFolderIDs: Set<UUID> = []
+    @State private var folderEditor: FolderEditorRequest?
+    @State private var folderDeletionCandidate: FolderView?
 
     /// Presents session navigation and the iOS Chat overflow menu.
     var body: some View {
@@ -428,6 +431,28 @@ private struct SessionSidebar: View {
             Text(
                 "This permanently deletes the conversation and its associated data from the server and all synchronized devices. This cannot be undone."
             )
+        }
+        .confirmationDialog(
+            "Delete folder?",
+            isPresented: Binding(
+                get: { folderDeletionCandidate != nil },
+                set: { if !$0 { folderDeletionCandidate = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: folderDeletionCandidate
+        ) { folder in
+            Button("Delete Folder", role: .destructive) {
+                folderDeletionCandidate = nil
+                Task { await model.deleteFolder(folder.id) }
+            }
+            Button("Cancel", role: .cancel) {
+                folderDeletionCandidate = nil
+            }
+        } message: { _ in
+            Text("The conversations in this folder return to History. Nothing is deleted.")
+        }
+        .sheet(item: $folderEditor) { request in
+            FolderNameSheet(request: request, model: model)
         }
         #if os(iOS)
         .toolbar {
@@ -511,28 +536,27 @@ private struct SessionSidebar: View {
             .buttonStyle(.plain)
             .listRowBackground(AppTheme.brandGradient)
 
-            Section("History") {
-                ForEach(model.history) { entry in
-                    HStack(spacing: 8) {
-                        Button {
-                            activate(.session(entry.sessionID))
-                        } label: {
-                            historyLabel(entry)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityIdentifier(
-                            "sidebar.session.\(entry.sessionID.uuidString)"
-                        )
-                        .buttonStyle(.plain)
-
-                        deleteButton(for: entry)
+            historySections { entry in
+                HStack(spacing: 8) {
+                    Button {
+                        activate(.session(entry.sessionID))
+                    } label: {
+                        historyLabel(entry)
+                            .contentShape(Rectangle())
                     }
-                    .listRowBackground(
-                        entry.sessionID == model.selectedSessionID
-                            ? AppTheme.turquoise.opacity(0.15)
-                            : Color.clear
+                    .accessibilityIdentifier(
+                        "sidebar.session.\(entry.sessionID.uuidString)"
                     )
+                    .buttonStyle(.plain)
+
+                    moveMenu(for: entry)
+                    deleteButton(for: entry)
                 }
+                .listRowBackground(
+                    entry.sessionID == model.selectedSessionID
+                        ? AppTheme.turquoise.opacity(0.15)
+                        : Color.clear
+                )
             }
         }
     }
@@ -571,26 +595,126 @@ private struct SessionSidebar: View {
             .accessibilityIdentifier("sidebar.new-conversation")
             .listRowBackground(AppTheme.brandGradient)
 
-            Section("History") {
-                ForEach(model.history) { entry in
-                    HStack(spacing: 8) {
-                        NavigationLink {
-                            ChatDestination(model: model, entry: entry)
-                        } label: {
-                            historyLabel(entry)
-                        }
-                        .accessibilityIdentifier("sidebar.session.\(entry.sessionID.uuidString)")
-                        .buttonStyle(.plain)
-
-                        deleteButton(for: entry)
+            historySections { entry in
+                HStack(spacing: 8) {
+                    NavigationLink {
+                        ChatDestination(model: model, entry: entry)
+                    } label: {
+                        historyLabel(entry)
                     }
-                    .listRowBackground(
-                        entry.sessionID == model.selectedSessionID
-                            ? AppTheme.turquoise.opacity(0.15)
-                            : Color.clear
+                    .accessibilityIdentifier("sidebar.session.\(entry.sessionID.uuidString)")
+                    .buttonStyle(.plain)
+
+                    moveMenu(for: entry)
+                    deleteButton(for: entry)
+                }
+                .listRowBackground(
+                    entry.sessionID == model.selectedSessionID
+                        ? AppTheme.turquoise.opacity(0.15)
+                        : Color.clear
+                )
+            }
+        }
+    }
+
+    /// One builder for both list variants, so folder sections cannot drift
+    /// between the direct-activation and the compact-navigation sidebars.
+    /// Order: suggested folders, the folders, then the unfiled history; with
+    /// folders unavailable this renders exactly the flat history of before.
+    @ViewBuilder
+    private func historySections<Row: View>(
+        @ViewBuilder row: @escaping (SessionHistoryEntry) -> Row
+    ) -> some View {
+        let grouped = model.groupedHistory
+        if model.foldersAvailable, !model.suggestedFolders.isEmpty {
+            Section("Suggested folders") {
+                ForEach(model.suggestedFolders) { proposal in
+                    SuggestedFolderRow(proposal: proposal, model: model)
+                }
+            }
+        }
+        ForEach(grouped.folders) { section in
+            Section {
+                DisclosureGroup(isExpanded: expansionBinding(section.id)) {
+                    ForEach(section.entries) { entry in
+                        row(entry)
+                    }
+                } label: {
+                    FolderSectionLabel(
+                        folder: section.folder,
+                        count: section.entries.count,
+                        onRename: { folderEditor = .rename(section.folder) },
+                        onDelete: { folderDeletionCandidate = section.folder }
                     )
                 }
             }
+        }
+        Section("History") {
+            ForEach(grouped.uncategorized) { entry in
+                row(entry)
+            }
+            if model.foldersAvailable {
+                Button {
+                    folderEditor = .create(moving: nil)
+                } label: {
+                    Label("New folder", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar.new-folder")
+            }
+        }
+    }
+
+    private func expansionBinding(_ folderID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedFolderIDs.contains(folderID) },
+            set: { expanded in
+                if expanded {
+                    collapsedFolderIDs.remove(folderID)
+                } else {
+                    collapsedFolderIDs.insert(folderID)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func moveMenu(for entry: SessionHistoryEntry) -> some View {
+        if model.foldersAvailable {
+            Menu {
+                ForEach(model.folders) { folder in
+                    Button {
+                        Task { await model.moveSession(entry.sessionID, toFolder: folder.id) }
+                    } label: {
+                        if entry.folderID == folder.id {
+                            Label(folder.name, systemImage: "checkmark")
+                        } else {
+                            Text(folder.name)
+                        }
+                    }
+                    .accessibilityIdentifier("sidebar.session.move.to.\(folder.id.uuidString)")
+                }
+                if entry.folderID != nil {
+                    Button("Remove from folder") {
+                        Task { await model.moveSession(entry.sessionID, toFolder: nil) }
+                    }
+                    .accessibilityIdentifier("sidebar.session.move.none")
+                }
+                Divider()
+                Button("New folder…") {
+                    folderEditor = .create(moving: entry.sessionID)
+                }
+                .accessibilityIdentifier("sidebar.session.move.new")
+            } label: {
+                Image(systemName: "folder")
+                    .foregroundColor(.secondary)
+            }
+            .menuIndicator(.hidden)
+            #if os(macOS)
+            .menuStyle(.borderlessButton)
+            #endif
+            .accessibilityLabel("Move \(entry.title) to a folder")
+            .accessibilityIdentifier("sidebar.session.move.\(entry.sessionID.uuidString)")
         }
     }
 

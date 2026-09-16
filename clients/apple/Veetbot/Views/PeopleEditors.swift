@@ -55,7 +55,7 @@ struct PeopleFactEditor: View {
             statement = fact.statement
             relationshipPredicate = model.profile?.relationships.first(where: { $0.beliefID == fact.id })?.predicate ?? ""
             commitmentState = model.profile?.commitments.first(where: { $0.beliefID == fact.id })?.state ?? ""
-        }.frame(minWidth: 340, minHeight: 300)
+        }.peopleModalFrame(.form, minHeight: 300, idealHeight: 440)
     }
 }
 
@@ -126,7 +126,7 @@ struct PeopleIdentityRepairView: View {
         }.task { await people.reload(); await model.loadIdentityEvidence(restart: true) }
         .sheet(isPresented: $showingAdd) { AddPersonView(sessionID: sessionID) { person in target = person; Task { await people.reload() } } }
         .sheet(item: $sourceSelection) { PeopleConversationView(selection: $0) }
-        .frame(minWidth: 340, minHeight: 400)
+        .peopleModalFrame(.reading, minHeight: 400, idealHeight: 600)
     }
     private func evidenceToggle(_ id: UUID, label: String) -> some View {
         Toggle(label, isOn: Binding(get: { selected.contains(id) }, set: { if $0 { selected.insert(id) } else { selected.remove(id) } }))
@@ -161,7 +161,7 @@ struct PeopleConversationView: View {
             .navigationTitle(selection.person.map { "Prepare: \($0.displayName)" } ?? "Source conversation")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() }.accessibilityIdentifier("people.conversation.close") } }
         }
-        .frame(minWidth: 340, minHeight: 450)
+        .peopleModalFrame(.reading, minHeight: 450, idealHeight: 640)
         .task { if chat.isConfigured && selection.source == nil { await prepare() } }
         .onChange(of: chat.isConfigured) { configured in if configured && selection.source == nil { Task { await prepare() } } }
     }
@@ -215,6 +215,7 @@ struct PeopleAliasEditor: View {
                 }
             }
         }
+        .peopleModalFrame(.form, minHeight: 300, idealHeight: 360)
     }
 }
 

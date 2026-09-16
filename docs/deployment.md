@@ -614,7 +614,7 @@ that counter.
 
 An ordinary branch or pull request runs verification only. A `dev` push also
 runs the non-publishing Apple signing smoke described above. On `main`, after
-all six required verification lanes pass:
+all seven required verification jobs pass:
 
 - `public-site` installs the locked Node dependencies, builds, tests, and lints
   the static export, and exposes only that output to downstream packaging;

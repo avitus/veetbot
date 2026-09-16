@@ -146,6 +146,12 @@ public struct SessionView: Codable, Identifiable, Sendable {
     public let updatedAt: Date
     public let activeRunID: UUID?
     public let lastRunID: UUID?
+    /// The server-assigned folder, absent on servers older than Milestone 29.
+    public let folderID: UUID?
+    /// Whether the index carried the `folder_id` key at all. A Milestone 29
+    /// server always sends it, null included; its absence identifies an older
+    /// server, so the client never asks one for folders.
+    public var folderSupported = true
 
     enum CodingKeys: String, CodingKey {
         case id, status, title, metadata
@@ -155,6 +161,57 @@ public struct SessionView: Codable, Identifiable, Sendable {
         case updatedAt = "updated_at"
         case activeRunID = "active_run_id"
         case lastRunID = "last_run_id"
+        case folderID = "folder_id"
+    }
+
+    public init(
+        id: UUID,
+        status: SessionStatus,
+        agentID: String,
+        agentVersion: String,
+        title: String?,
+        metadata: [String: JSONValue],
+        createdAt: Date,
+        updatedAt: Date,
+        activeRunID: UUID?,
+        lastRunID: UUID?,
+        folderID: UUID? = nil,
+        folderSupported: Bool = true
+    ) {
+        self.id = id
+        self.status = status
+        self.agentID = agentID
+        self.agentVersion = agentVersion
+        self.title = title
+        self.metadata = metadata
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.activeRunID = activeRunID
+        self.lastRunID = lastRunID
+        self.folderID = folderID
+        self.folderSupported = folderSupported
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        status = try container.decode(SessionStatus.self, forKey: .status)
+        agentID = try container.decode(String.self, forKey: .agentID)
+        agentVersion = try container.decode(String.self, forKey: .agentVersion)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        metadata = try container.decode([String: JSONValue].self, forKey: .metadata)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        activeRunID = try container.decodeIfPresent(UUID.self, forKey: .activeRunID)
+        lastRunID = try container.decodeIfPresent(UUID.self, forKey: .lastRunID)
+        folderID = try container.decodeIfPresent(UUID.self, forKey: .folderID)
+        folderSupported = container.contains(.folderID)
+    }
+
+    /// People audit anchors and import workers are sessions, not conversations.
+    var isPeopleOperational: Bool {
+        guard let purpose = metadata["purpose"]?.stringValue else { return false }
+        return purpose == "people-management" || purpose == "people-import"
     }
 }
 
@@ -916,6 +973,103 @@ public struct UpdatePersonaBody: Codable, Equatable, Sendable {
     public init(expectedVersion: Int, entries: [UpdatePersonaEntryBody]) {
         self.expectedVersion = expectedVersion
         self.entries = entries
+    }
+}
+
+/// One owner-named folder of chat conversations (thread-folders.md).
+public struct FolderView: Codable, Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let name: String
+    public let threadCount: Int
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case threadCount = "thread_count"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public init(id: UUID, name: String, threadCount: Int, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.name = name
+        self.threadCount = threadCount
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// The proposal kinds this client knows how to present; others stay hidden.
+public enum FolderProposalKind: String, Codable, Sendable {
+    case newFolder = "new_folder"
+    case addToFolder = "add_to_folder"
+}
+
+/// A grouping the server proposed and the owner resolves.
+public struct FolderProposalView: Codable, Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let kind: String
+    public let proposedName: String?
+    public let targetFolderID: UUID?
+    public let memberSessionIDs: [UUID]
+    public let rationale: String?
+    public let derivation: String
+    public let state: String
+    public let withdrawalReason: String?
+    public let resultingFolderID: UUID?
+    public let createdAt: Date
+    public let resolvedAt: Date?
+
+    /// Nil for a kind this build does not know; such proposals are not shown.
+    public var kindValue: FolderProposalKind? { FolderProposalKind(rawValue: kind) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, rationale, derivation, state
+        case proposedName = "proposed_name"
+        case targetFolderID = "target_folder_id"
+        case memberSessionIDs = "member_session_ids"
+        case withdrawalReason = "withdrawal_reason"
+        case resultingFolderID = "resulting_folder_id"
+        case createdAt = "created_at"
+        case resolvedAt = "resolved_at"
+    }
+}
+
+/// The create and rename request body (`POST`/`PATCH /v1/folders`).
+public struct FolderNameBody: Codable, Equatable, Sendable {
+    public let name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
+/// `PUT /v1/sessions/{id}/folder`: the key is always present, and an explicit
+/// null unfiles the conversation, so an omitted field can never unfile one.
+public struct SetSessionFolderBody: Encodable, Equatable, Sendable {
+    public let folderID: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case folderID = "folder_id"
+    }
+
+    public init(folderID: UUID?) {
+        self.folderID = folderID
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(folderID, forKey: .folderID)
+    }
+}
+
+/// The optional accept body: an owner-chosen name for a proposed new folder.
+public struct AcceptFolderProposalBody: Codable, Equatable, Sendable {
+    public let name: String
+
+    public init(name: String) {
+        self.name = name
     }
 }
 

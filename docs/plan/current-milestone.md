@@ -66,6 +66,14 @@ title: Current Milestone
   pending, and the milestone remains in progress. Aggregate automatic
   email budgets are USD 20/day and USD 200/rolling thirty days. ADR-0096 limits
   automatic historical analysis to the latest ninety days for now.
+- **Milestone 29 — Chat thread folders:** authorized on 2026-09-16 as a new
+  independent parallel workstream under ADR-0102;
+  [thread-folders.md](thread-folders.md) declares twelve gates for flat,
+  single-parent folders over chat conversations, owner-resolved grouping
+  proposals from a maintenance pass, grounded model-assisted grouping with a
+  deterministic fallback, scoped routes behind a default-off flag, and the
+  native sidebar. All twelve gates are bound to executable checks; hosted
+  CI, review and delivery evidence remain open and the milestone is in progress.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -353,6 +361,7 @@ Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
 plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 
 - [Milestone 26 — Client modes and adaptive email experience](engineering-plan.md#milestone-26-client-modes-and-adaptive-email-experience)
+- [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
 
 ## Completion rule
 
@@ -457,3 +466,16 @@ This independent workstream is in progress; the verified ceiling remains 12.
 
 ADR-0101 removes evaluation-dependent People availability; the complete implemented
 feature is enabled by default while quality measurement continues.
+
+## Milestone 29: Chat thread folders
+
+The owner authorized implementation on 2026-09-16 under ADR-0102.
+[Chat thread folders](thread-folders.md) specifies twelve gates: flat,
+single-parent folders as server-owned session state; owner-resolved grouping
+proposals with a bounded open set, durable decline and withdrawal; grounded
+model-assisted grouping with a deterministic lexical fallback; nine routes on
+the session scopes behind a default-off flag; and native sidebar folder
+sections with proposal review. The implementation landed on 2026-09-16 with
+every gate bound to an executable check; exact-head hosted CI, review and
+delivery evidence remain open. This independent workstream is in progress;
+the verified ceiling remains 12.

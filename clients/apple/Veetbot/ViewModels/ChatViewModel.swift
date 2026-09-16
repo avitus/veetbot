@@ -109,6 +109,24 @@ public final class ChatViewModel: ObservableObject {
     /// This installation's server-side device id, learned from its own
     /// registration. Nil until the push token has been registered this launch.
     @Published public private(set) var registeredDeviceID: UUID?
+    /// The server's folders and open grouping proposals, refreshed with the
+    /// history; memory only, because the server index is the authority.
+    @Published public private(set) var folders: [FolderView] = []
+    @Published public private(set) var folderProposals: [FolderProposalView] = []
+    /// False until a server answers the folder list; a 404 or 405 keeps the
+    /// flat history and hides every folder control without an error.
+    @Published public private(set) var foldersAvailable = false
+    /// The create or rename sheet's inline error; never the global banner.
+    @Published public private(set) var folderEditorError: String?
+    @Published public private(set) var pendingFolderProposalIDs: Set<UUID> = []
+
+    public var groupedHistory: GroupedConversationHistory {
+        .make(history: history, folders: folders, available: foldersAvailable)
+    }
+
+    public var suggestedFolders: [FolderProposalPresentation] {
+        FolderProposalPresentation.make(proposals: folderProposals, folders: folders, history: history)
+    }
 
     /// Set by the application delegate when it attaches.
     public weak var pushRegistrar: (any PushRegistrationRequesting)?
@@ -208,6 +226,7 @@ public final class ChatViewModel: ObservableObject {
 
     public func forgetCredentials() async {
         dismissCallResult()
+        resetFolderState()
         isConfigured = false
         connectionGeneration = UUID()
         composerText = ""
@@ -461,6 +480,208 @@ public final class ChatViewModel: ObservableObject {
         resetSelectedSession()
     }
 
+    // MARK: - Conversation folders (Milestone 29)
+
+    /// Create a folder and, when asked, file one conversation in it. A refused
+    /// or duplicate name lands in `folderEditorError` for the sheet.
+    @discardableResult
+    public func createFolder(named name: String, moving sessionID: UUID? = nil) async -> FolderView? {
+        guard let api else { return nil }
+        let generation = connectionGeneration
+        folderEditorError = nil
+        do {
+            let folder = try await api.createFolder(
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            guard generation == connectionGeneration else { return nil }
+            upsertFolder(folder)
+            if let sessionID {
+                await moveSession(sessionID, toFolder: folder.id)
+            }
+            return folder
+        } catch {
+            guard generation == connectionGeneration else { return nil }
+            folderEditorError = Self.folderErrorMessage(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    public func renameFolder(_ folderID: UUID, to name: String) async -> Bool {
+        guard let api else { return false }
+        let generation = connectionGeneration
+        folderEditorError = nil
+        do {
+            let folder = try await api.renameFolder(
+                folderID, name: name.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            guard generation == connectionGeneration else { return false }
+            upsertFolder(folder)
+            return true
+        } catch {
+            guard generation == connectionGeneration else { return false }
+            folderEditorError = Self.folderErrorMessage(error)
+            return false
+        }
+    }
+
+    /// Delete a folder; its conversations return to History and nothing is deleted.
+    public func deleteFolder(_ folderID: UUID) async {
+        guard let api else { return }
+        let generation = connectionGeneration
+        historyReconciliationID = nil
+        do {
+            try await api.deleteFolder(folderID)
+            guard generation == connectionGeneration else { return }
+            folders.removeAll { $0.id == folderID }
+            folderProposals.removeAll { $0.targetFolderID == folderID }
+            let members = history.filter { $0.folderID == folderID }.map(\.sessionID)
+            try await applyFolderMembership(sessionIDs: members, folderID: nil)
+        } catch {
+            guard generation == connectionGeneration else { return }
+            present(error)
+        }
+    }
+
+    /// File a conversation in a folder, or unfile it with an explicit null.
+    public func moveSession(_ sessionID: UUID, toFolder folderID: UUID?) async {
+        guard let api else { return }
+        let generation = connectionGeneration
+        historyReconciliationID = nil
+        do {
+            let session = try await api.setSessionFolder(sessionID, folderID: folderID)
+            guard generation == connectionGeneration else { return }
+            let existing = history.first { $0.sessionID == sessionID }
+            try await store(session: session, lastRunID: session.lastRunID ?? existing?.lastRunID)
+            folderProposals.removeAll { $0.memberSessionIDs.contains(sessionID) }
+        } catch {
+            guard generation == connectionGeneration else { return }
+            present(error)
+        }
+    }
+
+    public func acceptFolderProposal(_ proposalID: UUID) async {
+        guard let api, let proposal = folderProposals.first(where: { $0.id == proposalID })
+        else { return }
+        let generation = connectionGeneration
+        pendingFolderProposalIDs.insert(proposalID)
+        defer { pendingFolderProposalIDs.remove(proposalID) }
+        historyReconciliationID = nil
+        do {
+            let resolved = try await api.acceptFolderProposal(proposalID)
+            guard generation == connectionGeneration else { return }
+            folderProposals.removeAll { $0.id == proposalID }
+            if let folderID = resolved.resultingFolderID {
+                try await applyFolderMembership(
+                    sessionIDs: proposal.memberSessionIDs, folderID: folderID
+                )
+            }
+            try? await reconcileHistory()
+        } catch {
+            guard generation == connectionGeneration else { return }
+            await handleProposalResolutionFailure(error, proposalID: proposalID)
+        }
+    }
+
+    public func declineFolderProposal(_ proposalID: UUID) async {
+        guard let api else { return }
+        let generation = connectionGeneration
+        pendingFolderProposalIDs.insert(proposalID)
+        defer { pendingFolderProposalIDs.remove(proposalID) }
+        do {
+            _ = try await api.declineFolderProposal(proposalID)
+            guard generation == connectionGeneration else { return }
+            folderProposals.removeAll { $0.id == proposalID }
+            try? await reconcileHistory()
+        } catch {
+            guard generation == connectionGeneration else { return }
+            await handleProposalResolutionFailure(error, proposalID: proposalID)
+        }
+    }
+
+    public func clearFolderEditorError() { folderEditorError = nil }
+
+    /// A proposal resolved elsewhere (404 or 409) is a refresh, not an error.
+    private func handleProposalResolutionFailure(_ error: Error, proposalID: UUID) async {
+        if case HTTPTransportError.api(let apiError) = error,
+            apiError.statusCode == 404 || apiError.statusCode == 409
+        {
+            folderProposals.removeAll { $0.id == proposalID }
+            try? await reconcileHistory()
+            return
+        }
+        present(error)
+    }
+
+    private func upsertFolder(_ folder: FolderView) {
+        var next = folders.filter { $0.id != folder.id }
+        next.append(folder)
+        folders = next.sorted(by: GroupedConversationHistory.folderOrder)
+    }
+
+    private func applyFolderMembership(sessionIDs: [UUID], folderID: UUID?) async throws {
+        for sessionID in sessionIDs {
+            guard var entry = history.first(where: { $0.sessionID == sessionID }) else { continue }
+            entry.folderID = folderID
+            try await historyStore.upsert(entry)
+        }
+        history = try await historyStore.list()
+    }
+
+    /// Never throws: the folder surface is optional, and its absence or a
+    /// transient failure must not turn history reconciliation into a banner.
+    private func reconcileFolders(
+        using api: VeetbotAPIClient, reconciliationID: UUID, supported: Bool
+    ) async {
+        guard supported else {
+            // An older server, or an empty index: nothing to ask for.
+            foldersAvailable = false
+            folders = []
+            folderProposals = []
+            return
+        }
+        do {
+            var loaded: [FolderView] = []
+            var cursor: String?
+            var seenCursors: Set<String> = []
+            repeat {
+                let page = try await api.listFolders(cursor: cursor)
+                guard historyReconciliationID == reconciliationID else { return }
+                loaded.append(contentsOf: page.items)
+                cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
+            } while cursor != nil
+            let proposals = try await api.listFolderProposals().items
+            guard historyReconciliationID == reconciliationID else { return }
+            folders = loaded.sorted(by: GroupedConversationHistory.folderOrder)
+            folderProposals = proposals
+            foldersAvailable = true
+        } catch let error as VeetbotAPIClientError {
+            guard case .foldersUnavailable = error,
+                historyReconciliationID == reconciliationID
+            else { return }
+            foldersAvailable = false
+            folders = []
+            folderProposals = []
+        } catch {
+            // Any other failure keeps the previous folder state.
+        }
+    }
+
+    private func resetFolderState() {
+        folders = []
+        folderProposals = []
+        foldersAvailable = false
+        folderEditorError = nil
+        pendingFolderProposalIDs = []
+    }
+
+    private static func folderErrorMessage(_ error: Error) -> String {
+        if case HTTPTransportError.api(let apiError) = error {
+            return apiError.message
+        }
+        return error.localizedDescription
+    }
+
     public func reportConnectionError(_ error: Error) { present(error) }
 
     public func openSharedSession(_ id: UUID) async {
@@ -613,11 +834,15 @@ public final class ChatViewModel: ObservableObject {
         var cursor: String?
         var seenCursors: Set<String> = []
         var serverIDs: Set<UUID> = []
+        var serverSpeaksFolders = false
         repeat {
             let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
             for session in page.items {
+                // A cached People session left unlisted is pruned below.
+                guard !session.isPeopleOperational else { continue }
                 serverIDs.insert(session.id)
+                serverSpeaksFolders = serverSpeaksFolders || session.folderSupported
                 guard !removedHistorySessionIDs.contains(session.id),
                     !deletingHistorySessionIDs.contains(session.id)
                 else { continue }
@@ -646,6 +871,13 @@ public final class ChatViewModel: ObservableObject {
         var prunedHistory = false
         for resolution in missingResolutions {
             switch resolution {
+            case .found(let session) where session.isPeopleOperational:
+                // The session backs People data, so it is hidden locally, never deleted.
+                try await historyStore.delete(sessionID: session.id)
+                guard historyReconciliationID == reconciliationID else { return }
+                if selectedSessionID == session.id {
+                    resetSelectedSession()
+                }
             case .found(let session):
                 guard !removedHistorySessionIDs.contains(session.id),
                     !deletingHistorySessionIDs.contains(session.id)
@@ -678,6 +910,9 @@ public final class ChatViewModel: ObservableObject {
         if prunedHistory {
             await artifactCache.removeAll()
         }
+        await reconcileFolders(
+            using: api, reconciliationID: reconciliationID, supported: serverSpeaksFolders
+        )
     }
 
     private func discardSuccessfullyDeletedHistory() async {
@@ -1233,6 +1468,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func clearInstalledConnection() {
         dismissCallResult()
+        resetFolderState()
         api = nil
         eventStream = nil
         baseURL = nil
@@ -1323,7 +1559,9 @@ public final class ChatViewModel: ObservableObject {
             agentID: session.agentID,
             createdAt: session.createdAt,
             updatedAt: touchedAt ?? existing?.updatedAt ?? session.updatedAt,
-            lastRunID: lastRunID ?? session.lastRunID ?? existing?.lastRunID
+            lastRunID: lastRunID ?? session.lastRunID ?? existing?.lastRunID,
+            // The server index is the authority: its value wins, nil included.
+            folderID: session.folderID
         )
     }
 

@@ -9,6 +9,7 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case serverUpgradeRequired
     case memoryBrowsingUnavailable
     case scheduleBrowsingUnavailable
+    case foldersUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -18,6 +19,8 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
             return "This server does not support memory browsing yet."
         case .scheduleBrowsingUnavailable:
             return "This server does not support schedule browsing yet."
+        case .foldersUnavailable:
+            return "This server does not support conversation folders yet."
         }
     }
 }
@@ -512,6 +515,99 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    public func listFolders(limit: Int = 200, cursor: String? = nil) async throws -> Page<FolderView> {
+        var query = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/folders", queryItems: query)
+            )
+        } catch {
+            throw folderCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func createFolder(name: String) async throws -> FolderView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/folders",
+                body: try JSONEncoder.server.encode(FolderNameBody(name: name))
+            )
+        )
+    }
+
+    public func renameFolder(_ id: UUID, name: String) async throws -> FolderView {
+        try await transport.send(
+            TransportRequest(
+                method: .patch,
+                path: "/v1/folders/\(id.uuidString)",
+                body: try JSONEncoder.server.encode(FolderNameBody(name: name))
+            )
+        )
+    }
+
+    public func deleteFolder(_ id: UUID) async throws {
+        _ = try await transport.sendData(
+            TransportRequest(
+                method: .delete,
+                path: "/v1/folders/\(id.uuidString)",
+                retryAttempts: 2
+            )
+        )
+    }
+
+    public func setSessionFolder(_ sessionID: UUID, folderID: UUID?) async throws -> SessionView {
+        try await transport.send(
+            TransportRequest(
+                method: .put,
+                path: "/v1/sessions/\(sessionID.uuidString)/folder",
+                body: try JSONEncoder.server.encode(SetSessionFolderBody(folderID: folderID)),
+                retryAttempts: 2
+            )
+        )
+    }
+
+    public func listFolderProposals(
+        state: String = "proposed",
+        limit: Int = 200,
+        cursor: String? = nil
+    ) async throws -> Page<FolderProposalView> {
+        var query = [
+            URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/folders/proposals", queryItems: query)
+            )
+        } catch {
+            throw folderCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func acceptFolderProposal(_ id: UUID, name: String? = nil) async throws
+        -> FolderProposalView
+    {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/folders/proposals/\(id.uuidString)/accept",
+                body: try name.map { try JSONEncoder.server.encode(AcceptFolderProposalBody(name: $0)) }
+            )
+        )
+    }
+
+    public func declineFolderProposal(_ id: UUID) async throws -> FolderProposalView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/folders/proposals/\(id.uuidString)/decline"
+            )
+        )
+    }
+
     public func listSchedules(
         limit: Int = 50,
         cursor: String? = nil,
@@ -556,6 +652,17 @@ private func memoryBrowsingCompatibilityError(from error: Error) -> VeetbotAPICl
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
     if apiError.statusCode == 404 || apiError.statusCode == 405 {
         return .memoryBrowsingUnavailable
+    }
+    return nil
+}
+
+/// Folders are an optional, default-off surface: a server that lacks the
+/// router answers 404 or 405 on the list routes, and the client degrades to
+/// the flat history rather than demanding an upgrade.
+private func folderCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 404 || apiError.statusCode == 405 {
+        return .foldersUnavailable
     }
     return nil
 }

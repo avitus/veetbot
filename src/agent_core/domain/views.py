@@ -18,6 +18,14 @@ from agent_core.domain.devices import (
     PushEnvironment,
     PushProvider,
 )
+from agent_core.domain.folders import (
+    FolderProposal,
+    FolderProposalDerivation,
+    FolderProposalKind,
+    FolderProposalState,
+    FolderWithdrawalReason,
+    ThreadFolder,
+)
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -42,8 +50,8 @@ from agent_core.domain.persona import (
     PersonaNomination,
     PersonaNominationState,
 )
-from agent_core.domain.runs import FailureReason, RunStatus
-from agent_core.domain.sessions import SessionStatus
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, FailureReason, Run, RunStatus
+from agent_core.domain.sessions import Session, SessionStatus
 
 
 class TextContentBlock(BaseModel):
@@ -88,6 +96,28 @@ class SessionView(BaseModel):
     updated_at: datetime
     active_run_id: UUID | None
     last_run_id: UUID | None
+    folder_id: UUID | None = None
+
+    @classmethod
+    def from_session(
+        cls, session: Session, latest: Run | None, *, folder_id: UUID | None = None
+    ) -> SessionView:
+        active = (
+            latest if latest is not None and latest.status not in TERMINAL_RUN_STATUSES else None
+        )
+        return cls(
+            id=session.id,
+            status=session.status,
+            agent_id=str(session.agent_id),
+            agent_version=session.agent_version,
+            title=session.title,
+            metadata=dict(session.metadata),
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            active_run_id=None if active is None else active.id,
+            last_run_id=None if latest is None else latest.id,
+            folder_id=folder_id,
+        )
 
 
 class SessionMessageView(BaseModel):
@@ -403,6 +433,64 @@ class PersonaView(BaseModel):
             entries=[PersonaEntryView.from_entry(entry) for entry in document.entries],
             source=document.source,
             created_at=document.created_at,
+        )
+
+
+class FolderView(BaseModel):
+    """A folder's exposure list; tenant and principal withheld."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    name: str
+    thread_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_folder(cls, folder: ThreadFolder, thread_count: int) -> FolderView:
+        return cls(
+            id=folder.id,
+            name=folder.name,
+            thread_count=thread_count,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+        )
+
+
+class FolderProposalView(BaseModel):
+    """A grouping proposal's exposure list; tenant and principal withheld."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    kind: FolderProposalKind
+    proposed_name: str | None
+    target_folder_id: UUID | None
+    member_session_ids: list[UUID]
+    rationale: str | None
+    derivation: FolderProposalDerivation
+    state: FolderProposalState
+    withdrawal_reason: FolderWithdrawalReason | None
+    resulting_folder_id: UUID | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+    @classmethod
+    def from_proposal(cls, proposal: FolderProposal) -> FolderProposalView:
+        return cls(
+            id=proposal.id,
+            kind=proposal.kind,
+            proposed_name=proposal.proposed_name,
+            target_folder_id=proposal.target_folder_id,
+            member_session_ids=list(proposal.member_session_ids),
+            rationale=proposal.rationale,
+            derivation=proposal.derivation,
+            state=proposal.state,
+            withdrawal_reason=proposal.withdrawal_reason,
+            resulting_folder_id=proposal.resulting_folder_id,
+            created_at=proposal.created_at,
+            resolved_at=proposal.resolved_at,
         )
 
 

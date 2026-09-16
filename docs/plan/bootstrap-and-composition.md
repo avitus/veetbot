@@ -336,7 +336,7 @@ version-controlled files, not rows." Generalize it and the rule that sorts all
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-170 tuning knobs in YAML.
+177 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -409,7 +409,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 170. Schema versions, profile names, rule identifiers,
+and asserts the total is 177. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -421,7 +421,8 @@ or invariants rather than knobs and are not counted.
 | `tools/limits.yaml` | 20 |
 | `runtime/limits.yaml` | 57 |
 | `memory/profiles.yaml` | 38 |
-| **Total** | **170** |
+| `folders/profiles.yaml` | 7 |
+| **Total** | **177** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -1429,3 +1430,15 @@ People adapter receives its memory store so directory relationship filtering
 can check belief privacy before pagination; PostgreSQL applies the equivalent
 scoped join. The detailed contract is
 [people-and-relationships.md](people-and-relationships.md).
+
+## Milestone 29 thread folder composition
+
+`AGENT_THREAD_FOLDERS_API_ENABLED` defaults to off and gates both the folder
+router and the proposal sweep. The composition root loads the checked-in
+`folders/profiles.yaml` document, constructs the folder service over the
+unit-of-work factory, and — only when the flag is set and `proposals.enabled`
+is true — builds the model-assisted grouper over the model router and
+providers with the lexical grouper as its fallback, and registers the proposal
+pass as a maintenance sweep on its own timer. Its seven knobs join the
+executable inventory when the implementation lands. The detailed contract is
+[thread-folders.md](thread-folders.md).

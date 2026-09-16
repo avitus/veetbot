@@ -238,6 +238,18 @@ functionality or release. Production delivery still follows exact-head CI/review
 - [ ] Independently reviewed labels, version-bound quality and private owner evaluation evidence
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
+### Milestone 29 — Chat thread folders
+
+Twelve gates; independent workstream under ADR-0102. Flat, single-parent
+folders over chat conversations as server-owned state; a maintenance pass
+proposes groupings the owner accepts or declines; nothing files a conversation
+without the owner's acceptance. The schema, both store adapters, the manual
+operations, the proposal lifecycle, the grounded grouping with its lexical
+fallback, the routes behind the flag and the native sidebar are implemented
+with every gate bound to an executable check.
+
+- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.

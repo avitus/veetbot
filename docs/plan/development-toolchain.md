@@ -267,6 +267,21 @@ runtime downloads and the same discipline applies to the toolchain: if
 a check needs a binary, the binary is a declared dependency or the
 check fails with a message naming what to install.
 
+### Remote validation on a sidecar
+
+`.chunk/config.json` lets the CircleCI `chunk` CLI run the same gate on a
+disposable Linux sidecar. `chunk validate` runs `install` (`make install` and
+`make website-install`) and then `check` (`make check`), both marked remote.
+Its `environment` records how a sidecar is prepared: uv 0.8.6, Node 22.13.1
+and Pandoc, installed and checksum-verified as in CI.
+`validation.sidecarImage` names the prepared snapshot that new sidecars boot
+from. Active-sidecar and validation-pool files under `.chunk/` are
+per-developer and ignored. The sidecar adds no command, so a passing remote
+`make check` satisfies the same criterion as a local run. Run `chunk validate` rather than `chunk sidecar sync`
+from a git worktree: plain sync copies the worktree's `.git` pointer file,
+while validate sends a git bundle into a real repository. Xcode suites
+(`make test-apple`, `make test-apple-ui`) need macOS and stay local.
+
 ## The compose file
 
 One service at Milestone 0.
@@ -324,8 +339,9 @@ job           target invoked         needs     runs on
 3 integration make test-integration  postgres  every push, PR
 4 live        make test-live         secrets   schedule, manual
 5 sandbox     make test-sandbox      machine   every push, PR
-6 apple       make test-apple        Xcode     every push, PR
-              make test-apple-ui
+6a apple      make test-apple        Xcode     every push, PR
+              make test-apple-ui-macos
+6b apple-ios  make test-apple-ui-ios Xcode     every push, PR
 7 apple-      shared archive and     signing   dev
   signing-    package script
   smoke
@@ -349,10 +365,14 @@ targets are separate CircleCI steps so timing data identifies the remaining
 bottleneck. Jobs 1 through 3 and job 5 publish their pytest JUnit XML through
 CircleCI's test-results collector so failed and slow tests are visible without
 searching raw logs.
-Job 6 is an additional native-client gate outside `make check`; it runs
-`make test-apple` under full Xcode because Command Line Tools can compile a
-Swift Testing bundle without executing it, then runs `make test-apple-ui` on
-macOS and on available iPhone and iPad simulators. The macOS case resizes the
+Job 6 is an additional native-client gate outside `make check`, split across
+two macOS executors that run at the same time. Job 6a runs `make test-apple`
+under full Xcode because Command Line Tools can compile a Swift Testing bundle
+without executing it, then runs the macOS UI cases with
+`make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
+iPhone and iPad simulators. Locally, `make test-apple-ui` runs the macOS target
+and then the simulator target, never both at once, because the macOS cases
+drive the real desktop. The macOS case resizes the
 real SwiftUI window, terminates the application, and asserts that its size is
 restored after relaunch; a second Mac case verifies Email mode and exact draft
 approval. The simulator cases use a debug-only in-process
@@ -360,8 +380,12 @@ fixture to exercise historical-transcript
 selection, switching, and new-conversation navigation without a live server or
 credential, together with Email mode, editing, learning and compact-trait
 journeys. The simulator test products are built once, then the iPhone and
-iPad destinations run concurrently without rebuilding. Each platform writes a
-distinct result bundle, and CircleCI retains those bundles for diagnosis.
+iPad destinations run concurrently without rebuilding. Each UI case sets its
+fixture options before one launch; only cases that exercise a relaunch
+terminate the application. Each platform writes a distinct result bundle, and
+each job packs its bundles into one `apple-test-results-<platform>.tar`
+artifact, even after a failure, because uploading thousands of loose bundle
+files took about half a minute.
 Release packaging depends on all three additional gates.
 
 Job 9 is a credential-free Node lane. It installs the exact
@@ -435,7 +459,7 @@ Three workflow-level facts complete the definition:
     A pipeline with `run_live: true` selects the manual live workflow instead.
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
     runs only on trusted `dev`; it does not receive publication credentials.
-    Production delivery begins only after all six required verification jobs
+    Production delivery begins only after all seven required verification jobs
     pass. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual

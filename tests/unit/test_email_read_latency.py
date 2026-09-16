@@ -1,14 +1,27 @@
 """Reading one conversation must not wait for mailbox-wide housekeeping."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
+from typing import Any
+from uuid import UUID, uuid4
 
 import pytest
 
+from agent_core.adapters.mcp.scripted import ScriptedMCPClient
 from agent_core.adapters.persistence.email import InMemoryEmailStore
+from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import Principal
-from agent_core.domain.email import EmailDraftStatus, EmailRecord
+from agent_core.domain.credentials import SecretValue
+from agent_core.domain.email import EmailDraftStatus, EmailRecord, EmailThread
+from agent_core.domain.errors import ConflictError
+from agent_core.domain.mcp import MCPDiscovery, MCPServerConfig
+from agent_core.domain.sessions import Session
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
+from tests.gates.test_email_m18 import _email_settings
+from tests.gates.test_email_runtime_m26 import _current_mail_factory, _seed_draft
 
 
 @pytest.mark.parametrize("resource", ["thread", "draft", "draft_revisions"])
@@ -172,3 +185,269 @@ async def test_maintenance_rechecks_a_refreshed_candidate_before_erasing(
         assert result["messages"] == [
             message.model_dump(mode="json") for message in thread.messages
         ]
+
+
+@dataclass
+class HeldDiscovery:
+    """MCP discovery that the test can hold open, as a slow stdio server does."""
+
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    closed: list[UUID] = field(default_factory=list)
+    pending: int | None = 0
+
+    def hold(self, calls: int | None = None) -> None:
+        """Hold the next ``calls`` discoveries, or all of them, until released."""
+        self.pending = calls
+        self.closed.clear()
+        self.started.clear()
+        self.release.clear()
+
+    def take(self) -> bool:
+        if self.release.is_set() or self.pending == 0:
+            return False
+        if self.pending is not None:
+            self.pending -= 1
+        return True
+
+
+@asynccontextmanager
+async def held_discovery_email(
+    database_url: str | None = None,
+) -> AsyncIterator[tuple[Composition, HeldDiscovery]]:
+    """Compose Email whose admitted runs stay queued, like the PostgreSQL dispatcher."""
+    base = await _current_mail_factory()
+    held = HeldDiscovery()
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+        discover = client.discover
+
+        async def held_discover() -> MCPDiscovery:
+            if held.take():
+                held.started.set()
+                await held.release.wait()
+            return await discover()
+
+        vars(client)["discover"] = held_discover
+        return client
+
+    settings = replace(_email_settings(), email_mode_enabled=True)
+    async with build(
+        settings=settings if database_url is None else replace(settings, database_url=database_url),
+        storage="memory" if database_url is None else "postgres",
+        mcp_client_factory=factory,
+    ) as app:
+        service = app.services.email
+
+        async def queued(run_id: UUID) -> None:
+            return None
+
+        close = service.close_session
+        assert close is not None
+
+        async def record_close(session_id: UUID) -> None:
+            held.closed.append(session_id)
+            await close(session_id)
+
+        service.dispatch = queued
+        service.close_session = record_close
+        service.release_session_transports = record_close
+        yield app, held
+
+
+async def _unbind_thread_session(app: Composition, thread: EmailThread) -> EmailThread:
+    async with app.uow_factory() as uow:
+        row = await uow.email.get(app.principal, "thread", str(thread.id))
+        assert row is not None
+        unbound = EmailThread.model_validate(row.payload).model_copy(update={"session_id": None})
+        await uow.email.put(
+            row.model_copy(
+                update={"revision": row.revision + 1, "payload": unbound.model_dump(mode="json")}
+            ),
+            expected_revision=row.revision,
+        )
+    return unbound
+
+
+async def _next_thread(app: Composition, thread: EmailThread) -> EmailThread:
+    """Store the conversation the owner opens after acting on ``thread``."""
+    following = thread.model_copy(
+        update={
+            "id": uuid4(),
+            "provider_thread_id": "thread-2",
+            "session_id": None,
+            "draft_id": None,
+            "archive_operation": None,
+        }
+    )
+    async with app.uow_factory() as uow:
+        await uow.email.put(
+            EmailRecord(
+                tenant_id=app.principal.tenant_id,
+                principal_id=app.principal.principal_id,
+                kind="thread",
+                key=str(following.id),
+                revision=1,
+                payload=following.model_dump(mode="json"),
+                created_at=app.clock.now(),
+                updated_at=app.clock.now(),
+            ),
+            expected_revision=0,
+        )
+    return following
+
+
+async def _thread_sessions(app: Composition, thread: EmailThread) -> set[UUID]:
+    async with app.uow_factory() as uow:
+        return {
+            row.id
+            for row in await uow.sessions.list(app.principal, limit=100)
+            if row.metadata.get("email_thread_id") == str(thread.id)
+        }
+
+
+async def _session_pins(app: Composition, session_id: UUID) -> list[object]:
+    async with app.uow_factory() as uow:
+        created = await uow.events.latest_before(
+            session_id, (1 << 63) - 1, "session.created", app.principal
+        )
+    assert created is not None
+    pins = created.payload["skill_pins"]
+    assert isinstance(pins, list)
+    return pins
+
+
+async def _admit(app: Composition, kind: str, thread: EmailThread) -> UUID:
+    """Run one email command that may create a session; return that session."""
+    service = app.services.email
+    principal = app.principal
+    if kind in {"archive", "refresh", "draft"}:
+        operation = await service.submit_task(
+            principal,
+            kind=kind,  # type: ignore[arg-type]
+            thread_id=None if kind == "refresh" else thread.id,
+            expected_revision=None if kind == "refresh" else thread.revision,
+            archived=True if kind == "archive" else None,
+            idempotency_key=f"latency-{kind}",
+        )
+        async with app.uow_factory() as uow:
+            return (await uow.runs.get(operation.run_id, principal)).session_id
+    if kind == "exclusion":
+        result = await service.exclude_source(principal, thread.id, thread.revision)
+        async with app.uow_factory() as uow:
+            row = await uow.email.get(principal, "excluded_source", str(result["source_id"]))
+        assert row is not None
+        return UUID(str(row.payload["audit_session_id"]))
+    if kind == "discussion":
+        await service.discussion(principal, thread.id)
+    else:
+        assert kind == "generated_draft"
+        await service.save_generated_draft(
+            principal,
+            thread.id,
+            thread.revision,
+            "A revised reply.",
+            run_id=uuid4(),
+            instruction="Make it shorter.",
+        )
+    async with app.uow_factory() as uow:
+        bound = await service.thread_record(uow.email, principal, thread.id)
+    assert bound.session_id is not None
+    return bound.session_id
+
+
+OPERATIONAL = ("archive", "refresh", "exclusion")
+THREAD_BOUND = ("discussion", "draft", "generated_draft")
+
+
+async def assert_reads_continue_during_admission(
+    app: Composition, held: HeldDiscovery, kind: str
+) -> None:
+    """Open the next conversation while a slow MCP server delays one email command."""
+    thread, _ = await _seed_draft(app)
+    thread = await _unbind_thread_session(app, thread)
+    following = await _next_thread(app, thread)
+    held.hold()
+    work = asyncio.create_task(_admit(app, kind, thread))
+    try:
+        discovering = asyncio.create_task(held.started.wait())
+        await asyncio.wait({work, discovering}, timeout=2, return_when="FIRST_COMPLETED")
+        discovering.cancel()
+        result = await asyncio.wait_for(
+            app.services.email.thread(app.principal, following.id), timeout=1
+        )
+        assert result["id"] == str(following.id)
+    finally:
+        held.release.set()
+        session_id = await work
+    assert await _session_pins(app, session_id) == []
+    # Operational sessions never render a catalog, so admission starts no
+    # server; a thread-bound session still pins its full catalog.
+    assert held.started.is_set() is (kind in THREAD_BOUND)
+
+
+async def claim_session_then_fail(
+    app: Composition, held: HeldDiscovery, monkeypatch: pytest.MonkeyPatch
+) -> tuple[UUID, EmailThread]:
+    """Fail a discussion after it claimed its prepared session; return that session."""
+    thread, _ = await _seed_draft(app)
+    thread = await _unbind_thread_session(app, thread)
+    earlier = await _thread_sessions(app, thread)
+    service = app.services.email
+    original = service._session_in
+    claimed: list[UUID] = []
+
+    async def fail_after_claim(*args: Any, **kwargs: Any) -> Session:
+        session = await original(*args, **kwargs)
+        claimed.append(session.id)
+        raise ConflictError("injected failure after the session was claimed")
+
+    monkeypatch.setattr(service, "_session_in", fail_after_claim)
+    held.closed.clear()
+    with pytest.raises(ConflictError):
+        await service.discussion(app.principal, thread.id)
+    [session_id] = claimed
+    assert session_id not in earlier
+    # Released exactly once, by the rollback hook rather than the unclaimed path.
+    assert held.closed == [session_id]
+    return session_id, thread
+
+
+@pytest.mark.parametrize("kind", [*OPERATIONAL, *THREAD_BOUND])
+async def test_session_discovery_never_holds_the_owner_email_lock(kind: str) -> None:
+    """A slow MCP server must not stall thread reads behind email admission (ADR-0103)."""
+    async with held_discovery_email() as (app, held):
+        await assert_reads_continue_during_admission(app, held, kind)
+
+
+@pytest.mark.parametrize("kind", THREAD_BOUND)
+async def test_unused_prepared_thread_session_is_released(kind: str) -> None:
+    """A concurrently bound session wins, and the prepared catalog leaves no residue."""
+    async with held_discovery_email() as (app, held):
+        thread, _ = await _seed_draft(app)
+        thread = await _unbind_thread_session(app, thread)
+        earlier = await _thread_sessions(app, thread)
+        held.hold(calls=1)
+        work = asyncio.create_task(_admit(app, kind, thread))
+        try:
+            await asyncio.wait_for(held.started.wait(), timeout=2)
+            winner = await asyncio.wait_for(_admit(app, "discussion", thread), timeout=2)
+        finally:
+            held.release.set()
+            loser = await work
+        assert loser == winner
+        assert await _thread_sessions(app, thread) - earlier == {winner}
+        # The loser's catalog and transports are released; the winner's are not.
+        assert len(held.closed) == 1 and winner not in held.closed
+        assert held.closed[0] not in earlier
+
+
+async def test_rolled_back_admission_releases_its_claimed_thread_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A claimed catalog is released exactly once when its transaction fails."""
+    async with held_discovery_email() as (app, held):
+        await claim_session_then_fail(app, held, monkeypatch)
