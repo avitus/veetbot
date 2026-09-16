@@ -994,8 +994,11 @@ service that is accidentally bound to a public interface.
 roles, separate ingress Linux user and required live verification. The release
 script leaves both roles disabled by default. When enabled it validates matching
 owner/profile bindings, installs `veetbot-call.service` and optionally
-`veetbot-call-ingress.service`, then starts them after promotion. The proxy adds
-only the exact `/webhooks/bland` route when the active release enables intake.
+`veetbot-call-ingress.service`, then starts them after promotion. That preflight
+runs as the deploy identity without sudo. The guide's file permissions let that
+identity read both calling environment files and reach, but not read, their
+credentials. The proxy adds only the exact `/webhooks/bland` route when the
+active release enables intake.
 Verify both units independently alongside the normal public release probes.
 Before rolling back across calling support, stop both calling units and restore
 the target release's environment and proxy flags; only restart roles that exist

@@ -356,6 +356,10 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
     calling_env="$CALL_ENV_FILE"
     if [[ "$calling_unit" == "veetbot-call-ingress" ]]; then calling_env="$CALL_INGRESS_ENV_FILE"; fi
     [[ -f "$calling_env" ]] || fail "calling role environment is missing"
+    # The deploy user reads role environments and inspects credentials without
+    # sudo; docs/bland-setup.md prescribes the permissions this relies on.
+    [[ -r "$calling_env" ]] || fail \
+      "calling role environment is not readable by the deploy user: $calling_env"
     for binding in AGENT_CALL_ENABLED AGENT_CALL_INGRESS_ENABLED AGENT_CALL_NOTIFICATIONS_ENABLED \
       AUTH_TENANT_ID AUTH_PRINCIPAL_ID BLAND_CONFIGURATION_FILE; do
       [[ "$(environment_flag "$calling_env" "$binding")" == "$(environment_flag "$ENV_FILE" "$binding")" ]] || fail "calling role $binding must match the application environment"
@@ -369,6 +373,10 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
       [[ "$(environment_flag "$calling_env" BLAND_API_KEY_FILE)" == "0" ]] || fail "calling ingress must not contain the provider credential path"
     fi
     calling_path="$(environment_flag "$calling_env" "$calling_path_setting")"
+    calling_directory="$(dirname -- "$calling_path")"
+    if [[ "$calling_path" == /* && -d "$calling_directory" && ! -x "$calling_directory" ]]; then
+      fail "calling role credential directory is not traversable by the deploy user: $calling_directory"
+    fi
     [[ "$calling_path" == /* && -f "$calling_path" && ! -L "$calling_path" ]] || fail "calling role private credential file is missing or invalid"
     [[ "$(stat -c '%U:%a' -- "$calling_path" 2>/dev/null)" == "$calling_credential_owner:600" ]] || fail "calling role private credential file is missing or invalid"
     [[ "$(getfacl -cp -- "$calling_path" 2>/dev/null)" == $'user::rw-\ngroup::---\nother::---' ]] || fail "calling role private credential file is missing or invalid"

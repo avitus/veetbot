@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Bland calling setup passes the release preflight
+
+- The Bland setup guide now gives file permissions that the release preflight
+  can check. Before, it made the listener's environment file readable only by
+  the listener, so the deploy user could not read it. It also left the secret
+  directory closed to the deploy user. A production release failed with a
+  misleading "must match the application environment" error.
+- Both calling environment files are now `root:veetbot` with mode 0640, and
+  credential directories use mode 0711. The webhook secret and the Bland API
+  key stay mode 0600 and readable only by their services. The listener still
+  cannot read the application environment.
+- When a calling environment file is unreadable or a credential directory
+  cannot be traversed, the release now names that path. The release test
+  replays the guide's commands as both the `veetbot-deploy` and `veetbot`
+  deploy users.
+
 ## 2026-09-16 — Email archives no longer wait behind refreshes
 
 - An Email-mode archive or move-to-Inbox run now uses the interactive queue
