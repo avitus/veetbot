@@ -99,7 +99,11 @@ Command Line Tools build cannot be mistaken for an executed Swift Testing run.
 opening and switching durable historical transcripts and starting a new
 conversation. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
-or credential.
+or credential. It runs `make test-apple-ui-macos` and then
+`make test-apple-ui-ios`; either target runs alone when only one platform
+family changed. Each UI case sets its launch arguments and environment before
+calling `app.launch()` once. Terminate and relaunch only in a case that tests
+relaunch behavior.
 The keyboard-dismissal case holds its fake submission pending until teardown,
 so a slow accessibility query cannot consume the response-delay window.
 

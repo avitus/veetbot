@@ -32,7 +32,10 @@ in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
 Email journeys cover mode switching, feedback, editing, learning controls and
 compact-trait navigation on both simulator families.
-Both targets run in the required CircleCI Apple job.
+`make test-apple-ui` runs `make test-apple-ui-macos`, then
+`make test-apple-ui-ios`. CircleCI runs `make test-apple` and the Mac cases in
+the required `apple` job, and the simulator cases in the required `apple-ios`
+job at the same time.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
 Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
