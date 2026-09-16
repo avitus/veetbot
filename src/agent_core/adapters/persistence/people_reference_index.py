@@ -8,9 +8,11 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.sql.elements import TextClause
 
 INVOCATION_REFERENCE_TEXT = (
-    "coalesce(raw_arguments, '') || coalesce(arguments::text, '') || "
-    "coalesce(result_item::text, '') || coalesce(structured_result::text, '') || "
-    "coalesce(outcome::text, '') || coalesce(policy_decision::text, '')"
+    # Match PostgreSQL's reflected left-associative expression so Alembic can
+    # verify the migrated index without proposing a spurious replacement.
+    "((((coalesce(raw_arguments, ''::text) || coalesce(arguments::text, ''::text)) || "
+    "coalesce(result_item::text, ''::text)) || coalesce(structured_result::text, ''::text)) || "
+    "coalesce(outcome::text, ''::text)) || coalesce(policy_decision::text, ''::text)"
 )
 
 
