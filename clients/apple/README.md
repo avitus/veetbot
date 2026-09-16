@@ -103,6 +103,8 @@ debug fixture reads `VEETBOT_UI_TEST_TEXT_SIZE` into isolated appearance default
 leaving the owner's preferences untouched and avoiding positional AppKit launch
 arguments. UIKit's content-size launch preference is restricted to the iOS test
 targets.
+Person-profile empty states use primary text contrast so missing history and
+coverage remain readable at enlarged text sizes.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the

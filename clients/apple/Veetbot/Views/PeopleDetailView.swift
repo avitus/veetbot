@@ -132,7 +132,7 @@ public struct PeopleDetailView: View {
     }
     private func relationships(_ profile: PersonProfileView) -> some View {
         Section("Relationships") {
-            if profile.relationships.isEmpty { Text("No recorded relationships.").foregroundColor(.secondary) }
+            if profile.relationships.isEmpty { Text("No recorded relationships.").foregroundColor(.primary) }
             ForEach(profile.relationships) { relationship in
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(endpoint(relationship.subject, profile: profile)) → \(memoryDisplayText(relationship.predicate)) → \(endpoint(relationship.object, profile: profile))")
@@ -149,7 +149,7 @@ public struct PeopleDetailView: View {
     }
     private var history: some View {
         Section("History") {
-            if model.history.isEmpty { Text("No recorded interactions. Earlier history may not have been imported.").foregroundColor(.secondary) }
+            if model.history.isEmpty { Text("No recorded interactions. Earlier history may not have been imported.").foregroundColor(.primary) }
             ForEach(model.history) { interaction in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(interaction.summary)
@@ -166,7 +166,7 @@ public struct PeopleDetailView: View {
     private func commitments(_ profile: PersonProfileView) -> some View {
         Section("Open threads") {
             let open = profile.commitments.filter { ["open", "proposed", "uncertain"].contains($0.state) }
-            if open.isEmpty { Text("No recorded open commitments.").foregroundColor(.secondary) }
+            if open.isEmpty { Text("No recorded open commitments.").foregroundColor(.primary) }
             ForEach(open) { commitment in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(commitment.description)
@@ -179,7 +179,7 @@ public struct PeopleDetailView: View {
     }
     private func facts(_ profile: PersonProfileView) -> some View {
         Section("Facts and evidence") {
-            if profile.facts.isEmpty { Text("No recorded facts.").foregroundColor(.secondary) }
+            if profile.facts.isEmpty { Text("No recorded facts.").foregroundColor(.primary) }
             ForEach(profile.facts) { fact in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(fact.statement)

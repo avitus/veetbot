@@ -1352,9 +1352,11 @@ discovery. The final measurements include calendar-zone rendering and the
 concurrent-erasure recall fallback. The load report is emitted before checking
 the unchanged latency limits so a failing measurement is retained too.
 
-The automated directory/profile accessibility audit passes at the largest
-Dynamic Type size after repairing toolbar labels, filter clipping, search layout,
-profile controls, macOS control actions, and container descriptions. The macOS
+The automated directory/profile accessibility audit uses the native Large text
+preference on Mac and the largest accessibility Dynamic Type size on iPhone and
+iPad. Its coverage includes toolbar labels, filter clipping, search layout,
+profile controls, macOS control actions, container descriptions, and primary
+text contrast for empty profile sections. The macOS
 component audit rejects every finding inside the People sheet and records all
 findings outside it. An audit before opening People establishes the baseline
 for findings without an identifiable element; only matching baseline counts
