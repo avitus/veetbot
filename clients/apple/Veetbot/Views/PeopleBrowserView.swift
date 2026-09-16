@@ -354,24 +354,16 @@ enum PeopleModalWidth {
     /// Conversation lists, transcripts, and identity evidence.
     case reading
 
-    #if os(macOS)
-    var minimum: CGFloat { self == .form ? 560 : 680 }
+    var macMinimum: CGFloat { self == .form ? 560 : 680 }
     var ideal: CGFloat { self == .form ? 600 : 760 }
-    #endif
 }
 
 extension View {
-    /// macOS 15 opens a sheet at its ideal size only with fitted presentation
-    /// sizing; earlier releases open it at the minimum, so both are readable.
-    @ViewBuilder
+    /// Frames a People sheet with `sheetFrame`, so both its macOS 15 ideal
+    /// width and its earlier-release minimum are readable.
     func peopleModalFrame(_ width: PeopleModalWidth, minHeight: CGFloat, idealHeight: CGFloat) -> some View {
-        #if os(macOS)
-        let framed = frame(minWidth: width.minimum, idealWidth: width.ideal, maxWidth: .infinity,
-                           minHeight: minHeight, idealHeight: idealHeight, maxHeight: .infinity)
-        if #available(macOS 15, *) { framed.presentationSizing(.fitted) } else { framed }
-        #else
-        frame(minWidth: 320, minHeight: minHeight)
-        #endif
+        sheetFrame(minWidth: 320, macMinWidth: width.macMinimum, idealWidth: width.ideal, maxWidth: .infinity,
+                   minHeight: minHeight, idealHeight: idealHeight, maxHeight: .infinity)
     }
 }
 

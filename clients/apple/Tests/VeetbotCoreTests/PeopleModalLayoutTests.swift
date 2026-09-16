@@ -1,5 +1,4 @@
 #if os(macOS)
-import AppKit
 import Foundation
 import SwiftUI
 import Testing
@@ -46,31 +45,6 @@ import Testing
         let fact = try JSONDecoder.server.decode(MemoryView.self, from: Data(Self.factJSON.utf8))
         let width = try await presentedSheetWidth { PeopleFactEditor(model: model, fact: fact, sessionID: nil) }
         #expect(width >= Self.formWidth)
-    }
-
-    /// Presents `sheet` from a desktop-sized window and returns the settled sheet width.
-    private func presentedSheetWidth<Sheet: View>(@ViewBuilder _ sheet: @escaping () -> Sheet) async throws -> CGFloat {
-        _ = NSApplication.shared
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 1000),
-                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: Color.clear.sheet(isPresented: .constant(true), content: sheet))
-        window.orderFront(nil)
-        defer {
-            window.attachedSheet.map { window.endSheet($0) }
-            window.orderOut(nil)
-            window.contentView = nil
-        }
-        var settled: CGFloat?
-        var previous: CGFloat?
-        for _ in 0..<60 {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            try await Task.sleep(nanoseconds: 10_000_000)
-            let width = window.attachedSheet?.frame.width
-            if let width, width == previous { settled = width; break }
-            previous = width
-        }
-        return try #require(settled, "the sheet never presented")
     }
 
     private func detailModel() -> PeopleDetailViewModel {
