@@ -1081,7 +1081,9 @@ class EmailExperienceService:
                 agent_version=session.agent_version,
                 status=RunStatus.QUEUED,
                 limits=limits,
-                priority=10,
+                # The owner waits on an archive gesture; it must not queue behind
+                # minutes-long refreshes in the asynchronous lane.
+                priority=0 if kind == "archive" else 10,
                 scheduled_for=now,
                 deadline_at=deadline,
                 created_at=now,

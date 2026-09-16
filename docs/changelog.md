@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Email archives no longer wait behind refreshes
+
+- An Email-mode archive or move-to-Inbox run now uses the interactive queue
+  class. Previously it shared the single asynchronous worker with refresh runs,
+  which take about two minutes each. On 2026-09-16 one production archive waited
+  69 of its 115 seconds in that queue. Refresh, draft and send tasks remain
+  asynchronous. Consent, fencing, approval and uncertain-effect checks are
+  unchanged.
+
 ## 2026-09-15 — Personal-context memory retrieval repair
 
 - Session snapshots exclude provisional beliefs before candidate limits, keeping

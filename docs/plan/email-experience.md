@@ -676,9 +676,11 @@ or uncertain outcome so another device can recover the presentation.
 Archive admission requires current `email.read`, `email.write`, `run.write`,
 `session.write`, `approval.resolve`, and the account's exact read/write MCP
 scopes. The typed task performs no model work and consumes no automatic-email
-dollar reservation. It uses the existing tool pipeline and approval floor,
-validating the immutable, expiring owner request against the exact pending
-action before ordinary one-time resolution. Preserve requested/resolved audit
+dollar reservation. The owner is waiting on the gesture, so the task is queued in
+the interactive class (event-log-and-persistence.md:664) and never waits behind
+refresh, draft or send work, which stays asynchronous. It uses the existing
+tool pipeline and approval floor, validating the immutable, expiring owner
+request against the exact pending action before ordinary one-time resolution. Preserve requested/resolved audit
 ordering, policy revalidation, worker fencing, and uncertain-effect rules.
 Identical command retries replay their durable result. Labels alone are not
 new source content: synchronization must not stale a draft, reopen handled
