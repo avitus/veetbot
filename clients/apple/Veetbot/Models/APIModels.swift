@@ -156,6 +156,12 @@ public struct SessionView: Codable, Identifiable, Sendable {
         case activeRunID = "active_run_id"
         case lastRunID = "last_run_id"
     }
+
+    /// People audit anchors and import workers are sessions, not conversations.
+    var isPeopleOperational: Bool {
+        guard let purpose = metadata["purpose"]?.stringValue else { return false }
+        return purpose == "people-management" || purpose == "people-import"
+    }
 }
 
 public enum BrowserProfileStatus: String, Codable, Hashable, Sendable {

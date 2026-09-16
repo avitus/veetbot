@@ -589,6 +589,65 @@ import UserNotifications
     }
 
     @Test
+    func testSynchronizationPrunesCachedPeopleAuditSessions() async throws {
+        let conversationID = UUID()
+        let auditID = UUID()
+        let conversationJSON = """
+            {"id":"\(conversationID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Keep me","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let auditJSON = """
+            {"id":"\(auditID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"purpose":"people-management"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:02:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let session = urlSession { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(conversationJSON)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(auditID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: auditJSON)
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        // An earlier build cached the Add person audit session as a conversation.
+        let store = VolatileSessionHistoryStore()
+        try await store.upsert(
+            SessionHistoryEntry(
+                sessionID: auditID,
+                title: "New conversation",
+                agentID: "general",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0),
+                lastRunID: nil
+            )
+        )
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(
+                defaults: try #require(UserDefaults(suiteName: "com.veetbot.tests.\(UUID())"))
+            ),
+            historyStore: store,
+            urlSession: session
+        )
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+        await model.synchronizeHistory()
+
+        #expect(model.history.map(\.sessionID) == [conversationID])
+        #expect(await store.list().map(\.sessionID) == [conversationID])
+    }
+
+    @Test
     func testPendingApprovalPaginationHasNoArbitraryPageCap() async throws {
         let lock = NSLock()
         var approvalRequests = 0

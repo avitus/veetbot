@@ -40,6 +40,19 @@ async def test_postgres_import_priority_checks_due_work_for_the_same_owner() -> 
         await higher_priority_work_contract(app.uow_factory, clock)
 
 
+async def test_postgres_session_index_hides_people_operational_sessions() -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.test_session_repository_contract import (
+        assert_session_index_hides_people_operational_sessions,
+    )
+
+    async with (
+        build(settings=database_settings(), storage="postgres") as app,
+        app.uow_factory() as uow,
+    ):
+        await assert_session_index_hides_people_operational_sessions(uow.sessions)
+
+
 async def test_postgres_configured_async_worker_defers_and_resumes_people_import() -> None:
     from dataclasses import replace
     from datetime import datetime, timedelta

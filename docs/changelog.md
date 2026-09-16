@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Adding a person no longer adds a conversation
+
+- The conversation index hides the sessions that anchor native People writes
+  (`purpose: people-management`) and People import workers
+  (`purpose: people-import`). Previously every import preview, and every Add
+  person or profile edit made without a selected conversation, left an empty
+  conversation in the sidebar.
+- The Apple client prunes those sessions from its cached sidebar. The sessions
+  stay on the server because they hold the evidence behind each owner-added
+  person; deleting one would erase that evidence.
+
 ## 2026-09-15 — Personal-context memory retrieval repair
 
 - Session snapshots exclude provisional beliefs before candidate limits, keeping

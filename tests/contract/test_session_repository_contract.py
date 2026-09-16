@@ -99,6 +99,36 @@ async def test_session_index_filters_before_pagination() -> None:
     await assert_session_index_filters_before_pagination(InMemorySessionRepository())
 
 
+async def assert_session_index_hides_people_operational_sessions(
+    repository: SessionRepository,
+) -> None:
+    for value, metadata in (
+        (721, {"purpose": "people-management"}),
+        (722, {"purpose": "people-import", "people_import_job_id": "job"}),
+        (723, {"purpose": "research"}),
+        (724, {"purpose": ["people-management"]}),
+        (725, {}),
+    ):
+        await repository.create(
+            session().model_copy(update={"id": UUID(int=value), "metadata": metadata})
+        )
+    candidates = {UUID(int=value) for value in range(721, 726)}
+    visible = await repository.list(principal(), limit=20, exclude_operational=True)
+    assert {row.id for row in visible} & candidates == {
+        UUID(int=723),
+        UUID(int=724),
+        UUID(int=725),
+    }
+    # People audit and import sessions stay readable; only the conversation index hides them.
+    assert {row.id for row in await repository.list(principal(), limit=20)} >= candidates
+    audit = await repository.get(UUID(int=721), principal())
+    assert audit.metadata["purpose"] == "people-management"
+
+
+async def test_session_index_hides_people_operational_sessions() -> None:
+    await assert_session_index_hides_people_operational_sessions(InMemorySessionRepository())
+
+
 async def assert_email_chat_visibility_preserves_owner_messages(
     repository: SessionRepository, events: EventRepository
 ) -> None:
