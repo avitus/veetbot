@@ -134,6 +134,13 @@ context. The implementation adds no major dependency unless a separate decision
 justifies it. [Send Call](https://docs.bland.ai/api-v1/post/calls),
 [Call Details](https://docs.bland.ai/api-v1/get/calls-id)
 
+The server's stderr is not a private channel: the API or worker process that
+spawns the child passes on its own stderr, so anything the child logs lands in
+that service's journal. The package therefore holds HTTP transport logging at
+warning level. At the SDK's default informational level, every request line
+would carry provider call identifiers, the configured number and reconciliation
+query values.
+
 ## Inbound number and result delivery
 
 First inspect the account's existing numbers without making calls or purchasing
