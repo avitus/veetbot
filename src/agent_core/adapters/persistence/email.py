@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import builtins
 import hashlib
-from collections.abc import AsyncIterator, Sequence
+import re
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, and_, delete, or_, select, update
+from sqlalchemy import DateTime, and_, case, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +26,32 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailRecord
 from agent_core.domain.erasure import erased_email_payload
 from agent_core.domain.errors import ConflictError
+
+_EVIDENCE_TIMESTAMP_PATTERN = (
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
+    r"(\.[0-9]{1,6})?(Z|[+-](0[0-9]|1[0-5]):[0-5][0-9])$"
+)
+
+
+def _semantic_source_time(payload: Mapping[str, Any]) -> datetime:
+    """Require an ISO source instant with an explicit offset on both backends."""
+    raw = payload.get("evidence_at")
+    if not isinstance(raw, str) or re.fullmatch(_EVIDENCE_TIMESTAMP_PATTERN, raw) is None:
+        raise ValueError("invalid retained email source")
+    try:
+        at = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError("invalid retained email source") from exc
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("invalid retained email source")
+    return at
+
+
+def _validate_semantic_source(record: EmailRecord) -> None:
+    # Exclusion receipts must remain writable even for malformed legacy data;
+    # neither reader admits these records, and reactivation must validate again.
+    if record.kind == "semantic_source" and record.payload.get("excluded") is not True:
+        _semantic_source_time(record.payload)
 
 
 def _validate_limit(limit: int) -> None:
@@ -112,12 +140,7 @@ class InMemoryEmailStore:
                 or row.payload.get("account_id") not in account_ids
             ):
                 continue
-            raw = row.payload.get("evidence_at")
-            if not isinstance(raw, str):
-                continue
-            at = datetime.fromisoformat(raw)
-            if at.tzinfo is None or at.utcoffset() is None:
-                raise ValueError("invalid retained email source")
+            at = _semantic_source_time(row.payload)
             if since <= at < until and (after is None or (at, row.key) > after):
                 selected.append((at, row.key, row))
         selected.sort(key=lambda value: (value[0], value[1]))
@@ -155,6 +178,7 @@ class InMemoryEmailStore:
 
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord:
         _validate_revision(record, expected_revision)
+        _validate_semantic_source(record)
         key = (record.tenant_id, record.principal_id, record.kind, record.key)
         current = self._records.get(key)
         if (0 if current is None else current.revision) != expected_revision:
@@ -296,7 +320,18 @@ class PostgresEmailStore:
         limit: int = 100,
     ) -> builtins.list[EmailRecord]:
         _validate_source_window(account_ids, since, until, after, limit)
-        at = EmailRecordRow.payload["evidence_at"].astext.cast(DateTime(timezone=True))
+        raw = EmailRecordRow.payload["evidence_at"].astext
+        valid = func.coalesce(
+            and_(
+                func.jsonb_typeof(EmailRecordRow.payload["evidence_at"]) == "string",
+                raw.op("~")(_EVIDENCE_TIMESTAMP_PATTERN),
+                func.pg_input_is_valid(raw, "timestamp with time zone"),
+            ),
+            False,
+        )
+        # CASE is essential: SQL may reorder WHERE predicates. Invalid legacy
+        # rows sort first and are rejected by the same parser before pagination.
+        at = case((valid, raw.cast(DateTime(timezone=True))), else_=None)
         query = select(EmailRecordRow).where(
             EmailRecordRow.tenant_id == principal.tenant_id,
             EmailRecordRow.principal_id == principal.principal_id,
@@ -304,22 +339,26 @@ class PostgresEmailStore:
             ~EmailRecordRow.erasure_pending,
             EmailRecordRow.payload["account_id"].astext.in_(account_ids),
             func.coalesce(EmailRecordRow.payload["excluded"].astext, "false") == "false",
-            at >= since,
-            at < until,
+            or_(~valid, and_(at >= since, at < until)),
         )
         if after is not None:
             query = query.where(
-                or_(at > after[0], and_(at == after[0], EmailRecordRow.key > after[1]))
+                or_(~valid, at > after[0], and_(at == after[0], EmailRecordRow.key > after[1]))
             )
         try:
             rows = (
-                await self._session.scalars(query.order_by(at, EmailRecordRow.key).limit(limit))
+                await self._session.scalars(
+                    query.order_by(at.asc().nulls_first(), EmailRecordRow.key).limit(limit)
+                )
             ).all()
         except DBAPIError as exc:
             if getattr(exc.orig, "sqlstate", None) not in {"22007", "22008"}:
                 raise
             raise ValueError("invalid retained email source") from exc
-        return [email_record_to_domain(row) for row in rows]
+        records = [email_record_to_domain(row) for row in rows]
+        for record in records:
+            _semantic_source_time(record.payload)
+        return records
 
     async def list_tasks(
         self,
@@ -356,6 +395,7 @@ class PostgresEmailStore:
 
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord:
         _validate_revision(record, expected_revision)
+        _validate_semantic_source(record)
         values = email_record_values(record)
         if expected_revision == 0:
             written = (

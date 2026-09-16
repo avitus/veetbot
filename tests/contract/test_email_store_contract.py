@@ -191,3 +191,60 @@ async def test_email_import_pages_are_scoped_and_chronological() -> None:
     _, factory = await memory_uow_factory()
     async with factory() as uow:
         await email_import_window_contract(uow.email)
+
+
+async def semantic_source_timestamp_contract(store: EmailStore) -> None:
+    """Both stores validate active sources before any insert or revision change."""
+    from datetime import timezone
+
+    for index, timestamp in enumerate(
+        ["2026-01-01T00:00:00", "invalid", None, 123, "2026-02-30T00:00:00Z"]
+    ):
+        source = record(f"invalid-{index}").model_copy(
+            update={
+                "kind": "semantic_source",
+                "payload": {"account_id": "work", "evidence_at": timestamp},
+            }
+        )
+        with pytest.raises(ValueError, match="invalid retained email source"):
+            await store.put(source, expected_revision=0)
+        assert await store.get(principal(), "semantic_source", source.key) is None
+    source = record("aware-source").model_copy(
+        update={
+            "kind": "semantic_source",
+            "payload": {
+                "account_id": "work",
+                "evidence_at": NOW.astimezone(timezone(timedelta(hours=5))).isoformat(),
+            },
+        }
+    )
+    await store.put(source, expected_revision=0)
+    with pytest.raises(ValueError, match="invalid retained email source"):
+        await store.put(
+            source.model_copy(
+                update={
+                    "revision": 2,
+                    "payload": {**source.payload, "evidence_at": "2026-01-01T00:00:00"},
+                }
+            ),
+            expected_revision=1,
+        )
+    retained = await store.get(principal(), "semantic_source", source.key)
+    assert retained is not None and retained.revision == 1
+    # Legacy exclusion receipts remain writable so validation cannot block erasure.
+    await store.put(
+        record("excluded-legacy").model_copy(
+            update={"kind": "semantic_source", "payload": {"account_id": "work", "excluded": True}}
+        ),
+        expected_revision=0,
+    )
+    page = await store.list_semantic_window(
+        principal(), account_ids=["work"], since=NOW, until=NOW + timedelta(seconds=1), limit=10
+    )
+    assert source.key in {row.key for row in page}
+
+
+async def test_memory_semantic_source_timestamps_are_validated_before_writes() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await semantic_source_timestamp_contract(uow.email)

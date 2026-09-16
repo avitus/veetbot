@@ -713,8 +713,11 @@ preserve the current cursor for an explicit retry, and cancellation or changed
 account/identity authority prevents subsequent reads and source registration.
 
 Historical Chat import cursors pair the source timestamp with the globally unique
-event ID, not the session-local sequence. Invalid retained email timestamps fail
-the import with `invalid_source` before analysis. Newly fetched and replayed Gmail
+event ID, not the session-local sequence. Active semantic email sources require
+an explicit-offset ISO timestamp on both insert and update. Legacy invalid dates
+are rejected before PostgreSQL casts or pagination; imports report
+`invalid_source` before analysis. Excluded legacy receipts remain writable so
+validation cannot prevent erasure. Newly fetched and replayed Gmail
 headers undergo the same object, required-field and date validation.
 
 Historical import orders evidence chronologically and preserves original dates.

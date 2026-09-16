@@ -200,24 +200,52 @@ async def test_postgres_task_admission_query_preserves_unsettled_reservations() 
         )
 
 
-async def test_invalid_retained_email_date_raises_controlled_validation_error() -> None:
+@pytest.mark.parametrize(
+    "timestamp", ["invalid", "2026-01-01T00:00:00", None, "2026-02-30T00:00:00Z"]
+)
+@pytest.mark.parametrize("time_zone", ["UTC", "America/New_York"])
+async def test_invalid_retained_email_date_raises_controlled_validation_error(
+    timestamp: str | None, time_zone: str
+) -> None:
     from datetime import timedelta
 
+    from sqlalchemy import insert
+
+    from agent_core.adapters.persistence.mappers import email_record_values
     from tests.contract.support import NOW
 
     async with database() as engine, create_session_factory(engine)() as session:
         await configure(session)
-        store = PostgresEmailStore(session)
-        await store.put(
-            record("invalid-date").model_copy(
-                update={
-                    "kind": "semantic_source",
-                    "payload": {"account_id": "work", "evidence_at": "invalid", "excluded": False},
-                }
-            ),
-            expected_revision=0,
+        await session.execute(
+            text("SELECT set_config('TimeZone', :zone, true)"), {"zone": time_zone}
         )
-        with pytest.raises(ValueError, match="invalid retained email source"):
-            await store.list_semantic_window(
-                principal(), account_ids=["work"], since=NOW, until=NOW + timedelta(days=1)
-            )
+        source = record("invalid-date").model_copy(
+            update={
+                "kind": "semantic_source",
+                "payload": {"account_id": "work", "evidence_at": timestamp, "excluded": False},
+            }
+        )
+        # Bypass put to represent data retained before validation was introduced.
+        await session.execute(insert(EmailRecordRow).values(**email_record_values(source)))
+        store = PostgresEmailStore(session)
+        for after in [None, (NOW, "zzz")]:
+            with pytest.raises(ValueError, match="invalid retained email source"):
+                await store.list_semantic_window(
+                    principal(),
+                    account_ids=["work"],
+                    since=NOW,
+                    until=NOW + timedelta(days=1),
+                    after=after,
+                    limit=1,
+                )
+            # Rejection must precede a failing cast and leave the transaction usable.
+            assert await session.scalar(select(1)) == 1
+
+
+async def test_postgres_semantic_source_timestamps_are_validated_before_writes() -> None:
+    from tests.contract.test_email_store_contract import semantic_source_timestamp_contract
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        await semantic_source_timestamp_contract(PostgresEmailStore(session))
+        await session.commit()

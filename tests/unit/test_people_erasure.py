@@ -797,6 +797,7 @@ async def test_forget_removes_email_assessment_copies_and_preserves_original_mes
                 "semantic_source",
                 "source",
                 {
+                    "evidence_at": NOW.isoformat(),
                     "memory_ids": [str(belief.id)],
                     "facts": {"fact-digest": str(belief.id)},
                     "account_id": "work",

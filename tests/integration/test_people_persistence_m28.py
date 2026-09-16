@@ -1258,6 +1258,7 @@ async def test_postgres_forget_batches_email_and_episode_copies() -> None:
                             created_at=NOW,
                             updated_at=NOW,
                             payload={
+                                "evidence_at": NOW.isoformat(),
                                 "account_id": "work",
                                 "provider_thread_id": key,
                                 "memory_ids": [str(belief.id)],
