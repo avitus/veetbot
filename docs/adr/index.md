@@ -113,3 +113,4 @@ implementation without one.
 - [ADR-0102 — Chat thread folders and grouping proposals (Accepted; Milestone 29)](0102-chat-thread-folders.md)
 - [ADR-0103 — Email admission never discovers MCP servers under the owner lock (Accepted)](0103-email-admission-without-mcp-discovery.md)
 - [ADR-0104 — Typed Email runs prepare only the MCP servers their task calls (Proposed)](0104-typed-email-runs-prepare-only-their-servers.md)
+- [ADR-0105 — The tool-definition token cap rises to 9,000 so the item cap binds first (Proposed)](0105-tool-definition-token-cap.md)

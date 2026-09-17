@@ -210,6 +210,17 @@ secret ownership and provider-side admission limits are verified:
 | `AGENT_CALL_INGRESS_ENABLED=1` | Add the separate signed callback listener and exact public proxy route |
 | `AGENT_CALL_NOTIFICATIONS_ENABLED=1` | Enqueue `call_finished`; requires the existing notification API and delivery setup |
 
+Enabling the third flag touches all three environments. Each calling role
+validates on its own, so the application environment and both calling role files
+need `AGENT_CALL_NOTIFICATIONS_ENABLED=1`, and each calling role file also needs
+`AGENT_NOTIFICATION_API_ENABLED=1` with `AGENT_NOTIFICATION_DISPATCH_ENABLED=1`,
+which must always match each other. Those roles only enqueue: their push provider
+stays disabled and the notification worker still delivers. Grant `veetbot_call`
+`SELECT, INSERT` on `notification_outbox` before enabling, or its reconciliation
+fails on the first finished call. A role whose environment fails validation exits
+and its unit stops, so change the three files together and restart both calling
+units with the application and worker units.
+
 Give the owner API credential `call.read`, `call.cancel`, and `call.delete` as
 needed. The model's Bland tools use separately installed MCP scopes. Incoming
 callers receive none of these scopes. Notifications say only “New call result”

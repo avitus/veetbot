@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-17 — Chat reaches the call tools again
+
+- The owner's configured tools reached twenty-six items and 5,973 of the 6,000
+  tokens the tool-definition class allows, so every discovered tool was skipped
+  while four of the thirty slots stood empty. Chat could not list or place a
+  call, and no error said why. A message left with the receptionist on
+  2026-09-16 was received and stored, but nothing could show it.
+- ADR-0105 raises the class to 9,000 tokens and the prefix ceiling to 20,000, so
+  the thirty-tool item cap binds first. Builder version `context-builder@11`
+  rebuilds existing plans through the ordinary epoch rotation.
+- A production-shaped roster case now gates the calling tools.
+
 ## 2026-09-16 — Call roles skip the client-certificate probe
 
 - The call worker crash-looped after the first calling release. Its unit hides

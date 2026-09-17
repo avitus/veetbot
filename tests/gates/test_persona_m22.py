@@ -149,7 +149,8 @@ async def test_budget_capped() -> None:
     prefix = config["prefix"]
     classes = config["classes"]
     assert isinstance(prefix, dict) and isinstance(classes, dict)
-    assert prefix["ceiling_tokens"] == 17000
+    # ADR-0105 added the 3,000 tokens it gave the tool class to this ceiling.
+    assert prefix["ceiling_tokens"] == 20000
     assert classes["persona"] == {"region": "A", "max_items": 30, "max_tokens": 2000}
 
 
