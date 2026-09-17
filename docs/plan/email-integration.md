@@ -390,7 +390,7 @@ undetermined-outcome code, resolves to the platform's `uncertain` outcome with
 blocked from being proposed again in the run by the unified breaker's
 threshold-of-one row (tool-system.md:853). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:1822-1824) and the one
+after the watermark (tool-system.md:1831-1833) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:573-577), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an

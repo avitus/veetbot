@@ -27,6 +27,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import ModelLimits, ResolvedModel
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
+from agent_core.domain.skills import SessionSkillCatalog
 from agent_core.memory.profiles import SnapshotProfiles
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.registry import StaticToolRegistry
@@ -917,3 +918,96 @@ async def test_context_planner_rotates_when_provenance_changes_under_identical_t
     assert rotated.persona_version == 2
     latest_query = spy.queries[-1]
     assert latest_query.exclude_ids == (promoted,)
+
+
+class _SurfaceSpy:
+    """Record every session-surface preparation the planner requests."""
+
+    def __init__(self) -> None:
+        self.opened: list[UUID] = []
+        self.attached: list[UUID] = []
+
+    async def open(self, session_id: UUID, _agent, _principal) -> SessionSkillCatalog:  # type: ignore[no-untyped-def]
+        self.opened.append(session_id)
+        return SessionSkillCatalog()
+
+    async def attach(self, session_id: UUID, _principal) -> None:  # type: ignore[no-untyped-def]
+        self.attached.append(session_id)
+
+
+async def _surface_planner(
+    spy: _SurfaceSpy, retriever: _SpyRetriever | None = None
+) -> EventContextPlanner:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    registry = StaticToolRegistry()
+    registry.register(CurrentTimeTool(clock))
+    return EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        yaml.safe_load(
+            (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(
+                encoding="utf-8"
+            )
+        ),
+        policy_version="contract-policy@1",
+        skill_catalogs=spy,  # type: ignore[arg-type]
+        memory_retriever=retriever,
+        attach_device_tools=spy.attach,
+    )
+
+
+async def test_operational_email_plan_has_no_tool_surface_but_keeps_its_snapshot() -> None:
+    """Typed Email work pins no tools and starts no MCP server (ADR-0104)."""
+    spy = _SurfaceSpy()
+    retriever = _SpyRetriever()
+    planner = await _surface_planner(spy, retriever)
+    operational = session().model_copy(update={"metadata": {"email_operational": True}})
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    created = await planner.plan(operational, agent(), principal(), model)
+    reused = await planner.plan(operational, agent(), principal(), model)
+
+    assert reused == created
+    assert created.tool_names == ()
+    assert created.skill_pins == () and created.skill_catalog == ()
+    assert spy.opened == [] and spy.attached == []
+    assert len(retriever.queries) == 1
+
+
+async def test_typed_work_reuses_a_plan_without_reopening_the_session_surface() -> None:
+    spy = _SurfaceSpy()
+    planner = await _surface_planner(spy)
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    created = await planner.plan(session(), agent(), principal(), model)
+    reused = await planner.plan(session(), agent(), principal(), model, prepare_surface=False)
+
+    assert reused == created
+    assert created.tool_names == ("system.current_time",)
+    assert spy.opened == [session().id] and spy.attached == [session().id]
+
+
+async def test_typed_work_pins_the_full_surface_when_it_creates_a_thread_session_plan() -> None:
+    """Chat reuses a thread session's first plan, so typed work cannot narrow it."""
+    spy = _SurfaceSpy()
+    planner = await _surface_planner(spy)
+    thread = session().model_copy(update={"metadata": {"email_thread_id": str(UUID(int=5))}})
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    created = await planner.plan(thread, agent(), principal(), model, prepare_surface=False)
+
+    assert created.tool_names == ("system.current_time",)
+    assert spy.opened == [session().id] and spy.attached == [session().id]

@@ -105,8 +105,9 @@ class _PlanStore:
         model: ResolvedModel,
         *,
         refresh_authorization: bool = False,
+        prepare_surface: bool = True,
     ) -> ContextPlan:
-        del session, agent, principal, model, refresh_authorization
+        del session, agent, principal, model, refresh_authorization, prepare_surface
         return self.value.model_copy(deep=True)
 
     async def rotate(self, session_id: UUID, reason: str) -> ContextPlan:

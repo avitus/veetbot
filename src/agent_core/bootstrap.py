@@ -3248,7 +3248,11 @@ async def _compose(
                 registry,
                 semantic_factory=email_semantics,
                 render_context=render_email_context,
+                prepare_servers=mcp_runtime.prepare,
             )(context)
+
+        async def is_email_task(run: Run, run_principal: Principal) -> bool:
+            return await public_services.email.get_task(run_principal, run.id) is not None
 
         async def resolve_email_archive_approval(
             owner: Principal,
@@ -3294,6 +3298,7 @@ async def _compose(
             max_compactions_per_step=max_compactions_per_step,
             notification_producer=notification_producer,
             task_runner=execute_email_task,
+            typed_task=is_email_task,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.email import (
     EMAIL_HISTORY_DAYS,
@@ -64,6 +65,15 @@ EMAIL_BODY_WINDOW_BYTES = 512 * 1024
 EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
+# The account server modes each task kind calls. Drafts call only the model.
+EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
+    "refresh": ("read",),
+    "archive": ("read", "write"),
+    "send": ("read", "send"),
+    "draft": (),
+}
+
+type ServerPreparation = Callable[[UUID, Principal, frozenset[str]], Awaitable[None]]
 
 
 class EmailToolError(Exception):
@@ -114,11 +124,13 @@ class EmailTaskRunner:
         *,
         semantic_factory: Callable[[RunContext], EmailSemanticPort],
         render_context: EmailContextRenderer,
+        prepare_servers: ServerPreparation,
     ) -> None:
         self.service = service
         self.registry = registry
         self.semantic_factory = semantic_factory
         self.render_context = render_context
+        self.prepare_servers = prepare_servers
 
     async def __call__(self, context: RunContext) -> RunOutcome | None:
         task = await self.service.get_task(context.principal, context.run.id)
@@ -131,6 +143,15 @@ class EmailTaskRunner:
         configured = session.metadata.get("email_account_servers")
         if configured != self.service.account_servers:
             raise ConflictError("email task account configuration has changed")
+        # Typed work starts only the servers its task kind calls (ADR-0104).
+        servers = frozenset(
+            server
+            for account_id in task.account_ids
+            for mode in EMAIL_TASK_SERVER_MODES[task.kind]
+            if (server := self.service.account_servers[account_id].get(mode)) is not None
+        )
+        if servers:
+            await self.prepare_servers(task.session_id, context.principal, servers)
         semantics = self.semantic_factory(context)
         io = _TaskIO(context, task, self.registry, self.service, semantics, self.render_context)
         try:

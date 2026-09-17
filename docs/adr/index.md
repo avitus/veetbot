@@ -112,3 +112,4 @@ implementation without one.
 - [ADR-0101 — People availability without evaluation gates (Accepted)](0101-people-availability-without-evaluation-gates.md)
 - [ADR-0102 — Chat thread folders and grouping proposals (Accepted; Milestone 29)](0102-chat-thread-folders.md)
 - [ADR-0103 — Email admission never discovers MCP servers under the owner lock (Accepted)](0103-email-admission-without-mcp-discovery.md)
+- [ADR-0104 — Typed Email runs prepare only the MCP servers their task calls (Proposed)](0104-typed-email-runs-prepare-only-their-servers.md)

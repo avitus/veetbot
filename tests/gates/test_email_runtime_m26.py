@@ -767,7 +767,7 @@ async def test_queued_refresh_releases_admission_connections_before_worker_dispa
         assert operation.status == "QUEUED"
 
 
-async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_account(
+async def test_real_stdio_refresh_reopens_read_servers_and_recovers_one_failed_account(
     tmp_path: Path,
 ) -> None:
     """Real mailbox parsing retains priority mail while one account reconnects later."""
@@ -798,8 +798,8 @@ async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_ac
     ) -> SDKMCPClient:
         """Only the first worker's work-account read process fails discovery.
 
-        Admission starts no server (ADR-0103), so each refresh creates one
-        process per server, all in the worker.
+        Admission starts no server (ADR-0103), and a refresh starts only each
+        account's read server (ADR-0104), so each refresh creates two processes.
         """
         creations[config.server_id] += 1
         mode = config.server_id.rsplit("_", 1)[-1]
@@ -843,7 +843,7 @@ async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_ac
             and event.payload.get("reason_code") == "tool.server_unreachable"
             for event in events
         )
-        assert len(creations) == 6 and set(creations.values()) == {1}
+        assert creations == Counter({"gmail_read": 1, "gmail_work_read": 1})
 
         second = await app.services.email.submit_task(app.principal, kind="refresh")
         second_run = await app.runs.get(second.run_id)
@@ -866,7 +866,7 @@ async def test_real_stdio_refresh_reopens_six_servers_and_recovers_one_failed_ac
             messages = detail["messages"]
             assert isinstance(messages, list) and len(messages) == 1
             assert messages[0]["body"] == "Please approve the board materials."
-        assert set(creations.values()) == {2}
+        assert creations == Counter({"gmail_read": 2, "gmail_work_read": 2})
 
 
 async def test_no_reply_feedback_prevents_automatic_draft_after_reassessment() -> None:
@@ -1625,3 +1625,89 @@ async def test_invalid_memory_source_fields_do_not_interrupt_mailbox_viewing(mis
         },
     )
     semantics.register_source.assert_not_awaited()
+
+
+def _counting(base: MailboxFactory, started: dict[str, int]) -> MailboxFactory:
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        started[config.server_id] = started.get(config.server_id, 0) + 1
+        return base(config, credential, environment)
+
+    return factory
+
+
+async def _forget_session_in_worker(app: Composition, session_id: Any) -> None:
+    """Model a worker process that has never prepared this session."""
+    await app.mcp.close_session(session_id)
+    await app.skill_catalogs.discard(session_id)
+
+
+async def test_send_resumed_by_a_fresh_worker_starts_only_read_and_send_servers() -> None:
+    """Send reuses its thread session's plan and starts only what it calls (ADR-0104)."""
+    from dataclasses import replace
+
+    from agent_core.domain.approvals import ApprovalResolutionType
+    from tests.gates.test_email_m18 import _email_settings
+
+    started: dict[str, int] = {}
+    base = await _mailbox_factory(
+        [
+            ("get_profile", _profile()),
+            ("get_thread_page", _page()),
+            ("get_profile", _profile()),
+            ("get_thread_page", _page()),
+        ]
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=_counting(base, started),
+    ) as app:
+        _thread, draft = await _seed_draft(app)
+        operation = await app.services.email.submit_task(
+            app.principal, kind="send", draft_id=draft.id, expected_revision=draft.revision
+        )
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.WAITING_FOR_APPROVAL
+        await _forget_session_in_worker(app, run.session_id)
+        started.clear()
+        [approval] = await app.approvals.list_pending(run_id=operation.run_id)
+        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
+    assert started == {"gmail_read": 1, "gmail_send": 1}
+
+
+async def test_draft_in_a_planned_thread_session_starts_no_server() -> None:
+    """A draft calls only the model; only a new session's first plan discovers (ADR-0104)."""
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+    from tests.gates.test_email_m18 import _email_settings
+
+    started: dict[str, int] = {}
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(
+            turns=[ScriptedTurn(text='{"body": "First."}'), ScriptedTurn(text='{"body": "Next."}')]
+        ),
+        mcp_client_factory=_counting(await _current_mail_factory(), started),
+    ) as app:
+        thread, _ = await _seed_draft(app)
+        first = await app.services.email.submit_task(
+            app.principal, kind="draft", thread_id=thread.id
+        )
+        first_run = await app.runs.get(first.run_id)
+        assert first_run.status is RunStatus.COMPLETED
+        assert set(started) == {"gmail_read", "gmail_write", "gmail_send"}
+        await _forget_session_in_worker(app, first_run.session_id)
+        started.clear()
+        second = await app.services.email.submit_task(
+            app.principal, kind="draft", thread_id=thread.id
+        )
+        second_run = await app.runs.get(second.run_id)
+        assert second_run.status is RunStatus.COMPLETED
+        assert second_run.session_id == first_run.session_id
+        draft = (await app.services.email.thread(app.principal, thread.id))["draft"]
+        assert isinstance(draft, dict) and draft["body"] == "Next."
+    assert started == {}

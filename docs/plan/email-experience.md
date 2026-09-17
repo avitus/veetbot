@@ -158,9 +158,11 @@ principal mutation lock; pending archive reconciliation re-reads its one target
 under a short lock before applying an outcome. No email
 command starts MCP servers while holding that lock (ADR-0103). Refresh, archive
 and source-exclusion audit sessions render no skill catalog, so they record an
-empty one without starting any MCP server; the worker starts its own transports
-when the run executes. A thread-bound session opens its full catalog before the
-lock is taken and releases an unused one after the lock is released. Clients
+empty one without starting any MCP server. When the worker executes a typed
+run, it starts only the servers that task kind calls (ADR-0104): each admitted
+account's read server for refresh, read and write for archive, read and send for
+send, and none for a draft. A thread-bound session opens its full catalog before
+the lock is taken and releases an unused one after the lock is released. Clients
 reuse an in-flight initial thread read during foreground polling within the same
 activation, and display received messages without waiting for a separate draft
 response. Archive navigation clears the old content before loading its successor.

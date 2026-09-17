@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Email tasks start only the Gmail servers they use
+
+- An Email archive now starts only the account's read and write Gmail servers,
+  not all six. In production, starting all six took 17.7 seconds of an archive
+  run, and closing them took another 4–7 seconds before the worker took its
+  next task. A refresh starts only each account's read server. A send starts
+  the read and send servers. A draft starts no server (ADR-0104).
+- A thread's first Email task still starts every server, because Chat reuses
+  the tool list it records.
+
 ## 2026-09-16 — Calling services start and are checked on release
 
 - The call worker and webhook listener no longer refuse to start with their

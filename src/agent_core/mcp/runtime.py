@@ -173,7 +173,10 @@ class MCPRuntime:
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._call_interceptor = call_interceptor
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
+        # Sessions whose every enabled server was attempted, and the servers
+        # attempted for each session, including scoped typed-task preparation.
         self._prepared: set[UUID] = set()
+        self._attempted: dict[UUID, set[str]] = {}
         self._locks: WeakValueDictionary[UUID, asyncio.Lock] = WeakValueDictionary()
         self._session_registrations: dict[UUID, set[_RegistrationKey]] = {}
         self._registration_owners: dict[_RegistrationKey, set[UUID]] = {}
@@ -203,8 +206,14 @@ class MCPRuntime:
         owners.add(session_id)
         self._session_registrations.setdefault(session_id, set()).add(key)
 
-    def _unregister_session(self, session_id: UUID) -> None:
-        for key in self._session_registrations.pop(session_id, set()):
+    def _unregister_session(
+        self, session_id: UUID, keep: frozenset[_RegistrationKey] = frozenset()
+    ) -> None:
+        """Drop a session's registrations, except those ``keep`` names."""
+        registrations = self._session_registrations.pop(session_id, set())
+        if retained := registrations & keep:
+            self._session_registrations[session_id] = retained
+        for key in registrations - keep:
             owners = self._registration_owners[key]
             owners.discard(session_id)
             if owners:
@@ -364,19 +373,36 @@ class MCPRuntime:
             with suppress(BaseException):
                 await self._release_connection(result)
 
-    async def prepare(self, session_id: UUID, principal: Principal) -> None:
-        """Discover servers concurrently, then register results in configured order."""
+    async def prepare(
+        self,
+        session_id: UUID,
+        principal: Principal,
+        server_ids: frozenset[str] | None = None,
+    ) -> None:
+        """Discover servers concurrently, then register results in configured order.
+
+        ``server_ids`` limits preparation to the servers a typed task calls
+        (ADR-0104). A server already attempted for the session is not started
+        again, so a later full preparation adds only the remaining servers.
+        """
         if self._closing:
             raise MCPUnavailableError("tool.server_unreachable")
-        if session_id in self._prepared:
+        if self._ready(session_id, server_ids):
             return
         async with self._lock(session_id):
             if self._closing:
                 raise MCPUnavailableError("tool.server_unreachable")
-            if session_id in self._prepared:
+            if self._ready(session_id, server_ids):
                 return
+            attempted = self._attempted.get(session_id, set())
+            earlier = frozenset(self._session_registrations.get(session_id, ()))
             async with self._uow_factory() as uow:
-                configs = await uow.mcp_servers.list_enabled(principal.tenant_id)
+                configs = [
+                    config
+                    for config in await uow.mcp_servers.list_enabled(principal.tenant_id)
+                    if config.server_id not in attempted
+                    and (server_ids is None or config.server_id in server_ids)
+                ]
                 try:
                     await uow.sessions.get(session_id, principal)
                 except NotFoundError:
@@ -399,7 +425,7 @@ class MCPRuntime:
                     except BaseException:
                         continue
                 await self._close_prepared_connections(completed)
-                self._unregister_session(session_id)
+                self._unregister_session(session_id, keep=earlier)
                 raise
             connections: dict[str, _Connection] = {}
             try:
@@ -462,13 +488,22 @@ class MCPRuntime:
                     raise MCPUnavailableError("tool.server_unreachable")
             except BaseException:
                 await self._close_prepared_connections(prepared)
-                self._unregister_session(session_id)
+                self._unregister_session(session_id, keep=earlier)
                 raise
-            self._sessions[session_id] = connections
-            self._prepared.add(session_id)
+            self._sessions.setdefault(session_id, {}).update(connections)
+            self._attempted.setdefault(session_id, set()).update(
+                result.config.server_id for result in prepared
+            )
+            if server_ids is None:
+                self._prepared.add(session_id)
             self._principals[session_id] = principal
             if self._maintenance_task is None:
                 self._maintenance_task = asyncio.create_task(self._maintain_sessions())
+
+    def _ready(self, session_id: UUID, server_ids: frozenset[str] | None) -> bool:
+        if session_id in self._prepared:
+            return True
+        return server_ids is not None and server_ids <= self._attempted.get(session_id, set())
 
     async def _record_catalog(self, connection: _Connection) -> None:
         config = connection.config
@@ -1060,6 +1095,7 @@ class MCPRuntime:
             # sweep or shutdown attempt, including clients waiting on active calls.
             self._sessions.pop(session_id, None)
             self._prepared.discard(session_id)
+            self._attempted.pop(session_id, None)
             self._principals.pop(session_id, None)
             self._deferred_events.discard(session_id)
             self._pending_events.pop(session_id, None)
