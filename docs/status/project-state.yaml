@@ -67,7 +67,7 @@ milestones:
     - Nested or shared folders, Email-mode threads, automatic filing without acceptance
     - Embeddings or semantic search over threads, folder text in conversation prompts
     open_items:
-    - Exact-head hosted CI and explicitly authorized review and production delivery evidence
+    - Exact-head hosted CI and explicitly authorized review evidence
     evidence:
     - check: uv run pytest tests/unit/test_folder_domain.py tests/unit/test_folder_clustering.py tests/unit/test_folder_grouping.py tests/unit/test_folder_proposals.py tests/contract/test_folder_store_contract.py tests/gates/test_folder_api_boundary_m29.py tests/gates/test_folder_m29.py
       outcome: pass
@@ -81,6 +81,25 @@ milestones:
     - check: xcodebuild test -project clients/apple/Veetbot.xcodeproj -scheme Veetbot -destination platform=macOS with the five folder journeys (tests/native/test_folders_m29.py::test_folder_native_journeys)
       outcome: pass
       detail: Folder sections and the flat older-server sidebar, the new-folder sheet, rename through the context menu, and accepting and declining a suggested folder, on macOS (local, 2026-09-16); the five iOS journeys also pass on the iPhone 17 Pro and iPad Air 11-inch (M4) simulators, iOS 26.5, through xcodebuild test-without-building (local, 2026-09-16) after the Save tap switched to a button-typed query.
+    - check: production activation of AGENT_THREAD_FOLDERS_API_ENABLED on the owner host
+      outcome: pass
+      detail: >-
+        On 2026-09-17 the owner enabled the surface in production. The key was
+        absent from /etc/veetbot/veetbot.env, so the router and the proposal
+        pass had both been default-off since the merge and the native sidebar
+        had been degrading to the flat list. It was appended as
+        AGENT_THREAD_FOLDERS_API_ENABLED=1 with tee so the file kept its
+        0640 root:veetbot mode, and veetbot-api and veetbot-maintenance, which
+        both read that EnvironmentFile, were restarted to active. An
+        unauthenticated loopback probe then returned 401 for /v1/folders
+        against 404 for an unrouted control path, confirming the nine routes
+        are mounted rather than absent. The running release
+        20260917-202850-8ae32c9 carries main at 8ae32c9c, so the delivered
+        revision contains the Milestone 29 implementation; that identity was
+        read from the host's running release rather than from the merge
+        pipeline's application and documentation job records. No proposal had
+        yet been observed at the time of this entry, the pass running on its
+        900-second timer.
   '28':
     title: People and relationship memory
     status: in_progress

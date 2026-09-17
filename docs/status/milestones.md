@@ -248,7 +248,7 @@ operations, the proposal lifecycle, the grounded grouping with its lexical
 fallback, the routes behind the flag and the native sidebar are implemented
 with every gate bound to an executable check.
 
-- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
+- [ ] Exact-head hosted CI and explicitly authorized review evidence
 
 ## Authorized
 
