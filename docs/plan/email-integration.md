@@ -352,6 +352,14 @@ terminal for the session and mid-session 401s run the adapter's bounded
 ladder, both exactly as [tool-system.md](tool-system.md) already specifies for
 every MCP server.
 
+The server's stderr is not a private channel: the API or worker process that
+spawns the child passes on its own stderr, so anything the child logs lands in
+that service's journal. The
+package therefore holds HTTP transport logging at warning level. At the SDK's
+default informational level, every request line would carry the search query
+and provider identifiers, which
+[email-experience.md](email-experience.md) keeps out of operational logs.
+
 ### Retryability splits on the classification, not on the status code
 
 A blanket "rate limits and 5xx are retryable" would be correct for a read
@@ -382,7 +390,7 @@ undetermined-outcome code, resolves to the platform's `uncertain` outcome with
 blocked from being proposed again in the run by the unified breaker's
 threshold-of-one row (tool-system.md:853). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:1822-1824) and the one
+after the watermark (tool-system.md:1831-1833) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:573-577), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an

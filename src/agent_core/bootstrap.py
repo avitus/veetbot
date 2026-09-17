@@ -106,6 +106,7 @@ from agent_core.adapters.persistence.device_channel import (
     PostgresDeviceInvocationStore,
 )
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
+from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -114,6 +115,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
     InMemoryExportConsentRepository,
+    InMemoryFolderStore,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
     InMemoryPersonaStore,
@@ -252,6 +254,7 @@ from agent_core.application.device_management import (
     NotificationInboxService,
 )
 from agent_core.application.email import EmailExperienceService
+from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.notification_dispatcher import (
     NotificationDispatcher,
     NotificationDispatchUnitOfWorkFactory,
@@ -289,6 +292,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     DeviceService as PublicDeviceServiceContract,
+)
+from agent_core.application.services import (
+    FolderService as PublicFolderServiceContract,
 )
 from agent_core.application.services import (
     MemoryReadService as PublicMemoryReadServiceContract,
@@ -421,6 +427,9 @@ from agent_core.domain.tools import ToolExecutionContext, ToolInvocation, ToolSp
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
+from agent_core.folders.grouping import ModelAssistedThreadGrouper
+from agent_core.folders.profiles import FolderProfiles
+from agent_core.folders.proposals import FolderProposalPass
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import (
     calling_server_configs,
@@ -568,6 +577,7 @@ class ApplicationServices:
     surfaces: PublicSurfaceServiceContract
     memory: PublicMemoryReadServiceContract
     persona: PublicPersonaServiceContract
+    folders: PublicFolderServiceContract
     email: EmailExperienceService
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
@@ -604,9 +614,11 @@ class Composition:
     people_erasure: PeopleErasureService
     memory_retriever: HybridMemoryRetriever
     memory_profiles: MemoryProfiles
+    folder_profiles: FolderProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    folder_proposals: FolderProposalPass | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -840,6 +852,7 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        folders=InMemoryFolderStore(),
         email=InMemoryEmailStore(),
         calls=InMemoryCallStore(),
         people=people,
@@ -927,6 +940,7 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            folders=PostgresFolderStore(session),
             email=PostgresEmailStore(session),
             calls=PostgresCallStore(session),
             people=people,
@@ -1498,6 +1512,7 @@ async def build_call_worker(
         require_email_credentials=False,
         require_surface_credentials=False,
         require_call_credentials=not ingress,
+        require_owner_scopes=False,
     )
     if not selected.call_enabled or selected.call_configuration is None:
         raise ConfigurationError("calling is disabled")
@@ -2047,6 +2062,7 @@ async def _compose(
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
     memory_profiles: MemoryProfiles,
+    folder_profiles: FolderProfiles,
     mcp_config: Mapping[str, object],
     max_compactions_per_step: int,
     skill_store: SkillPackageStore,
@@ -3232,7 +3248,11 @@ async def _compose(
                 registry,
                 semantic_factory=email_semantics,
                 render_context=render_email_context,
+                prepare_servers=mcp_runtime.prepare,
             )(context)
+
+        async def is_email_task(run: Run, run_principal: Principal) -> bool:
+            return await public_services.email.get_task(run_principal, run.id) is not None
 
         async def resolve_email_archive_approval(
             owner: Principal,
@@ -3278,6 +3298,7 @@ async def _compose(
             max_compactions_per_step=max_compactions_per_step,
             notification_producer=notification_producer,
             task_runner=execute_email_task,
+            typed_task=is_email_task,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -3595,6 +3616,22 @@ async def _compose(
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
         )
+        folder_proposal_pass: FolderProposalPass | None = None
+        if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:
+            folder_proposal_pass = FolderProposalPass(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                profile=folder_profiles.proposals,
+                grouper=ModelAssistedThreadGrouper(
+                    router=model_router,
+                    providers=model_providers,
+                    clock=clock,
+                    ids=ids,
+                    model_policy=folder_profiles.proposals.model_policy,
+                ),
+            )
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=public_run_service,
@@ -3615,6 +3652,7 @@ async def _compose(
             memory=PublicMemoryService(uow_factory=uow_factory),
             people=people_service,
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
             calls=call_service,
             email=EmailExperienceService(
                 uow_factory=uow_factory,
@@ -3748,6 +3786,10 @@ async def _compose(
                     sweep_session_deletions=sweep_session_deletions,
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
+                    sweep_folder_proposals=(
+                        folder_proposal_pass.run_once if folder_proposal_pass is not None else None
+                    ),
+                    folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
                     ),
@@ -3769,6 +3811,8 @@ async def _compose(
                 people_erasure=people_erasure,
                 memory_retriever=memory_retriever,
                 memory_profiles=memory_profiles,
+                folder_profiles=folder_profiles,
+                folder_proposals=folder_proposal_pass,
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
                 local_import_tasks=local_import_tasks,
@@ -4115,6 +4159,9 @@ async def build(
     context_config = load_config_document(effective_settings, "context/plan.yaml")
     memory_profiles = MemoryProfiles.from_document(
         load_config_document(effective_settings, "memory/profiles.yaml")
+    )
+    folder_profiles = FolderProfiles.from_document(
+        load_config_document(effective_settings, "folders/profiles.yaml")
     )
     run_defaults = runtime_config["run_defaults"]
     email_budget_limits = EmailBudgetLimits.model_validate(runtime_config["email"])
@@ -4484,6 +4531,7 @@ async def build(
             live_events=live_events,
             context_config=context_config,
             memory_profiles=memory_profiles,
+            folder_profiles=folder_profiles,
             mcp_config=tool_config["mcp"],
             max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
             skill_store=skill_store,

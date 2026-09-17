@@ -20,6 +20,7 @@ LOCK_WAIT_SECS="${VEETBOT_DEPLOY_LOCK_WAIT_SECS:-900}"
 HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
+CALL_SETTLE_SECS="${VEETBOT_CALL_SETTLE_SECS:-15}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
 EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock
 UNITS=(veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api)
@@ -96,6 +97,8 @@ reclaim_image_storage() {
   "VEETBOT_DEPLOY_LOCK_WAIT_SECS must be a positive integer"
 [[ "$HEALTH_TIMEOUT_SECS" =~ ^[1-9][0-9]*$ ]] || fail \
   "VEETBOT_HEALTH_TIMEOUT_SECS must be a positive integer"
+[[ "$CALL_SETTLE_SECS" =~ ^[0-9]+$ ]] || fail \
+  "VEETBOT_CALL_SETTLE_SECS must be a non-negative integer"
 [[ "$API_BASE_URL" =~ ^https?://[^/?#[:space:]]+(/[^?#[:space:]]*)?$ ]] || fail \
   "VEETBOT_API_BASE_URL must be an HTTP(S) URL without a query or fragment"
 while [[ "$API_BASE_URL" == */ ]]; do
@@ -134,7 +137,7 @@ cleanup() {
   fi
   if (( status != 0 && PROMOTED == 1 )); then
     printf 'post-promotion unit status follows:\n' >&2
-    for unit in "${UNITS[@]}"; do
+    for unit in "${UNITS[@]}" ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
       systemctl --no-pager --full status "$unit" >&2 || true
     done
   fi
@@ -356,6 +359,10 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
     calling_env="$CALL_ENV_FILE"
     if [[ "$calling_unit" == "veetbot-call-ingress" ]]; then calling_env="$CALL_INGRESS_ENV_FILE"; fi
     [[ -f "$calling_env" ]] || fail "calling role environment is missing"
+    # The deploy user reads role environments and inspects credentials without
+    # sudo; docs/bland-setup.md prescribes the permissions this relies on.
+    [[ -r "$calling_env" ]] || fail \
+      "calling role environment is not readable by the deploy user: $calling_env"
     for binding in AGENT_CALL_ENABLED AGENT_CALL_INGRESS_ENABLED AGENT_CALL_NOTIFICATIONS_ENABLED \
       AUTH_TENANT_ID AUTH_PRINCIPAL_ID BLAND_CONFIGURATION_FILE; do
       [[ "$(environment_flag "$calling_env" "$binding")" == "$(environment_flag "$ENV_FILE" "$binding")" ]] || fail "calling role $binding must match the application environment"
@@ -369,10 +376,23 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
       [[ "$(environment_flag "$calling_env" BLAND_API_KEY_FILE)" == "0" ]] || fail "calling ingress must not contain the provider credential path"
     fi
     calling_path="$(environment_flag "$calling_env" "$calling_path_setting")"
+    calling_directory="$(dirname -- "$calling_path")"
+    if [[ "$calling_path" == /* && -d "$calling_directory" && ! -x "$calling_directory" ]]; then
+      fail "calling role credential directory is not traversable by the deploy user: $calling_directory"
+    fi
     [[ "$calling_path" == /* && -f "$calling_path" && ! -L "$calling_path" ]] || fail "calling role private credential file is missing or invalid"
     [[ "$(stat -c '%U:%a' -- "$calling_path" 2>/dev/null)" == "$calling_credential_owner:600" ]] || fail "calling role private credential file is missing or invalid"
     [[ "$(getfacl -cp -- "$calling_path" 2>/dev/null)" == $'user::rw-\ngroup::---\nother::---' ]] || fail "calling role private credential file is missing or invalid"
   done
+fi
+
+# The umask above keeps the release tree out of reach of users outside the
+# application group, which is where the ingress listener deliberately runs.
+# Grant that one user read access to this release only; its credentials and
+# the application environment stay closed to it.
+if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then
+  setfacl -R -P -m u:veetbot-call-ingress:rX "$STAGE" || fail \
+    "could not grant veetbot-call-ingress read access to $STAGE"
 fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
@@ -465,6 +485,7 @@ for calling_unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
   sudo systemctl enable --now "$calling_unit"
   sudo systemctl restart "$calling_unit"
 done
+CALLING_STARTED_AT=$SECONDS
 
 HEALTH_HEADERS="$(mktemp "$SHARED_DIR/health.XXXXXX")"
 healthy=0
@@ -514,6 +535,21 @@ for unit in "${UNITS[@]}"; do
   fi
   process_cwd="$(readlink -f "$PROCESS_ROOT/$pid/cwd" 2>/dev/null || true)"
   [[ "$process_cwd" == "$STAGE" ]] || fail "$unit is not running from $STAGE"
+done
+
+# Calling units have no readiness probe. Give one that fails at startup time
+# to exit, then require it to be running without an automatic restart.
+if (( ${#CALL_UNITS[@]} > 0 )); then
+  settle_remaining=$((CALL_SETTLE_SECS - (SECONDS - CALLING_STARTED_AT)))
+  if (( settle_remaining > 0 )); then sleep "$settle_remaining"; fi
+fi
+for unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
+  sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"
+  restarts="$(sudo systemctl show --property NRestarts --value "$unit")"
+  [[ "$restarts" == 0 ]] || fail \
+    "$unit restarted after promotion ($restarts automatic restarts)"
+  pid="$(sudo systemctl show --property MainPID --value "$unit")"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "$unit has no main process"
 done
 
 kept=0

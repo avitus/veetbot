@@ -12,7 +12,20 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, and_, case, delete, or_, select, update
+from sqlalchemy import (
+    DateTime,
+    Text,
+    and_,
+    case,
+    cast,
+    delete,
+    literal,
+    or_,
+    select,
+    type_coerce,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +65,13 @@ def _validate_semantic_source(record: EmailRecord) -> None:
     # neither reader admits these records, and reactivation must validate again.
     if record.kind == "semantic_source" and record.payload.get("excluded") is not True:
         _semantic_source_time(record.payload)
+
+
+_MESSAGES = cast(literal("messages"), Text)
+
+
+def _without_messages(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "messages"}
 
 
 def _validate_limit(limit: int) -> None:
@@ -118,6 +138,14 @@ class InMemoryEmailStore:
             key=lambda record: record.key,
         )
         return [record.model_copy(deep=True) for record in selected[:limit]]
+
+    async def list_thread_summaries(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        return [
+            row.model_copy(update={"payload": _without_messages(row.payload)})
+            for row in await self.list(principal, "thread", after=after, limit=limit)
+        ]
 
     async def list_semantic_window(
         self,
@@ -308,6 +336,41 @@ class PostgresEmailStore:
             .all()
         )
         return [email_record_to_domain(row) for row in rows]
+
+    async def list_thread_summaries(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        _validate_limit(limit)
+        # Dropping bodies in SQL skips transferring and decoding most of each row.
+        summary = type_coerce(EmailRecordRow.payload.op("-")(_MESSAGES), JSONB)
+        query = select(
+            EmailRecordRow.key,
+            EmailRecordRow.revision,
+            EmailRecordRow.erasure_pending,
+            EmailRecordRow.created_at,
+            EmailRecordRow.updated_at,
+            summary,
+        ).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "thread",
+        )
+        if after is not None:
+            query = query.where(EmailRecordRow.key > after)
+        rows = await self._session.execute(query.order_by(EmailRecordRow.key).limit(limit))
+        return [
+            EmailRecord(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kind="thread",
+                key=key,
+                revision=revision,
+                payload=erased_email_payload("thread", payload) if erasure_pending else payload,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+            for key, revision, erasure_pending, created_at, updated_at, payload in rows
+        ]
 
     async def list_semantic_window(
         self,

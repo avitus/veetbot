@@ -39,6 +39,7 @@ class ContextPlanner(Protocol):
         model: ResolvedModel,
         *,
         refresh_authorization: bool = False,
+        prepare_surface: bool = True,
     ) -> ContextPlan: ...
 
     async def current(self, session_id: UUID) -> ContextPlan | None: ...

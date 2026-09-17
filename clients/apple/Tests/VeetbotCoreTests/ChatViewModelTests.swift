@@ -589,6 +589,65 @@ import UserNotifications
     }
 
     @Test
+    func testSynchronizationPrunesCachedPeopleAuditSessions() async throws {
+        let conversationID = UUID()
+        let auditID = UUID()
+        let conversationJSON = """
+            {"id":"\(conversationID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Keep me","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let auditJSON = """
+            {"id":"\(auditID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"purpose":"people-management"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:02:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let session = urlSession { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(conversationJSON)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(auditID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: auditJSON)
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        // An earlier build cached the Add person audit session as a conversation.
+        let store = VolatileSessionHistoryStore()
+        try await store.upsert(
+            SessionHistoryEntry(
+                sessionID: auditID,
+                title: "New conversation",
+                agentID: "general",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0),
+                lastRunID: nil
+            )
+        )
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(
+                defaults: try #require(UserDefaults(suiteName: "com.veetbot.tests.\(UUID())"))
+            ),
+            historyStore: store,
+            urlSession: session
+        )
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+        await model.synchronizeHistory()
+
+        #expect(model.history.map(\.sessionID) == [conversationID])
+        #expect(await store.list().map(\.sessionID) == [conversationID])
+    }
+
+    @Test
     func testPendingApprovalPaginationHasNoArbitraryPageCap() async throws {
         let lock = NSLock()
         var approvalRequests = 0
@@ -1609,6 +1668,276 @@ import UserNotifications
         return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    // MARK: - Conversation folders (Milestone 29)
+
+    private static let folderFixtureID = "00000000-0000-0000-0000-0000000000F1"
+    private static let otherFolderFixtureID = "00000000-0000-0000-0000-0000000000F2"
+    private static let filedSessionFixtureID = "00000000-0000-0000-0000-000000000123"
+    private static let looseSessionFixtureID = "00000000-0000-0000-0000-000000000456"
+    private static let proposalFixtureID = "00000000-0000-0000-0000-0000000000E1"
+
+    private func sessionJSON(_ id: String, title: String, folderID: String?) -> String {
+        let folder = folderID.map { "\"\($0)\"" } ?? "null"
+        return #"{"id":"\#(id)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"\#(title)","metadata":{},"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01Z","active_run_id":null,"last_run_id":null,"folder_id":\#(folder)}"#
+    }
+
+    private func folderJSON(_ id: String, name: String, count: Int) -> String {
+        #"{"id":"\#(id)","name":"\#(name)","thread_count":\#(count),"created_at":"2026-09-16T12:00:00Z","updated_at":"2026-09-16T12:00:00Z"}"#
+    }
+
+    private func proposalJSON(state: String, resultingFolderID: String? = nil) -> String {
+        let resulting = resultingFolderID.map { "\"\($0)\"" } ?? "null"
+        return #"{"id":"\#(Self.proposalFixtureID)","kind":"new_folder","proposed_name":"Lisbon Trip","target_folder_id":null,"member_session_ids":["\#(Self.looseSessionFixtureID)"],"rationale":null,"derivation":"lexical","state":"\#(state)","withdrawal_reason":null,"resulting_folder_id":\#(resulting),"created_at":"2026-09-16T12:00:00Z","resolved_at":null}"#
+    }
+
+    private func sessionsPageJSON() -> String {
+        "{\"items\":[\(sessionJSON(Self.filedSessionFixtureID, title: "Filed", folderID: Self.folderFixtureID)),\(sessionJSON(Self.looseSessionFixtureID, title: "Loose", folderID: nil))],\"next_cursor\":null}"
+    }
+
+    private func folderPageJSON() -> String {
+        "{\"items\":[\(folderJSON(Self.folderFixtureID, name: "Travel", count: 1)),\(folderJSON(Self.otherFolderFixtureID, name: "Work", count: 0))],\"next_cursor\":null}"
+    }
+
+    @Test
+    func testConfigureSucceedsAndStaysFlatWhenTheFoldersRouteIsMissing() async throws {
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            }
+            if request.url?.path == "/v1/folders" {
+                return try response(
+                    for: request, statusCode: 404,
+                    body: #"{"error":{"code":"not_found","message":"Not found.","details":{},"request_id":"old"}}"#
+                )
+            }
+            Issue.record("Unexpected request \(request.url?.path ?? "")")
+            return try response(for: request, statusCode: 500, body: "{}")
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.foldersAvailable == false)
+        #expect(model.errorMessage == nil)
+        #expect(model.groupedHistory.uncategorized.count == 2)
+        #expect(model.groupedHistory.folders.isEmpty)
+        #expect(model.suggestedFolders.isEmpty)
+    }
+
+    @Test
+    func testAFolderLoadFailureNeverPresentsABanner() async throws {
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            }
+            return try response(
+                for: request, statusCode: 500,
+                body: #"{"error":{"code":"internal_error","message":"boom","details":{},"request_id":"r"}}"#
+            )
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.errorMessage == nil)
+        #expect(model.foldersAvailable == false)
+        await model.synchronizeHistory()
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testReconcileLoadsFoldersAndProposalsAndGroupsTheHistory() async throws {
+        let model = try configuredModel { request in
+            switch request.url?.path {
+            case "/v1/sessions":
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case "/v1/folders":
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case "/v1/folders/proposals":
+                return try response(
+                    for: request, statusCode: 200,
+                    body: "{\"items\":[\(proposalJSON(state: "proposed"))],\"next_cursor\":null}"
+                )
+            default:
+                Issue.record("Unexpected request \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.foldersAvailable)
+        #expect(model.folders.map(\.name) == ["Travel", "Work"])
+        let grouped = model.groupedHistory
+        #expect(grouped.uncategorized.map(\.title) == ["Loose"])
+        #expect(grouped.folders.map(\.folder.name) == ["Travel", "Work"])
+        #expect(grouped.folders.first?.entries.map(\.title) == ["Filed"])
+        #expect(model.suggestedFolders.map(\.headline) == ["New folder “Lisbon Trip”"])
+        #expect(model.suggestedFolders.first?.memberTitles == ["Loose"])
+    }
+
+    @Test
+    func testMovingASessionSendsAnExplicitNullAndKeepsItsRowTimestamp() async throws {
+        let recorder = WebsiteLoginRequestRecorder()
+        let model = try configuredModel { request in
+            recorder.record(request)
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("PUT", "/v1/sessions/\(Self.filedSessionFixtureID)/folder"):
+                return try response(
+                    for: request, statusCode: 200,
+                    body: sessionJSON(Self.filedSessionFixtureID, title: "Filed", folderID: nil)
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let filedID = try #require(UUID(uuidString: Self.filedSessionFixtureID))
+        let before = try #require(model.history.first { $0.sessionID == filedID })
+        #expect(before.folderID?.uuidString == Self.folderFixtureID.uppercased())
+        await model.moveSession(filedID, toFolder: nil)
+        let sent = recorder.matching(method: "PUT", path: "/v1/sessions/\(Self.filedSessionFixtureID)/folder")
+        #expect(sent.count == 1)
+        let body = try #require(sent.first?.body)
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(object.keys.contains("folder_id"))
+        #expect(object["folder_id"] is NSNull)
+        let after = try #require(model.history.first { $0.sessionID == filedID })
+        #expect(after.folderID == nil)
+        #expect(after.updatedAt == before.updatedAt)
+        #expect(model.groupedHistory.uncategorized.map(\.title).sorted() == ["Filed", "Loose"])
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testRenameConflictKeepsTheNameAndSetsTheInlineError() async throws {
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("PATCH", "/v1/folders/\(Self.folderFixtureID)"):
+                return try response(
+                    for: request, statusCode: 409,
+                    body: #"{"error":{"code":"conflict","message":"folder name 'Work' is taken","details":{"reason":"folder_name_taken"},"request_id":"r"}}"#
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let folderID = try #require(UUID(uuidString: Self.folderFixtureID))
+        let renamed = await model.renameFolder(folderID, to: "Work")
+        #expect(renamed == false)
+        #expect(model.folderEditorError == "folder name 'Work' is taken")
+        #expect(model.errorMessage == nil)
+        #expect(model.folders.map(\.name) == ["Travel", "Work"])
+        model.clearFolderEditorError()
+        #expect(model.folderEditorError == nil)
+    }
+
+    @Test
+    func testDeletingAFolderReturnsItsConversationsToHistory() async throws {
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("DELETE", "/v1/folders/\(Self.folderFixtureID)"):
+                return try response(for: request, statusCode: 204, body: "")
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let folderID = try #require(UUID(uuidString: Self.folderFixtureID))
+        await model.deleteFolder(folderID)
+        #expect(model.folders.map(\.name) == ["Work"])
+        #expect(model.history.allSatisfy { $0.folderID == nil })
+        #expect(model.groupedHistory.uncategorized.count == 2)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testAcceptingAProposalFilesItsConversationsAndDecliningRemovesIt() async throws {
+        let state = FolderProposalFixtureState()
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                let loose = sessionJSON(
+                    Self.looseSessionFixtureID, title: "Loose",
+                    folderID: state.accepted ? Self.otherFolderFixtureID : nil
+                )
+                let filed = sessionJSON(Self.filedSessionFixtureID, title: "Filed", folderID: Self.folderFixtureID)
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(filed),\(loose)],\"next_cursor\":null}")
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                let items = state.resolved ? "" : proposalJSON(state: "proposed")
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(items)],\"next_cursor\":null}")
+            case ("POST", "/v1/folders/proposals/\(Self.proposalFixtureID)/accept"):
+                state.accepted = true
+                state.resolved = true
+                return try response(
+                    for: request, statusCode: 200,
+                    body: proposalJSON(state: "accepted", resultingFolderID: Self.otherFolderFixtureID)
+                )
+            case ("POST", "/v1/folders/proposals/\(Self.proposalFixtureID)/decline"):
+                state.resolved = true
+                return try response(for: request, statusCode: 200, body: proposalJSON(state: "declined"))
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let proposalID = try #require(UUID(uuidString: Self.proposalFixtureID))
+        #expect(model.suggestedFolders.map(\.id) == [proposalID])
+        await model.acceptFolderProposal(proposalID)
+        #expect(model.folderProposals.isEmpty)
+        #expect(model.pendingFolderProposalIDs.isEmpty)
+        let looseID = try #require(UUID(uuidString: Self.looseSessionFixtureID))
+        #expect(model.history.first { $0.sessionID == looseID }?.folderID?.uuidString == Self.otherFolderFixtureID.uppercased())
+        #expect(model.errorMessage == nil)
+
+        state.resolved = false
+        state.accepted = false
+        await model.synchronizeHistory()
+        #expect(model.suggestedFolders.count == 1)
+        await model.declineFolderProposal(proposalID)
+        #expect(model.folderProposals.isEmpty)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testForgettingCredentialsClearsFolderState() async throws {
+        let model = try configuredModel { request in
+            switch request.url?.path {
+            case "/v1/sessions":
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case "/v1/folders":
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case "/v1/folders/proposals":
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(proposalJSON(state: "proposed"))],\"next_cursor\":null}")
+            default:
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.foldersAvailable)
+        await model.forgetCredentials()
+        #expect(model.foldersAvailable == false)
+        #expect(model.folders.isEmpty)
+        #expect(model.folderProposals.isEmpty)
+    }
+
     private func configuredModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
@@ -1665,17 +1994,32 @@ private final class WebsiteLoginRequestRecorder: @unchecked Sendable {
         let url: String
         let path: String
         let authorization: String?
+        let body: Data?
     }
 
     private let lock = NSLock()
     private var entries: [Entry] = []
 
     func record(_ request: URLRequest) {
+        var body = request.httpBody
+        if body == nil, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var collected = Data()
+            var buffer = [UInt8](repeating: 0, count: 1_024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                collected.append(buffer, count: count)
+            }
+            body = collected
+        }
         let entry = Entry(
             method: request.httpMethod ?? "",
             url: request.url?.absoluteString ?? "",
             path: request.url?.path ?? "",
-            authorization: request.value(forHTTPHeaderField: "Authorization")
+            authorization: request.value(forHTTPHeaderField: "Authorization"),
+            body: body
         )
         lock.withLock { entries.append(entry) }
     }
@@ -1760,5 +2104,22 @@ private final class ChatViewModelURLProtocolHandlerStore: @unchecked Sendable {
 
     func handler(for id: String) -> Handler? {
         lock.withLock { handlers[id] }
+    }
+}
+
+/// Mutable server-side state for the proposal fixture, shared with the handler.
+private final class FolderProposalFixtureState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var acceptedValue = false
+    private var resolvedValue = false
+
+    var accepted: Bool {
+        get { lock.withLock { acceptedValue } }
+        set { lock.withLock { acceptedValue = newValue } }
+    }
+
+    var resolved: Bool {
+        get { lock.withLock { resolvedValue } }
+        set { lock.withLock { resolvedValue = newValue } }
     }
 }

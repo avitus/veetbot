@@ -62,7 +62,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:2052` states that device tools are *"a reserved
+    `tool-system.md:2061` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:631` named `ApprovalService` as one of
+`bootstrap-and-composition.md:633` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4449-4526`
+Section 28 of the plan is not empty — `engineering-plan.md:4475-4552`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -575,12 +575,12 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:733`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1427`.
+bridge Section 8.5 requires is specified from `tool-system.md:1436`.
 
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4524` requires a container-escape attempt as
+    `engineering-plan.md:4550` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -734,7 +734,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1358-1405` draws the line between
+had to be written. `tool-system.md:1367-1414` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -987,7 +987,7 @@ review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1812`, and the sibling join
 at `runtime-loop.md:1150` reads it. Restricted context is
-`context-engine.md:345`, where `runs.seed_event_sequence` is nullable
+`context-engine.md:346`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:96`, which
@@ -1544,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4528-4685` for links to other documents returned
+`engineering-plan.md:4554-4711` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1569,8 +1569,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1510` does open a *"Device-scoped tools"* section, and
-`tool-system.md:2052` states that device tools are *"a reserved seam,
+`tool-system.md:1519` does open a *"Device-scoped tools"* section, and
+`tool-system.md:2061` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1610,7 +1610,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1524` reserved by name —
+one of them the question `tool-system.md:1533` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1765,7 +1765,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2642` against
-    `model-gateway.md:1810` and `milestone-map.md:1782`. The map
+    `model-gateway.md:1810` and `milestone-map.md:1802`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1774,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4524` requires a test the harness's case set
+    `engineering-plan.md:4550` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1899,3 +1899,15 @@ lands; no quality or production requirement is marked complete by admission.
 
 ADR-0101 makes all implemented People features available by default. Pending
 quality measurements do not gate runtime functionality or release.
+
+## Milestone 29: Chat thread folders
+
+The owner authorized [thread-folders.md](thread-folders.md) on 2026-09-16
+under ADR-0102. Twelve gates are registered in a new `gate.folder.*` area for
+the additive schema, folder invariants, move semantics, closed proposal
+eligibility, the bounded open set, durable decline, withdrawal, grounded
+grouping with a deterministic fallback, atomic acceptance, exact scopes under
+the flag, content-free prompts and logs, and native degradation. The design
+touches no roadmap item: it adds no embedding, no retrieval arm and no memory
+read. Every gate is bound to an executable check as of 2026-09-16; hosted CI,
+review and delivery evidence remain open and the verified ceiling remains 12.

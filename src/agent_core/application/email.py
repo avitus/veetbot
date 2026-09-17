@@ -10,6 +10,8 @@ import hashlib
 import json
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -47,7 +49,10 @@ from agent_core.domain.email import (
     addresses,
     apply_feedback,
     archive_result_matches,
+    body_cutoff,
+    draft_expired,
     feedback_matches,
+    retained_thread,
 )
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -67,6 +72,7 @@ from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.skills import SessionSkillCatalog
 from agent_core.domain.tools import ToolInvocationStatus
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.email import EmailStore
@@ -79,6 +85,15 @@ async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIt
     while page := await store.list(principal, kind, after=after):
         for row in page:
             yield row
+        after = page[-1].key
+
+
+async def thread_summaries(store: EmailStore, principal: Principal) -> AsyncIterator[EmailThread]:
+    """Yield message-free conversations for listing; never save one back."""
+    after: str | None = None
+    while page := await store.list_thread_summaries(principal, after=after):
+        for row in page:
+            yield EmailThread.model_validate(row.payload)
         after = page[-1].key
 
 
@@ -126,6 +141,15 @@ async def save_value(
     )
 
 
+@dataclass
+class PreparedSession:
+    """A thread session's catalog, opened before the owner lock was taken."""
+
+    session_id: UUID
+    catalog: SessionSkillCatalog
+    claimed: bool = False
+
+
 def thread_summary(thread: EmailThread) -> dict[str, object]:
     return thread.model_dump(
         mode="json",
@@ -144,31 +168,6 @@ def draft_body_fingerprint(body: str) -> str:
         line.rstrip() for line in body.replace("\r\n", "\n").splitlines()
     ).strip()
     return hashlib.sha256(normalized.encode()).hexdigest()
-
-
-def retained_thread(thread: EmailThread, cutoff: datetime) -> EmailThread:
-    """Expire only this conversation, before a read can renew its access time."""
-    if thread.last_accessed_at > cutoff or not any(message.body for message in thread.messages):
-        return thread
-    return thread.model_copy(
-        update={
-            "messages": [
-                message.model_copy(update={"body": "", "complete": False})
-                for message in thread.messages
-            ],
-            "complete": False,
-            "source_fingerprint": "",
-            "assessment_version": "",
-        }
-    )
-
-
-def draft_expired(draft: EmailDraft, cutoff: datetime) -> bool:
-    """Unsent owner edits remain retained regardless of age."""
-    return (
-        draft.status in {EmailDraftStatus.SENT, EmailDraftStatus.DISCARDED}
-        and draft.updated_at <= cutoff
-    )
 
 
 def expired_body(record: EmailRecord, cutoff: datetime) -> EmailThread | EmailDraft | None:
@@ -279,11 +278,13 @@ class EmailExperienceService:
     async def _thread(
         self, store: EmailStore, principal: Principal, thread_id: UUID
     ) -> EmailThread:
+        """Read one authorized conversation; bodies past the window are withheld."""
         thread = await read_value(store, principal, "thread", str(thread_id), EmailThread)
         if thread is None:
             raise NotFoundError("email thread not found")
         self._authorize_account(principal, thread.account_id)
-        return thread
+        # Maintenance may not have swept yet; its delay cannot expose an expired body.
+        return retained_thread(thread, body_cutoff(self.clock.now()))
 
     def _authorize_account(self, principal: Principal, account_id: str) -> None:
         if account_id not in self.account_servers:
@@ -307,8 +308,7 @@ class EmailExperienceService:
         async with self.uow_factory() as uow:
             feedback = await self._feedback(uow.email, principal)
             threads = []
-            async for row in records(uow.email, principal, "thread"):
-                stored = EmailThread.model_validate(row.payload)
+            async for stored in thread_summaries(uow.email, principal):
                 if (
                     stored.account_id not in self.account_servers
                     or f"mcp.{self.account_servers[stored.account_id]['read']}.use"
@@ -368,7 +368,6 @@ class EmailExperienceService:
         require_scope(principal, "email.read")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)
-            thread = retained_thread(thread, self.clock.now() - timedelta(days=30))
             thread = await self._reconcile_archive_in(uow, principal, thread)
             thread = thread.model_copy(update={"last_accessed_at": self.clock.now()})
             await save_value(
@@ -505,10 +504,13 @@ class EmailExperienceService:
             )
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:
+        """Read one authorized draft; a settled body past the window is withheld."""
         draft = await read_value(store, principal, "draft", str(draft_id), EmailDraft)
         if draft is None:
             raise NotFoundError("email draft not found")
         self._authorize_account(principal, draft.account_id)
+        if draft.body and draft_expired(draft, body_cutoff(self.clock.now())):
+            return draft.model_copy(update={"body": ""})
         return draft
 
     async def draft(self, principal: Principal, draft_id: UUID) -> EmailDraft:
@@ -527,7 +529,7 @@ class EmailExperienceService:
         if draft is None:
             return None
         self._authorize_account(principal, draft.account_id)
-        if draft.body and draft_expired(draft, self.clock.now() - timedelta(days=30)):
+        if draft.body and draft_expired(draft, body_cutoff(self.clock.now())):
             draft = draft.model_copy(update={"body": ""})
             await save_value(store, principal, "draft", str(draft.id), draft, self.clock.now())
         return draft
@@ -716,7 +718,7 @@ class EmailExperienceService:
         require_scope(principal, "email.read")
         async with self.uow_factory() as uow:
             draft = await self._draft(uow.email, principal, draft_id)
-            if draft_expired(draft, self.clock.now() - timedelta(days=30)):
+            if draft_expired(draft, body_cutoff(self.clock.now())):
                 return {"items": [], "next_cursor": None}
             revisions = [
                 row.payload
@@ -725,24 +727,78 @@ class EmailExperienceService:
             ]
         return {"items": revisions, "next_cursor": None}
 
+    async def _bound_session(
+        self, uow: RepositoryUnitOfWork, principal: Principal, thread: EmailThread
+    ) -> Session | None:
+        if thread.session_id is None:
+            return None
+        session = await uow.sessions.get(thread.session_id, principal)
+        if (
+            session.status is SessionStatus.ACTIVE
+            and session.metadata.get("email_account_servers") == self.account_servers
+        ):
+            return session
+        # Manifest/default changes select a fresh capability binding. Old
+        # sessions remain intact so historical observations keep their identity.
+        return None
+
+    @asynccontextmanager
+    async def _prepared_session(
+        self, principal: Principal, thread_id: UUID | None
+    ) -> AsyncIterator[PreparedSession | None]:
+        """Discover MCP prompts for a new thread session before the owner lock is taken.
+
+        Enter this before the locked unit of work so that an unclaimed catalog is
+        released only after the lock is released.
+        """
+        if thread_id is None or self.catalogs is None:
+            yield None
+            return
+        async with self.uow_factory() as uow:
+            thread = await self._thread(uow.email, principal, thread_id)
+            bound = await self._bound_session(uow, principal, thread)
+        if bound is not None:
+            yield None
+            return
+        session_id = self.ids.new_id()
+        prepared: PreparedSession | None = None
+        try:
+            prepared = PreparedSession(
+                session_id, await self.catalogs.open(session_id, self.agent, principal)
+            )
+            yield prepared
+        finally:
+            if prepared is None or not prepared.claimed:
+                await self._release_session(session_id)
+
     async def _session_in(
         self,
         uow: RepositoryUnitOfWork,
         principal: Principal,
         thread: EmailThread | None,
+        prepared: PreparedSession | None = None,
     ) -> Session:
-        if thread is not None and thread.session_id is not None:
-            session = await uow.sessions.get(thread.session_id, principal)
-            if (
-                session.status is SessionStatus.ACTIVE
-                and session.metadata.get("email_account_servers") == self.account_servers
-            ):
-                return session
-            # Manifest/default changes select a fresh capability binding. Old
-            # sessions remain intact so historical observations keep their identity.
-        session_id, catalog = await bootstrap_session(
-            uow, self.ids, self.catalogs, self.close_session, self.agent, principal
-        )
+        if thread is not None:
+            bound = await self._bound_session(uow, principal, thread)
+            if bound is not None:
+                return bound
+        catalog: SessionSkillCatalog | None
+        if thread is None:
+            # Typed operational work never renders a skill catalog, so it must
+            # not start MCP servers while the owner lock is held (ADR-0103).
+            session_id, catalog = await bootstrap_session(
+                uow, self.ids, None, self.close_session, self.agent, principal
+            )
+        elif prepared is not None and not prepared.claimed:
+            prepared.claimed = True
+            session_id, catalog = prepared.session_id, prepared.catalog
+            uow.on_rollback(lambda: self._release_session(session_id))
+        else:
+            # Reached without a catalog service, or when the bound session closed
+            # after the unlocked check; this rare path discovers in place.
+            session_id, catalog = await bootstrap_session(
+                uow, self.ids, self.catalogs, self.close_session, self.agent, principal
+            )
         now = self.clock.now()
         metadata: dict[str, Any] = (
             {"email_operational": True}
@@ -918,9 +974,18 @@ class EmailExperienceService:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
-        await self.expire_cache(principal)
         now = self.clock.now()
-        async with self.uow_factory() as uow, uow.email.lock(principal):
+        session_thread_id = thread_id
+        if draft_id is not None:
+            async with self.uow_factory() as uow:
+                session_thread_id = (await self._draft(uow.email, principal, draft_id)).thread_id
+        async with (
+            self._prepared_session(
+                principal, None if kind in {"refresh", "archive"} else session_thread_id
+            ) as prepared,
+            self.uow_factory() as uow,
+            uow.email.lock(principal),
+        ):
             thread = (
                 None if thread_id is None else await self._thread(uow.email, principal, thread_id)
             )
@@ -1054,7 +1119,9 @@ class EmailExperienceService:
             )
             if kind != "archive":
                 await self._check_budget(uow.email, principal, reservation)
-            session = await self._session_in(uow, principal, None if kind == "archive" else thread)
+            session = await self._session_in(
+                uow, principal, None if kind == "archive" else thread, prepared
+            )
             if await uow.runs.active_for_session(session.id, principal) is not None:
                 raise ConflictError("the thread conversation has an active run")
             deadline = (
@@ -1081,7 +1148,9 @@ class EmailExperienceService:
                 agent_version=session.agent_version,
                 status=RunStatus.QUEUED,
                 limits=limits,
-                priority=10,
+                # The owner waits on an archive gesture; it must not queue behind
+                # minutes-long refreshes in the asynchronous lane.
+                priority=0 if kind == "archive" else 10,
                 scheduled_for=now,
                 deadline_at=deadline,
                 created_at=now,
@@ -1214,7 +1283,7 @@ class EmailExperienceService:
             # Admission has pinned the ordinary catalog. The worker opens its
             # own transports; keeping the API's copies leaks a process roster
             # for every foreground poll.
-            await self._release_refresh_session(session.id)
+            await self._release_session(session.id)
         await self.dispatch(run.id)
         async with self.uow_factory() as uow:
             final_run = await uow.runs.get(run.id, principal)
@@ -1572,7 +1641,7 @@ class EmailExperienceService:
             if run.status in TERMINAL_RUN_STATUSES:
                 # Release even when provider usage still needs reconciliation.
                 # Durable session/events and all source receipts remain intact.
-                await self._release_refresh_session(task.session_id)
+                await self._release_session(task.session_id)
         async with self.uow_factory() as uow, uow.email.lock(principal):
             task = await read_value(uow.email, principal, "task", str(run_id), EmailTask)
             if task is None or task.settled_cost is not None:
@@ -1636,8 +1705,8 @@ class EmailExperienceService:
             )
         await save_value(uow.email, principal, "task", str(run.id), updated, self.clock.now())
 
-    async def _release_refresh_session(self, session_id: UUID) -> None:
-        """Release ephemeral refresh resources while preserving durable evidence."""
+    async def _release_session(self, session_id: UUID) -> None:
+        """Release process-local catalog and transports while preserving durable evidence."""
         try:
             if self.close_session is not None:
                 await self.close_session(session_id)
@@ -2041,6 +2110,9 @@ class EmailExperienceService:
                     uow.email, principal, "thread", str(index.payload["thread_id"]), EmailThread
                 )
             )
+            if previous is not None:
+                # An unswept expired body is not current content; the fetched copy replaces it.
+                previous = retained_thread(previous, body_cutoff(now))
             archive_operation = (
                 None
                 if previous is None
@@ -2384,7 +2456,11 @@ class EmailExperienceService:
     ) -> EmailDraft:
         if not body.strip() or len(body) > 500_000:
             raise ValueError("generated draft body is empty or too large")
-        async with self.uow_factory() as uow, uow.email.lock(principal):
+        async with (
+            self._prepared_session(principal, thread_id) as prepared,
+            self.uow_factory() as uow,
+            uow.email.lock(principal),
+        ):
             await self._fence(uow, run, lease)
             thread = await self._thread(uow.email, principal, thread_id)
             if (
@@ -2432,7 +2508,7 @@ class EmailExperienceService:
                 EmailDraftStatus.DISCARDED,
             }:
                 raise ConflictError("finish the current draft action before regenerating")
-            session = await self._session_in(uow, principal, thread)
+            session = await self._session_in(uow, principal, thread, prepared)
             new_session = session.id != thread.session_id
             state = await self._learning_state(uow.email, principal)
             draft = EmailDraft(
@@ -2559,9 +2635,13 @@ class EmailExperienceService:
     async def discussion(self, principal: Principal, thread_id: UUID) -> dict[str, object]:
         require_scope(principal, "email.write")
         require_scope(principal, "session.write")
-        async with self.uow_factory() as uow, uow.email.lock(principal):
+        async with (
+            self._prepared_session(principal, thread_id) as prepared,
+            self.uow_factory() as uow,
+            uow.email.lock(principal),
+        ):
             thread = await self._thread(uow.email, principal, thread_id)
-            session = await self._session_in(uow, principal, thread)
+            session = await self._session_in(uow, principal, thread, prepared)
             await uow.events.append(
                 NewEvent(
                     session_id=session.id,
@@ -2759,7 +2839,7 @@ class EmailExperienceService:
 
     async def expire_cache(self, principal: Principal) -> int:
         """Scan outside the lock; recheck each candidate in a short mutation transaction."""
-        cutoff = self.clock.now() - timedelta(days=30)
+        cutoff = body_cutoff(self.clock.now())
         removed = 0
         expired: set[str] = set()
         for kind in ("thread", "draft"):
@@ -2798,7 +2878,6 @@ class EmailExperienceService:
     ) -> EmailLearningState:
         """Use an explicitly chosen revision as style evidence, never sent authorship."""
         require_scope(principal, "email.write")
-        await self.expire_cache(principal)
         async with self.uow_factory() as uow, uow.email.lock(principal):
             draft = await self._draft(uow.email, principal, draft_id)
             if draft.revision != expected_revision:

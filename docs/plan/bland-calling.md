@@ -134,6 +134,13 @@ context. The implementation adds no major dependency unless a separate decision
 justifies it. [Send Call](https://docs.bland.ai/api-v1/post/calls),
 [Call Details](https://docs.bland.ai/api-v1/get/calls-id)
 
+The server's stderr is not a private channel: the API or worker process that
+spawns the child passes on its own stderr, so anything the child logs lands in
+that service's journal. The package therefore holds HTTP transport logging at
+warning level. At the SDK's default informational level, every request line
+would carry provider call identifiers, the configured number and reconciliation
+query values.
+
 ## Inbound number and result delivery
 
 First inspect the account's existing numbers without making calls or purchasing
@@ -227,6 +234,21 @@ secret-typed fields and the existing child-environment confinement. Credential
 validation must not print values. A local bootstrap command can accept the key
 through a hidden prompt; the user need not paste it into chat. Never replace an
 existing account webhook secret without identifying affected integrations.
+
+Release preflight runs as the unprivileged deploy identity without sudo. It
+reads both calling environment files, and checks each credential's owner, mode
+and ACL without opening it. Decision (2026-09-16): each calling environment
+file is `root:veetbot` mode 0640, like the application environment. Every
+directory above a credential is traversable (0711) by the deploy identity. The
+credentials stay mode 0600 with base ACL entries only, owned by their service.
+The deploy identity therefore reads no credential. The listener stays outside
+the `veetbot` group, so it still cannot read the application environment. That
+group gains read access to the two calling database passwords. Its members
+already read the application environment, which holds the broader application
+database credential. Reading these files through the deploy sudo contract was
+rejected: it would add root reads of paths taken from the environment files.
+The [setup guide](../bland-setup.md) holds the commands, and
+`deploy/app/release.test.sh` replays them as each deploy identity.
 
 Initial call limits are five minutes per call and one concurrent outbound call.
 Inbound concurrency follows the reviewed provider plan's limits; a stricter

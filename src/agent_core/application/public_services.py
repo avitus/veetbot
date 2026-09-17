@@ -20,6 +20,7 @@ from agent_core.application.errors import (
     SessionMessageCursorError,
     SessionMetadataValidationError,
 )
+from agent_core.application.folder_service import unfile_deleted_session
 from agent_core.application.session_service import bootstrap_session
 from agent_core.application.surfaces import PreparedSurfaceSubmission
 from agent_core.domain.agents import AgentSpec, Principal
@@ -146,20 +147,10 @@ async def _notify_session_closed(
     )
 
 
-def _session_view(session: Session, latest: Run | None) -> SessionView:
-    active = latest if latest is not None and latest.status not in TERMINAL_RUN_STATUSES else None
-    return SessionView(
-        id=session.id,
-        status=session.status,
-        agent_id=str(session.agent_id),
-        agent_version=session.agent_version,
-        title=session.title,
-        metadata=dict(session.metadata),
-        created_at=session.created_at,
-        updated_at=session.updated_at,
-        active_run_id=None if active is None else active.id,
-        last_run_id=None if latest is None else latest.id,
-    )
+def _session_view(
+    session: Session, latest: Run | None, folder_id: UUID | None = None
+) -> SessionView:
+    return SessionView.from_session(session, latest, folder_id=folder_id)
 
 
 def _run_view(run: Run) -> RunView:
@@ -465,7 +456,8 @@ class PublicSessionService:
         async with self._uow_factory() as uow:
             session = await uow.sessions.get(session_id, principal)
             latest = await uow.runs.latest_for_session(session_id, principal)
-        return _session_view(session, latest)
+            folder_id = (await uow.folders.folder_of([session_id], principal)).get(session_id)
+        return _session_view(session, latest, folder_id)
 
     async def list(
         self,
@@ -483,10 +475,16 @@ class PublicSessionService:
             latest_runs = await uow.runs.latest_for_sessions(
                 [row.id for row in rows[:effective_limit]], principal
             )
+            folders = await uow.folders.folder_of(
+                [row.id for row in rows[:effective_limit]], principal
+            )
         has_more = len(rows) > effective_limit
         page_rows = rows[:effective_limit]
         return Page[SessionView](
-            items=[_session_view(session, latest_runs.get(session.id)) for session in page_rows],
+            items=[
+                _session_view(session, latest_runs.get(session.id), folders.get(session.id))
+                for session in page_rows
+            ],
             next_cursor=(_encode_session_cursor(page_rows[-1]) if has_more and page_rows else None),
         )
 
@@ -539,6 +537,9 @@ class PublicSessionService:
         require_scope(principal, "session.write")
         async with self._uow_factory() as uow:
             await uow.session_deletions.delete(session_id, principal, self._clock.now())
+            await unfile_deleted_session(
+                uow, principal, session_id, clock=self._clock, ids=self._ids
+            )
         if self._close_session is not None:
             try:
                 await self._close_session(session_id)
@@ -622,11 +623,13 @@ class PublicSessionService:
                     details={"run_id": str(active.id), "run_status": active.status.value},
                 )
             session, closed_now = await uow.sessions.close(session_id, principal, self._clock.now())
+            # A filed session stays filed when it closes.
+            folder_id = (await uow.folders.folder_of([session_id], principal)).get(session_id)
         if self._close_session is not None:
             await self._close_session(session_id)
         if closed_now and self._on_session_closed is not None:
             await _notify_session_closed(self._on_session_closed, session_id)
-        return _session_view(session, None)
+        return _session_view(session, None, folder_id)
 
     async def ready(self) -> bool:
         """Perform the readiness database round-trip without calling a provider."""

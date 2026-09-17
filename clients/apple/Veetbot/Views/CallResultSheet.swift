@@ -44,6 +44,6 @@ struct CallResultSheet: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 280, idealWidth: 540, minHeight: 300, idealHeight: 620)
+        .sheetFrame(minWidth: 280, macMinWidth: 480, idealWidth: 540, minHeight: 300, idealHeight: 620)
     }
 }

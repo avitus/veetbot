@@ -684,3 +684,42 @@ async def test_archive_list_reconciliation_does_not_persist_feedback_projection(
         assert undone["priority"] == 0.9
         latest = await app.services.email.thread(app.principal, thread.id)
         assert _archive_status(latest) == "completed" and latest["in_inbox"] is False
+
+
+async def test_archive_worker_starts_only_the_account_read_and_write_servers() -> None:
+    """An archive run starts only the servers it calls (ADR-0104)."""
+    from collections import Counter
+
+    writes: list[dict[str, Any]] = []
+    base = await _archive_factory(writes)
+    started: Counter[str] = Counter()
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        started[config.server_id] += 1
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            if name != "get_thread_page" or not writes:
+                return await original(name, arguments)
+            value = _page()
+            value["messages"][0]["label_ids"] = []
+            value["history_id"] = "101"
+            return MCPCallResult(content=(json.dumps(value),), structured=value)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, _ = await _seed_draft(app)
+        started.clear()
+        await app.services.email.archive(
+            app.principal, thread.id, thread.revision, archived=True, idempotency_key="scoped"
+        )
+        latest = await app.services.email.thread(app.principal, thread.id)
+        assert _archive_status(latest) == "completed" and latest["in_inbox"] is False
+    assert started == Counter({"gmail_read": 1, "gmail_write": 1})

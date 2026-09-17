@@ -1,0 +1,15 @@
+schema_version: 1
+proposals:
+  enabled: true
+  # Unfiled chat conversations a grouping needs before a new folder is proposed.
+  threshold: 4
+  # Open proposals per principal; further candidates wait for a slot.
+  max_open: 3
+  # The pass's own timer inside the maintenance worker.
+  interval_seconds: 900
+  # A non-routed policy (deterministic, fake-balanced) makes the grouper lexical-only.
+  model_policy: balanced
+  # Jaccard floor for two conversations to link in the lexical grouper.
+  similarity_threshold: 0.2
+  # Members a proposal may name.
+  max_members: 12

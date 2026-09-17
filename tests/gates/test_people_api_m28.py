@@ -306,6 +306,43 @@ async def test_people_import_preview_is_scoped_idempotent_and_requires_a_finite_
             ).status_code == 409
 
 
+async def test_adding_a_person_does_not_add_a_conversation() -> None:
+    settings = replace(memory_settings(), people_enabled=True)
+    owner = principal().model_copy(
+        update={"scopes": {"people.read", "people.write", "session.read", "session.write"}}
+    )
+    async with build(settings=settings, storage="memory", principal=owner) as app:
+        api = create_app(
+            app.services, app.settings, app.principal, app.new_request_id, app.readiness_probe
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api, client=("127.0.0.1", 1234)),
+            base_url="http://localhost",
+        ) as client:
+            before = await client.get("/v1/sessions")
+            assert before.status_code == 200, before.text
+            # The native Add person sheet anchors its audit trail this way when
+            # no conversation is selected.
+            created = await client.post(
+                "/v1/sessions",
+                json={"agent_id": "general", "metadata": {"purpose": "people-management"}},
+            )
+            assert created.status_code == 201, created.text
+            audit_id = created.json()["id"]
+            person = await client.post(
+                "/v1/people?ceiling=sensitive",
+                json={"session_id": audit_id, "display_name": "Alex"},
+                headers={"Idempotency-Key": "add-person"},
+            )
+            assert person.status_code == 200, person.text
+            after = await client.get("/v1/sessions")
+            assert after.status_code == 200, after.text
+            assert after.json()["items"] == before.json()["items"]
+            audit = await client.get(f"/v1/sessions/{audit_id}")
+            assert audit.status_code == 200
+            assert audit.json()["metadata"] == {"purpose": "people-management"}
+
+
 async def test_people_api_write_read_retry_and_validation() -> None:
     settings = replace(memory_settings(), people_enabled=True)
     owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})

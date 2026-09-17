@@ -18,6 +18,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
+from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.people import (
     PeopleErasure,
@@ -66,6 +67,8 @@ from agent_core.domain.views import (
     DeviceInvocationView,
     DeviceRegistrationResult,
     DeviceView,
+    FolderProposalView,
+    FolderView,
     MemoryView,
     NotificationInboxItem,
     Page,
@@ -559,6 +562,32 @@ class PersonaService(Protocol):
     async def affirm(self, principal: Principal, nomination_id: UUID) -> PersonaView: ...
 
     async def decline(self, principal: Principal, nomination_id: UUID) -> PersonaNominationView: ...
+
+
+class FolderService(Protocol):
+    async def create(self, principal: Principal, *, name: str) -> FolderView: ...
+
+    async def list(self, principal: Principal) -> Page[FolderView]: ...
+
+    async def get(self, principal: Principal, folder_id: UUID) -> FolderView: ...
+
+    async def rename(self, principal: Principal, folder_id: UUID, *, name: str) -> FolderView: ...
+
+    async def delete(self, principal: Principal, folder_id: UUID) -> None: ...
+
+    async def move_session(
+        self, principal: Principal, session_id: UUID, *, folder_id: UUID | None
+    ) -> SessionView: ...
+
+    async def proposals(
+        self, principal: Principal, *, state: FolderProposalState | None
+    ) -> Page[FolderProposalView]: ...
+
+    async def accept(
+        self, principal: Principal, proposal_id: UUID, *, name: str | None = None
+    ) -> FolderProposalView: ...
+
+    async def decline(self, principal: Principal, proposal_id: UUID) -> FolderProposalView: ...
 
 
 class EmailService(Protocol):

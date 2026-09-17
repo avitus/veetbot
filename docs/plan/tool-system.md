@@ -1227,6 +1227,15 @@ context engine pins the tool set and the pin must include MCP tools or they
 cannot be advertised. For each configured server: connect, `initialize`,
 `tools/list`, map, register, hash.
 
+Typed Email work is the one exception (ADR-0104). Its model requests carry no
+tools. An operational Email session's plan therefore pins none, and planning it
+discovers nothing. A typed run in a thread session that already has a plan does
+not reopen that session's catalog. Instead, the run prepares only the servers
+its task kind calls. Preparation is recorded per server, so a later full
+discovery for the same session adds only the servers not yet attempted. The
+first plan for a thread session still discovers every server, because Chat
+reuses that plan.
+
 Independent server connection, initialization, and discovery operations share
 eight preparation slots across sessions in one runtime. Stdio startups also
 share two process-startup slots: simultaneous Python imports must not exhaust

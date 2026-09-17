@@ -98,6 +98,8 @@ def test_required_make_targets_exist() -> None:
         "test-live",
         "test-apple",
         "test-apple-ui",
+        "test-apple-ui-macos",
+        "test-apple-ui-ios",
         "test-deploy",
         "production-check",
         "client-build",
@@ -723,6 +725,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "apple-ios",
         "apple-signing-smoke",
         "apple-testflight",
         "live",
@@ -735,9 +738,9 @@ def test_ci_has_the_required_partitions() -> None:
         if name == "sandbox":
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
-        if name in {"apple", "apple-signing-smoke", "apple-testflight"}:
+        if name in {"apple", "apple-ios", "apple-signing-smoke", "apple-testflight"}:
             assert job["macos"]["xcode"] == "26.6.0"
-            if name == "apple":
+            if name in {"apple", "apple-ios"}:
                 assert job["macos"] == {"xcode": "26.6.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
@@ -780,7 +783,10 @@ def test_ci_has_the_required_partitions() -> None:
     assert any("make test-integration" in command for command in commands["integration"])
     assert any("make test-sandbox" in command for command in commands["sandbox"])
     assert "make test-apple" in commands["apple"]
-    assert any("make test-apple-ui" in command for command in commands["apple"])
+    assert any("make test-apple-ui-macos" in command for command in commands["apple"])
+    assert not any("make test-apple-ui-ios" in command for command in commands["apple"])
+    assert any("make test-apple-ui-ios" in command for command in commands["apple-ios"])
+    assert not any("make test-apple-ui-macos" in command for command in commands["apple-ios"])
     testflight_job = jobs["apple-testflight"]
     assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
@@ -876,8 +882,15 @@ def test_ci_has_the_required_partitions() -> None:
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
     verify = workflows["verify"]
     assert verify["unless"] == "<< pipeline.parameters.run_live >>"
-    assert verify["jobs"][:5] == ["static", "contract", "integration", "sandbox", "apple"]
-    assert verify["jobs"][5] == {
+    assert verify["jobs"][:6] == [
+        "static",
+        "contract",
+        "integration",
+        "sandbox",
+        "apple",
+        "apple-ios",
+    ]
+    assert verify["jobs"][6] == {
         "apple-signing-smoke": {
             "context": "veetbot-apple-signing",
             "filters": {"branches": {"only": "dev"}},
@@ -885,7 +898,7 @@ def test_ci_has_the_required_partitions() -> None:
     }
     delivery_jobs = {
         next(iter(job)): next(iter(job.values()))
-        for job in verify["jobs"][6:]
+        for job in verify["jobs"][7:]
         if isinstance(job, dict)
     }
     assert set(delivery_jobs) == {
@@ -900,6 +913,7 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
+        "apple-ios",
         "public-site",
     ]
     assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
@@ -967,21 +981,41 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
     assert "-n 2" in static_command
     assert "--dist loadscope" in static_command
 
-    apple_commands = [
-        step["run"]["command"]
-        for step in jobs["apple"]["steps"]
-        if isinstance(step, dict) and "run" in step
-    ]
-    assert any(
-        "APPLE_TEST_RESULTS_DIR" in command and "make test-apple-ui" in command
-        for command in apple_commands
+    # The Mac and simulator UI suites run on separate executors at the same time,
+    # and each uploads its result bundles as one archive instead of thousands of
+    # bundle files.
+    for job_name, platform in (("apple", "macos"), ("apple-ios", "ios")):
+        apple_commands = [
+            step["run"]["command"]
+            for step in jobs[job_name]["steps"]
+            if isinstance(step, dict) and "run" in step
+        ]
+        assert any(
+            'APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results"' in command
+            and f"make test-apple-ui-{platform}" in command
+            for command in apple_commands
+        )
+        assert {"store_apple_test_results": {"platform": platform}} in jobs[job_name]["steps"]
+        assert not any(
+            isinstance(step, dict) and "store_artifacts" in step for step in jobs[job_name]["steps"]
+        )
+
+    store_results = config["commands"]["store_apple_test_results"]
+    assert store_results["parameters"] == {"platform": {"type": "string"}}
+    archive_step, upload_step = store_results["steps"]
+    assert archive_step["run"]["when"] == "always"
+    archive_command = archive_step["run"]["command"]
+    assert "if [[ -d build/apple-test-results ]]" in archive_command
+    assert (
+        "COPYFILE_DISABLE=1 tar -cf build/apple-test-results.tar -C build apple-test-results"
+        in archive_command
     )
-    assert {
+    assert upload_step == {
         "store_artifacts": {
-            "path": "build/apple-test-results",
-            "destination": "apple-test-results",
+            "path": "build/apple-test-results.tar",
+            "destination": "apple-test-results-<< parameters.platform >>.tar",
         }
-    } in jobs["apple"]["steps"]
+    }
 
 
 def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
@@ -1682,13 +1716,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 28 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 29 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(29)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(30)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1711,7 +1745,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 29):
+    for milestone in range(12, 30):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
@@ -1835,6 +1869,12 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     for unit in [*scheduled_units, "veetbot-notify", "veetbot-surface"]:
         assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
         assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
+    # Calling units have no readiness probe, so the release also confirms that
+    # neither one restarted automatically after promotion.
+    for unit in ("veetbot-call", "veetbot-call-ingress"):
+        assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
+        for unit_property in ("MainPID", "NRestarts"):
+            assert f"/usr/bin/systemctl show --property {unit_property} --value {unit}" in specs
     assert "/usr/bin/systemctl daemon-reload" in specs
     assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
     assert "/usr/bin/systemctl disable --now veetbot-notify" in specs
@@ -1875,10 +1915,10 @@ def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
     simulator destinations never needed signing at all.
     """
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+    recipe = _make_recipe(makefile, "test-apple-ui-macos")
     parts = recipe.split("-destination 'platform=macOS'")
     assert len(parts) == 2, "the macOS UI-test destination is missing"
-    invocation_tail = parts[1].split("|| exit", 1)[0]
+    invocation_tail = parts[1]
     for override in (
         "CODE_SIGN_STYLE=Manual",
         "CODE_SIGN_IDENTITY=-",
@@ -1892,9 +1932,11 @@ def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
 
 def test_apple_ui_builds_once_and_runs_phone_and_tablet_concurrently() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+    results = makefile.split("APPLE_RESULTS_RUN_DIR =", 1)[1].split("\n\n", 1)[0]
 
-    assert "APPLE_TEST_RESULTS_DIR" in recipe
+    assert "APPLE_TEST_RESULTS_DIR" in results
+    assert "$(APPLE_RESULTS_RUN_DIR)" in recipe
     assert "-resultBundlePath" in recipe
     assert recipe.count("xcodebuild build-for-testing") == 1
     assert "-testProductsPath" in recipe
@@ -1911,7 +1953,7 @@ def test_apple_ui_builds_once_and_runs_phone_and_tablet_concurrently() -> None:
 def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
     """An xctestproducts run cannot also select a project or scheme."""
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
 
     invocations = [
         tail.split(";", 1)[0] for tail in recipe.split("xcodebuild test-without-building")[1:]
@@ -1921,6 +1963,83 @@ def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
         assert "-testProductsPath" in invocation
         assert "-project" not in invocation
         assert "-scheme" not in invocation
+
+
+def _make_recipe(makefile: str, target: str) -> str:
+    """Return one Makefile rule, from its target line to the next rule."""
+    rule = re.search(rf"^{re.escape(target)}:.*?(?=^[A-Za-z][\w.-]*:)", makefile, re.M | re.S)
+    assert rule, f"{target} is missing"
+    return rule.group(0)
+
+
+def test_apple_ui_platform_targets_split_the_macos_and_simulator_suites() -> None:
+    """CI runs each platform family on its own executor; the aggregate keeps both.
+
+    Mac UI tests drive the real desktop, so the aggregate runs the two families
+    one after the other even under ``make -j``.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    phony = makefile.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
+    assert "test-apple-ui-macos" in phony
+    assert "test-apple-ui-ios" in phony
+
+    aggregate = _make_recipe(makefile, "test-apple-ui")
+    assert aggregate.splitlines()[0] == "test-apple-ui:"
+    assert aggregate.index("$(MAKE) --no-print-directory test-apple-ui-macos") < aggregate.index(
+        "$(MAKE) --no-print-directory test-apple-ui-ios"
+    )
+    assert "xcodebuild" not in aggregate
+
+    macos = _make_recipe(makefile, "test-apple-ui-macos")
+    assert "-destination 'platform=macOS'" in macos
+    assert "simctl" not in macos
+    assert "build-for-testing" not in macos
+
+    ios = _make_recipe(makefile, "test-apple-ui-ios")
+    assert "platform=macOS" not in ios
+    assert ios.count("xcodebuild build-for-testing") == 1
+    assert "run_ios_ui_tests iphone" in ios
+    assert "run_ios_ui_tests ipad" in ios
+
+    for recipe in (_make_recipe(makefile, "test-apple"), macos, ios):
+        assert "$(APPLE_FULL_XCODE)" in recipe
+    for recipe in (macos, ios):
+        assert "$(APPLE_RESULTS_RUN_DIR)" in recipe
+
+
+def _swift_functions(source: str) -> dict[str, str]:
+    """Split a Swift type's members into function bodies keyed by name."""
+    starts = list(re.finditer(r"^    (?:override )?(?:private )?func (\w+)\(", source, re.M))
+    return {
+        match.group(1): source[match.end() : following.start() if following else len(source)]
+        for match, following in zip(starts, [*starts[1:], None], strict=True)
+    }
+
+
+def test_apple_ui_cases_configure_the_fixture_before_one_launch() -> None:
+    """Each case pays for one app launch unless it is exercising a relaunch.
+
+    Launching in ``setUp`` and then terminating to add a launch argument
+    doubled the launch cost of every such case on all three destinations.
+    """
+    source = (
+        ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+    functions = _swift_functions(source)
+
+    setup = functions["setUp"]
+    assert "app.launch()" not in setup
+    assert 'app.launchArguments.append("--ui-testing-conversation-navigation")' in setup
+    for name, body in functions.items():
+        first = re.search(r"app\.(launch|terminate)\(\)", body)
+        assert first is None or first.group(1) == "launch", (
+            f"{name} terminates the app before launching it"
+        )
+        if name.startswith("test"):
+            launches = re.search(
+                r"app\.launch\(\)|launchFullEmailInbox\(\)|submitSlowChatMessage\(", body
+            )
+            assert launches, f"{name} never launches the app"
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:

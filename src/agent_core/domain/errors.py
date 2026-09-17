@@ -37,6 +37,11 @@ class PersonaContentError(AgentCoreError):
     patterns, oversize entries, or provenance the caller may not mint."""
 
 
+class FolderNameError(AgentCoreError):
+    """A folder name was refused before persistence: empty, over-length,
+    control characters, or content failing the secret or injection scans."""
+
+
 class ScheduleValidationError(AgentCoreError):
     """A schedule definition failed one stable boundary rule."""
 

@@ -127,8 +127,10 @@ from agent_core.domain.runs import (
     RunUsage,
 )
 from agent_core.domain.sessions import (
+    PEOPLE_OPERATIONAL_SESSION_PURPOSES,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
+    SESSION_PURPOSE_METADATA_KEY,
     Session,
     SessionCursor,
     SessionStatus,
@@ -352,6 +354,11 @@ class PostgresSessionRepository:
                 SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]
                 .as_boolean()
                 .is_not(True)
+            )
+            predicates.append(
+                func.coalesce(
+                    SessionRow.metadata_json[SESSION_PURPOSE_METADATA_KEY].as_string(), ""
+                ).not_in(PEOPLE_OPERATIONAL_SESSION_PURPOSES)
             )
             predicates.append(
                 or_(

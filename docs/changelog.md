@@ -4,6 +4,131 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Email tasks start only the Gmail servers they use
+
+- An Email archive now starts only the account's read and write Gmail servers,
+  not all six. In production, starting all six took 17.7 seconds of an archive
+  run, and closing them took another 4–7 seconds before the worker took its
+  next task. A refresh starts only each account's read server. A send starts
+  the read and send servers. A draft starts no server (ADR-0104).
+- A thread's first Email task still starts every server, because Chat reuses
+  the tool list it records.
+
+## 2026-09-16 — Calling services start and are checked on release
+
+- The call worker and webhook listener no longer refuse to start with their
+  shipped settings. Those leave the owner's scopes empty because neither
+  service uses them.
+- The webhook listener's account can now run the released code. When intake is
+  enabled, the release grants that one account read access to the new release,
+  which is otherwise closed to accounts outside the application group.
+- A release that enables calling now waits 15 seconds after starting the
+  calling services and fails if either one is down or has restarted, instead
+  of reporting success while it crash-loops.
+- The deploy account's sudo contract gains the matching status rules. Hosts
+  with an older contract need it reinstalled before calling is enabled.
+
+## 2026-09-16 — Bland calling setup passes the release preflight
+
+- The Bland setup guide now gives file permissions that the release preflight
+  can check. Before, it made the listener's environment file readable only by
+  the listener, so the deploy user could not read it. It also left the secret
+  directory closed to the deploy user. A production release failed with a
+  misleading "must match the application environment" error.
+- Both calling environment files are now `root:veetbot` with mode 0640, and
+  credential directories use mode 0711. The webhook secret and the Bland API
+  key stay mode 0600 and readable only by their services. The listener still
+  cannot read the application environment.
+- When a calling environment file is unreadable or a credential directory
+  cannot be traversed, the release now names that path. The release test
+  replays the guide's commands as both the `veetbot-deploy` and `veetbot`
+  deploy users.
+
+## 2026-09-16 — Email archives no longer wait behind refreshes
+
+- An Email-mode archive or move-to-Inbox run now uses the interactive queue
+  class. Previously it shared the single asynchronous worker with refresh runs,
+  which take about two minutes each. On 2026-09-16 one production archive waited
+  69 of its 115 seconds in that queue. Refresh, draft and send tasks remain
+  asynchronous. Consent, fencing, approval and uncertain-effect checks are
+  unchanged.
+
+## 2026-09-16 — Gmail request URLs stay out of service logs
+
+- The Gmail MCP servers no longer write a line for each Google request to the
+  API and worker journals. Those lines exposed search queries, which can hold
+  names, addresses and subject text, as well as Gmail thread and message IDs.
+  Warnings and errors from the servers still reach the journal.
+
+## 2026-09-16 — Cheaper Email listing, admission and body retention
+
+- The Email inbox list reads thread summaries without message content, and
+  PostgreSQL drops the bodies in the query. On a PostgreSQL copy with 4,044
+  production-sized threads, a priority page fell from about 850 ms to about
+  260 ms. Owner feedback is sorted only for the threads it matches.
+- Admitting refresh, draft, send and archive operations, and endorsing a writing
+  example, no longer scan every cached thread, draft and draft revision first.
+  On the same data, admission fell from about 800 ms to about 4 ms.
+- The maintenance worker's email body sweep runs once an hour instead of on
+  every five-second pass. The thirty-day body window is unchanged: thread and
+  draft reads, refresh selection and imports withhold expired bodies before
+  the sweep reaches them, and never send one to the model.
+
+## 2026-09-16 — Bland request URLs stay out of service logs
+
+- The Bland MCP servers no longer write a line for each Bland request to the
+  API and worker journals. Those lines exposed provider call IDs, the configured
+  phone number and call-history query values. Warnings and errors from the
+  servers still reach the journal.
+
+## 2026-09-16 — Email reads no longer wait for archive and refresh admission
+
+- Archiving a conversation or starting an Email refresh no longer starts the
+  Gmail MCP servers in the API process. In production that startup took 10–16
+  seconds per request and ran while the owner's email lock was held. Thread
+  reads and inbox reconciliation waited behind it, and archive requests took
+  23–25 seconds. These requests now finish without that delay. The worker still
+  starts its own servers when it runs the task (ADR-0103).
+- Opening a thread in Chat or starting its first draft still pins the full skill
+  catalog, but server discovery now happens before the lock is taken.
+
+## 2026-09-16 — Faster native Apple CI lane
+
+- The Apple CI gate now runs on two macOS executors at once: `apple` runs the
+  Swift unit tests and the macOS UI cases, and `apple-ios` runs the iPhone and
+  iPad cases. Release packaging requires both. No test was removed.
+- `make test-apple-ui` now runs the new `make test-apple-ui-macos` and
+  `make test-apple-ui-ios` targets in turn, so either platform family can run
+  alone.
+- UI cases set their fixture options before a single launch instead of
+  launching in `setUp` and relaunching, which saves one app launch per affected
+  case on every destination.
+- The Email status-polling test runs its bounded backoff in virtual time and
+  also asserts the backoff delays, removing about thirty seconds of real
+  waiting from `make test-apple`.
+- Each Apple job uploads its result bundles as one archive instead of thousands
+  of files.
+
+## 2026-09-16 — Archiving the open email from its row advances the reading pane
+
+- In the Apple client's Email mode, checking off the open conversation in the
+  inbox list now clears the reading pane and opens the next visible
+  conversation, or the previous one at the end of the list, as the reading
+  pane's own checkbox already did. Previously the archived conversation stayed
+  open until another row was chosen. Archiving any other row still keeps the
+  current selection.
+
+## 2026-09-16 — Adding a person no longer adds a conversation
+
+- The conversation index hides the sessions that anchor native People writes
+  (`purpose: people-management`) and People import workers
+  (`purpose: people-import`). Previously every import preview, and every Add
+  person or profile edit made without a selected conversation, left an empty
+  conversation in the sidebar.
+- The Apple client prunes those sessions from its cached sidebar. The sessions
+  stay on the server because they hold the evidence behind each owner-added
+  person; deleting one would erase that evidence.
+
 ## 2026-09-15 — Personal-context memory retrieval repair
 
 - Session snapshots exclude provisional beliefs before candidate limits, keeping

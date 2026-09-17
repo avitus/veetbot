@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.email import (
     EMAIL_HISTORY_DAYS,
@@ -25,6 +26,8 @@ from agent_core.domain.email import (
     EmailValue,
     apply_feedback,
     archive_result_matches,
+    body_cutoff,
+    retained_thread,
 )
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import (
@@ -54,7 +57,7 @@ from agent_core.ports.email import EmailContextRenderer, EmailRuntimeServices, E
 from agent_core.ports.persistence import RepositoryUnitOfWork
 from agent_core.ports.tools import ToolRegistry
 from agent_core.runtime.email_assessment import assessment_instruction
-from agent_core.runtime.email_state import read_value, records, save_value
+from agent_core.runtime.email_state import read_value, records, save_value, thread_summaries
 from agent_core.runtime.loop import RunContext, _invoke_model, checkpoint, select_final_message
 
 EMAIL_MESSAGE_WINDOW = 100
@@ -62,6 +65,15 @@ EMAIL_BODY_WINDOW_BYTES = 512 * 1024
 EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
+# The account server modes each task kind calls. Drafts call only the model.
+EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
+    "refresh": ("read",),
+    "archive": ("read", "write"),
+    "send": ("read", "send"),
+    "draft": (),
+}
+
+type ServerPreparation = Callable[[UUID, Principal, frozenset[str]], Awaitable[None]]
 
 
 class EmailToolError(Exception):
@@ -112,11 +124,13 @@ class EmailTaskRunner:
         *,
         semantic_factory: Callable[[RunContext], EmailSemanticPort],
         render_context: EmailContextRenderer,
+        prepare_servers: ServerPreparation,
     ) -> None:
         self.service = service
         self.registry = registry
         self.semantic_factory = semantic_factory
         self.render_context = render_context
+        self.prepare_servers = prepare_servers
 
     async def __call__(self, context: RunContext) -> RunOutcome | None:
         task = await self.service.get_task(context.principal, context.run.id)
@@ -129,6 +143,15 @@ class EmailTaskRunner:
         configured = session.metadata.get("email_account_servers")
         if configured != self.service.account_servers:
             raise ConflictError("email task account configuration has changed")
+        # Typed work starts only the servers its task kind calls (ADR-0104).
+        servers = frozenset(
+            server
+            for account_id in task.account_ids
+            for mode in EMAIL_TASK_SERVER_MODES[task.kind]
+            if (server := self.service.account_servers[account_id].get(mode)) is not None
+        )
+        if servers:
+            await self.prepare_servers(task.session_id, context.principal, servers)
         semantics = self.semantic_factory(context)
         io = _TaskIO(context, task, self.registry, self.service, semantics, self.render_context)
         try:
@@ -646,6 +669,27 @@ class _TaskIO:
             await self._erase_progress(progress_key)
         return result, pending
 
+    async def _expired_inbox(self, account_id: str) -> list[EmailThread]:
+        """Inbox conversations whose cached bodies must be fetched again."""
+        c = self.context
+        cutoff = body_cutoff(c.clock.now())
+        expired: list[EmailThread] = []
+        async with c.uow_factory() as uow:
+            async for summary in thread_summaries(uow.email, c.principal):
+                if summary.account_id != account_id or not summary.in_inbox:
+                    continue
+                if summary.source_fingerprint and summary.last_accessed_at > cutoff:
+                    continue
+                if summary.source_fingerprint:
+                    # Past the window but not yet swept: only the bodies decide.
+                    thread = await read_value(
+                        uow.email, c.principal, "thread", str(summary.id), EmailThread
+                    )
+                    if thread is None or retained_thread(thread, cutoff).source_fingerprint:
+                        continue
+                expired.append(summary)
+        return expired
+
     async def _window_analyzed(self, account_id: str, provider_id: str) -> bool:
         """Check whether eligible cached passages have completed analysis for this window."""
         key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
@@ -659,6 +703,7 @@ class _TaskIO:
             )
             if thread is None:
                 return False
+            thread = retained_thread(thread, body_cutoff(c.clock.now()))
             if not any(
                 message.body
                 and message.sent_at >= c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
@@ -762,14 +807,7 @@ class _TaskIO:
                     await self._save_sync(account, sync)
                 if account.inbox_complete:
                     account, sync = await self._changes(account, sync)
-                async with c.uow_factory() as uow:
-                    expired = [
-                        EmailThread.model_validate(row.payload)
-                        async for row in records(uow.email, c.principal, "thread")
-                        if row.payload.get("account_id") == account_id
-                        and row.payload.get("in_inbox") is True
-                        and not row.payload.get("source_fingerprint")
-                    ]
+                expired = await self._expired_inbox(account_id)
                 for thread in sorted(expired, key=lambda item: -item.priority):
                     if not await self._import(account_id, thread.provider_thread_id):
                         break
@@ -803,9 +841,10 @@ class _TaskIO:
                     sync,
                 )
         # Cached mail also reranks after a profile change without another Gmail read.
+        cutoff = body_cutoff(c.clock.now())
         async with c.uow_factory() as uow:
             candidates = [
-                EmailThread.model_validate(row.payload)
+                retained_thread(EmailThread.model_validate(row.payload), cutoff)
                 async for row in records(uow.email, c.principal, "thread")
             ]
             assessments = {
@@ -863,7 +902,11 @@ class _TaskIO:
         async with c.uow_factory() as uow:
             feedback = await self.service._feedback(uow.email, c.principal)
             candidates = [
-                apply_feedback(EmailThread.model_validate(row.payload), feedback, now=c.clock.now())
+                apply_feedback(
+                    retained_thread(EmailThread.model_validate(row.payload), cutoff),
+                    feedback,
+                    now=c.clock.now(),
+                )
                 async for row in records(uow.email, c.principal, "thread")
             ]
             assessments = {
@@ -1023,6 +1066,7 @@ class _TaskIO:
             )
             if thread is None or not any(message.id == message_id for message in thread.messages):
                 return
+            thread = retained_thread(thread, body_cutoff(c.clock.now()))
             messages = [message for message in thread.messages if message.id != message_id]
             complete = (
                 thread.complete and bool(messages) and all(message.complete for message in messages)

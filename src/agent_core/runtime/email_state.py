@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.email import EmailRecord, EmailValue
+from agent_core.domain.email import EmailRecord, EmailThread, EmailValue
 from agent_core.ports.email import EmailStore
 
 
@@ -15,6 +15,15 @@ async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIt
     while page := await store.list(principal, kind, after=after):
         for row in page:
             yield row
+        after = page[-1].key
+
+
+async def thread_summaries(store: EmailStore, principal: Principal) -> AsyncIterator[EmailThread]:
+    """Yield message-free conversations for selection; never save one back."""
+    after: str | None = None
+    while page := await store.list_thread_summaries(principal, after=after):
+        for row in page:
+            yield EmailThread.model_validate(row.payload)
         after = page[-1].key
 
 

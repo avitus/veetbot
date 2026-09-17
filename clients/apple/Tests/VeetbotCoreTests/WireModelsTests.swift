@@ -244,4 +244,58 @@ import Testing
         #expect(nomination.affirmedVersion == nil)
         #expect(nomination.corroborationCount == 3)
     }
+
+    @Test
+    func testSessionViewDecodesFolderIDAbsentNullAndPresent() throws {
+        let base = #"{"id":"00000000-0000-0000-0000-000000000001","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{},"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01Z","active_run_id":null,"last_run_id":null"#
+        let absent = try JSONDecoder.server.decode(SessionView.self, from: Data((base + "}").utf8))
+        #expect(absent.folderID == nil)
+        #expect(absent.folderSupported == false)
+        let null = try JSONDecoder.server.decode(
+            SessionView.self, from: Data((base + #","folder_id":null}"#).utf8)
+        )
+        #expect(null.folderID == nil)
+        #expect(null.folderSupported == true)
+        let present = try JSONDecoder.server.decode(
+            SessionView.self,
+            from: Data((base + #","folder_id":"00000000-0000-0000-0000-0000000000f1"}"#).utf8)
+        )
+        #expect(present.folderID?.uuidString == "00000000-0000-0000-0000-0000000000F1")
+    }
+
+    @Test
+    func testFolderViewsDecodeAndTolerateAnUnknownProposalKind() throws {
+        let folder = try JSONDecoder.server.decode(
+            FolderView.self,
+            from: Data(
+                #"{"id":"00000000-0000-0000-0000-0000000000f1","name":"Travel","thread_count":3,"created_at":"2026-09-16T12:00:00Z","updated_at":"2026-09-16T12:00:00Z"}"#
+                    .utf8
+            )
+        )
+        #expect(folder.name == "Travel")
+        #expect(folder.threadCount == 3)
+        let template = #"{"id":"00000000-0000-0000-0000-0000000000e1","kind":"KIND","proposed_name":"Lisbon","target_folder_id":null,"member_session_ids":["00000000-0000-0000-0000-000000000001"],"rationale":null,"derivation":"lexical","state":"proposed","withdrawal_reason":null,"resulting_folder_id":null,"created_at":"2026-09-16T12:00:00Z","resolved_at":null}"#
+        for (raw, expected) in [("new_folder", FolderProposalKind.newFolder), ("add_to_folder", .addToFolder)] {
+            let proposal = try JSONDecoder.server.decode(
+                FolderProposalView.self,
+                from: Data(template.replacingOccurrences(of: "KIND", with: raw).utf8)
+            )
+            #expect(proposal.kindValue == expected)
+        }
+        let unknown = try JSONDecoder.server.decode(
+            FolderProposalView.self,
+            from: Data(template.replacingOccurrences(of: "KIND", with: "merge_folders").utf8)
+        )
+        #expect(unknown.kindValue == nil)
+        #expect(unknown.memberSessionIDs.count == 1)
+    }
+
+    @Test
+    func testSetSessionFolderBodyEncodesAnExplicitNull() throws {
+        let unfiled = try JSONEncoder.server.encode(SetSessionFolderBody(folderID: nil))
+        #expect(String(decoding: unfiled, as: UTF8.self) == #"{"folder_id":null}"#)
+        let id = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000000f1"))
+        let filed = try JSONEncoder.server.encode(SetSessionFolderBody(folderID: id))
+        #expect(String(decoding: filed, as: UTF8.self) == #"{"folder_id":"\#(id.uuidString)"}"#)
+    }
 }

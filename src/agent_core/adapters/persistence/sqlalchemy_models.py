@@ -1789,6 +1789,79 @@ class DelegationRow(Base):
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ThreadFolderRow(Base):
+    __tablename__ = "thread_folders"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "principal_id",
+            "name_key",
+            name="uq_thread_folders_principal_name_key",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    name_key: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SessionFolderMembershipRow(Base):
+    """One row per filed session: the primary key is the single-parent rule."""
+
+    __tablename__ = "session_folder_memberships"
+    __table_args__ = (Index("ix_session_folder_memberships_folder_id", "folder_id"),)
+
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    folder_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("thread_folders.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ThreadFolderProposalRow(Base):
+    __tablename__ = "thread_folder_proposals"
+    __table_args__ = (
+        Index(
+            "ix_thread_folder_proposals_open",
+            "tenant_id",
+            "principal_id",
+            "content_key",
+            unique=True,
+            postgresql_where=text("state = 'proposed'"),
+        ),
+        Index(
+            "ix_thread_folder_proposals_principal_state",
+            "tenant_id",
+            "principal_id",
+            "state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    proposed_name: Mapped[str | None] = mapped_column(Text)
+    target_folder_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    member_session_ids: Mapped[list[str]] = mapped_column(JSONB)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    derivation: Mapped[str] = mapped_column(Text)
+    content_key: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    withdrawal_reason: Mapped[str | None] = mapped_column(Text)
+    resulting_folder_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class PersonaDocumentRow(Base):
     __tablename__ = "persona_documents"
 

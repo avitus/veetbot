@@ -4116,6 +4116,32 @@ The verified sequential ceiling stays at Milestone 12. New source providers,
 general graph inference, arbitrary history mining, external enrichment,
 automatic outreach and automatic persona changes remain outside this milestone.
 
+### Milestone 29: Chat thread folders
+
+The owner authorized this scope on 2026-09-16 under ADR-0102. Implement
+[thread-folders.md](thread-folders.md): flat, single-parent, principal-scoped
+folders over chat conversations as server-owned state; create, rename, delete
+and move; a maintenance pass that proposes a new folder when at least a
+configured number of unfiled chat conversations group together, or adding
+unfiled conversations to an existing folder; owner acceptance or durable
+decline of every proposal, a bounded open set and withdrawal when members
+change; model-assisted grouping under a strict schema, grounding and fixed
+budgets with a deterministic lexical fallback; nine routes under `/v1/folders`
+and `/v1/sessions/{id}/folder` on the existing session scopes behind a
+default-off flag; an additive `SessionView.folder_id`; and native sidebar
+folder sections and proposal review. The design declares twelve gates.
+
+This amends no roadmap item: grouping adds no retrieval arm, reads no memory
+store, and introduces no embedding, so roadmap B6's semantic residue is
+untouched. Nothing files a conversation without the owner's acceptance, and
+folder text never enters a conversation prompt.
+
+Acceptance requires all twelve gates, both repository adapters, the Apple
+package and simulator lanes, and final-head hosted CI/review plus separately
+authorized production delivery. The verified sequential ceiling stays at
+Milestone 12. Nested or shared folders, Email-mode conversations, automatic
+filing, embeddings and search remain outside this milestone.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

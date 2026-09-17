@@ -19,6 +19,18 @@ file or symlink. Do not put the key in chat, shell arguments, source control or
 the public profile. Set `BLAND_API_KEY_FILE` to that path in the application and
 call worker environments. Inline `BLAND_API_KEY` is rejected.
 
+On the production host, save the key in the existing traverse-only secret
+directory, which is the path in the example environment:
+
+```bash
+sudo /opt/veetbot/current/.venv/bin/python -m bland_mcp bootstrap \
+  --output-file /etc/veetbot/secrets/bland-api-key
+```
+
+The command creates a missing parent directory with mode 0700. The release
+preflight cannot traverse such a directory (see
+[the service roles](#separate-the-two-service-roles)).
+
 Inspect the account's numbers in the Bland dashboard first. Do not buy a number
 automatically. Confirm the selected number belongs to the same account as the
 key and supports the required incoming and outgoing destinations. The account
@@ -91,21 +103,36 @@ this account has a particular plan or price.
 
 The application holds the private Bland credential for approved outbound tools.
 The dedicated `veetbot-call` worker holds it for bounded result reconciliation
-and termination. It has no owner API bearer or model credentials. The separate
+and termination. It has no owner API bearer or model credentials. Both calling
+roles act for the owner tenant and principal but hold none of the owner's
+scopes, so their environments leave `AUTH_SCOPES` empty. The separate
 `veetbot-call-ingress` listener has only a webhook signing secret and receipt
 database access. It verifies the raw bytes before parsing, queues only a call ID,
 and listens at `127.0.0.1:8003`; the public proxy exposes only `/webhooks/bland`.
 
 Provision the unprivileged Linux user/group `veetbot-call-ingress` before enabling
-its unit. Its environment file and signing-secret file must belong to that user
-and be mode 0600. Use a separate private directory it can traverse, for example
-`/etc/veetbot-call-ingress/`, rather than granting access to the application's
-secret directory. The reviewed public configuration may be readable by both
-roles. The Bland API key remains readable only by the application's `veetbot`
-user. The listener must not be able to read the application environment file.
-Install the host's `acl` package before enabling calling. Release preflight uses
-`stat` and `getfacl` to require non-symlink regular credential files, mode 0600,
-the exact service owner above, and only the base owner/group/other ACL entries.
+its unit. Never add it to the `veetbot` group, which can read the application
+environment file. The listener must not be able to read that file. The signing
+secret belongs to `veetbot-call-ingress` and the Bland API key to the
+application's `veetbot` user; no other identity can read either. Keep the
+secret in its own directory, `/etc/veetbot-call-ingress/`, rather than in the
+application's secret directory. The reviewed public configuration may be
+readable by both roles.
+
+Release preflight runs as the unprivileged deploy identity, without sudo:
+`veetbot` on the current host and `veetbot-deploy`, a member of the `veetbot`
+group, in the [documented host model](deployment.md#one-time-host-preparation).
+It reads both calling environment files, and inspects each credential with
+`stat` and `getfacl` without opening it. Each calling environment file is
+therefore owned by `root:veetbot` with mode 0640, like the application
+environment. systemd reads the file as root before starting the unit, so the
+listener needs no access to it. Every directory above a credential must let the
+deploy identity traverse it: mode 0711 lets it reach the file without listing
+the directory.
+
+Install the host's `acl` package before enabling calling. Preflight requires
+each credential to be a non-symlink regular file with mode 0600, the exact
+service owner above, and only the base owner/group/other ACL entries.
 Additional ACL entries are rejected, including currently masked grants.
 
 Create distinct PostgreSQL login roles, with credentials set privately. Neither
@@ -141,6 +168,37 @@ path and three calling flags must match the application environment. Do not copy
 the full application environment into either role. Use the ingress-specific
 secret directory for `BLAND_WEBHOOK_SECRET_FILE`.
 
+Write the webhook signing secret to
+`/etc/veetbot-call-ingress/bland-webhook-secret` without echoing it or putting
+it in a shell argument. Then apply the ownership and modes; the commands are
+safe to rerun:
+
+```bash
+sudo chown root:veetbot /etc/veetbot/veetbot-call.env \
+  /etc/veetbot/veetbot-call-ingress.env
+sudo chmod 0640 /etc/veetbot/veetbot-call.env \
+  /etc/veetbot/veetbot-call-ingress.env
+sudo install -d -m 0711 /etc/veetbot/secrets
+sudo install -d -m 0711 -o veetbot-call-ingress -g veetbot-call-ingress \
+  /etc/veetbot-call-ingress
+sudo chown veetbot:veetbot /etc/veetbot/secrets/bland-api-key
+sudo chown veetbot-call-ingress:veetbot-call-ingress \
+  /etc/veetbot-call-ingress/bland-webhook-secret
+sudo chmod 0600 /etc/veetbot/secrets/bland-api-key \
+  /etc/veetbot-call-ingress/bland-webhook-secret
+sudo setfacl -b /etc/veetbot/secrets/bland-api-key \
+  /etc/veetbot-call-ingress/bland-webhook-secret
+```
+
+`deploy/app/release.test.sh` replays these commands and releases as both deploy
+identities, so change the two together. A host prepared under earlier
+guidance can fail with `calling role environment is not readable by the deploy
+user` or `calling role credential directory is not traversable by the deploy
+user`. Earlier guidance left the environment files owned by their service with
+mode 0600, and the credential directories at mode 0700. Rerun the commands
+above. If a credential is kept elsewhere, give each directory above it mode
+0711.
+
 ## Activate and verify
 
 Keep all flags at zero until the reviewed number configuration, database roles,
@@ -167,12 +225,18 @@ intake. Do not add an unsigned fallback or accept multiple signing conventions
 without a reviewed change. Never save that secret or a real transcript in the
 repository. [Webhook signing](https://docs.bland.ai/tutorials/webhook-signing).
 
-Use the existing deployment procedure once separately authorized. The release
-script validates matching role bindings and installs/restarts the optional
-units; the proxy includes its call route only when the active release enables
-ingress. Verify both units, HTTPS routing and release identity. During rollback,
-stop both calling units before switching releases; restart only units supported
-by the target release and restore its flags and proxy configuration.
+Use the existing deployment procedure once separately authorized. A host whose
+sudo contract predates calling support lacks the calling rules, so reinstall
+`deploy/sudoers/veetbot-deploy` as [deployment](deployment.md#one-time-host-preparation)
+describes before the first calling release. The release script validates
+matching role bindings, grants the ingress user read access to the new release
+and installs/restarts the optional units. It then fails unless each enabled
+calling unit is still running without an automatic restart, so a unit that
+cannot start fails the release. The proxy includes its call route only when the
+active release enables ingress. Verify both units, HTTPS routing and release
+identity. During rollback, stop both calling units before switching releases;
+restart only units supported by the target release and restore its flags and
+proxy configuration.
 
 With an explicitly approved test recipient, verify one inbound call and one
 outbound call. Confirm the greeting, transcription disclosure, voice quality,

@@ -614,7 +614,7 @@ that counter.
 
 An ordinary branch or pull request runs verification only. A `dev` push also
 runs the non-publishing Apple signing smoke described above. On `main`, after
-all six required verification lanes pass:
+all seven required verification jobs pass:
 
 - `public-site` installs the locked Node dependencies, builds, tests, and lints
   the static export, and exposes only that output to downstream packaging;
@@ -994,10 +994,25 @@ service that is accidentally bound to a public interface.
 roles, separate ingress Linux user and required live verification. The release
 script leaves both roles disabled by default. When enabled it validates matching
 owner/profile bindings, installs `veetbot-call.service` and optionally
-`veetbot-call-ingress.service`, then starts them after promotion. The proxy adds
-only the exact `/webhooks/bland` route when the active release enables intake.
+`veetbot-call-ingress.service`, then starts them after promotion. That preflight
+runs as the deploy identity without sudo. The guide's file permissions let that
+identity read both calling environment files and reach, but not read, their
+credentials. The proxy adds only the exact `/webhooks/bland` route when the
+active release enables intake.
 Verify both units independently alongside the normal public release probes.
 Before rolling back across calling support, stop both calling units and restore
 the target release's environment and proxy flags; only restart roles that exist
 in that release. Do not downgrade the call migration to roll back code: preserve
 correspondence and erasure tombstones, following the normal expand-only policy.
+
+The release tree is created with umask 027, and `veetbot-call-ingress` is
+deliberately outside the `veetbot` group. When ingress is enabled, the release
+therefore grants that user read access to the staged release with a recursive
+ACL (`setfacl -R -P -m u:veetbot-call-ingress:rX`) before promotion. Calling
+units have no readiness probe: after the API checks, the release waits until
+`VEETBOT_CALL_SETTLE_SECS` (default 15) have passed since it restarted them,
+then requires each enabled calling unit to be active with a main process and
+no automatic restart. Otherwise the release fails after promotion, like any
+other unit failure. These probes use the calling rules in
+`deploy/sudoers/veetbot-deploy`, so reinstall that contract on hosts
+provisioned before calling support.

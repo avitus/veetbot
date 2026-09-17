@@ -80,13 +80,13 @@ the archive request and durable operation finish asynchronously. Normal progress
 and successful completion are silent; other rows remain actionable. Keep the
 last confirmed mailbox state separate from this optimistic presentation, retain
 draft edits, and restore the row with an actionable error if admission, status
-retrieval, or execution fails or the outcome is uncertain. Archiving from thread
-detail immediately clears that detail and opens the next visible conversation
-in the current list order, falling back to the previous conversation at the end
-of the list or an empty pane when none remain. Loading the next conversation
-does not wait for archive admission or completion. A later archive failure
-restores its row without replacing the owner's new selection. Row checkboxes
-and move-to-Inbox actions retain their existing selection behavior.
+retrieval, or execution fails or the outcome is uncertain. Archiving the open
+conversation, from its row or its detail, immediately clears that detail and
+opens the next visible conversation in the current list order, falling back to
+the previous conversation at the end of the list or an empty pane when none
+remain. Loading the next conversation does not wait for archive admission or
+completion. A later archive failure restores its row without replacing the
+owner's new selection. Archiving another row and move-to-Inbox keep the selection.
 Projection refreshes must not resurrect a pending row; reopening Email resumes
 status reads without another archive request. Preserve unread state,
 other labels, and importance feedback. New correspondence is assessed again.
@@ -151,9 +151,18 @@ activation; results from an earlier activation cannot update the newly opened vi
 A successful thread read clears an earlier read error without clearing an
 unresolved draft-edit or send error.
 Thread detail reads apply retention only to the requested conversation and its
-draft. They do not sweep unrelated threads, drafts or draft histories. Inbox
-scans do not hold the principal mutation lock; pending archive reconciliation
-re-reads its one target under a short lock before applying an outcome. Clients
+draft. They do not sweep unrelated threads, drafts or draft histories, and
+neither does admitting an operation or endorsing a writing example. Inbox
+scans read thread summaries without message content and do not hold the
+principal mutation lock; pending archive reconciliation re-reads its one target
+under a short lock before applying an outcome. No email
+command starts MCP servers while holding that lock (ADR-0103). Refresh, archive
+and source-exclusion audit sessions render no skill catalog, so they record an
+empty one without starting any MCP server. When the worker executes a typed
+run, it starts only the servers that task kind calls (ADR-0104): each admitted
+account's read server for refresh, read and write for archive, read and send for
+send, and none for a draft. A thread-bound session opens its full catalog before
+the lock is taken and releases an unused one after the lock is released. Clients
 reuse an in-flight initial thread read during foreground polling within the same
 activation, and display received messages without waiting for a separate draft
 response. Archive navigation clears the old content before loading its successor.
@@ -676,9 +685,11 @@ or uncertain outcome so another device can recover the presentation.
 Archive admission requires current `email.read`, `email.write`, `run.write`,
 `session.write`, `approval.resolve`, and the account's exact read/write MCP
 scopes. The typed task performs no model work and consumes no automatic-email
-dollar reservation. It uses the existing tool pipeline and approval floor,
-validating the immutable, expiring owner request against the exact pending
-action before ordinary one-time resolution. Preserve requested/resolved audit
+dollar reservation. The owner is waiting on the gesture, so the task is queued in
+the interactive class (event-log-and-persistence.md:664) and never waits behind
+refresh, draft or send work, which stays asynchronous. It uses the existing
+tool pipeline and approval floor, validating the immutable, expiring owner
+request against the exact pending action before ordinary one-time resolution. Preserve requested/resolved audit
 ordering, policy revalidation, worker fencing, and uncertain-effect rules.
 Identical command retries replay their durable result. Labels alone are not
 new source content: synchronization must not stale a draft, reopen handled
@@ -1003,7 +1014,9 @@ records in `email_records`, keyed by tenant, principal, kind and opaque key.
 The closed application DTO supplies each JSON payload; revision, created time
 and updated time are explicit columns. The repository never returns mutable
 aliases into stored payloads. Key-ordered pagination accepts an exclusive `after`
-key and a limit from one to one thousand. `put` compares the exact existing
+key and a limit from one to one thousand. A thread-summary read pages the same
+thread records with `messages` omitted; PostgreSQL drops them in the query, so
+listing neither transfers nor decodes message bodies. `put` compares the exact existing
 revision (zero means absent), requires the new revision to be expected plus one,
 and raises a conflict without mutation on a mismatch. Delete likewise requires
 the exact positive existing revision; missing or foreign records conflict.
@@ -1018,12 +1031,15 @@ in-memory unit of work retains its documented deterministic, non-transactional
 scope. Immutable draft and feedback histories use independently keyed records,
 not destructive rewriting of a prior revision's content.
 
-The existing maintenance worker performs mailbox-wide body retention. It scans
-in pages of at most 100 records outside the mutation lock, then re-reads each
-expired candidate in a separate short locked transaction before erasing it.
-Draft-history deletion also rechecks the current parent draft's retention state.
-Foreground reads still enforce the thirty-day rule on their requested content,
-so a delayed maintenance sweep cannot expose or renew an expired body.
+The existing maintenance worker performs mailbox-wide body retention, at most
+once an hour. It scans in pages of at most 100 records outside the mutation
+lock, then re-reads each expired candidate in a separate short locked
+transaction before erasing it. Draft-history deletion also rechecks the current
+parent draft's retention state. Request paths never run this sweep. Instead,
+every reader of cached content enforces the thirty-day rule on what it reads:
+point reads of a thread or draft, the refresh task's selection of mail to fetch
+again or assess, and an import's comparison with its cached copy. A delayed
+maintenance sweep therefore cannot expose or renew an expired body.
 
 ### Source-content erasure mechanism
 

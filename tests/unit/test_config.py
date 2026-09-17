@@ -1089,6 +1089,22 @@ def test_token_auth_requires_a_configured_principal() -> None:
         load_settings(values)
 
 
+def test_owner_token_auth_requires_owner_scopes() -> None:
+    values = {
+        **base_environment(),
+        "AUTH_MODE": "token",
+        "AUTH_TOKEN": "local-test-token-value",
+        "AUTH_TENANT_ID": "tenant",
+        "AUTH_PRINCIPAL_ID": "owner",
+        "SANDBOX_MECHANISM": "microvm",
+    }
+    with pytest.raises(ConfigurationError, match=r"configured principal: AUTH_SCOPES$"):
+        load_settings(values)
+    scoped = load_settings({**values, "AUTH_SCOPES": "session.read"})
+    with pytest.raises(ConfigurationError, match=r"configured principal: AUTH_SCOPES$"):
+        validate_settings(replace(scoped, auth_scopes=frozenset()))
+
+
 @pytest.mark.parametrize(
     ("overlay", "message"),
     [
@@ -1114,13 +1130,17 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_170_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_177_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 170
+    assert len(qualified_paths) == 177
+    assert {
+        "folders/profiles.yaml:proposals.threshold",
+        "folders/profiles.yaml:proposals.max_open",
+    } <= qualified_paths
     assert {
         "runtime/limits.yaml:email.daily_cost",
         "runtime/limits.yaml:email.monthly_cost",

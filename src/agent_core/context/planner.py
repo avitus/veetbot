@@ -27,6 +27,7 @@ from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.persona import render_persona
 from agent_core.domain.runs import RunKind
 from agent_core.domain.sessions import (
+    SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_RUN_KIND_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
     Session,
@@ -57,6 +58,11 @@ def _authority_scope_hashes(principal: Principal) -> tuple[str, ...]:
     return tuple(
         sorted(hashlib.sha256(scope.encode("utf-8")).hexdigest() for scope in principal.scopes)
     )
+
+
+def _has_tool_surface(session: Session) -> bool:
+    """Operational Email sessions pin no tools or skills and start no server (ADR-0104)."""
+    return session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is not True
 
 
 class EventContextPlanner:
@@ -166,6 +172,7 @@ class EventContextPlanner:
         model: ResolvedModel,
         *,
         refresh_authorization: bool = False,
+        prepare_surface: bool = True,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
             (
@@ -183,10 +190,13 @@ class EventContextPlanner:
                         current.authority_scope_hashes
                     )
                 )
-                if self._attach_device_tools is not None:
-                    await self._attach_device_tools(session.id, principal)
-                if self._skill_catalogs is not None:
-                    await self._skill_catalogs.open(session.id, agent, principal)
+                # Typed Email work prepares only the MCP servers its task calls,
+                # so it does not reopen the session's catalog or devices.
+                if prepare_surface and _has_tool_surface(session):
+                    if self._attach_device_tools is not None:
+                        await self._attach_device_tools(session.id, principal)
+                    if self._skill_catalogs is not None:
+                        await self._skill_catalogs.open(session.id, agent, principal)
                 current_prefix = build_prefix(
                     agent,
                     current.tool_specs,
@@ -316,22 +326,29 @@ class EventContextPlanner:
         if not isinstance(tool_config, dict):
             raise ValueError("tool-definition context configuration must be a mapping")
         maximum_tools = int(tool_config["max_items"])
+        # A session that renders a tool surface pins it here even for typed
+        # work, because later runs in the session reuse this plan.
+        surface = _has_tool_surface(session)
         # Opening the catalog also performs MCP discovery. It must happen before
         # tool advertisement so the same frozen plan pins both surfaces.
         catalog = (
             None
-            if self._skill_catalogs is None
+            if self._skill_catalogs is None or not surface
             else await self._skill_catalogs.open(session.id, agent, principal)
         )
         # Device attach reconciles capability-derived registrations against the
         # devices present now, for the same reason and at the same point.
-        if self._attach_device_tools is not None:
+        if surface and self._attach_device_tools is not None:
             await self._attach_device_tools(session.id, principal)
-        tools = self._registry.specs_for_session(
-            agent,
-            principal,
-            profile=self._policy_version,
-            environment="runtime",
+        tools = (
+            self._registry.specs_for_session(
+                agent,
+                principal,
+                profile=self._policy_version,
+                environment="runtime",
+            )
+            if surface
+            else []
         )
         if self._session_tool_filter is not None:
             tools = self._session_tool_filter(session, tools)

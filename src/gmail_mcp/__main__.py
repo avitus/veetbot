@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import stat
 import sys
@@ -172,9 +173,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _quiet_transport_logging() -> None:
+    """Keep request lines out of the stderr the parent forwards to its journal.
+
+    The SDK server configures the root logger at INFO, where HTTPX logs every
+    request URL. Those URLs carry search queries and provider identifiers.
+    """
+
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Run a Gmail MCP server or the interactive credential bootstrap."""
 
+    _quiet_transport_logging()
     arguments = _parser().parse_args(argv)
     if arguments.command == "bootstrap":
         if arguments.mode is not None:

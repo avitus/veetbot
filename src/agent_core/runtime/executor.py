@@ -80,6 +80,9 @@ type RunCompleteCallback = Callable[[UUID, int | None], Awaitable[None]]
 type ChildSuspensionCallback = Callable[[UUID, UUID], Awaitable[None]]
 type FinalizationWriteProbe = Callable[[str], None]
 type TaskRunner = Callable[[RunContext], Awaitable[RunOutcome | None]]
+# True when the task runner will execute this run without a model-visible tool
+# surface and prepares the MCP servers it calls itself (ADR-0104).
+type TypedTaskProbe = Callable[[Run, Principal], Awaitable[bool]]
 logger = logging.getLogger(__name__)
 
 
@@ -299,6 +302,7 @@ class RunExecutor:
         notification_producer: RunNotificationProducer | None = None,
         finalization_write_probe: FinalizationWriteProbe | None = None,
         task_runner: TaskRunner | None = None,
+        typed_task: TypedTaskProbe | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
@@ -329,6 +333,7 @@ class RunExecutor:
         self._notification_producer = notification_producer
         self._finalization_write_probe = finalization_write_probe
         self._task_runner = task_runner
+        self._typed_task = typed_task
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
@@ -737,11 +742,13 @@ class RunExecutor:
                 if selected is None:
                     raise RuntimeError("the pinned model provider has no registered adapter")
                 model_provider = selected
+            typed = self._typed_task is not None and await self._typed_task(run, principal)
             context_plan = await self._context_planner.plan(
                 session,
                 agent,
                 principal,
                 resolved_model,
+                prepare_surface=not typed,
                 # A scheduled run may already have a seed checkpoint. Only
                 # initialized pins (including empty ones) or pending calls make
                 # this a continuation whose advertised tools must stay frozen.

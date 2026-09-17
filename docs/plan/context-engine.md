@@ -155,10 +155,11 @@ the tool list, which would rewrite the prefix.
 
 Resolve it by separating the *advertisement* of a tool from the *authorization* to
 call it. **The tool set is resolved once at session open and pinned in the context
-plan.** One resolution-time rule narrows the set before it pins: when the pinned
+plan.** Two resolution-time rules narrow the set before it pins. When the pinned
 skill catalog is empty, [skills.md](skills.md) directs the planner not to
 advertise `skill.load`, because a control tool with no valid argument only
-invites guessed names. A tool whose authorization is later revoked stays in the
+invites guessed names. An operational Email session pins no tools at all,
+because its typed tasks send none to a model (ADR-0104). A tool whose authorization is later revoked stays in the
 prefix and is
 denied at call time by the policy engine (Section 9), which is where the security
 boundary actually lives — a tool definition in a prompt grants nothing. The denial
