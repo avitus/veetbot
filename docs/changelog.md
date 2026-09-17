@@ -16,6 +16,23 @@ title: Changelog
   rebuilds existing plans through the ordinary epoch rotation.
 - A production-shaped roster case now gates the calling tools.
 
+## 2026-09-17 — Scheduled runs start again
+
+- No scheduled run could start after the People memory release. Session
+  history now locks event rows while it builds, so an erasure cannot race it.
+  That lock needs `UPDATE` on `events`, which the scheduler's database role
+  does not have. On 2026-09-17 the 09:00 PDT weekday briefing retried every
+  five seconds on `permission denied for table events` until its late-start
+  window ran out.
+- The scheduler now skips that lock only for the session its own transaction
+  just created. Erasure cannot see that session until the transaction
+  commits. The scheduler's permissions are unchanged, and it still cannot
+  build history for any other session.
+- A new integration test runs the production scheduler through a login that
+  holds exactly the permissions the release check allows. Earlier tests ran
+  the scheduler as the database owner.
+- A schedule that paused after the missed run needs to be resumed.
+
 ## 2026-09-16 — Call roles skip the client-certificate probe
 
 - The call worker crash-looped after the first calling release. Its unit hides
