@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Call roles skip the client-certificate probe
+
+- The call worker crash-looped after the first calling release. Its unit hides
+  home directories, and without `PGSSLMODE=disable` the database driver looked
+  for `~/.postgresql/postgresql.key`, was refused, and exited. Both call role
+  examples now set `PGSSLMODE=disable`, like every other database role.
+- The release now waits 90 seconds before checking the calling services, up
+  from 15. Under deploy load, the worker's first crash came after 64 seconds,
+  so the shorter wait passed a failing unit.
+
 ## 2026-09-16 — The webhook listener's release grant comes last
 
 - The first calling release failed its own check: the webhook listener could

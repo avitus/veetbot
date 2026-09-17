@@ -1012,7 +1012,7 @@ ACL (`setfacl -R -P -m u:veetbot-call-ingress:rX`) as the last step before
 promotion. It runs after the deployment check, whose `uv run` can reinstall the
 project's entry points and would leave a reinstalled `agent` unreadable. Calling
 units have no readiness probe: after the API checks, the release waits until
-`VEETBOT_CALL_SETTLE_SECS` (default 15) have passed since it restarted them,
+`VEETBOT_CALL_SETTLE_SECS` (default 90) have passed since it restarted them,
 then requires each enabled calling unit to be active with a main process and
 no automatic restart. Otherwise the release fails after promotion, like any
 other unit failure. These probes use the calling rules in
