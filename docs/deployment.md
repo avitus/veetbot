@@ -1004,3 +1004,15 @@ Before rolling back across calling support, stop both calling units and restore
 the target release's environment and proxy flags; only restart roles that exist
 in that release. Do not downgrade the call migration to roll back code: preserve
 correspondence and erasure tombstones, following the normal expand-only policy.
+
+The release tree is created with umask 027, and `veetbot-call-ingress` is
+deliberately outside the `veetbot` group. When ingress is enabled, the release
+therefore grants that user read access to the staged release with a recursive
+ACL (`setfacl -R -P -m u:veetbot-call-ingress:rX`) before promotion. Calling
+units have no readiness probe: after the API checks, the release waits until
+`VEETBOT_CALL_SETTLE_SECS` (default 15) have passed since it restarted them,
+then requires each enabled calling unit to be active with a main process and
+no automatic restart. Otherwise the release fails after promotion, like any
+other unit failure. These probes use the calling rules in
+`deploy/sudoers/veetbot-deploy`, so reinstall that contract on hosts
+provisioned before calling support.

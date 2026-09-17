@@ -1512,6 +1512,7 @@ async def build_call_worker(
         require_email_credentials=False,
         require_surface_credentials=False,
         require_call_credentials=not ingress,
+        require_owner_scopes=False,
     )
     if not selected.call_enabled or selected.call_configuration is None:
         raise ConfigurationError("calling is disabled")

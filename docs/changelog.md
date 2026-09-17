@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — Calling services start and are checked on release
+
+- The call worker and webhook listener no longer refuse to start with their
+  shipped settings. Those leave the owner's scopes empty because neither
+  service uses them.
+- The webhook listener's account can now run the released code. When intake is
+  enabled, the release grants that one account read access to the new release,
+  which is otherwise closed to accounts outside the application group.
+- A release that enables calling now waits 15 seconds after starting the
+  calling services and fails if either one is down or has restarted, instead
+  of reporting success while it crash-loops.
+- The deploy account's sudo contract gains the matching status rules. Hosts
+  with an older contract need it reinstalled before calling is enabled.
+
 ## 2026-09-16 — Bland calling setup passes the release preflight
 
 - The Bland setup guide now gives file permissions that the release preflight

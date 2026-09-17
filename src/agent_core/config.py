@@ -1154,6 +1154,7 @@ def validate_settings(
     require_email_credentials: bool = True,
     require_surface_credentials: bool = False,
     require_call_credentials: bool = True,
+    require_owner_scopes: bool = True,
 ) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
@@ -1339,11 +1340,13 @@ def validate_settings(
             "unsafe authentication configuration: DEPLOYMENT_MODE=production refuses AUTH_MODE=dev"
         )
     if settings.auth_mode is AuthMode.TOKEN:
-        required_identity = {
+        required_identity: dict[str, object] = {
             "AUTH_TENANT_ID": settings.auth_tenant_id,
             "AUTH_PRINCIPAL_ID": settings.auth_principal_id,
-            "AUTH_SCOPES": settings.auth_scopes,
         }
+        # Calling roles act for the owner principal but hold none of its scopes.
+        if require_owner_scopes:
+            required_identity["AUTH_SCOPES"] = settings.auth_scopes
         missing = [name for name, value in required_identity.items() if not value]
         if missing:
             raise ConfigurationError(
@@ -1473,6 +1476,7 @@ def _load_settings(
     load_surface_credentials: bool,
     load_call_credentials: bool | None = None,
     load_call_webhook_secret: bool = False,
+    require_owner_scopes: bool = True,
 ) -> Settings:
 
     if load_call_credentials is None:
@@ -1858,6 +1862,7 @@ def _load_settings(
         require_email_credentials=load_email_credentials,
         require_surface_credentials=load_surface_credentials,
         require_call_credentials=load_call_credentials,
+        require_owner_scopes=require_owner_scopes,
     )
     return settings
 
@@ -1875,4 +1880,5 @@ def load_call_worker_settings(
         load_surface_credentials=False,
         load_call_credentials=not ingress,
         load_call_webhook_secret=ingress,
+        require_owner_scopes=False,
     )

@@ -17,6 +17,8 @@ from bland_mcp.client import BlandClient
 from bland_mcp.server import create_server
 from tests.contract.test_bland_client_contract import CALL_ID, KEY, NUMBER, RECIPIENT
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def call_configuration() -> CallConfiguration:
     return CallConfiguration(
@@ -276,6 +278,67 @@ def test_call_roles_confine_provider_and_signing_credentials(tmp_path: Any) -> N
     assert set(worker.credentials) == {"bland_read", "bland_call"}
     assert worker.call_webhook_secret is None
     assert ingress.auth_token is None and worker.auth_token is None
+
+
+class _DatabaseReachedError(Exception):
+    """Raised in place of engine creation once call-role validation has passed."""
+
+
+def _shipped_role_environment(example: str) -> dict[str, str]:
+    """Read a shipped role environment the way systemd does: assignments only."""
+    values = {}
+    for line in (ROOT / "deploy" / example).read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            name, _, value = line.partition("=")
+            values[name] = value
+    return values
+
+
+@pytest.mark.parametrize(
+    ("example", "ingress", "credential_setting"),
+    [
+        ("veetbot-call.env.example", False, "BLAND_API_KEY_FILE"),
+        ("veetbot-call-ingress.env.example", True, "BLAND_WEBHOOK_SECRET_FILE"),
+    ],
+)
+async def test_shipped_call_role_environments_start_without_owner_scopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    example: str,
+    ingress: bool,
+    credential_setting: str,
+) -> None:
+    import agent_core.bootstrap as bootstrap
+    from agent_core.config import load_call_worker_settings
+
+    configuration = tmp_path / "calls.json"
+    configuration.write_text(call_configuration().model_dump_json())
+    credential = tmp_path / "private-credential"
+    credential.write_text(KEY)
+    credential.chmod(0o600)
+    shipped = _shipped_role_environment(example)
+    # Calling roles hold no owner scopes, so the shipped token-mode roles leave them empty.
+    assert shipped["AUTH_MODE"] == "token" and shipped["AUTH_SCOPES"] == ""
+    environment = {
+        **shipped,
+        # Only the values the setup guide asks the operator to supply.
+        "DATABASE_URL": "postgresql+asyncpg://" + "role:secret@127.0.0.1:5432/agent",
+        "AUTH_TENANT_ID": "tenant",
+        "AUTH_PRINCIPAL_ID": "owner",
+        "AGENT_CALL_ENABLED": "1",
+        "AGENT_CALL_INGRESS_ENABLED": "1",
+        "BLAND_CONFIGURATION_FILE": str(configuration),
+        credential_setting: str(credential),
+    }
+    settings = load_call_worker_settings(environment, ingress=ingress)
+
+    def reach_database(url: str) -> Any:
+        raise _DatabaseReachedError(url)
+
+    monkeypatch.setattr(bootstrap, "create_engine", reach_database)
+    with pytest.raises(_DatabaseReachedError):
+        async with bootstrap.build_call_worker(settings=settings, ingress=ingress):
+            pass
 
 
 def test_private_key_bootstrap_uses_a_hidden_prompt_and_never_overwrites(

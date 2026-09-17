@@ -1089,6 +1089,22 @@ def test_token_auth_requires_a_configured_principal() -> None:
         load_settings(values)
 
 
+def test_owner_token_auth_requires_owner_scopes() -> None:
+    values = {
+        **base_environment(),
+        "AUTH_MODE": "token",
+        "AUTH_TOKEN": "local-test-token-value",
+        "AUTH_TENANT_ID": "tenant",
+        "AUTH_PRINCIPAL_ID": "owner",
+        "SANDBOX_MECHANISM": "microvm",
+    }
+    with pytest.raises(ConfigurationError, match=r"configured principal: AUTH_SCOPES$"):
+        load_settings(values)
+    scoped = load_settings({**values, "AUTH_SCOPES": "session.read"})
+    with pytest.raises(ConfigurationError, match=r"configured principal: AUTH_SCOPES$"):
+        validate_settings(replace(scoped, auth_scopes=frozenset()))
+
+
 @pytest.mark.parametrize(
     ("overlay", "message"),
     [

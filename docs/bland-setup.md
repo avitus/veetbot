@@ -103,7 +103,9 @@ this account has a particular plan or price.
 
 The application holds the private Bland credential for approved outbound tools.
 The dedicated `veetbot-call` worker holds it for bounded result reconciliation
-and termination. It has no owner API bearer or model credentials. The separate
+and termination. It has no owner API bearer or model credentials. Both calling
+roles act for the owner tenant and principal but hold none of the owner's
+scopes, so their environments leave `AUTH_SCOPES` empty. The separate
 `veetbot-call-ingress` listener has only a webhook signing secret and receipt
 database access. It verifies the raw bytes before parsing, queues only a call ID,
 and listens at `127.0.0.1:8003`; the public proxy exposes only `/webhooks/bland`.
@@ -223,12 +225,18 @@ intake. Do not add an unsigned fallback or accept multiple signing conventions
 without a reviewed change. Never save that secret or a real transcript in the
 repository. [Webhook signing](https://docs.bland.ai/tutorials/webhook-signing).
 
-Use the existing deployment procedure once separately authorized. The release
-script validates matching role bindings and installs/restarts the optional
-units; the proxy includes its call route only when the active release enables
-ingress. Verify both units, HTTPS routing and release identity. During rollback,
-stop both calling units before switching releases; restart only units supported
-by the target release and restore its flags and proxy configuration.
+Use the existing deployment procedure once separately authorized. A host whose
+sudo contract predates calling support lacks the calling rules, so reinstall
+`deploy/sudoers/veetbot-deploy` as [deployment](deployment.md#one-time-host-preparation)
+describes before the first calling release. The release script validates
+matching role bindings, grants the ingress user read access to the new release
+and installs/restarts the optional units. It then fails unless each enabled
+calling unit is still running without an automatic restart, so a unit that
+cannot start fails the release. The proxy includes its call route only when the
+active release enables ingress. Verify both units, HTTPS routing and release
+identity. During rollback, stop both calling units before switching releases;
+restart only units supported by the target release and restore its flags and
+proxy configuration.
 
 With an explicitly approved test recipient, verify one inbound call and one
 outbound call. Confirm the greeting, transcription disclosure, voice quality,

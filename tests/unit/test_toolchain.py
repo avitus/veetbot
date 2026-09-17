@@ -1869,6 +1869,12 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     for unit in [*scheduled_units, "veetbot-notify", "veetbot-surface"]:
         assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
         assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
+    # Calling units have no readiness probe, so the release also confirms that
+    # neither one restarted automatically after promotion.
+    for unit in ("veetbot-call", "veetbot-call-ingress"):
+        assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
+        for unit_property in ("MainPID", "NRestarts"):
+            assert f"/usr/bin/systemctl show --property {unit_property} --value {unit}" in specs
     assert "/usr/bin/systemctl daemon-reload" in specs
     assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
     assert "/usr/bin/systemctl disable --now veetbot-notify" in specs

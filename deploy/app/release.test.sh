@@ -196,13 +196,25 @@ write_stub sudo '
 '
 write_stub systemctl '
   printf "systemctl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  unit="${!#}"
+  if [[ "${1:-}" == is-active && "$unit" == "${VEETBOT_TEST_INACTIVE_UNIT:-}" ]]; then
+    exit 3
+  fi
   if [[ "${1:-}" == show ]]; then
-    if [[ " $* " == *" veetbot-execution "* ]]; then
+    if [[ " $* " == *" NRestarts "* ]]; then
+      if [[ "$unit" == "${VEETBOT_TEST_RESTARTED_UNIT:-}" ]]; then printf "2\n"; else printf "0\n"; fi
+    elif [[ " $* " == *" veetbot-execution "* ]]; then
       printf "4343\n"
     else
       printf "4242\n"
     fi
   fi
+'
+write_stub setfacl '
+  printf "setfacl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+'
+write_stub sleep '
+  printf "sleep %s\n" "$*" >>"$VEETBOT_TEST_LOG"
 '
 write_stub curl '
   headers=""
@@ -306,6 +318,7 @@ run_release() {
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
   VEETBOT_HEALTH_TIMEOUT_SECS=2 \
+  VEETBOT_CALL_SETTLE_SECS="${VEETBOT_TEST_CALL_SETTLE_SECS:-0}" \
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_AUTH_HEADERS="$TEST_ROOT/session-index-headers" \
   VEETBOT_TEST_RELEASE="$release_id" \
@@ -709,6 +722,90 @@ for private_file in "$TEST_ROOT/bland-key" "$TEST_ROOT/bland-signing"; do
     chmod 0600 "$private_file"
     unset VEETBOT_TEST_BAD_CALL_OWNER VEETBOT_TEST_BAD_CALL_ACL
   done
+done
+
+# The ingress user is deliberately outside the application group, so a release
+# that starts it must grant that one user read access to the staged tree before
+# promotion. A calling unit has no readiness probe, so the release must not
+# report success while one is down or crash-looping.
+stage_calling_release() {
+  make_stage "$1"
+  rm -f -- "$PROCESS_ROOT/4242/cwd"
+  ln -s "$DEPLOY_ROOT/releases/$1" "$PROCESS_ROOT/4242/cwd"
+  : >"$LOG_FILE"
+}
+log_line_number() {
+  { grep -nFx -- "$1" "$LOG_FILE" || true; } | head -n 1 | cut -d: -f1
+}
+
+grant_id="20260810-152300-00000a1"
+stage_calling_release "$grant_id"
+VEETBOT_TEST_ENV_FILE="$call_env" VEETBOT_TEST_CALL_SETTLE_SECS=30 \
+  run_release "$grant_id" >/dev/null
+grant_line="$(log_line_number "setfacl -R -P -m u:veetbot-call-ingress:rX $DEPLOY_ROOT/releases/$grant_id")"
+promotion_line="$(log_line_number "docker tag agent-core-sandbox:$grant_id agent-core-sandbox:production")"
+if [[ -z "$grant_line" || -z "$promotion_line" ]] || (( grant_line > promotion_line )); then
+  printf 'calling release did not grant the ingress user its staged release before promotion\n' >&2
+  exit 1
+fi
+settle_entry="$(grep -n '^sleep ' "$LOG_FILE" | head -n 1 || true)"
+settle_seconds="${settle_entry#*:sleep }"
+probe_line="$(log_line_number 'sudo systemctl is-active --quiet veetbot-call')"
+if [[ -z "$settle_entry" || -z "$probe_line" ]] \
+  || (( ${settle_entry%%:*} > probe_line || settle_seconds < 1 || settle_seconds > 30 )); then
+  printf 'calling release did not let its units settle before checking them\n' >&2
+  exit 1
+fi
+for unit in veetbot-call veetbot-call-ingress; do
+  for probe in "is-active --quiet $unit" \
+    "show --property NRestarts --value $unit" \
+    "show --property MainPID --value $unit"; do
+    if ! grep -Fxq "sudo systemctl $probe" "$LOG_FILE"; then
+      printf 'calling release did not run: sudo systemctl %s\n' "$probe" >&2
+      exit 1
+    fi
+  done
+done
+
+worker_only_id="20260810-152300-00000a2"
+stage_calling_release "$worker_only_id"
+sed 's/^AGENT_CALL_INGRESS_ENABLED=1$/AGENT_CALL_INGRESS_ENABLED=0/' "$call_env" \
+  >"$TEST_ROOT/call-worker-only.env"
+sed 's/^AGENT_CALL_INGRESS_ENABLED=1$/AGENT_CALL_INGRESS_ENABLED=0/' "$TEST_ROOT/call-worker.env" \
+  >"$TEST_ROOT/call-worker-only-role.env"
+VEETBOT_TEST_ENV_FILE="$TEST_ROOT/call-worker-only.env" \
+  VEETBOT_TEST_CALL_ENV_FILE="$TEST_ROOT/call-worker-only-role.env" \
+  run_release "$worker_only_id" >/dev/null
+assert_log_lacks 'setfacl'
+assert_log_lacks 'systemctl restart veetbot-call-ingress'
+grep -Fxq 'sudo systemctl is-active --quiet veetbot-call' "$LOG_FILE"
+
+unit_fault_index=0
+for unit_fault in inactive:veetbot-call-ingress restarted:veetbot-call; do
+  unit_fault_index=$((unit_fault_index + 1))
+  unit_fault_id="20260810-152300-00000b$unit_fault_index"
+  faulty_unit="${unit_fault#*:}"
+  stage_calling_release "$unit_fault_id"
+  export VEETBOT_TEST_INACTIVE_UNIT="" VEETBOT_TEST_RESTARTED_UNIT=""
+  case "${unit_fault%%:*}" in
+    inactive)
+      export VEETBOT_TEST_INACTIVE_UNIT="$faulty_unit"
+      expected_failure="release failed: $faulty_unit is not active"
+      ;;
+    restarted)
+      export VEETBOT_TEST_RESTARTED_UNIT="$faulty_unit"
+      expected_failure="release failed: $faulty_unit restarted after promotion"
+      ;;
+  esac
+  if VEETBOT_TEST_ENV_FILE="$call_env" run_release "$unit_fault_id" \
+    >"$TEST_ROOT/call-unit.out" 2>&1; then
+    printf 'calling release reported success although %s was %s\n' \
+      "$faulty_unit" "${unit_fault%%:*}" >&2
+    exit 1
+  fi
+  grep -Fq "$expected_failure" "$TEST_ROOT/call-unit.out"
+  grep -Fxq "systemctl --no-pager --full status $faulty_unit" "$LOG_FILE"
+  unset VEETBOT_TEST_INACTIVE_UNIT VEETBOT_TEST_RESTARTED_UNIT
 done
 
 call_id="20260810-152300-0000027"
