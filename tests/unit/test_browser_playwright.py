@@ -20,6 +20,8 @@ from agent_core.adapters.browser.playwright import (
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserAuthenticationStatus,
+    BrowserInteractiveEvent,
     BrowserObservation,
     BrowserProviderError,
 )
@@ -314,6 +316,7 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
     runtime._temporary_home = FailingTemporaryHome()  # type: ignore[assignment]
     runtime._revision = "stale-revision"
     runtime._elements = {"stale": object()}  # type: ignore[dict-item]
+    runtime._sign_in_entered = True
 
     await runtime.close()
 
@@ -323,6 +326,7 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
     assert runtime._page is None
     assert runtime._revision is None
     assert runtime._elements == {}
+    assert runtime._sign_in_entered is False
 
 
 @dataclass
@@ -527,3 +531,122 @@ async def test_production_runtime_uses_the_platform_display_by_default(
     )
 
     assert chromium.launches[0]["env"]["DISPLAY"] == ":77"
+
+
+class FakeCeremonyPage:
+    """A login-ceremony page whose visible sign-in challenge the test controls."""
+
+    def __init__(self, url: str) -> None:
+        """Start signed out with no challenge showing, like a marketing landing page."""
+        self.url = url
+        self.password_visible = False
+        self.challenge_text_visible = False
+        self.keyboard = SimpleNamespace(insert_text=AsyncMock(), press=AsyncMock())
+        self.mouse = SimpleNamespace(click=AsyncMock())
+
+    def locator(self, selector: str) -> Mock:
+        """Return the challenge fields; a hidden password input stays in the DOM."""
+        assert "input[type=password]" in selector
+        field = Mock(spec=Locator)
+        field.is_visible = AsyncMock(return_value=self.password_visible)
+        fields = Mock(spec=Locator)
+        fields.count = AsyncMock(return_value=1)
+        fields.nth.return_value = field
+        return fields
+
+    def get_by_text(self, pattern: object) -> Mock:
+        """Return the MFA, passkey, and consent text matches."""
+        del pattern
+        matches = Mock(spec=Locator)
+        matches.count = AsyncMock(return_value=int(self.challenge_text_visible))
+        return matches
+
+
+def ceremony_runtime(page: FakeCeremonyPage) -> PythonPlaywrightRuntime:
+    """Bind a runtime to a page whose context already holds analytics storage state."""
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://www.duolingo.com",)
+    runtime._page = page  # type: ignore[assignment]
+    runtime._context = SimpleNamespace(  # type: ignore[assignment]
+        storage_state=AsyncMock(
+            return_value={
+                "cookies": [{"name": "consent", "value": "synthetic"}],
+                "origins": [{"origin": "https://www.duolingo.com", "localStorage": []}],
+            }
+        )
+    )
+    return runtime
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        pytest.param((), id="no-interaction"),
+        pytest.param(
+            (BrowserInteractiveEvent(kind="click", x=40, y=600),),
+            id="consent-banner-click",
+        ),
+    ],
+)
+async def test_signed_out_page_with_analytics_cookies_is_not_ready(
+    events: tuple[BrowserInteractiveEvent, ...],
+) -> None:
+    """Cookies a landing page sets on its own are not evidence that anyone signed in."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    for event in events:
+        await runtime.interactive_event(event)
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+async def test_sign_in_entered_at_a_visible_challenge_that_then_clears_is_ready() -> None:
+    """The runtime mediated the sign-in, so it can vouch for the session it seals."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.password_visible = False
+    page.url = "https://www.duolingo.com/learn"
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.READY
+
+
+async def test_text_sent_while_no_challenge_is_visible_is_not_sign_in_evidence() -> None:
+    """A search box or a first e-mail step must not end the ceremony before the password."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    page.keyboard.insert_text.assert_awaited_once_with("synthetic-entry")
+
+
+@pytest.mark.parametrize(
+    ("password_visible", "challenge_text_visible"),
+    [
+        pytest.param(True, False, id="rejected-password-form-still-showing"),
+        pytest.param(False, True, id="verification-code-step"),
+    ],
+)
+async def test_a_visible_challenge_still_needs_the_user_after_sign_in_was_entered(
+    password_visible: bool,
+    challenge_text_visible: bool,
+) -> None:
+    """Entering text never outranks a challenge the user has not completed."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.password_visible = password_visible
+    page.challenge_text_visible = challenge_text_visible
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.NEEDS_USER

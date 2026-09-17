@@ -107,6 +107,7 @@ class PythonPlaywrightRuntime:
         self._disallowed_navigation = False
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
+        self._sign_in_entered = False
 
     async def start(
         self,
@@ -385,10 +386,9 @@ class PythonPlaywrightRuntime:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return cast(dict[str, object], await self._context.storage_state(indexed_db=True))
 
-    async def authentication_status(self) -> BrowserAuthenticationStatus:
-        page = self._current_page()
-        if not _origin_allowed(page.url, self._allowed_origins):
-            return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    @staticmethod
+    async def _sign_in_challenge_visible(page: Page) -> bool:
+        """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
         intervention = page.locator(
             "input[type=password],input[autocomplete=one-time-code],"
             "iframe[src*='captcha' i],iframe[title*='captcha' i],"
@@ -396,7 +396,7 @@ class PythonPlaywrightRuntime:
         )
         for index in range(await intervention.count()):
             if await intervention.nth(index).is_visible():
-                return BrowserAuthenticationStatus.NEEDS_USER
+                return True
         interactive_text = page.get_by_text(
             re.compile(
                 r"(?:use\s+(?:a\s+)?passkey|verification\s+code|"
@@ -404,8 +404,18 @@ class PythonPlaywrightRuntime:
                 re.IGNORECASE,
             )
         )
-        if await interactive_text.count():
+        return bool(await interactive_text.count())
+
+    async def authentication_status(self) -> BrowserAuthenticationStatus:
+        page = self._current_page()
+        if not _origin_allowed(page.url, self._allowed_origins):
+            return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+        if await self._sign_in_challenge_visible(page):
             return BrowserAuthenticationStatus.NEEDS_USER
+        if not self._sign_in_entered:
+            # A signed-out page holds analytics and consent storage of its own,
+            # so storage state alone never shows that anyone signed in.
+            return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
         storage = await self.storage_state()
         if storage.get("cookies") or storage.get("origins"):
             return BrowserAuthenticationStatus.READY
@@ -426,6 +436,10 @@ class PythonPlaywrightRuntime:
             await page.mouse.click(event.x, event.y)
         elif event.kind == "text":
             assert event.text is not None
+            # Checked before the text lands so a failed check loses no input.
+            # Only the fact of entry is kept, never the text itself.
+            if await self._sign_in_challenge_visible(page):
+                self._sign_in_entered = True
             await page.keyboard.insert_text(event.text)
         else:
             assert event.key is not None
@@ -461,6 +475,7 @@ class PythonPlaywrightRuntime:
             self._disallowed_navigation = False
             self._document_session = None
             self._main_frame_id = None
+            self._sign_in_entered = False
 
 
 def _default_role(tag: str, input_type: str | None) -> str:
