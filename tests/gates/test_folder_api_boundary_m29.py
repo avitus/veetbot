@@ -229,6 +229,20 @@ async def test_folder_crud_names_and_session_views() -> None:
         assert (await client.delete(f"/v1/folders/{other['id']}")).status_code == 404
 
 
+async def test_closing_a_filed_session_reports_its_folder() -> None:
+    async with _enabled() as composition, _client(composition) as client:
+        folder_id = UUID((await _create_folder(client, "Trips"))["id"])
+        session_id = await _create_session(client)
+        filed = await client.put(
+            f"/v1/sessions/{session_id}/folder", json={"folder_id": str(folder_id)}
+        )
+        assert filed.status_code == 200, filed.text
+
+        closed = await composition.services.sessions.close(composition.principal, session_id)
+
+        assert closed.folder_id == folder_id
+
+
 async def test_non_chat_sessions_refuse_filing() -> None:
     async with _enabled() as composition, _client(composition) as client:
         folder = await _create_folder(client, "Travel")

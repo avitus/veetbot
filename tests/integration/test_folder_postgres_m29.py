@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from dataclasses import replace
@@ -10,6 +11,8 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
@@ -78,6 +81,62 @@ def _proposal(principal: Principal, members: tuple[UUID, ...]) -> FolderProposal
         derivation=FolderProposalDerivation.LEXICAL,
         created_at=NOW,
     )
+
+
+async def _wait_for_blocked_proposal_insert(observer: AsyncConnection) -> None:
+    """Return once another backend waits on a lock while inserting a proposal."""
+    for _ in range(200):
+        waiting = await observer.scalar(
+            text(
+                "SELECT count(*) FROM pg_stat_activity"
+                " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                " AND query ILIKE '%INSERT INTO thread_folder_proposals%'"
+            )
+        )
+        if waiting:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("the racing proposal insert never waited on the open proposal")
+
+
+async def test_concurrent_proposal_conflict_leaves_the_unit_of_work_usable(
+    tmp_path: Path,
+) -> None:
+    _alembic("upgrade", "head")
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    principal = PRINCIPAL.model_copy(update={"principal_id": f"race-{uuid4().hex[:12]}"})
+    member = _session(principal)
+    winner = _proposal(principal, (member.id, uuid4()))
+    loser = winner.model_copy(update={"id": uuid4()})
+    # Autocommit gives each poll a fresh pg_stat_activity snapshot.
+    observer_engine = create_async_engine(settings.database_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with (
+            observer_engine.connect() as observer,
+            build(settings=settings, storage="postgres") as composition,
+        ):
+            async with composition.uow_factory() as uow:
+                await uow.sessions.create(member)
+
+            async def propose_behind_the_winner() -> list[FolderProposal]:
+                async with composition.uow_factory() as uow:
+                    with pytest.raises(ConflictError) as error:
+                        await uow.folders.propose(loser)
+                    assert error.value.reason == "proposal_key_durable"
+                    # A proposal pass keeps recording in this unit of work.
+                    return await uow.folders.list_proposals(principal)
+
+            # The loser checks for an open proposal before the winner commits,
+            # so its insert waits on the winner's row and then conflicts.
+            async with composition.uow_factory() as uow:
+                await uow.folders.propose(winner)
+                racing = asyncio.create_task(propose_behind_the_winner())
+                await _wait_for_blocked_proposal_insert(observer)
+            listed = await racing
+    finally:
+        await observer_engine.dispose()
+
+    assert [proposal.id for proposal in listed] == [winner.id]
 
 
 async def test_folder_store_round_trips_folders_memberships_and_proposals(

@@ -122,6 +122,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var foldersEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.foldersLaunchArgument)
     }
+    /// What a server without the folder routes answers for every one of them.
+    private static let foldersUnavailableJSON =
+        #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"ui-test"}}"#
     /// Starts each folder journey with one folder holding the second conversation
     /// and one open new-folder proposal over the first.
     static func resetFolders() {
@@ -365,26 +368,46 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/folders"):
             guard Self.foldersEnabled else {
                 statusCode = 404
-                body = #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"ui-test"}}"#
+                body = Self.foldersUnavailableJSON
                 break
             }
             statusCode = 200
             body = "{\"items\":[\(Self.folderItemsJSON)],\"next_cursor\":null}"
         case ("GET", "/v1/folders/proposals"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             statusCode = 200
-            let open = Self.folderLock.withLock { Self.foldersEnabled && !Self.proposalResolved }
+            let open = Self.folderLock.withLock { !Self.proposalResolved }
             body = "{\"items\":[\(open ? Self.proposalJSON(state: "proposed", resultingFolderID: nil) : "")],\"next_cursor\":null}"
         case ("POST", "/v1/folders"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             let name = requestJSON()["name"] as? String ?? "New Folder"
             Self.folderLock.withLock { Self.createdFolderName = name }
             statusCode = 201
             body = Self.folderJSON(id: ConversationNavigationUITestFixture.proposedFolderID, name: name)
         case ("PATCH", "/v1/folders/\(ConversationNavigationUITestFixture.folderID)"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             let name = requestJSON()["name"] as? String ?? "Travel"
             Self.folderLock.withLock { Self.folderName = name }
             statusCode = 200
             body = Self.folderJSON(id: ConversationNavigationUITestFixture.folderID, name: name)
         case ("DELETE", "/v1/folders/\(ConversationNavigationUITestFixture.folderID)"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             Self.folderLock.withLock {
                 Self.folderDeleted = true
                 Self.sessionFolders = Self.sessionFolders.filter { $0.value != ConversationNavigationUITestFixture.folderID }
@@ -392,6 +415,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 204
             body = ""
         case ("POST", "/v1/folders/proposals/\(ConversationNavigationUITestFixture.proposalID)/accept"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             Self.folderLock.withLock {
                 Self.proposalResolved = true
                 Self.createdFolderName = "Lisbon Trip"
@@ -400,11 +428,21 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 200
             body = Self.proposalJSON(state: "accepted", resultingFolderID: ConversationNavigationUITestFixture.proposedFolderID)
         case ("POST", "/v1/folders/proposals/\(ConversationNavigationUITestFixture.proposalID)/decline"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             Self.folderLock.withLock { Self.proposalResolved = true }
             statusCode = 200
             body = Self.proposalJSON(state: "declined", resultingFolderID: nil)
         case ("PUT", "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/folder"),
             ("PUT", "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)/folder"):
+            guard Self.foldersEnabled else {
+                statusCode = 404
+                body = Self.foldersUnavailableJSON
+                break
+            }
             let sessionID = url.pathComponents[3]
             let target = requestJSON()["folder_id"] as? String
             Self.folderLock.withLock {

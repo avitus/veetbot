@@ -2109,6 +2109,17 @@ private final class ChatViewModelURLProtocolHandlerStore: @unchecked Sendable {
 
 /// Mutable server-side state for the proposal fixture, shared with the handler.
 private final class FolderProposalFixtureState: @unchecked Sendable {
-    var accepted = false
-    var resolved = false
+    private let lock = NSLock()
+    private var acceptedValue = false
+    private var resolvedValue = false
+
+    var accepted: Bool {
+        get { lock.withLock { acceptedValue } }
+        set { lock.withLock { acceptedValue = newValue } }
+    }
+
+    var resolved: Bool {
+        get { lock.withLock { resolvedValue } }
+        set { lock.withLock { resolvedValue = newValue } }
+    }
 }

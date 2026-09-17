@@ -623,11 +623,13 @@ class PublicSessionService:
                     details={"run_id": str(active.id), "run_status": active.status.value},
                 )
             session, closed_now = await uow.sessions.close(session_id, principal, self._clock.now())
+            # A filed session stays filed when it closes.
+            folder_id = (await uow.folders.folder_of([session_id], principal)).get(session_id)
         if self._close_session is not None:
             await self._close_session(session_id)
         if closed_now and self._on_session_closed is not None:
             await _notify_session_closed(self._on_session_closed, session_id)
-        return _session_view(session, None)
+        return _session_view(session, None, folder_id)
 
     async def ready(self) -> bool:
         """Perform the readiness database round-trip without calling a provider."""

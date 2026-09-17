@@ -299,30 +299,33 @@ class PostgresFolderStore:
                     f"grouping {proposal.content_key} has a durable {state} proposal",
                     reason="proposal_key_durable",
                 )
+        # A concurrent pass can win the open-proposal index; the savepoint keeps
+        # the caller's transaction usable after that conflict.
         try:
-            await self._session.execute(
-                pg_insert(ThreadFolderProposalRow).values(
-                    id=proposal.id,
-                    tenant_id=proposal.tenant_id,
-                    principal_id=proposal.principal_id,
-                    kind=proposal.kind.value,
-                    proposed_name=proposal.proposed_name,
-                    target_folder_id=proposal.target_folder_id,
-                    member_session_ids=[str(member) for member in proposal.member_session_ids],
-                    rationale=proposal.rationale,
-                    derivation=proposal.derivation.value,
-                    content_key=proposal.content_key,
-                    state=proposal.state.value,
-                    withdrawal_reason=(
-                        proposal.withdrawal_reason.value
-                        if proposal.withdrawal_reason is not None
-                        else None
-                    ),
-                    resulting_folder_id=proposal.resulting_folder_id,
-                    created_at=proposal.created_at,
-                    resolved_at=proposal.resolved_at,
+            async with self._session.begin_nested():
+                await self._session.execute(
+                    pg_insert(ThreadFolderProposalRow).values(
+                        id=proposal.id,
+                        tenant_id=proposal.tenant_id,
+                        principal_id=proposal.principal_id,
+                        kind=proposal.kind.value,
+                        proposed_name=proposal.proposed_name,
+                        target_folder_id=proposal.target_folder_id,
+                        member_session_ids=[str(member) for member in proposal.member_session_ids],
+                        rationale=proposal.rationale,
+                        derivation=proposal.derivation.value,
+                        content_key=proposal.content_key,
+                        state=proposal.state.value,
+                        withdrawal_reason=(
+                            proposal.withdrawal_reason.value
+                            if proposal.withdrawal_reason is not None
+                            else None
+                        ),
+                        resulting_folder_id=proposal.resulting_folder_id,
+                        created_at=proposal.created_at,
+                        resolved_at=proposal.resolved_at,
+                    )
                 )
-            )
         except IntegrityError as error:
             raise ConflictError(
                 f"grouping {proposal.content_key} was proposed concurrently",
