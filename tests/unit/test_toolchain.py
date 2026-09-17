@@ -151,6 +151,31 @@ def test_apple_target_declares_only_exempt_encryption() -> None:
     assert project.count("INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;") == 2
 
 
+def test_every_database_role_example_skips_the_client_certificate_probe() -> None:
+    # Every unit runs with ProtectHome=true. Without PGSSLMODE=disable, asyncpg
+    # stats ~/.postgresql/postgresql.key, gets EACCES, and the role exits.
+    examples = sorted((ROOT / "deploy").glob("*.env.example"))
+    with_database = [
+        example
+        for example in examples
+        if any(
+            line.startswith("DATABASE_URL=")
+            for line in example.read_text(encoding="utf-8").splitlines()
+        )
+    ]
+    assert {example.name for example in with_database} >= {
+        "veetbot.env.example",
+        "veetbot-call.env.example",
+        "veetbot-call-ingress.env.example",
+    }
+    missing = [
+        example.name
+        for example in with_database
+        if "PGSSLMODE=disable" not in example.read_text(encoding="utf-8").splitlines()
+    ]
+    assert missing == []
+
+
 def test_production_environment_preserves_process_boundaries() -> None:
     deploy = ROOT / "deploy"
     environment = (deploy / "veetbot.env.example").read_text(encoding="utf-8")

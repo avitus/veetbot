@@ -748,6 +748,13 @@ if [[ -z "$grant_line" || -z "$promotion_line" ]] || (( grant_line > promotion_l
   printf 'calling release did not grant the ingress user its staged release before promotion\n' >&2
   exit 1
 fi
+# The deployment check runs `uv run`, which can reinstall the project's entry
+# points; a grant before it leaves the reinstalled `agent` unreadable.
+deployment_check_line="$(log_line_number 'python scripts/check_production_deployment.py')"
+if [[ -z "$deployment_check_line" ]] || (( grant_line < deployment_check_line )); then
+  printf 'calling release granted the ingress user before its last staged-tree writes\n' >&2
+  exit 1
+fi
 settle_entry="$(grep -n '^sleep ' "$LOG_FILE" | head -n 1 || true)"
 settle_seconds="${settle_entry#*:sleep }"
 probe_line="$(log_line_number 'sudo systemctl is-active --quiet veetbot-call')"
