@@ -386,3 +386,144 @@ async def test_playwright_runtime_classifies_failed_navigation_by_origin_policy(
     assert raised.value.retryable is expected_retryable
     assert "ERR_TUNNEL" not in str(raised.value)
     assert "duolingo" not in str(raised.value)
+
+
+class FakeVirtualDisplay:
+    """Record the lifecycle of the private display an interactive ceremony owns."""
+
+    def __init__(self, *, failure: Exception | None = None) -> None:
+        """Initialize the display with an optional synthetic start failure."""
+        self.failure = failure
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> str:
+        """Report a display name the way a started virtual display does."""
+        if self.failure is not None:
+            raise self.failure
+        self.started = True
+        return ":77"
+
+    async def close(self) -> None:
+        """Record that the owning runtime destroyed the display."""
+        self.closed = True
+
+
+@dataclass
+class FakeChromiumLaunches:
+    """Capture how the runtime launches Chromium without starting a browser."""
+
+    launches: list[dict[str, Any]] = field(default_factory=list)
+    contexts: list[dict[str, Any]] = field(default_factory=list)
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Replace the Playwright entry point with this recording fake."""
+        session = Mock()
+        session.send = AsyncMock(return_value={"frameTree": {"frame": {"id": "main"}}})
+        context = Mock()
+        context.route = AsyncMock()
+        context.new_page = AsyncMock(return_value=Mock())
+        context.new_cdp_session = AsyncMock(return_value=session)
+        context.close = AsyncMock()
+        browser = Mock()
+        browser.close = AsyncMock()
+
+        async def new_context(**kwargs: Any) -> Mock:
+            self.contexts.append(kwargs)
+            return context
+
+        async def launch(**kwargs: Any) -> Mock:
+            self.launches.append(kwargs)
+            return browser
+
+        browser.new_context = new_context
+        playwright = Mock()
+        playwright.chromium.launch = launch
+        playwright.stop = AsyncMock()
+        manager = Mock()
+        manager.start = AsyncMock(return_value=playwright)
+        monkeypatch.setattr(
+            "agent_core.adapters.browser.playwright.async_playwright", lambda: manager
+        )
+
+
+async def test_interactive_ceremony_launches_headed_chromium_on_its_own_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A headless login browser is refused by sites that score the login request."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay()
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert chromium.launches[0]["headless"] is False
+    assert chromium.launches[0]["env"]["DISPLAY"] == ":77"
+    assert display.started
+
+    await runtime.close()
+
+    assert display.closed
+
+
+async def test_run_attempt_lease_stays_headless_without_a_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay()
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=False)
+
+    assert chromium.launches[0]["headless"] is True
+    assert "DISPLAY" not in chromium.launches[0]["env"]
+    assert not display.started
+
+
+async def test_interactive_ceremony_never_falls_back_to_headless(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay(failure=OSError("synthetic display failure"))
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert chromium.launches == []
+
+
+async def test_interactive_ceremony_reports_its_real_browser_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusing website is unsupported; the runtime must not disguise automation."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: None)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert "user_agent" not in chromium.contexts[0]
+    assert "ignore_default_args" not in chromium.launches[0]
+    assert not any("AutomationControlled" in argument for argument in chromium.launches[0]["args"])
+
+
+async def test_production_runtime_uses_the_platform_display_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay()
+    monkeypatch.setattr(
+        "agent_core.adapters.browser.playwright.platform_virtual_display", lambda: display
+    )
+
+    await PythonPlaywrightRuntime().start(
+        "http://127.0.0.1:9", ("https://site.example",), interactive=True
+    )
+
+    assert chromium.launches[0]["env"]["DISPLAY"] == ":77"

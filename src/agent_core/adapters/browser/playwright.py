@@ -28,6 +28,7 @@ from playwright.async_api import (
 )
 from playwright.async_api import Error as PlaywrightError
 
+from agent_core.adapters.browser.virtual_display import platform_virtual_display
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
@@ -68,6 +69,15 @@ class BrowserProxy(Protocol):
 ProxyFactory = Callable[..., Awaitable[BrowserProxy]]
 
 
+class VirtualDisplay(Protocol):
+    async def start(self) -> str: ...
+
+    async def close(self) -> None: ...
+
+
+VirtualDisplayFactory = Callable[[], VirtualDisplay | None]
+
+
 def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
     try:
         return browser_origin(url) in allowed_origins
@@ -76,10 +86,16 @@ def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
 
 
 class PythonPlaywrightRuntime:
-    """Own a headless Chromium process and one non-persistent browser context."""
+    """Own one Chromium process, headed only for a ceremony, and one non-persistent context."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        virtual_display_factory: VirtualDisplayFactory | None = None,
+    ) -> None:
         """Initialize the scoped state used by this adapter."""
+        self._virtual_display_factory = virtual_display_factory
+        self._virtual_display: VirtualDisplay | None = None
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -103,26 +119,30 @@ class PythonPlaywrightRuntime:
         """Launch the isolated browser context with origin interception and audited egress."""
         if self._browser is not None:
             return
-        # Authentication uses screenshots and synthetic input, both supported
-        # by the same headless context, so no alternate launch mode is needed.
-        del interactive
         self._allowed_origins = allowed_origins
         self._temporary_home = tempfile.TemporaryDirectory(prefix="veetbot-browser-")
         temporary_home = self._temporary_home.name
+        environment: dict[str, str | float | bool] = {
+            "HOME": temporary_home,
+            "PATH": os.defpath,
+            "TMPDIR": temporary_home,
+        }
+        # Websites refuse a login from a browser that reports itself headless,
+        # so the user's ceremony is headed and never falls back (ADR-0106).
+        if interactive:
+            display_name = await self._start_virtual_display()
+            if display_name is not None:
+                environment["DISPLAY"] = display_name
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
-            headless=True,
+            headless=not interactive,
             proxy={"server": proxy_url},
             args=[
                 "--proxy-bypass-list=<-loopback>",
                 "--disable-quic",
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             ],
-            env={
-                "HOME": temporary_home,
-                "PATH": os.defpath,
-                "TMPDIR": temporary_home,
-            },
+            env=environment,
         )
         self._context = await self._browser.new_context(
             accept_downloads=False,
@@ -144,6 +164,23 @@ class PythonPlaywrightRuntime:
             },
         )
         self._context.on("page", self._close_popup)
+
+    async def _start_virtual_display(self) -> str | None:
+        """Start the ceremony's private display, or use the platform's native one."""
+        display = (self._virtual_display_factory or platform_virtual_display)()
+        if display is None:
+            return None
+        try:
+            display_name = await display.start()
+        except Exception as exc:
+            with suppress(Exception):
+                await display.close()
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+        self._virtual_display = display
+        return display_name
 
     async def _guard_document_request(self, event: dict[str, Any]) -> None:
         """Check document redirects before dispatch, even when a CDN tunnel exists."""
@@ -406,10 +443,14 @@ class PythonPlaywrightRuntime:
             if self._playwright is not None:
                 with suppress(Exception):
                     await self._playwright.stop()
+            if self._virtual_display is not None:
+                with suppress(Exception):
+                    await self._virtual_display.close()
             if self._temporary_home is not None:
                 with suppress(OSError):
                     self._temporary_home.cleanup()
         finally:
+            self._virtual_display = None
             self._context = None
             self._browser = None
             self._playwright = None

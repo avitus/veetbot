@@ -435,6 +435,20 @@ passkey, MFA, CAPTCHA, and consent interaction occurs inside that browser
 surface. The orchestration API sees neither keystrokes nor browser protocol
 frames and has no generic proxy endpoint.
 
+The ceremony's browser is headed (ADR-0106). Websites attach an
+abuse-classification signal to the login request and refuse a browser that
+reports itself headless, answering even correct credentials with a generic
+credential error. The isolated runtime therefore launches full Chromium for an
+interactive ceremony. On Linux it first starts a private virtual display for
+that one ceremony, passes only that display to the browser's scrubbed
+environment, and destroys it when the runtime closes; elsewhere it uses the
+native display. A display that cannot start fails the launch as
+`tool.browser.provider_unavailable`; the runtime never falls back to headless.
+The browser reports its real user agent and automation state: the runtime
+overrides no user agent and masks no automation indicator, so a website that
+still refuses the browser is unsupported rather than evaded. Run-attempt leases
+remain headless.
+
 The trusted client presents the returned launch URL behind a user-initiated
 continue action and treats a rejected platform handoff as a failed setup. It
 cancels the ceremony and revokes and deletes the unused profile so retry does

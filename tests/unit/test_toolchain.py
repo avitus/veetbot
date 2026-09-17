@@ -333,6 +333,18 @@ def test_browser_profile_dockerfile_preserves_process_isolation() -> None:
     assert "playwright install --with-deps chromium" in profile_dockerfile
 
 
+def test_browser_profile_image_carries_the_ceremony_display_server() -> None:
+    """A headed ceremony needs Xvfb in the shared browser layer, above the source copy."""
+
+    profile_dockerfile = (ROOT / "deploy" / "browser-profile-service.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    display_server = profile_dockerfile.index("apt-get install -y --no-install-recommends xvfb")
+    browser_layer = profile_dockerfile.index("playwright install --with-deps chromium")
+    source_copy = profile_dockerfile.index("COPY src /opt/veetbot/src")
+    assert browser_layer < display_server < source_copy
+
+
 def test_browser_profile_dockerfile_caches_runtime_layers_before_source() -> None:
     """Dependency and browser layers precede the source copy so releases share them."""
 
