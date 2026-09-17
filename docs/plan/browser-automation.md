@@ -485,6 +485,18 @@ already signs in, where the user signs in again or cancels. The runtime keeps
 one boolean for this rule and never inspects, compares, or records the text the
 user sent or any cookie value.
 
+That evidence is necessary, not sufficient. The runtime is site-independent: a
+profile names allowed origins and nothing about a site's pages, so no marker
+tells it that a page is signed in. A sign-in the site rejects normally shows its
+form again and stays `needs_user`. One that replaces the form with a page
+showing no challenge, or a status check made between submission and the site's
+answer, can still seal a profile that holds no session. Such a profile grants
+nothing: the model cannot type into a password or one-time-code field, so a run
+meets the signed-out page and the user repeats the ceremony. A signed-in marker
+declared per site would close the gap; the profile contract carries none, and
+cookie names or flags are not a substitute, since sites keep sessions in
+script-readable cookies and in origin storage as well.
+
 A ready result atomically seals storage state, releases the authentication
 lease, and advances metadata from `AUTHENTICATION_REQUIRED` or `NEEDS_USER` to
 `READY`. Failure and expiry discard the runtime state and never overwrite the

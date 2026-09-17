@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -76,6 +77,22 @@ async def test_display_that_never_reports_a_name_is_killed(tmp_path: Path) -> No
 
     with pytest.raises(OSError, match="virtual display did not start"):
         await display.start()
+
+    assert not _process_exists(tmp_path)
+
+
+async def test_cancelled_start_kills_the_server_it_launched(tmp_path: Path) -> None:
+    """Cancellation is not a timeout, and nobody else holds the process yet."""
+    display = XvfbDisplay(executable=_display_server(tmp_path, "time.sleep(60)\n"))
+    pid_file = tmp_path / "pid"
+    start = asyncio.create_task(display.start())
+    async with asyncio.timeout(10):
+        while not (pid_file.exists() and pid_file.read_text()):
+            await asyncio.sleep(0.01)
+
+    start.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await start
 
     assert not _process_exists(tmp_path)
 

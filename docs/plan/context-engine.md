@@ -267,11 +267,14 @@ candidates, not with their token weight. Thirty tools is already generous; a
 deployment that needs more needs tool filtering or skills (Section 30.4, where only
 skill metadata enters ordinary context), not a bigger allowance.
 
-The token cap exists to bound the cost of that item cap, not to decide the roster.
-Six thousand tokens did decide it: the owner's own configured roster — People,
-Email mode, scheduling, web and workspace — reached twenty-six tools and 5,973
-tokens, so every discovered tool was skipped while nine of the thirty slots stood
-empty. Calling shipped tools the owner could never see, and no error said so.
+The token cap is the secondary limit. It bounds what that item cap may cost, and
+it remains an admission check: a discovered definition that would take the prefix
+past it is skipped, as the selection rule below states. It is sized so that an
+ordinary roster reaches the item cap first. Six thousand tokens was not: the
+owner's own configured roster — People, Email mode, scheduling, web and
+workspace — reached twenty-six tools and 5,973 tokens, so every discovered tool
+was skipped while four of the thirty slots stood empty. Calling shipped tools the
+owner could never see, and no error said so.
 [ADR-0105](../adr/0105-tool-definition-token-cap.md) raises the class to 9,000
 tokens so that the item cap binds first, as this section always intended. The
 argument above still holds against raising the item cap. The skill catalog

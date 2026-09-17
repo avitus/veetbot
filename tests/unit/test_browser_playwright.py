@@ -395,7 +395,7 @@ async def test_playwright_runtime_classifies_failed_navigation_by_origin_policy(
 class FakeVirtualDisplay:
     """Record the lifecycle of the private display an interactive ceremony owns."""
 
-    def __init__(self, *, failure: Exception | None = None) -> None:
+    def __init__(self, *, failure: BaseException | None = None) -> None:
         """Initialize the display with an optional synthetic start failure."""
         self.failure = failure
         self.started = False
@@ -501,6 +501,22 @@ async def test_interactive_ceremony_never_falls_back_to_headless(
     assert chromium.launches == []
 
 
+async def test_cancelled_ceremony_start_destroys_its_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation is not an Exception, and the runtime does not own the display yet."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay(failure=asyncio.CancelledError())
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    with pytest.raises(asyncio.CancelledError):
+        await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert display.closed
+    assert chromium.launches == []
+
+
 async def test_interactive_ceremony_reports_its_real_browser_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -541,6 +557,7 @@ class FakeCeremonyPage:
         self.url = url
         self.password_visible = False
         self.challenge_text_visible = False
+        self.challenge_text_hidden = False
         self.keyboard = SimpleNamespace(insert_text=AsyncMock(), press=AsyncMock())
         self.mouse = SimpleNamespace(click=AsyncMock())
 
@@ -555,10 +572,15 @@ class FakeCeremonyPage:
         return fields
 
     def get_by_text(self, pattern: object) -> Mock:
-        """Return the MFA, passkey, and consent text matches."""
+        """Return the MFA, passkey, and consent text matches; hidden ones stay in the DOM."""
         del pattern
+        match = Mock(spec=Locator)
+        match.is_visible = AsyncMock(return_value=self.challenge_text_visible)
         matches = Mock(spec=Locator)
-        matches.count = AsyncMock(return_value=int(self.challenge_text_visible))
+        matches.count = AsyncMock(
+            return_value=int(self.challenge_text_visible or self.challenge_text_hidden)
+        )
+        matches.nth.return_value = match
         return matches
 
 
@@ -650,3 +672,30 @@ async def test_a_visible_challenge_still_needs_the_user_after_sign_in_was_entere
     status = await runtime.authentication_status()
 
     assert status is BrowserAuthenticationStatus.NEEDS_USER
+
+
+async def test_hidden_challenge_text_does_not_hold_a_finished_sign_in() -> None:
+    """A collapsed verification-code template in the DOM is not a challenge anyone sees."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.password_visible = False
+    page.challenge_text_hidden = True
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.READY
+
+
+async def test_text_sent_beside_hidden_challenge_text_is_not_sign_in_evidence() -> None:
+    """Hidden challenge text must not turn a search box into a mediated sign-in."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.challenge_text_hidden = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.challenge_text_hidden = False
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED

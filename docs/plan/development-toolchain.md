@@ -462,18 +462,24 @@ Three workflow-level facts complete the definition:
 
 1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 plus the additional
     sandbox, Apple, and public-site jobs 5, 6, and 9. It starts by itself only
-    for a push to `main`. On every other branch, pull-request branches
-    included, a push starts no workflow and spends no credits; the workflow runs
-    there only when a pipeline is triggered with `run_verify: true` (ADR-0107).
-    Request that run once, on the final head of a change proposed for `main`:
+    on `main`: the condition reads the pipeline's branch, not what created the
+    pipeline, so a push and a requested pipeline both run it there. On every
+    other branch, pull-request branches included, a pipeline starts no workflow
+    by itself and spends no credits; the workflow runs there only when the
+    pipeline is triggered with `run_verify: true` (ADR-0107). Request that run
+    once, on the final head of a change proposed for `main`, naming the pull
+    request's own source branch:
 
     ```text
     circleci api api/v2/project/gh/avitus/veetbot/pipeline \
-      -d '{"branch": "dev", "parameters": {"run_verify": true}}'
+      -d '{"branch": "<source-branch>", "parameters": {"run_verify": true}}'
     ```
 
-    The requested pipeline reports its job statuses on that commit, so the pull
-    request shows them. A pipeline with `run_live: true` selects the manual live
+    A promotion's source branch is `dev`. CircleCI builds the named branch's
+    current head, so a request naming any other branch verifies the wrong
+    commit. The requested pipeline reports its job statuses on that commit, so
+    the pull request shows them; confirm the commit they sit on is the pull
+    request's head. A pipeline with `run_live: true` selects the manual live
     workflow instead, and wins when both parameters are set.
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
     runs only on trusted `dev`, and only in a requested pipeline; it does not

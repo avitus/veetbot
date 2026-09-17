@@ -29,13 +29,15 @@ satisfies the same criterion as a local run.
 
 ## Decision
 
-1. The `verify` workflow starts by itself only for a push to `main`. There it
-   still gates packaging, deployment and TestFlight delivery exactly as
-   ADR-0048 and ADR-0074 define.
-2. On every other branch a push starts no workflow. The workflow runs there
-   only when a pipeline is triggered with the boolean parameter
+1. The `verify` workflow starts by itself only on `main`. The condition reads
+   the pipeline's branch, not what created the pipeline, so a push to `main`
+   and a pipeline requested for `main` both run it. There it still gates
+   packaging, deployment and TestFlight delivery exactly as ADR-0048 and
+   ADR-0074 define.
+2. On every other branch a pipeline starts no workflow by itself. The workflow
+   runs there only when the pipeline is triggered with the boolean parameter
    `run_verify: true`. `run_live: true` still selects the live workflow and
-   wins when both are set.
+   wins when both are set, on `main` as well.
 3. The gate for a change entering `dev` is `chunk validate` on the sidecar,
    plus the local suites the sidecar cannot run when the change touches them:
    integration against the disposable PostgreSQL, the sandbox gates, and the
@@ -65,7 +67,12 @@ satisfies the same criterion as a local run.
   should be judged on.
 - Anyone who merges to `main` without requesting the run is caught by the
   `main` pipeline, which verifies before it delivers, but only after the merge.
-  GitHub does not enforce the requested run.
+  GitHub does not enforce the requested run: `main` carries no branch
+  protection, and carried none under ADR-0035 either, so the exact-head gate
+  was procedural before this decision and stays procedural after it. Requiring
+  the verification statuses on `main` would make GitHub refuse such a merge. It
+  is a repository setting, outside the configuration this repository can test,
+  and enabling it is the owner's decision.
 
 ## Alternatives considered
 

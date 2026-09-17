@@ -173,6 +173,11 @@ class PythonPlaywrightRuntime:
             return None
         try:
             display_name = await display.start()
+        except asyncio.CancelledError:
+            # The runtime does not own the display yet, so its close() cannot.
+            with suppress(Exception):
+                await display.close()
+            raise
         except Exception as exc:
             with suppress(Exception):
                 await display.close()
@@ -404,7 +409,10 @@ class PythonPlaywrightRuntime:
                 re.IGNORECASE,
             )
         )
-        return bool(await interactive_text.count())
+        for index in range(await interactive_text.count()):
+            if await interactive_text.nth(index).is_visible():
+                return True
+        return False
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
         page = self._current_page()

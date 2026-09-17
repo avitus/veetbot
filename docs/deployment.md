@@ -612,9 +612,9 @@ that counter.
 
 ## Automatic delivery
 
-A push to any branch other than `main` starts no hosted workflow; such a branch
-is verified on the sidecar and, before it is proposed for `main`, by one
-pipeline requested with `run_verify: true` (ADR-0107,
+A pipeline for any branch other than `main` starts no hosted workflow by
+itself; such a branch is verified on the sidecar and, before it is proposed for
+`main`, by one pipeline requested with `run_verify: true` (ADR-0107,
 `docs/plan/development-toolchain.md`). A requested `dev` pipeline also
 runs the non-publishing Apple signing smoke described above. On `main`, after
 all seven required verification jobs pass:

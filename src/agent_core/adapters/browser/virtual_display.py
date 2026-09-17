@@ -53,22 +53,32 @@ class XvfbDisplay:
             raise
         finally:
             os.close(write_descriptor)
+        # Until this returns nobody else holds the process, so a cancelled
+        # start has to stop the server itself.
+        try:
+            reported = await self._reported_display(read_descriptor)
+        except BaseException:
+            await self.close()
+            raise
+        number = reported.strip().decode("ascii", "replace")
+        if not number.isdigit():
+            await self.close()
+            raise OSError("virtual display did not start")
+        return f":{number}"
+
+    async def _reported_display(self, read_descriptor: int) -> bytes:
+        """Read the display number the server writes once it accepts clients."""
         reader = asyncio.StreamReader()
         transport, _ = await asyncio.get_running_loop().connect_read_pipe(
             lambda: asyncio.StreamReaderProtocol(reader),
             os.fdopen(read_descriptor, "rb", buffering=0),
         )
         try:
-            reported = await asyncio.wait_for(reader.readline(), self._start_timeout_seconds)
+            return await asyncio.wait_for(reader.readline(), self._start_timeout_seconds)
         except TimeoutError:
-            reported = b""
+            return b""
         finally:
             transport.close()
-        number = reported.strip().decode("ascii", "replace")
-        if not number.isdigit():
-            await self.close()
-            raise OSError("virtual display did not start")
-        return f":{number}"
 
     async def close(self) -> None:
         """Let the server remove its lock and socket, and kill one that will not exit."""
