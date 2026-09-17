@@ -385,15 +385,6 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
     [[ "$(getfacl -cp -- "$calling_path" 2>/dev/null)" == $'user::rw-\ngroup::---\nother::---' ]] || fail "calling role private credential file is missing or invalid"
   done
 fi
-
-# The umask above keeps the release tree out of reach of users outside the
-# application group, which is where the ingress listener deliberately runs.
-# Grant that one user read access to this release only; its credentials and
-# the application environment stay closed to it.
-if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then
-  setfacl -R -P -m u:veetbot-call-ingress:rX "$STAGE" || fail \
-    "could not grant veetbot-call-ingress read access to $STAGE"
-fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
@@ -471,6 +462,16 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "0" ]]; then
 fi
 if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-call-ingress >/dev/null 2>&1 || true
+fi
+
+# The umask above keeps the release tree out of reach of users outside the
+# application group, which is where the ingress listener deliberately runs.
+# Grant that one user read access to this release only; its credentials and
+# the application environment stay closed to it. The grant comes last because
+# the deployment check's `uv run` can reinstall the project's entry points.
+if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then
+  setfacl -R -P -m u:veetbot-call-ingress:rX "$STAGE" || fail \
+    "could not grant veetbot-call-ingress read access to $STAGE"
 fi
 
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"

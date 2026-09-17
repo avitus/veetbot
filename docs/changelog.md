@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-16 — The webhook listener's release grant comes last
+
+- The first calling release failed its own check: the webhook listener could
+  not read `.venv/bin/agent`. The deployment check's `uv run` had reinstalled
+  the project's entry points after the release granted the listener access.
+  The release now grants that access as its last step before promotion.
+
 ## 2026-09-16 — Email tasks start only the Gmail servers they use
 
 - An Email archive now starts only the account's read and write Gmail servers,

@@ -1008,7 +1008,9 @@ correspondence and erasure tombstones, following the normal expand-only policy.
 The release tree is created with umask 027, and `veetbot-call-ingress` is
 deliberately outside the `veetbot` group. When ingress is enabled, the release
 therefore grants that user read access to the staged release with a recursive
-ACL (`setfacl -R -P -m u:veetbot-call-ingress:rX`) before promotion. Calling
+ACL (`setfacl -R -P -m u:veetbot-call-ingress:rX`) as the last step before
+promotion. It runs after the deployment check, whose `uv run` can reinstall the
+project's entry points and would leave a reinstalled `agent` unreadable. Calling
 units have no readiness probe: after the API checks, the release waits until
 `VEETBOT_CALL_SETTLE_SECS` (default 15) have passed since it restarted them,
 then requires each enabled calling unit to be active with a main process and
