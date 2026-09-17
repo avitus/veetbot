@@ -74,16 +74,22 @@ root.
 
 ### 1. Install the project
 
-Create your local environment file, then install the locked development
-dependencies:
+Doppler holds the development secrets and `.env` is a generated cache of
+them. Fetch them, then install the locked development dependencies:
 
 ```bash
-cp .env.example .env
+make env-pull
 make install
 ```
 
-The default `.env` uses development authentication and a scripted fake model,
-so the first run is local, deterministic, and free.
+`make env-pull` needs the [Doppler CLI](https://docs.doppler.com/docs/install-cli)
+and access to the `veetbot` project. [`doppler.yaml`](doppler.yaml) pins the
+project and config, so no `doppler setup` is required; rerun the target after
+changing a secret and once in each new worktree. Without Doppler access, run
+`cp .env.example .env` instead.
+
+Either way the default environment uses development authentication and a
+scripted fake model, so the first run is local, deterministic, and free.
 
 ### 2. Start PostgreSQL
 
@@ -122,12 +128,16 @@ through the same durable run and tool lifecycle used by real model providers.
 
 ### 5. Connect a real model (optional)
 
-Add the credential for the provider you want to use to `.env`:
+Add the credential for the provider you want to use to Doppler, which prompts
+for the value so it stays out of your shell history, then regenerate `.env`:
 
-```dotenv
-VEETBOT_OPENAI_KEY=...
-ANTHROPIC_API_KEY=...
+```bash
+doppler secrets set VEETBOT_OPENAI_KEY
+make env-pull
 ```
+
+Without Doppler, set `VEETBOT_OPENAI_KEY` or `ANTHROPIC_API_KEY` in `.env`
+directly.
 
 Restart the worker after changing `.env`, then create a run with a declared
 model policy:
@@ -198,10 +208,10 @@ tree checks match. CI always installs cleanly; locally force a reinstall with
 
 ### Configuration and project conventions
 
-Secrets, addresses, and deployment identity belong in `.env`; reviewed tuning
-values belong in the YAML file owned by the relevant package. Optional web,
-browser, scheduling, notification, email, and trajectory-export features are
-disabled by default. Their available environment switches are documented in
+Secrets, addresses, and deployment identity belong in Doppler, from which
+`make env-pull` generates `.env`; reviewed tuning values belong in the YAML
+file owned by the relevant package. Optional web, browser, scheduling,
+notification, email, and trajectory-export features are disabled by default. Their available environment switches are documented in
 [`.env.example`](.env.example).
 
 The initial public-web comparison keeps the incumbent provider for half of each

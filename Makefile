@@ -11,7 +11,7 @@ ifneq ($(filter check test-fast,$(MAKECMDGOALS)),)
 test-contract: | test-static
 endif
 
-.PHONY: install format lint typecheck test check db-up migrate client-build \
+.PHONY: install format lint typecheck test check db-up migrate env-pull client-build \
 	test-static test-contract test-fast test-integration test-live \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-ios \
 	test-deploy sandbox-image \
@@ -20,6 +20,25 @@ endif
 
 install:
 	uv sync --all-groups
+
+# Doppler holds the development secrets; .env is a generated cache of them.
+# Regenerate it after changing a secret, and in each new worktree. install
+# deliberately does not depend on this: a fresh clone and the chunk sidecar
+# have no Doppler credentials and use the .env.example path instead.
+env-pull:
+	@command -v doppler >/dev/null 2>&1 || { \
+		echo "env-pull needs the doppler CLI: brew install dopplerhq/cli/doppler" >&2; \
+		exit 1; \
+	}
+	@tmp=$$(mktemp "$(CURDIR)/.env.tmp.XXXXXX") && \
+	chmod 600 "$$tmp" && \
+	if doppler secrets download --format=env --no-file --no-fallback >"$$tmp"; then \
+		mv -f "$$tmp" "$(CURDIR)/.env"; \
+		echo "wrote $(CURDIR)/.env from doppler"; \
+	else \
+		rm -f "$$tmp"; \
+		exit 1; \
+	fi
 
 format:
 	uv run ruff format .

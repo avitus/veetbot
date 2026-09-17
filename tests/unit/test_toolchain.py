@@ -91,6 +91,7 @@ def test_required_make_targets_exist() -> None:
         "check",
         "db-up",
         "migrate",
+        "env-pull",
         "test-static",
         "test-contract",
         "test-fast",
@@ -111,6 +112,49 @@ def test_required_make_targets_exist() -> None:
 
     assert "docker inspect --format '{{.State.Health.Status}}'" in text
     assert "docker compose ps --status healthy" not in text
+
+
+def _make_target(makefile: str, target: str) -> str:
+    match = re.search(rf"^{re.escape(target)}:.*?(?=^\S|\Z)", makefile, re.M | re.S)
+    assert match is not None, f"{target} is not a Makefile target"
+    return match.group(0)
+
+
+def test_env_pull_writes_the_dotenv_from_doppler_without_exposing_values() -> None:
+    body = _make_target((ROOT / "Makefile").read_text(encoding="utf-8"), "env-pull")
+    # Doppler is the source of truth. The fetch prints to a redirected file
+    # descriptor and leaves no second plaintext copy behind.
+    assert "doppler secrets download --format=env --no-file --no-fallback" in body
+    # The replacement is atomic and owner-only, and a failed fetch leaves the
+    # existing .env in place rather than truncating it.
+    assert 'chmod 600 "$$tmp"' in body
+    assert 'mv -f "$$tmp"' in body
+    assert 'rm -f "$$tmp"' in body
+    # A missing CLI fails with a message naming what to install.
+    assert "command -v doppler" in body
+
+
+def test_generated_dotenv_temporary_files_cannot_be_committed() -> None:
+    # The fetch writes to a temporary file beside .env so that the replacement
+    # is atomic. A hard kill between creating it and moving it into place would
+    # leave plaintext secrets in the working tree, so the pattern is ignored
+    # and cannot collide with the tracked .env.example.
+    body = _make_target((ROOT / "Makefile").read_text(encoding="utf-8"), "env-pull")
+    assert 'mktemp "$(CURDIR)/.env.tmp.XXXXXX"' in body
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").split()
+    assert ".env.tmp.*" in ignored
+
+
+def test_install_does_not_require_doppler_authentication() -> None:
+    # A fresh clone and the chunk sidecar have no Doppler credentials, so the
+    # documented .env.example path must keep working without env-pull.
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^install:[ \t]*$", makefile, re.M) is not None
+
+
+def test_doppler_binding_pins_the_development_project_and_config() -> None:
+    document = yaml.safe_load((ROOT / "doppler.yaml").read_text(encoding="utf-8"))
+    assert document["setup"] == {"project": "veetbot", "config": "dev"}
 
 
 def test_apple_app_target_compiles_every_production_swift_source() -> None:

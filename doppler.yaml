@@ -1,0 +1,6 @@
+# Binds this repository to its Doppler development secrets so that
+# `make env-pull` needs no prior `doppler setup`, in any clone or worktree.
+# Contains no secret values.
+setup:
+  project: veetbot
+  config: dev
