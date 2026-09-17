@@ -211,6 +211,14 @@ class NotificationDispatcher:
             except DispatchProbeError:
                 raise
             except Exception:
+                # A bug here looks exactly like a network fault: every device
+                # retries until the notification expires. Name the cause, since
+                # the recorded reason cannot distinguish them.
+                logger.exception(
+                    "notification transport raised notification_id=%s kind=%s",
+                    notification.id,
+                    notification.kind.value,
+                )
                 outcome = PushOutcome(
                     outcome=DeliveryOutcome.RETRY,
                     provider_reason="TransportError",

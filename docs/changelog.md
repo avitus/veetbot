@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-17 — Call results reach the lock screen
+
+- The lock-screen alert builder had no case for `call_finished`, so it raised
+  before the push was sent. The dispatcher records any such failure as
+  `TransportError`, indistinguishable from a network fault, and retried all
+  five devices until the notification would expire thirty days later. The
+  first real call result, on 2026-09-17, was never delivered.
+- The alert now reads "Open Veetbot to read the transcript and summary", with
+  no caller, number or summary on the lock screen. A guard test fails when any
+  notification kind has no alert case, and the dispatcher logs the underlying
+  exception instead of discarding it.
+
 ## 2026-09-17 — Chat reaches the call tools again
 
 - The owner's configured tools reached twenty-six items and 5,973 of the 6,000
