@@ -4,6 +4,9 @@ parameters:
   run_live:
     type: boolean
     default: false
+  run_verify:
+    type: boolean
+    default: false
 
 commands:
   install_uv:
@@ -546,7 +549,14 @@ jobs:
 
 workflows:
   verify:
-    unless: << pipeline.parameters.run_live >>
+    # Automatic on main only. Every other branch validates on the sidecar
+    # (`chunk validate`) and runs here when a pipeline sets run_verify.
+    when:
+      and:
+        - not: << pipeline.parameters.run_live >>
+        - or:
+            - equal: [main, << pipeline.git.branch >>]
+            - << pipeline.parameters.run_verify >>
     jobs:
       - static
       - contract

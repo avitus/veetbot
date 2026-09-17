@@ -810,7 +810,13 @@ it executes none of those capabilities. Release validation connects through
 that role and verifies the exact table privileges needed to check the schema
 head, seed the session-history projection and checkpoint, materialize the run,
 and enqueue schedule notifications; it also rejects superuser and `BYPASSRLS`
-authority. Create, update, and resume issue a fixed-channel PostgreSQL
+authority. That role has no `UPDATE` on `events`, so it cannot take the row
+lock that serializes session-history projection with People erasure. It
+projects only the session its own transaction created, which erasure cannot
+see before commit, so that projection reads the erasure markers without the
+lock; projecting any other session still takes it and fails closed. An
+integration test materializes a due run through a login holding exactly the
+release allowlist. Create, update, and resume issue a fixed-channel PostgreSQL
 notification after commit; the scheduler always keeps its bounded table-scan
 fallback.
 

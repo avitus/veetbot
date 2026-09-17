@@ -4,6 +4,57 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-17 — Hosted CI runs on `main` and on request
+
+- A push to `dev` or any other branch no longer starts CircleCI. Over the
+  previous week 96 of 122 pipelines were `dev` pushes at roughly 3,900 credits
+  each, about 96% of it macOS executors.
+- Branches are verified with `chunk validate` on the sidecar. Before a merge to
+  `main`, one pipeline triggered with `run_verify: true` runs the full hosted
+  workflow on the final head. `main` still verifies and delivers on every push
+  (ADR-0107).
+
+## 2026-09-17 — Call results reach the lock screen
+
+- The lock-screen alert builder had no case for `call_finished`, so it raised
+  before the push was sent. The dispatcher records any such failure as
+  `TransportError`, indistinguishable from a network fault, and retried all
+  five devices until the notification would expire thirty days later. The
+  first real call result, on 2026-09-17, was never delivered.
+- The alert now reads "Open Veetbot to read the transcript and summary", with
+  no caller, number or summary on the lock screen. A guard test fails when any
+  notification kind has no alert case, and the dispatcher logs the underlying
+  exception instead of discarding it.
+
+## 2026-09-17 — Chat reaches the call tools again
+
+- The owner's configured tools reached twenty-six items and 5,973 of the 6,000
+  tokens the tool-definition class allows, so every discovered tool was skipped
+  while four of the thirty slots stood empty. Chat could not list or place a
+  call, and no error said why. A message left with the receptionist on
+  2026-09-16 was received and stored, but nothing could show it.
+- ADR-0105 raises the class to 9,000 tokens and the prefix ceiling to 20,000, so
+  the thirty-tool item cap binds first. Builder version `context-builder@11`
+  rebuilds existing plans through the ordinary epoch rotation.
+- A production-shaped roster case now gates the calling tools.
+
+## 2026-09-17 — Scheduled runs start again
+
+- No scheduled run could start after the People memory release. Session
+  history now locks event rows while it builds, so an erasure cannot race it.
+  That lock needs `UPDATE` on `events`, which the scheduler's database role
+  does not have. On 2026-09-17 the 09:00 PDT weekday briefing retried every
+  five seconds on `permission denied for table events` until its late-start
+  window ran out.
+- The scheduler now skips that lock only for the session its own transaction
+  just created. Erasure cannot see that session until the transaction
+  commits. The scheduler's permissions are unchanged, and it still cannot
+  build history for any other session.
+- A new integration test runs the production scheduler through a login that
+  holds exactly the permissions the release check allows. Earlier tests ran
+  the scheduler as the database owner.
+- A schedule that paused after the missed run needs to be resumed.
+
 ## 2026-09-16 — Call roles skip the client-certificate probe
 
 - The call worker crash-looped after the first calling release. Its unit hides

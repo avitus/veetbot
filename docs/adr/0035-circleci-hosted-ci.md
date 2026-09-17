@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-07-31
 - Related: Milestone 0, Section 21, ADR-0025
+- Superseded in part: ADR-0107 replaces the consequence that every branch push
+  receives the verification partitions; they now start by themselves only on
+  `main` and run elsewhere on request.
 - Detailed design: `docs/plan/development-toolchain.md`
 
 ## Context

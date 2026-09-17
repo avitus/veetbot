@@ -86,6 +86,9 @@ def apns_alert(payload: NotificationPayload) -> dict[str, str]:
                 body = f"{severity}: {signal} needs attention."
         case NotificationKind.TEST:
             body = "Notifications are working on this device."
+        case NotificationKind.CALL_FINISHED:
+            # Caller, number and summary stay out of the lock screen.
+            body = "Open Veetbot to read the transcript and summary."
         case NotificationKind.DEVICE_INVOCATION:
             if payload.tool_name == "device.sms.send":
                 title = "Text message ready to review"

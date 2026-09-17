@@ -249,7 +249,7 @@ ceiling.
 | A | Platform policy | 2,000 | No | Never — fails at plan time |
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
-| A | Tool definitions | 30 tools / 6,000 tokens | No | Only at an epoch boundary |
+| A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
@@ -265,7 +265,19 @@ Tool definitions carry an **item cap as the primary limit**, exactly as the snap
 does and for exactly the same reason: selection accuracy degrades with the number of
 candidates, not with their token weight. Thirty tools is already generous; a
 deployment that needs more needs tool filtering or skills (Section 30.4, where only
-skill metadata enters ordinary context), not a bigger allowance. The skill catalog
+skill metadata enters ordinary context), not a bigger allowance.
+
+The token cap is the secondary limit. It bounds what that item cap may cost, and
+it remains an admission check: a discovered definition that would take the prefix
+past it is skipped, as the selection rule below states. It is sized so that an
+ordinary roster reaches the item cap first. Six thousand tokens was not: the
+owner's own configured roster — People, Email mode, scheduling, web and
+workspace — reached twenty-six tools and 5,973 tokens, so every discovered tool
+was skipped while four of the thirty slots stood empty. Calling shipped tools the
+owner could never see, and no error said so.
+[ADR-0105](../adr/0105-tool-definition-token-cap.md) raises the class to 9,000
+tokens so that the item cap binds first, as this section always intended. The
+argument above still holds against raising the item cap. The skill catalog
 carries an item cap for the same reason and is capped at twenty;
 [skills.md](skills.md) argues that number and the 6,000-token body class beside
 it, which never yields because a third `skill.load` fails instead.
@@ -278,7 +290,7 @@ explicitly enabled capabilities still fail at plan time if they exceed the token
 cap. The selected set is then sorted by name for stable rendering. Adding an MCP account must not evict an explicitly
 enabled web, clock, or workspace capability merely because its name sorts earlier.
 The item and token ceilings still apply; excess discovered tools require a narrower
-catalog or explicit agent configuration. Builder version `context-builder@10`
+catalog or explicit agent configuration. Builder version `context-builder@11`
 rebuilds older plans through the ordinary logged epoch rotation, so existing
 sessions recover the configured capabilities without replacing their history.
 A snapshot containing People context is retained even when it contains no ordinary
@@ -303,9 +315,10 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 17,000 tokens — 15,000 before
+The prefix classes sum to a hard ceiling of 20,000 tokens — 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
-exactly its own cap, the same move the skill classes made. If a plan exceeds it,
+exactly its own cap, the same move the skill classes made, and 17,000 before
+ADR-0105 added the 3,000 tokens it gave the tool class. If a plan exceeds it,
 **the session fails to open with a structured error naming the offending class**.
 It does not silently truncate the agent's instructions. A truncated system prompt
 is an agent that behaves subtly wrong forever, which is far worse than a session

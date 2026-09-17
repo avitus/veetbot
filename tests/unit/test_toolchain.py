@@ -333,6 +333,18 @@ def test_browser_profile_dockerfile_preserves_process_isolation() -> None:
     assert "playwright install --with-deps chromium" in profile_dockerfile
 
 
+def test_browser_profile_image_carries_the_ceremony_display_server() -> None:
+    """A headed ceremony needs Xvfb in the shared browser layer, above the source copy."""
+
+    profile_dockerfile = (ROOT / "deploy" / "browser-profile-service.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    display_server = profile_dockerfile.index("apt-get install -y --no-install-recommends xvfb")
+    browser_layer = profile_dockerfile.index("playwright install --with-deps chromium")
+    source_copy = profile_dockerfile.index("COPY src /opt/veetbot/src")
+    assert browser_layer < display_server < source_copy
+
+
 def test_browser_profile_dockerfile_caches_runtime_layers_before_source() -> None:
     """Dependency and browser layers precede the source copy so releases share them."""
 
@@ -906,7 +918,6 @@ def test_ci_has_the_required_partitions() -> None:
     workflows = config["workflows"]
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
     verify = workflows["verify"]
-    assert verify["unless"] == "<< pipeline.parameters.run_live >>"
     assert verify["jobs"][:6] == [
         "static",
         "contract",
@@ -974,6 +985,48 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_hosted_verification_is_automatic_only_on_main() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+
+    # Both switches default off, so an ordinary push carries neither.
+    assert config["parameters"] == {
+        "run_live": {"type": "boolean", "default": False},
+        "run_verify": {"type": "boolean", "default": False},
+    }
+
+    # A push to main verifies and delivers by itself; every other branch spends
+    # hosted credits only when a pipeline asks with run_verify, and a live
+    # pipeline never runs verification.
+    verify = config["workflows"]["verify"]
+    assert "unless" not in verify
+    assert verify["when"] == {
+        "and": [
+            {"not": "<< pipeline.parameters.run_live >>"},
+            {
+                "or": [
+                    {"equal": ["main", "<< pipeline.git.branch >>"]},
+                    "<< pipeline.parameters.run_verify >>",
+                ]
+            },
+        ]
+    }
+
+    # No job narrows the rule further: the signing smoke stays dev-only and
+    # delivery stays main-only, exactly as before.
+    filtered = {
+        next(iter(job)): next(iter(job.values()))["filters"]
+        for job in verify["jobs"]
+        if isinstance(job, dict) and "filters" in next(iter(job.values()))
+    }
+    assert filtered == {
+        "apple-signing-smoke": {"branches": {"only": "dev"}},
+        "package-release": {"branches": {"only": "main"}},
+        "deploy-app": {"branches": {"only": "main"}},
+        "deploy-nginx": {"branches": {"only": "main"}},
+        "apple-testflight": {"branches": {"only": "main"}},
+    }
 
 
 def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> None:

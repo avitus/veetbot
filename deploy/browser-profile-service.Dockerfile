@@ -16,7 +16,10 @@ COPY pyproject.toml uv.lock /opt/veetbot/
 RUN python -m pip install --no-cache-dir uv==0.8.6 \
     && uv sync --frozen --no-dev --no-editable --no-install-project \
     && rm -rf /root/.cache
+# The user's login ceremony runs headed Chromium on a private Xvfb display
+# (ADR-0106); the package is named here rather than left to Playwright's list.
 RUN /opt/veetbot/.venv/bin/playwright install --with-deps chromium \
+    && apt-get install -y --no-install-recommends xvfb \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /root/.cache /var/lib/apt/lists/*
 

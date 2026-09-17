@@ -1272,7 +1272,8 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
         prefix[2:],
         plan.model_id,
     ) + estimator.estimate_tools(plan.tool_specs, plan.model_id)
-    assert tool_tokens <= 6_000
+    # context/plan.yaml classes.tool_definitions.max_tokens (ADR-0105).
+    assert tool_tokens <= 9_000
 
 
 @pytest.mark.parametrize("email_mode", [False, True])
@@ -1349,10 +1350,11 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
         assert "mcp.gmail_read.search_threads" in plan.tool_names
     estimator = ConservativeTokenEstimator()
     prefix = build_prefix(agent, plan.tool_specs)
+    # context/plan.yaml classes.tool_definitions.max_tokens (ADR-0105).
     assert (
         estimator.estimate(prefix[2:], plan.model_id)
         + estimator.estimate_tools(plan.tool_specs, plan.model_id)
-    ) <= 6_000
+    ) <= 9_000
 
 
 def test_email_scope_confinement_rejects_any_nonexact_scope() -> None:

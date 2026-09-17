@@ -20,6 +20,8 @@ from agent_core.adapters.browser.playwright import (
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserAuthenticationStatus,
+    BrowserInteractiveEvent,
     BrowserObservation,
     BrowserProviderError,
 )
@@ -314,6 +316,7 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
     runtime._temporary_home = FailingTemporaryHome()  # type: ignore[assignment]
     runtime._revision = "stale-revision"
     runtime._elements = {"stale": object()}  # type: ignore[dict-item]
+    runtime._sign_in_entered = True
 
     await runtime.close()
 
@@ -323,6 +326,7 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
     assert runtime._page is None
     assert runtime._revision is None
     assert runtime._elements == {}
+    assert runtime._sign_in_entered is False
 
 
 @dataclass
@@ -386,3 +390,312 @@ async def test_playwright_runtime_classifies_failed_navigation_by_origin_policy(
     assert raised.value.retryable is expected_retryable
     assert "ERR_TUNNEL" not in str(raised.value)
     assert "duolingo" not in str(raised.value)
+
+
+class FakeVirtualDisplay:
+    """Record the lifecycle of the private display an interactive ceremony owns."""
+
+    def __init__(self, *, failure: BaseException | None = None) -> None:
+        """Initialize the display with an optional synthetic start failure."""
+        self.failure = failure
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> str:
+        """Report a display name the way a started virtual display does."""
+        if self.failure is not None:
+            raise self.failure
+        self.started = True
+        return ":77"
+
+    async def close(self) -> None:
+        """Record that the owning runtime destroyed the display."""
+        self.closed = True
+
+
+@dataclass
+class FakeChromiumLaunches:
+    """Capture how the runtime launches Chromium without starting a browser."""
+
+    launches: list[dict[str, Any]] = field(default_factory=list)
+    contexts: list[dict[str, Any]] = field(default_factory=list)
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Replace the Playwright entry point with this recording fake."""
+        session = Mock()
+        session.send = AsyncMock(return_value={"frameTree": {"frame": {"id": "main"}}})
+        context = Mock()
+        context.route = AsyncMock()
+        context.new_page = AsyncMock(return_value=Mock())
+        context.new_cdp_session = AsyncMock(return_value=session)
+        context.close = AsyncMock()
+        browser = Mock()
+        browser.close = AsyncMock()
+
+        async def new_context(**kwargs: Any) -> Mock:
+            self.contexts.append(kwargs)
+            return context
+
+        async def launch(**kwargs: Any) -> Mock:
+            self.launches.append(kwargs)
+            return browser
+
+        browser.new_context = new_context
+        playwright = Mock()
+        playwright.chromium.launch = launch
+        playwright.stop = AsyncMock()
+        manager = Mock()
+        manager.start = AsyncMock(return_value=playwright)
+        monkeypatch.setattr(
+            "agent_core.adapters.browser.playwright.async_playwright", lambda: manager
+        )
+
+
+async def test_interactive_ceremony_launches_headed_chromium_on_its_own_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A headless login browser is refused by sites that score the login request."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay()
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert chromium.launches[0]["headless"] is False
+    assert chromium.launches[0]["env"]["DISPLAY"] == ":77"
+    assert display.started
+
+    await runtime.close()
+
+    assert display.closed
+
+
+async def test_run_attempt_lease_stays_headless_without_a_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay()
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=False)
+
+    assert chromium.launches[0]["headless"] is True
+    assert "DISPLAY" not in chromium.launches[0]["env"]
+    assert not display.started
+
+
+async def test_interactive_ceremony_never_falls_back_to_headless(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay(failure=OSError("synthetic display failure"))
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert chromium.launches == []
+
+
+async def test_cancelled_ceremony_start_destroys_its_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation is not an Exception, and the runtime does not own the display yet."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay(failure=asyncio.CancelledError())
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
+
+    with pytest.raises(asyncio.CancelledError):
+        await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert display.closed
+    assert chromium.launches == []
+
+
+async def test_interactive_ceremony_reports_its_real_browser_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusing website is unsupported; the runtime must not disguise automation."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: None)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+
+    assert "user_agent" not in chromium.contexts[0]
+    assert "ignore_default_args" not in chromium.launches[0]
+    assert not any("AutomationControlled" in argument for argument in chromium.launches[0]["args"])
+
+
+async def test_production_runtime_uses_the_platform_display_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    display = FakeVirtualDisplay()
+    monkeypatch.setattr(
+        "agent_core.adapters.browser.playwright.platform_virtual_display", lambda: display
+    )
+
+    await PythonPlaywrightRuntime().start(
+        "http://127.0.0.1:9", ("https://site.example",), interactive=True
+    )
+
+    assert chromium.launches[0]["env"]["DISPLAY"] == ":77"
+
+
+class FakeCeremonyPage:
+    """A login-ceremony page whose visible sign-in challenge the test controls."""
+
+    def __init__(self, url: str) -> None:
+        """Start signed out with no challenge showing, like a marketing landing page."""
+        self.url = url
+        self.password_visible = False
+        self.challenge_text_visible = False
+        self.challenge_text_hidden = False
+        self.keyboard = SimpleNamespace(insert_text=AsyncMock(), press=AsyncMock())
+        self.mouse = SimpleNamespace(click=AsyncMock())
+
+    def locator(self, selector: str) -> Mock:
+        """Return the challenge fields; a hidden password input stays in the DOM."""
+        assert "input[type=password]" in selector
+        field = Mock(spec=Locator)
+        field.is_visible = AsyncMock(return_value=self.password_visible)
+        fields = Mock(spec=Locator)
+        fields.count = AsyncMock(return_value=1)
+        fields.nth.return_value = field
+        return fields
+
+    def get_by_text(self, pattern: object) -> Mock:
+        """Return the MFA, passkey, and consent text matches; hidden ones stay in the DOM."""
+        del pattern
+        match = Mock(spec=Locator)
+        match.is_visible = AsyncMock(return_value=self.challenge_text_visible)
+        matches = Mock(spec=Locator)
+        matches.count = AsyncMock(
+            return_value=int(self.challenge_text_visible or self.challenge_text_hidden)
+        )
+        matches.nth.return_value = match
+        return matches
+
+
+def ceremony_runtime(page: FakeCeremonyPage) -> PythonPlaywrightRuntime:
+    """Bind a runtime to a page whose context already holds analytics storage state."""
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://www.duolingo.com",)
+    runtime._page = page  # type: ignore[assignment]
+    runtime._context = SimpleNamespace(  # type: ignore[assignment]
+        storage_state=AsyncMock(
+            return_value={
+                "cookies": [{"name": "consent", "value": "synthetic"}],
+                "origins": [{"origin": "https://www.duolingo.com", "localStorage": []}],
+            }
+        )
+    )
+    return runtime
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        pytest.param((), id="no-interaction"),
+        pytest.param(
+            (BrowserInteractiveEvent(kind="click", x=40, y=600),),
+            id="consent-banner-click",
+        ),
+    ],
+)
+async def test_signed_out_page_with_analytics_cookies_is_not_ready(
+    events: tuple[BrowserInteractiveEvent, ...],
+) -> None:
+    """Cookies a landing page sets on its own are not evidence that anyone signed in."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    for event in events:
+        await runtime.interactive_event(event)
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+async def test_sign_in_entered_at_a_visible_challenge_that_then_clears_is_ready() -> None:
+    """The runtime mediated the sign-in, so it can vouch for the session it seals."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.password_visible = False
+    page.url = "https://www.duolingo.com/learn"
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.READY
+
+
+async def test_text_sent_while_no_challenge_is_visible_is_not_sign_in_evidence() -> None:
+    """A search box or a first e-mail step must not end the ceremony before the password."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    page.keyboard.insert_text.assert_awaited_once_with("synthetic-entry")
+
+
+@pytest.mark.parametrize(
+    ("password_visible", "challenge_text_visible"),
+    [
+        pytest.param(True, False, id="rejected-password-form-still-showing"),
+        pytest.param(False, True, id="verification-code-step"),
+    ],
+)
+async def test_a_visible_challenge_still_needs_the_user_after_sign_in_was_entered(
+    password_visible: bool,
+    challenge_text_visible: bool,
+) -> None:
+    """Entering text never outranks a challenge the user has not completed."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.password_visible = password_visible
+    page.challenge_text_visible = challenge_text_visible
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.NEEDS_USER
+
+
+async def test_hidden_challenge_text_does_not_hold_a_finished_sign_in() -> None:
+    """A collapsed verification-code template in the DOM is not a challenge anyone sees."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.password_visible = False
+    page.challenge_text_hidden = True
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.READY
+
+
+async def test_text_sent_beside_hidden_challenge_text_is_not_sign_in_evidence() -> None:
+    """Hidden challenge text must not turn a search box into a mediated sign-in."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.challenge_text_hidden = True
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+    page.challenge_text_hidden = False
+
+    status = await runtime.authentication_status()
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED

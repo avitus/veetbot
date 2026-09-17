@@ -106,7 +106,7 @@ validates the floor, and no trailer means lane A.
 
 ## Verification
 
-Run `make check` once on the final inputs; it includes `docs-check` and the
+Run `make check` once on the final inputs, on the sidecar with `chunk validate`; it includes `docs-check` and the
 website checks. Do not separately rerun passed checks unless their inputs change.
 Use `make docs-check` for standalone documentation verification, and
 `make citations-fix` to repair moved citations before the final verification.
@@ -150,7 +150,7 @@ GitHub mergeability is insufficient. Use only the CodeRabbit GitHub PR integrati
    Fix valid findings; answer inapplicable ones with concrete evidence and resolve the conversation.
 3. Push, wait for the review of the new head commit, and repeat until
    CodeRabbit reports no findings and every conversation is resolved.
-4. Confirm all required CI checks pass on that same final head commit.
+4. Request hosted CI for that final head (`run_verify: true`, ADR-0107) and confirm every required check passes on it.
 5. After merging to `main`, follow the merge commit's CircleCI pipeline through production delivery. Verify the application and documentation jobs pass
    and their public release-identity checks report the merged revision, as defined in `docs/deployment.md`. If delivery fails, keep the work active through
    diagnosis and recovery; a merge is not complete until its production deployment succeeds.

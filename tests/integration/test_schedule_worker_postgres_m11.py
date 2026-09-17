@@ -1,17 +1,28 @@
 """PostgreSQL proof for the bounded Milestone 11 schedule worker."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from uuid import uuid4
 
+import pytest
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
+
+from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.persistence.database import create_engine
 from agent_core.adapters.schedule_wakeup import PostgresScheduleWakeup
 from agent_core.bootstrap import build, build_schedule_worker
-from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism
+from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
+from agent_core.domain.events import NewEvent
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.runtime.worker import DurableWorker
 from agent_core.scheduling.worker import ScheduleWorker
+from scripts.check_schedule_database_permissions import REQUIRED_TABLE_PRIVILEGES
 from tests.contract.support import agent
 from tests.contract.test_schedule_unit_of_work_contract import (
     assert_schedule_unit_of_work_contract,
@@ -19,9 +30,61 @@ from tests.contract.test_schedule_unit_of_work_contract import (
 from tests.integration.m2_support import database_settings
 from tests.integration.test_schedule_materializer_m11 import (
     NOW,
+    _assert_complete,
     _create_due_schedule,
     _materializer,
 )
+
+
+def _production_schedule_settings(database_url: str | None = None) -> Settings:
+    settings = database_settings()
+    return replace(
+        settings,
+        database_url=database_url or settings.database_url,
+        deployment_mode=DeploymentMode.PRODUCTION,
+        auth_mode=AuthMode.TOKEN,
+        auth_token=None,
+        sandbox=SandboxMechanism.GVISOR,
+        auth_tenant_id="local",
+        auth_principal_id="local-user",
+        auth_roles=frozenset({"user"}),
+        auth_scopes=PLATFORM_SCOPES,
+        schedule_api_enabled=True,
+        schedule_worker_enabled=True,
+    )
+
+
+@asynccontextmanager
+async def _release_schedule_role() -> AsyncIterator[str]:
+    """Yield a login URL holding exactly the privileges release validation allows."""
+
+    admin_url = make_url(database_settings().database_url)
+    role = f"veetbot_schedule_probe_{uuid4().hex[:12]}"
+    password = uuid4().hex
+    engine = create_engine(admin_url.render_as_string(hide_password=False))
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    f"CREATE ROLE {role} LOGIN PASSWORD '{password}' "
+                    "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
+                )
+            )
+            await connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
+            for table, privileges in REQUIRED_TABLE_PRIVILEGES.items():
+                await connection.execute(
+                    text(f"GRANT {', '.join(sorted(privileges))} ON {table} TO {role}")
+                )
+        try:
+            yield admin_url.set(username=role, password=password).render_as_string(
+                hide_password=False
+            )
+        finally:
+            async with engine.begin() as connection:
+                await connection.execute(text(f"DROP OWNED BY {role}"))
+                await connection.execute(text(f"DROP ROLE {role}"))
+    finally:
+        await engine.dispose()
 
 
 async def test_postgres_schedule_wakeup_crosses_process_connections() -> None:
@@ -44,22 +107,77 @@ async def test_postgres_schedule_wakeup_crosses_process_connections() -> None:
 
 
 async def test_lean_production_schedule_role_constructs_without_execution_credentials() -> None:
-    settings = replace(
-        database_settings(),
-        deployment_mode=DeploymentMode.PRODUCTION,
-        auth_mode=AuthMode.TOKEN,
-        auth_token=None,
-        sandbox=SandboxMechanism.GVISOR,
-        auth_tenant_id="local",
-        auth_principal_id="local-user",
-        auth_roles=frozenset({"user"}),
-        auth_scopes=PLATFORM_SCOPES,
-        schedule_api_enabled=True,
-        schedule_worker_enabled=True,
-    )
-    async with build_schedule_worker(settings=settings) as worker:
+    async with build_schedule_worker(settings=_production_schedule_settings()) as worker:
         assert isinstance(worker, ScheduleWorker)
         await assert_schedule_unit_of_work_contract(worker._uow_factory)
+
+
+async def test_release_privileged_schedule_role_materializes_a_due_run() -> None:
+    """The production scheduler needs no privilege beyond the release allowlist."""
+
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        schedule_id = uuid4()
+        await _create_due_schedule(composition, schedule_id)
+
+        async with (
+            _release_schedule_role() as role_url,
+            build_schedule_worker(
+                settings=_production_schedule_settings(role_url), clock=FixedClock(NOW)
+            ) as worker,
+        ):
+            assert await worker.run_once() == 1
+
+        async with composition.uow_factory() as uow:
+            [occurrence] = await uow.schedule_occurrences.list(
+                schedule_id, composition.principal, limit=10
+            )
+        await _assert_complete(composition, schedule_id, occurrence)
+
+
+async def test_release_privileged_schedule_role_cannot_project_a_committed_session() -> None:
+    """Committed history still takes the erasure lock the scheduler cannot hold."""
+
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        pinned_agent = agent()
+        session_id = uuid4()
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(pinned_agent)
+            await uow.sessions.create(
+                Session(
+                    id=session_id,
+                    tenant_id=composition.principal.tenant_id,
+                    principal_id=composition.principal.principal_id,
+                    agent_id=pinned_agent.id,
+                    agent_version=pinned_agent.version,
+                    status=SessionStatus.ACTIVE,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="user",
+                    actor_id=composition.principal.principal_id,
+                    payload={"content": "Committed before the scheduler looked."},
+                )
+            )
+
+        async with (
+            _release_schedule_role() as role_url,
+            build_schedule_worker(
+                settings=_production_schedule_settings(role_url), clock=FixedClock(NOW)
+            ) as worker,
+        ):
+            with pytest.raises(DBAPIError, match="permission denied for table events"):
+                async with worker._uow_factory() as uow:
+                    await uow.history.catch_up(session_id)
 
 
 async def test_reserved_worker_classes_preserve_interactive_and_async_progress() -> None:

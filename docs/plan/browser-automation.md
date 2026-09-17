@@ -435,6 +435,20 @@ passkey, MFA, CAPTCHA, and consent interaction occurs inside that browser
 surface. The orchestration API sees neither keystrokes nor browser protocol
 frames and has no generic proxy endpoint.
 
+The ceremony's browser is headed (ADR-0106). Websites attach an
+abuse-classification signal to the login request and refuse a browser that
+reports itself headless, answering even correct credentials with a generic
+credential error. The isolated runtime therefore launches full Chromium for an
+interactive ceremony. On Linux it first starts a private virtual display for
+that one ceremony, passes only that display to the browser's scrubbed
+environment, and destroys it when the runtime closes; elsewhere it uses the
+native display. A display that cannot start fails the launch as
+`tool.browser.provider_unavailable`; the runtime never falls back to headless.
+The browser reports its real user agent and automation state: the runtime
+overrides no user agent and masks no automation indicator, so a website that
+still refuses the browser is unsupported rather than evaded. Run-attempt leases
+remain headless.
+
 The trusted client presents the returned launch URL behind a user-initiated
 continue action and treats a rejected platform handoff as a failed setup. It
 cancels the ceremony and revokes and deletes the unused profile so retry does
@@ -456,10 +470,37 @@ Only the isolated runtime determines completion. It may report `ready`,
 `needs_user`, `authentication_required`, `expired`, or `cancelled`; a caller
 cannot submit a credential or assert success. CAPTCHA, MFA, reauthentication,
 consent, password fields, and one-time-code fields keep the ceremony in
-`needs_user` until the user completes them directly. A ready result atomically
-seals storage state, releases the authentication lease, and advances metadata
-from `AUTHENTICATION_REQUIRED` or `NEEDS_USER` to `READY`. Failure and expiry
-discard the runtime state and never overwrite the last sealed profile.
+`needs_user` until the user completes them directly.
+
+The runtime reports `ready` only on evidence of a sign-in it mediated itself:
+during this ceremony the user sent text while one of those challenges was
+visible, no challenge is visible now, the page is on an allowed origin, and the
+context holds storage state. Storage state is not that evidence. A signed-out
+page sets analytics and consent cookies with no user action, and they keep
+arriving after the launch navigation, so neither their presence nor a change
+since launch distinguishes a sign-in; clicks alone, such as dismissing a
+consent banner, do not either. Until the evidence exists a page that shows no
+challenge stays `authentication_required`, including a page that saved state
+already signs in, where the user signs in again or cancels. The runtime keeps
+one boolean for this rule and never inspects, compares, or records the text the
+user sent or any cookie value.
+
+That evidence is necessary, not sufficient. The runtime is site-independent: a
+profile names allowed origins and nothing about a site's pages, so no marker
+tells it that a page is signed in. A sign-in the site rejects normally shows its
+form again and stays `needs_user`. One that replaces the form with a page
+showing no challenge, or a status check made between submission and the site's
+answer, can still seal a profile that holds no session. Such a profile grants
+nothing: the model cannot type into a password or one-time-code field, so a run
+meets the signed-out page and the user repeats the ceremony. A signed-in marker
+declared per site would close the gap; the profile contract carries none, and
+cookie names or flags are not a substitute, since sites keep sessions in
+script-readable cookies and in origin storage as well.
+
+A ready result atomically seals storage state, releases the authentication
+lease, and advances metadata from `AUTHENTICATION_REQUIRED` or `NEEDS_USER` to
+`READY`. Failure and expiry discard the runtime state and never overwrite the
+last sealed profile.
 
 ### Profile API contract
 

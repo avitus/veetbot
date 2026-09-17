@@ -1016,12 +1016,17 @@ class _ScheduleUnitOfWork(ScheduleUnitOfWork):
             select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
         )
         upcasters = EventUpcasterRegistry()
+        # This unit of work commits only on exit, so sessions it creates stay
+        # invisible to erasure for as long as it can project them.
+        created_sessions: set[UUID] = set()
         events = PostgresEventRepository(session, self._clock, upcasters)
-        history = PostgresSessionHistoryRepository(session, self._clock, upcasters)
+        history = PostgresSessionHistoryRepository(
+            session, self._clock, upcasters, uncommitted_sessions=created_sessions
+        )
         schedules = PostgresScheduleRepository(session)
         self.agents = PostgresAgentRepository(session, self._clock)
         self.process_events = PostgresProcessEventRepository(session)
-        self.sessions = PostgresSessionRepository(session)
+        self.sessions = PostgresSessionRepository(session, created=created_sessions)
         self.runs = PostgresRunRepository(session, self._clock)
         self.events = events
         self.history = history

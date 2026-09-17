@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Container, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -45,10 +45,13 @@ class PostgresSessionHistoryRepository:
         session: AsyncSession,
         clock: Clock,
         upcasters: EventUpcasterRegistry,
+        *,
+        uncommitted_sessions: Container[UUID] = frozenset(),
     ) -> None:
         self._session = session
         self._clock = clock
         self._upcasters = upcasters
+        self._uncommitted_sessions = uncommitted_sessions
 
     async def _cursor(self, session_id: UUID) -> ProjectionCursor:
         scope = str(session_id)
@@ -74,21 +77,22 @@ class PostgresSessionHistoryRepository:
     ) -> ProjectionCursor:
         watermark = cursor.watermark_seq
         session_id = UUID(cursor.scope)
-        # Serialize a projection built from an older event snapshot with erasure.
-        # The event's permanent marker also protects late projection writes.
-        erased = {
-            sequence
-            for sequence, hidden in await self._session.execute(
-                select(EventRow.sequence, EventRow.people_erased)
-                .where(
-                    EventRow.session_id == session_id,
-                    EventRow.sequence.in_([event.sequence for event in events]),
-                )
-                .order_by(EventRow.id)
-                .with_for_update()
+        markers = (
+            select(EventRow.sequence, EventRow.people_erased)
+            .where(
+                EventRow.session_id == session_id,
+                EventRow.sequence.in_([event.sequence for event in events]),
             )
-            if hidden
-        }
+            .order_by(EventRow.id)
+        )
+        if session_id not in self._uncommitted_sessions:
+            # Serialize a projection built from an older event snapshot with erasure.
+            # The event's permanent marker also protects late projection writes.
+            # Erasure cannot see a session this transaction created, and its history
+            # commits with its events, so that projection skips the row lock the
+            # least-privilege scheduler role has no UPDATE privilege to take.
+            markers = markers.with_for_update()
+        erased = {sequence for sequence, hidden in await self._session.execute(markers) if hidden}
         inserts: list[dict[str, Any]] = []
         for event in sorted(events, key=lambda item: (item.sequence, item.id)):
             if event.sequence <= watermark:

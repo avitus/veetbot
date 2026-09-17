@@ -130,115 +130,132 @@ async def test_apns_signs_addresses_and_refreshes_provider_token(
     await transport.aclose()
 
 
-@pytest.mark.parametrize(
-    ("kind", "details", "title", "body"),
-    [
-        (
-            "approval_requested",
-            {"status": "WAITING_FOR_APPROVAL", "tool_name": "email.send"},
-            "Approval needed",
-            "Review email.send to let this run continue.",
-        ),
-        (
-            "approval_requested",
-            {"status": "WAITING_FOR_APPROVAL"},
-            "Approval needed",
-            "This run is paused. Open Veetbot to review the requested action.",
-        ),
-        (
-            "question_asked",
-            {"status": "WAITING_FOR_USER"},
-            "The agent has a question",
-            "This run is waiting for your answer. Open Veetbot to respond.",
-        ),
-        (
-            "run_failed",
-            {"status": "FAILED"},
-            "Run failed",
-            "This run stopped before finishing. Open Veetbot to see the error.",
-        ),
-        (
-            "schedule_run_finished",
-            {"status": "COMPLETED"},
-            "Scheduled run completed",
-            "The scheduled task finished successfully. Open Veetbot to view the result.",
-        ),
-        (
-            "schedule_run_finished",
-            {"status": "FAILED"},
-            "Scheduled run failed",
-            "The scheduled task stopped before finishing. Open Veetbot to see the error.",
-        ),
-        (
-            "schedule_run_finished",
-            {"status": "CANCELLED"},
-            "Scheduled run cancelled",
-            "The scheduled task was cancelled before it finished.",
-        ),
-        (
-            "schedule_occurrence_skipped",
-            {"status": "MISSED"},
-            "Scheduled run missed",
-            "The start window passed before this task could run.",
-        ),
-        (
-            "schedule_occurrence_skipped",
-            {"status": "SKIPPED_OVERLAP"},
-            "Scheduled run skipped",
-            "An earlier run of this schedule was still active.",
-        ),
-        (
-            "schedule_occurrence_skipped",
-            {"status": "AUTHORIZATION_FAILED"},
-            "Scheduled run blocked",
-            "The required access was no longer available. Review the schedule in Veetbot.",
-        ),
-        (
-            "schedule_occurrence_skipped",
-            {"status": "CONFIGURATION_FAILED"},
-            "Scheduled run needs attention",
-            "The schedule could not start with its current configuration. Review it in Veetbot.",
-        ),
-        (
-            "ops_alert",
-            {"signal": "disk_free", "severity": "critical", "reason_code": "ops.disk_free"},
-            "Production alert",
-            "Critical: Disk space needs attention.",
-        ),
-        (
-            "ops_recovered",
-            {"signal": "disk_free", "severity": "recovered", "reason_code": "ops.disk_free"},
-            "Production recovered",
-            "Disk space has recovered.",
-        ),
-        ("test", {}, "Test notification", "Notifications are working on this device."),
-        (
-            "device_invocation",
-            {"status": "pending", "tool_name": "device.sms.send"},
-            "Text message ready to review",
-            "Open Veetbot on your iPhone to review the recipient and message, "
-            "then choose whether to send.",
-        ),
-        (
-            "device_invocation",
-            {"status": "pending"},
-            "Your device has a pending action",
-            "Open Veetbot on the requested device to review and complete the action.",
-        ),
-        (
-            "device_invocation",
-            {"status": "pending", "tool_name": "device.camera.capture"},
-            "Your device has a pending action",
-            "Open Veetbot on the requested device to review device.camera.capture.",
-        ),
-        (
-            "ops_alert",
-            {"signal": "future_signal", "severity": "warn", "reason_code": "ops.future_signal"},
-            "Production alert",
-            "Warning: A production health check needs attention.",
-        ),
-    ],
-)
+_ALERT_CASES = [
+    (
+        "approval_requested",
+        {"status": "WAITING_FOR_APPROVAL", "tool_name": "email.send"},
+        "Approval needed",
+        "Review email.send to let this run continue.",
+    ),
+    (
+        "approval_requested",
+        {"status": "WAITING_FOR_APPROVAL"},
+        "Approval needed",
+        "This run is paused. Open Veetbot to review the requested action.",
+    ),
+    (
+        "question_asked",
+        {"status": "WAITING_FOR_USER"},
+        "The agent has a question",
+        "This run is waiting for your answer. Open Veetbot to respond.",
+    ),
+    (
+        "run_failed",
+        {"status": "FAILED"},
+        "Run failed",
+        "This run stopped before finishing. Open Veetbot to see the error.",
+    ),
+    (
+        "schedule_run_finished",
+        {"status": "COMPLETED"},
+        "Scheduled run completed",
+        "The scheduled task finished successfully. Open Veetbot to view the result.",
+    ),
+    (
+        "schedule_run_finished",
+        {"status": "FAILED"},
+        "Scheduled run failed",
+        "The scheduled task stopped before finishing. Open Veetbot to see the error.",
+    ),
+    (
+        "schedule_run_finished",
+        {"status": "CANCELLED"},
+        "Scheduled run cancelled",
+        "The scheduled task was cancelled before it finished.",
+    ),
+    (
+        "schedule_occurrence_skipped",
+        {"status": "MISSED"},
+        "Scheduled run missed",
+        "The start window passed before this task could run.",
+    ),
+    (
+        "schedule_occurrence_skipped",
+        {"status": "SKIPPED_OVERLAP"},
+        "Scheduled run skipped",
+        "An earlier run of this schedule was still active.",
+    ),
+    (
+        "schedule_occurrence_skipped",
+        {"status": "AUTHORIZATION_FAILED"},
+        "Scheduled run blocked",
+        "The required access was no longer available. Review the schedule in Veetbot.",
+    ),
+    (
+        "schedule_occurrence_skipped",
+        {"status": "CONFIGURATION_FAILED"},
+        "Scheduled run needs attention",
+        "The schedule could not start with its current configuration. Review it in Veetbot.",
+    ),
+    (
+        "ops_alert",
+        {"signal": "disk_free", "severity": "critical", "reason_code": "ops.disk_free"},
+        "Production alert",
+        "Critical: Disk space needs attention.",
+    ),
+    (
+        "ops_recovered",
+        {"signal": "disk_free", "severity": "recovered", "reason_code": "ops.disk_free"},
+        "Production recovered",
+        "Disk space has recovered.",
+    ),
+    ("test", {}, "Test notification", "Notifications are working on this device."),
+    (
+        "device_invocation",
+        {"status": "pending", "tool_name": "device.sms.send"},
+        "Text message ready to review",
+        "Open Veetbot on your iPhone to review the recipient and message, "
+        "then choose whether to send.",
+    ),
+    (
+        "device_invocation",
+        {"status": "pending"},
+        "Your device has a pending action",
+        "Open Veetbot on the requested device to review and complete the action.",
+    ),
+    (
+        "device_invocation",
+        {"status": "pending", "tool_name": "device.camera.capture"},
+        "Your device has a pending action",
+        "Open Veetbot on the requested device to review device.camera.capture.",
+    ),
+    (
+        "ops_alert",
+        {"signal": "future_signal", "severity": "warn", "reason_code": "ops.future_signal"},
+        "Production alert",
+        "Warning: A production health check needs attention.",
+    ),
+    (
+        "call_finished",
+        {},
+        "New call result",
+        "Open Veetbot to read the transcript and summary.",
+    ),
+]
+
+
+def test_every_notification_kind_has_an_alert_case() -> None:
+    """A kind with no case leaves the alert body unbound.
+
+    `apns_alert` then raises, and the dispatcher records every device as
+    `TransportError` and retries until the notification expires, so the owner
+    never sees it. Production delivered no call result for this reason.
+    """
+
+    assert {case[0] for case in _ALERT_CASES} == {kind.value for kind in NotificationKind}
+
+
+@pytest.mark.parametrize(("kind", "details", "title", "body"), _ALERT_CASES)
 async def test_apns_alerts_explain_every_kind_without_changing_the_tap_payload(
     tmp_path: Path,
     kind: str,
@@ -253,6 +270,7 @@ async def test_apns_alerts_explain_every_kind_without_changing_the_tap_payload(
         "schedule_run_finished": ("session_id", "run_id", "schedule_id", "occurrence_id"),
         "schedule_occurrence_skipped": ("schedule_id", "occurrence_id"),
         "device_invocation": ("invocation_id", "device_id"),
+        "call_finished": ("call_id",),
     }
     payload = NotificationPayload.model_validate(
         {
