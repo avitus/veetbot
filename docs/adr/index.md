@@ -115,3 +115,4 @@ implementation without one.
 - [ADR-0104 — Typed Email runs prepare only the MCP servers their task calls (Proposed)](0104-typed-email-runs-prepare-only-their-servers.md)
 - [ADR-0105 — The tool-definition token cap rises to 9,000 so the item cap binds first (Proposed)](0105-tool-definition-token-cap.md)
 - [ADR-0106 — The authentication ceremony runs a headed browser and never disguises it (Proposed)](0106-headed-authentication-ceremony.md)
+- [ADR-0107 — Hosted verification is automatic on `main` and on request elsewhere (Proposed)](0107-on-demand-hosted-verification.md)

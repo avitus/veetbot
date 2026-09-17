@@ -282,6 +282,13 @@ from a git worktree: plain sync copies the worktree's `.git` pointer file,
 while validate sends a git bundle into a real repository. Xcode suites
 (`make test-apple`, `make test-apple-ui`) need macOS and stay local.
 
+The sidecar is the gate for every branch except `main` (ADR-0107). Hosted
+verification no longer starts when such a branch is pushed, so a change reaches
+`dev` on a passing `chunk validate`, plus the local suites the sidecar cannot
+run when the change touches them: `make test-integration` against the
+disposable PostgreSQL, `make test-sandbox`, and the Xcode suites. The workflow
+section below defines when the hosted jobs still run.
+
 ## The compose file
 
 One service at Milestone 0.
@@ -333,21 +340,21 @@ the public-site verification and publication lane.
 ```text
 job           target invoked         needs     runs on
 ------------  ---------------------  --------  ----------------
-1 static      make lint typecheck    nothing   every push, PR
+1 static      make lint typecheck    nothing   main, on request
               test-static test-deploy docs
-2 contract    make test-contract     nothing   every push, PR
-3 integration make test-integration  postgres  every push, PR
+2 contract    make test-contract     nothing   main, on request
+3 integration make test-integration  postgres  main, on request
 4 live        make test-live         secrets   schedule, manual
-5 sandbox     make test-sandbox      machine   every push, PR
-6a apple      make test-apple        Xcode     every push, PR
+5 sandbox     make test-sandbox      machine   main, on request
+6a apple      make test-apple        Xcode     main, on request
               make test-apple-ui-macos
-6b apple-ios  make test-apple-ui-ios Xcode     every push, PR
-7 apple-      shared archive and     signing   dev
+6b apple-ios  make test-apple-ui-ios Xcode     main, on request
+7 apple-      shared archive and     signing   dev, on request
   signing-    package script
   smoke
 8 apple-      shared archive and     signing   main, after deploy-app
   testflight  package script, altool API key
-9 public-site make test-website      Node 22   every push, PR
+9 public-site make test-website      Node 22   main, on request
 ```
 
 Jobs 1, 2, and 9 partition `make check`, split so the cheap lanes fail
@@ -395,7 +402,7 @@ Only the generated `website/out` tree enters the release workspace; the
 application and deployment jobs receive no Node runtime or website credential.
 
 Job 7 is a pre-merge signing smoke, not a verification partition and not part of
-`make check`. On trusted `dev` pushes it installs the CircleCI-managed
+`make check`. On a requested pipeline for trusted `dev` it installs the CircleCI-managed
 `veetbot-app-store` application-signing bundle and receives the separately
 restricted `veetbot-apple-signing` installer context. It runs the same
 repository-owned archive, application-signature, installer-package, and
@@ -454,11 +461,23 @@ credentials without placing them in the configuration file.
 Three workflow-level facts complete the definition:
 
 1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 plus the additional
-    sandbox, Apple, and public-site jobs 5, 6, and 9 for ordinary VCS pipelines,
-    including pull-request branches.
-    A pipeline with `run_live: true` selects the manual live workflow instead.
+    sandbox, Apple, and public-site jobs 5, 6, and 9. It starts by itself only
+    for a push to `main`. On every other branch, pull-request branches
+    included, a push starts no workflow and spends no credits; the workflow runs
+    there only when a pipeline is triggered with `run_verify: true` (ADR-0107).
+    Request that run once, on the final head of a change proposed for `main`:
+
+    ```text
+    circleci api api/v2/project/gh/avitus/veetbot/pipeline \
+      -d '{"branch": "dev", "parameters": {"run_verify": true}}'
+    ```
+
+    The requested pipeline reports its job statuses on that commit, so the pull
+    request shows them. A pipeline with `run_live: true` selects the manual live
+    workflow instead, and wins when both parameters are set.
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
-    runs only on trusted `dev`; it does not receive publication credentials.
+    runs only on trusted `dev`, and only in a requested pipeline; it does not
+    receive publication credentials.
     Production delivery begins only after all seven required verification jobs
     pass. On
     `main`, macOS TestFlight delivery follows the successful application deploy

@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-17 — Hosted CI runs on `main` and on request
+
+- A push to `dev` or any other branch no longer starts CircleCI. Over the
+  previous week 96 of 122 pipelines were `dev` pushes at roughly 3,900 credits
+  each, about 96% of it macOS executors.
+- Branches are verified with `chunk validate` on the sidecar. Before a merge to
+  `main`, one pipeline triggered with `run_verify: true` runs the full hosted
+  workflow on the final head. `main` still verifies and delivers on every push
+  (ADR-0107).
+
 ## 2026-09-17 — Call results reach the lock screen
 
 - The lock-screen alert builder had no case for `call_finished`, so it raised

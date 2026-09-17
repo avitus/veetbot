@@ -229,4 +229,5 @@ nav:
       - ADR-0104 Typed Email runs prepare only their servers: adr/0104-typed-email-runs-prepare-only-their-servers.md
       - ADR-0105 The tool-definition token cap: adr/0105-tool-definition-token-cap.md
       - ADR-0106 Headed authentication ceremony: adr/0106-headed-authentication-ceremony.md
+      - ADR-0107 On-demand hosted verification: adr/0107-on-demand-hosted-verification.md
   - Changelog: changelog.md

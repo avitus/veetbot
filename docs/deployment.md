@@ -562,8 +562,8 @@ key in the owner's protected credential store only if certificate recovery is
 required; never place the PKCS#12, password, or decoded key in the repository,
 a project variable, cache, workspace, artifact, or log.
 
-The `apple-signing-smoke` job proves this complete signing path on trusted
-`dev` pushes before a release pull request is opened. It runs the same
+The `apple-signing-smoke` job proves this complete signing path in the
+requested `dev` pipeline that precedes a merge to `main` (ADR-0107). It runs the same
 repository-owned archive and package script as `apple-testflight`, including
 the archived identity checks, application-signature verification,
 `productbuild`, and `pkgutil` verification. It receives neither the
@@ -612,7 +612,10 @@ that counter.
 
 ## Automatic delivery
 
-An ordinary branch or pull request runs verification only. A `dev` push also
+A push to any branch other than `main` starts no hosted workflow; such a branch
+is verified on the sidecar and, before it is proposed for `main`, by one
+pipeline requested with `run_verify: true` (ADR-0107,
+`docs/plan/development-toolchain.md`). A requested `dev` pipeline also
 runs the non-publishing Apple signing smoke described above. On `main`, after
 all seven required verification jobs pass:
 
