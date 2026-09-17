@@ -222,13 +222,16 @@ class PostgresAgentRepository:
 
 
 class PostgresSessionRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, created: set[UUID] | None = None) -> None:
         self._session = session
+        self._created = created
 
     async def create(self, session: Session) -> None:
         statement = pg_insert(SessionRow).values(**session_values(session)).on_conflict_do_nothing()
         if not _rowcount(await self._session.execute(statement)):
             raise ConflictError("session already exists")
+        if self._created is not None:
+            self._created.add(session.id)
 
     @staticmethod
     def _title_from_event_payload(payload: dict[str, Any]) -> str | None:
