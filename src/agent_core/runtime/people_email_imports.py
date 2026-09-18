@@ -34,6 +34,10 @@ from agent_core.runtime.loop import select_final_message
 from agent_core.runtime.people_imports import ImportProvider, ImportRecordResult, ImportSlice
 
 
+class RejectedAssessmentError(Exception):
+    """A completed assessment that is not a usable document; never holds its text."""
+
+
 class PeopleEmailImportProcessor:
     def __init__(
         self,
@@ -116,7 +120,12 @@ class PeopleEmailImportProcessor:
             if context.run.model_call_count >= 3:
                 return ImportRecordResult(complete=False, processed=processed)
             if await self.selected(source, job):
-                assessment = await self.assess(source)
+                try:
+                    assessment = await self.assess(source)
+                except RejectedAssessmentError:
+                    # The completed attempt is already charged. The cursor stays
+                    # before this passage so an explicit resume reassesses it.
+                    return ImportRecordResult(complete=False, processed=processed, rejected=True)
                 await self.semantics.register_source(source, run=context.run, lease=context.lease)
                 await self.semantics.form(
                     source, assessment.people_facts, run=context.run, lease=context.lease
@@ -124,12 +133,15 @@ class PeopleEmailImportProcessor:
                 processed = True
             async with context.uow_factory() as uow, uow.people.lock(context.principal):
                 job = await self.worker.guard(uow)
+                retried = job.email_current_failed and job.email_current_key == record.key
                 await self.worker.save(
                     uow,
                     job,
                     email_current_key=record.key,
                     email_passage_offset=source.body_offset,
                     email_current_processed=processed,
+                    email_current_failed=False,
+                    failures=job.failures - int(retried),
                 )
             offset = source.body_offset
         return ImportRecordResult(complete=True, processed=processed)
@@ -227,7 +239,13 @@ class PeopleEmailImportProcessor:
             turn = await collect_turn(self.provider.stream(request, model, attempt))
         message = select_final_message(turn)
         if turn.stop_reason is not StopReason.END_TURN or turn.tool_calls or message is None:
-            raise ToolValidationError("email import assessment returned no complete document")
-        return EmailPeopleAssessment.model_validate_json(
-            "\n".join(part.text for part in message.content if isinstance(part, TextPart))
-        )
+            raise RejectedAssessmentError("email import assessment returned no complete document")
+        try:
+            return EmailPeopleAssessment.model_validate_json(
+                "\n".join(part.text for part in message.content if isinstance(part, TextPart))
+            )
+        except ValueError:
+            pass
+        # Raised outside the handler: a schema validation error quotes its input,
+        # which is private mail, and must not survive even as suppressed context.
+        raise RejectedAssessmentError("email import assessment is not a valid document")

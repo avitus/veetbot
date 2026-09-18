@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-17 — One unusable assessment no longer fails a People email import
+
+- A historical email import parsed each passage assessment without a guard. A
+  response that failed its schema, was malformed or truncated JSON, or asked
+  for tools raised outside the import's handlers. The run was recorded as an
+  internal error and the whole job failed as `run_interrupted`, with no failure
+  counted. The defect was found by reading the code, not from a reported
+  failure.
+- Such a response now pauses the job as `analysis_incomplete` before that
+  passage and keeps none of its text, as a Chat source already does. Its cost
+  stays charged to the job, the run and the email allowance. Resume reassesses
+  that passage alone. The failure counts once and clears when a retry
+  succeeds. The People design states the behavior.
+
 ## 2026-09-17 — Hosted CI runs on `main` and on request
 
 - A push to `dev` or any other branch no longer starts CircleCI. Over the

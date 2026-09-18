@@ -360,6 +360,8 @@ class PeopleImportJob(PeopleEntity):
     email_current_key: str | None = Field(default=None, max_length=64)
     email_passage_offset: int | None = Field(default=None, ge=0)
     email_current_processed: bool = False
+    # The passage after the cursor was rejected and is counted in `failures`.
+    email_current_failed: bool = False
     session_cursors: dict[UUID, int] = Field(default_factory=dict, max_length=100)
     email_cursors: dict[str, str | None] = Field(default_factory=dict, max_length=10)
     finished_sessions: list[UUID] = Field(default_factory=list, max_length=100)

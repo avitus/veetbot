@@ -712,6 +712,23 @@ window; exact per-passage matching still applies before analysis. Read failures
 preserve the current cursor for an explicit retry, and cancellation or changed
 account/identity authority prevents subsequent reads and source registration.
 
+An email passage assessment that completes but fails local validation takes
+the Chat analysis retry path: malformed or schema-invalid JSON, a truncated or
+other non-final stop, tool calls, or no final message. The response is not
+evidence, and its text is neither stored nor reported. No source is registered
+and nothing is formed for that passage. The job pauses as `failed` with
+`analysis_incomplete`, and the passage cursor stays before the rejected passage.
+The record is not yet counted as read. The attempt's settled cost remains charged
+to the job, the run and the aggregate email allowance. The slice ends there,
+even with calls left under its three-call bound, and queues no continuation, so
+a passage whose every response is rejected cannot spend again without an
+explicit resume. Resume reassesses exactly that passage and continues. The
+rejection is one failure however many attempts reject it; the failure clears
+once a retry analyzes or excludes the passage. The import never skips the
+passage or marks its record processed,
+since either would report coverage it did not obtain. Provider failures and
+uncertain usage keep their existing dispositions.
+
 Historical Chat import cursors pair the source timestamp with the globally unique
 event ID, not the session-local sequence. Active semantic email sources require
 an explicit-offset ISO timestamp on both insert and update. Legacy invalid dates
