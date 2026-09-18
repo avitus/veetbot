@@ -719,6 +719,8 @@ class _TaskIO:
             assessment.payload.get("source_fingerprint") == thread.source_fingerprint
             and assessment.payload.get("model_revision") == self._model_revision()
             and assessment.payload.get("analysis_complete") is True
+            # A rejected result keeps its passage for the one promised retry.
+            and assessment.payload.get("retry_pending") is not True
         )
 
     async def _erase_progress(self, key: str) -> None:

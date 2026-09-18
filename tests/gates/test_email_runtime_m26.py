@@ -1697,6 +1697,58 @@ async def test_rolling_body_window_preserves_original_byte_offset_and_final_pass
         assert "FINAL_PASSAGE" in provider.requests[-1].model_dump_json()
 
 
+async def test_rejected_assessment_holds_its_body_window_until_the_retry(
+    monkeypatch: Any,
+) -> None:
+    """A retry-pending passage is not analyzed, so the window cannot advance past it.
+
+    A first rejection of a complete assessment keeps analysis_complete for the
+    retry. The window check read only that flag, so an import could replace the
+    retained passage before the promised retry of the same passage ran.
+    """
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript
+    from agent_core.runtime import email_tasks
+    from tests.gates.test_email_m18 import _email_settings
+
+    captured: list[Any] = []
+    original = email_tasks._TaskIO.__init__
+
+    def capture(self: Any, *args: Any, **kwargs: Any) -> None:
+        original(self, *args, **kwargs)
+        captured.append(self)
+
+    monkeypatch.setattr(email_tasks._TaskIO, "__init__", capture)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=await _current_mail_factory(),
+        script=FakeModelScript(turns=[_assessment_turn()]),
+    ) as app:
+        task = await app.services.email.submit_task(app.principal, kind="refresh")
+        current = await app.runs.get(task.run_id)
+        assert current.status is RunStatus.COMPLETED, current.failure
+        io = captured[-1]
+        async with app.uow_factory() as uow:
+            [row] = await uow.email.list(app.principal, "thread")
+        thread = EmailThread.model_validate(row.payload)
+        assert await io._window_analyzed(thread.account_id, thread.provider_thread_id)
+        async with app.uow_factory() as uow:
+            assessment = await uow.email.get(app.principal, "assessment", str(thread.id))
+            assert assessment is not None
+            assert assessment.payload["analysis_complete"] is True
+            await uow.email.put(
+                assessment.model_copy(
+                    update={
+                        "payload": {**assessment.payload, "retry_pending": True},
+                        "revision": assessment.revision + 1,
+                    }
+                ),
+                expected_revision=assessment.revision,
+            )
+        assert not await io._window_analyzed(thread.account_id, thread.provider_thread_id)
+
+
 async def test_partial_large_thread_does_not_block_other_current_mail() -> None:
     import json
     from dataclasses import replace
