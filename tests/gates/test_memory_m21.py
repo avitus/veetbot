@@ -3447,15 +3447,24 @@ def test_provider_response_schemas_have_no_optional_property() -> None:
     call. A defaulted `polarity` did exactly that in a live evaluation: the
     distillation stage fell back on all 67 cases and evidence-disposition
     precision measured 0.000. This test fails on the schema, not on the bill.
+    formation@11's People schema repeated it with defaulted time zones: every
+    production distillation call failed, and "Erin is my wife" formed only as
+    the fallback's nameless "User has a wife."
     """
 
     from agent_core.memory.distillation import (
         _AnticipationResponse,
         _DistillationResponse,
         _EpisodeResponse,
+        _PeopleDistillationResponse,
     )
 
-    for response in (_EpisodeResponse, _AnticipationResponse, _DistillationResponse):
+    for response in (
+        _EpisodeResponse,
+        _AnticipationResponse,
+        _DistillationResponse,
+        _PeopleDistillationResponse,
+    ):
         schema = response.model_json_schema()
         objects = [schema, *schema.get("$defs", {}).values()]
         for definition in objects:

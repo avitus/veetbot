@@ -4,6 +4,55 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-18 — One malformed model response no longer fails an Email refresh
+
+- A refresh at 22:48 UTC on 2026-09-17 failed as an internal error after one
+  assessment response did not match its schema. The parse raised a raw
+  validation error outside every per-thread guard, so the remaining threads
+  were not assessed and the client reported that Mail could not be updated.
+- A rejected response (invalid JSON, out-of-bound values, tool calls or no
+  result) now records the same abstention as ungrounded evidence for that
+  thread, keeps none of its text, and lets the refresh continue. The next
+  refresh retries that thread once; a second rejection is kept until the
+  thread is next invalidated. A rejected automatic draft leaves its thread
+  undrafted. The attempt still settles, and an owner-requested draft still
+  fails. The Email experience design states the behavior.
+- The run's response event had still recorded the text and arguments of any
+  tool calls in the rejected response, which can repeat the mail that
+  induced them. Email assessments and drafts now keep only the tool names
+  there, and the hostile-mail privacy gate checks it.
+
+## 2026-09-18 — Chat remembers the people it is told about
+
+- Every chat consolidation since People formation (`formation@11`) became the
+  default failed its distillation call: four optional time-zone and precision
+  fields made OpenAI reject the structured-output schema as `invalid_json_schema`.
+  Only the local fallback ran, so "Kyrri and Riv are my daughters. Erin is my
+  wife" formed a single nameless "User has a wife." The fields are now required,
+  and the guard test that caught the same fault in `formation@9` covers the
+  People schema too.
+- In the same turn, all three explicit saves were refused as untrusted. Recalled
+  memory in context runs the turn at memory trust, which `memory.remember`
+  accepts; its person-linked version demanded user trust and so could not
+  succeed for an owner with memories. It now follows the base tool: memory trust
+  is accepted as an affirmed statement, external content is still refused, the
+  owner's message must still name each person, and an over-portable
+  relationship gets the same retryable refusal.
+
+## 2026-09-17 — One unusable assessment no longer fails a People email import
+
+- A historical email import parsed each passage assessment without a guard. A
+  response that failed its schema, was malformed or truncated JSON, or asked
+  for tools raised outside the import's handlers. The run was recorded as an
+  internal error and the whole job failed as `run_interrupted`, with no failure
+  counted. The defect was found by reading the code, not from a reported
+  failure.
+- Such a response now pauses the job as `analysis_incomplete` before that
+  passage and keeps none of its text, as a Chat source already does. Its cost
+  stays charged to the job, the run and the email allowance. Resume reassesses
+  that passage alone. The failure counts once and clears when a retry
+  succeeds. The People design states the behavior.
+
 ## 2026-09-17 — Hosted CI runs on `main` and on request
 
 - A push to `dev` or any other branch no longer starts CircleCI. Over the

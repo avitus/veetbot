@@ -267,6 +267,22 @@ runtime downloads and the same discipline applies to the toolchain: if
 a check needs a binary, the binary is a declared dependency or the
 check fails with a message naming what to install.
 
+### Where the development secrets come from
+
+Doppler holds them and `.env` is a generated cache. `make env-pull` downloads
+the pinned config in env format and replaces `.env` atomically at mode 0600;
+a failed fetch leaves the previous file in place rather than truncating it.
+The target prints no secret value, and `--no-fallback` keeps the generated
+`.env` the only plaintext copy on disk. `doppler.yaml` pins the project and
+config, so the target works in any clone or worktree with no prior
+`doppler setup`.
+
+`install` does not depend on `env-pull`. A fresh clone and the sidecar have no
+Doppler credentials, so `cp .env.example .env` remains a supported path, and
+the loader's precedence is unchanged: `.env` first, then the process
+environment. Production is unaffected; its units read
+`/etc/veetbot/veetbot.env`.
+
 ### Remote validation on a sidecar
 
 `.chunk/config.json` lets the CircleCI `chunk` CLI run the same gate on a
@@ -786,6 +802,13 @@ done badly.
     corpus. Widening the manifest requires per-document anchor
     prefixing first, and is recorded as an open question rather than
     done with silently colliding anchors.
+18. **Doppler is the source of the development secrets and `.env` is a
+    generated cache of them.** `make env-pull` replaces `.env` atomically
+    at mode 0600 and prints no value; `doppler.yaml` pins the project and
+    config so it needs no prior `doppler setup`. `install` does not depend
+    on it, because a fresh clone and the sidecar have no Doppler
+    credentials and the `.env.example` path still has to work. Production
+    is untouched and still reads `/etc/veetbot/veetbot.env`.
 
 ## Open questions for review
 

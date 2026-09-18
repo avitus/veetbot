@@ -216,13 +216,16 @@ remains Milestone 12. Remaining:
 
 Approved on 2026-09-11 under ADR-0097. Local implementation includes twelve
 executable offline gate bindings, PostgreSQL contract evidence and 289 passing
-Apple package tests. The workstream remains in progress until live evidence passes.
-The owner number, reviewed public profile and private credentials are prepared;
-live routing is unchanged.
+Apple package tests. Calling has been active in production since 2026-09-17.
+Live inbound calls and one owner-approved outbound call are retained, readable from
+Chat and announced to every device. Reaching that point took two fixes: ADR-0105's
+tool-definition budget and the missing `call_finished` lock-screen alert. Call
+results so far arrived through reconciliation, not a proven signed webhook.
 
-- [ ] Apply and verify the prepared provider configuration during authorized activation
-- [ ] Verify provider-side admission controls and real signed-byte convention; authorize live test calls
-- [ ] Hosted CI, explicitly authorized CodeRabbit review and production delivery evidence
+- [ ] Read back the applied inbound provider configuration against the reviewed revision
+- [ ] Verify provider-side admission controls and the real signed-byte convention; receipts so far arrived through reconciliation
+- [ ] Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
+- [ ] Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
 
 ### Milestone 28 — People and relationship memory
 
@@ -248,7 +251,7 @@ operations, the proposal lifecycle, the grounded grouping with its lexical
 fallback, the routes behind the flag and the native sidebar are implemented
 with every gate bound to an executable check.
 
-- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
+- [ ] Exact-head hosted CI and explicitly authorized review evidence
 
 ## Authorized
 

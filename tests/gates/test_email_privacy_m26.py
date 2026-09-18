@@ -104,7 +104,10 @@ async def _hostile_mail(*, failure: str | None = None) -> None:
         ]
     )
     if failure == "model":
-        script = FakeModelScript(turns=[ScriptedTurn(text=DRAFT_CANARY)])
+        # The refresh assessment, then an owner-requested draft of the same thread.
+        script = FakeModelScript(
+            turns=[ScriptedTurn(text=DRAFT_CANARY), ScriptedTurn(text=DRAFT_CANARY)]
+        )
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
@@ -159,11 +162,29 @@ async def _hostile_mail(*, failure: str | None = None) -> None:
         assert all(server == "gmail_read" for server, _ in calls)
         assert all(item.tool_name.startswith("mcp.gmail_read.") for item in invocations)
         assert not any(event.event_type == "user.message.created" for event in events)
+        # A rejected model result keeps no text: the tool calls the hostile mail
+        # induced must not survive in the run's model-response events.
+        responses = [e for e in events if e.event_type == "model.response.completed"]
+        assert responses and all(
+            MAIL_CANARY not in str(e.payload) and "thief@example.test" not in str(e.payload)
+            for e in responses
+        )
         assert not await app.approvals.list_pending(run_id=run.id)
         assert MAIL_CANARY not in str(processes)
         if failure == "model":
-            assert run.status is RunStatus.FAILED
-            assert run.failure is not None and DRAFT_CANARY not in run.failure.message
+            # A rejected refresh result abstains for its thread without keeping its text.
+            assert run.status is RunStatus.COMPLETED
+            async with app.uow_factory() as uow:
+                [thread] = await uow.email.list(app.principal, "thread")
+                assessments = await uow.email.list(app.principal, "assessment")
+            assert assessments and DRAFT_CANARY not in str([thread, *assessments])
+            # A rejected owner-requested draft still fails through the redacted diagnostic.
+            draft = await app.services.email.submit_task(
+                app.principal, kind="draft", thread_id=UUID(thread.key)
+            )
+            failed = await app.runs.get(draft.run_id)
+            assert failed.status is RunStatus.FAILED
+            assert failed.failure is not None and DRAFT_CANARY not in failed.failure.message
 
 
 async def _approval_notification() -> None:
@@ -397,7 +418,7 @@ async def test_email_privacy_boundaries(
         assert value not in logged
     diagnostic = {
         "tool_error": ("tool_execution_failed", "tool_name", "RuntimeError"),
-        "model_error": ("run_execution_failed", "run_id", "ValidationError"),
+        "model_error": ("run_execution_failed", "run_id", "EmailModelResultError"),
         "internal_api_error": ("api_request_failed", "request_id", "RuntimeError"),
     }.get(boundary)
     if diagnostic is not None:

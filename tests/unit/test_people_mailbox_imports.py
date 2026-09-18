@@ -386,3 +386,225 @@ async def test_resumed_mailbox_header_rejects_invalid_retained_shapes(payload: A
     )
     with pytest.raises(ToolTrustRejectedError):
         await importer.header("work", pending)
+
+
+@pytest.mark.parametrize("rejected_attempts", [1, 2])
+@pytest.mark.parametrize("layout", ["messages", "passages"])
+@pytest.mark.parametrize("rejection", ["schema_invalid", "invalid_json", "truncated", "tool_call"])
+async def test_rejected_passage_assessment_pauses_the_import_for_an_exact_retry(
+    rejection: str, layout: str, rejected_attempts: int
+) -> None:
+    """One unusable assessment pauses its import at that passage instead of failing the run."""
+    import json
+    import re
+    from decimal import Decimal
+
+    from agent_core.adapters.determinism import SystemClock
+    from agent_core.adapters.models.fake import FakeModelProvider
+    from agent_core.domain.messages import (
+        FakeModelScript,
+        ModelRequest,
+        ModelUsage,
+        ScriptedToolCall,
+        ScriptedTurn,
+        StopReason,
+    )
+    from agent_core.domain.runs import RunStatus
+    from tests.gates.test_email_runtime_m26 import _assessment_turn
+
+    now = SystemClock().now()
+    sent_at = (now - timedelta(days=200)).replace(microsecond=0)
+    canary = "rejected-assessment-canary"
+    passages = layout == "passages"
+    values: list[tuple[str, dict[str, Any]]] = [
+        ("get_profile", {"email_address": "owner@example.test"}),
+        ("search_threads", {"threads": [{"thread_id": "t1"}], "next_page_token": None}),
+    ]
+    for index in range(3):
+        # m1 is newest; analysis runs oldest first, so m2 is always the second record.
+        chunked = passages and index == 1
+        body = "Alex prefers tea."
+        values.append(
+            (
+                "get_thread_page",
+                {
+                    "thread_id": "t1",
+                    "messages": [
+                        {
+                            "id": f"m{index + 1}",
+                            "from": "Alex <alex@example.test>",
+                            "to": ["owner@example.test"],
+                            "cc": [],
+                            "body": body,
+                            "headers_complete": True,
+                            "body_complete": not chunked,
+                            "body_available": True,
+                            "history_id": "h1",
+                            "internal_date": str(
+                                int((sent_at - timedelta(hours=index)).timestamp() * 1000)
+                            ),
+                            "next_body_offset": len(body.encode()) if chunked else None,
+                        }
+                    ],
+                    "next_page_token": f"page{index + 1}" if index < 2 else None,
+                },
+            )
+        )
+        if chunked:
+            values.append(
+                (
+                    "get_message_body",
+                    {
+                        "message_id": "m2",
+                        "history_id": "h1",
+                        "body": "Alex enjoys hiking.",
+                        "offset": len(body.encode()),
+                        "next_offset": None,
+                        "complete": True,
+                        "source_changed": False,
+                        "body_available": True,
+                    },
+                )
+            )
+    assessment = json.loads(_assessment_turn(evidence="Alex prefers tea.").text)
+    assessment["people_facts"] = []
+    cost = Decimal("0.01")
+    usage = ModelUsage(input_tokens=10, output_tokens=5, cost=cost)
+    valid = ScriptedTurn(text=json.dumps(assessment), usage=usage)
+    rejected = {
+        "schema_invalid": ScriptedTurn(text=json.dumps({"summary": canary}), usage=usage),
+        "invalid_json": ScriptedTurn(text=f'{{"summary": "{canary}", ', usage=usage),
+        "truncated": ScriptedTurn(
+            text=json.dumps({**assessment, "summary": canary})[:-20],
+            stop_reason=StopReason.MAX_TOKENS,
+            usage=usage,
+        ),
+        "tool_call": ScriptedTurn(
+            text=canary,
+            tool_calls=[ScriptedToolCall(name="memory.search", arguments={"query": canary})],
+            usage=usage,
+        ),
+    }[rejection]
+    # m3, then m2 (and its first passage when chunked) before the rejected passage.
+    before = 2 if passages else 1
+    turns = [valid] * before + [rejected] * rejected_attempts + [valid, valid]
+    provider = FakeModelProvider(FakeModelScript(turns=turns), SystemClock())
+
+    def passage(request: ModelRequest) -> tuple[list[str], list[str]]:
+        text = "".join(
+            part.text
+            for item in request.conversation
+            for part in getattr(item, "content", [])
+            if hasattr(part, "text")
+        )
+        return re.findall(r'"id": "(m\d)"', text), re.findall(r'"body_offset": (\d+)', text)
+
+    async with build(
+        settings=replace(_email_settings(), people_enabled=True),
+        storage="memory",
+        mcp_client_factory=await _mailbox_factory(values),
+        model_provider_overrides={"fake": provider},
+    ) as app:
+        owner = app.principal
+        service = app.services.people
+        assert service is not None
+        audit = await app.services.sessions.create(owner, "general", {})
+        account = next(iter(app.services.email.account_servers))
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email,
+                owner,
+                "account",
+                account,
+                EmailAccount(
+                    id=account, label="Test", status="ready", email_address="owner@example.test"
+                ),
+                app.clock.now(),
+            )
+        request = PeopleImportRequest.model_validate(
+            {
+                "phase": "preview",
+                "session_id": audit.id,
+                "scope": {
+                    "account_ids": [account],
+                    "email_source": "mailbox",
+                    "since": sent_at - timedelta(days=1),
+                    "until": sent_at + timedelta(days=1),
+                    "max_records": 10,
+                    "max_cost_usd": "1",
+                },
+            }
+        )
+        preview = await service.create_import(
+            owner, request, key="preview", ceiling=Sensitivity.SENSITIVE
+        )
+        result = await service.create_import(
+            owner,
+            request.model_copy(
+                update={
+                    "phase": "apply",
+                    "operation_id": preview.id,
+                    "expected_revision": preview.revision,
+                }
+            ),
+            key="apply",
+            ceiling=Sensitivity.SENSITIVE,
+        )
+        for attempt in range(rejected_attempts):
+            # The rejected passage pauses the job for an explicit retry. It is one
+            # failure however many attempts reject it, and its record is unread.
+            calls = before + attempt + 1
+            assert result.state == "failed", result
+            assert result.error_code == "analysis_incomplete"
+            assert result.failures == 1
+            assert result.records_read == 1 and result.records_processed == 1
+            assert len(provider.requests) == calls
+            if attempt:
+                assert passage(provider.requests[-1]) == passage(provider.requests[-2])
+            # The completed attempt stays charged to the job, the run and the
+            # shared email allowance. Nothing is reserved, so resume is allowed.
+            assert result.spent_usd == cost * calls and result.reserved_usd == 0
+            async with app.uow_factory() as uow:
+                job = await uow.people.get(owner, result.id, ceiling=Sensitivity.RESTRICTED)
+                assert isinstance(job, PeopleImportJob) and job.run_id is not None
+                run = await uow.runs.get(job.run_id, owner)
+                assert run.status is RunStatus.COMPLETED and run.failure is None
+                assert run.usage.cost == cost * (1 if attempt else calls)
+                budgets = [
+                    record
+                    for record in await uow.email.list(owner, "people_import_budget")
+                    if record.payload.get("settled_cost") is not None
+                ]
+                assert len(budgets) == calls
+                sources = await uow.people.query(
+                    PeopleQuery(
+                        tenant_id=owner.tenant_id,
+                        principal_id=owner.principal_id,
+                        kinds=["source"],
+                        sensitivity_ceiling=Sensitivity.RESTRICTED,
+                    )
+                )
+                assert len(sources) == before
+                # No rejected model text survives in durable progress.
+                assert canary not in job.model_dump_json() + run.model_dump_json()
+            result = await service.create_import(
+                owner,
+                request.model_copy(
+                    update={
+                        "phase": "resume",
+                        "operation_id": result.id,
+                        "expected_revision": result.revision,
+                    }
+                ),
+                key=f"resume-{attempt}",
+                ceiling=Sensitivity.SENSITIVE,
+            )
+        # The retry reassesses exactly the rejected passage, then the import finishes.
+        calls = before + rejected_attempts + 2
+        assert len(provider.requests) == calls
+        assert all(len(passage(request)[0]) == 1 for request in provider.requests)
+        assert passage(provider.requests[before]) == passage(provider.requests[-2])
+        assert result.state == "completed" and result.error_code is None, result
+        assert result.analysis_complete and result.failures == 0
+        assert result.records_read == 3 and result.records_processed == 3
+        assert result.spent_usd == cost * calls

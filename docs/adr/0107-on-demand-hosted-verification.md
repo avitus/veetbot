@@ -44,8 +44,9 @@ satisfies the same criterion as a local run.
    Xcode suites.
 4. A change proposed for `main` still needs hosted verification on its exact
    final head. The proposer requests one `run_verify` pipeline for that commit
-   and the pull request shows its statuses. The repository contract's review
-   gate is unchanged in strength; only the way the run starts changes.
+   and the pull request shows its statuses, which `main` branch protection
+   requires before the merge. The repository contract's review gate is
+   unchanged in strength; only the way the run starts changes.
 5. The Apple signing smoke keeps its `dev`-only filter and therefore runs in a
    requested `dev` pipeline. The restricted signing context still excludes
    unversioned configuration; a requested pipeline uses the committed file.
@@ -65,14 +66,18 @@ satisfies the same criterion as a local run.
 - A requested pipeline has no previous revision, so the reading-lane floor
   falls back to `origin/main` as its base, which is the range a promotion
   should be judged on.
-- Anyone who merges to `main` without requesting the run is caught by the
-  `main` pipeline, which verifies before it delivers, but only after the merge.
-  GitHub does not enforce the requested run: `main` carries no branch
-  protection, and carried none under ADR-0035 either, so the exact-head gate
-  was procedural before this decision and stays procedural after it. Requiring
-  the verification statuses on `main` would make GitHub refuse such a merge. It
-  is a repository setting, outside the configuration this repository can test,
-  and enabling it is the owner's decision.
+- GitHub enforces the requested run's verification jobs. `main` carried no
+  branch protection under ADR-0035, so the exact-head gate was procedural; on
+  2026-09-17 the owner enabled protection requiring the seven verification
+  contexts as status checks, and a pull request whose head has no requested run
+  can no longer merge. The Apple signing smoke is not one of those contexts: it
+  is not a verification partition and runs only in a requested `dev` pipeline
+  (decision 5), so its required pass on the exact revision proposed for `main`
+  remains a check of the review gate, not of branch protection. The owner keeps
+  an admin override for an emergency, and the `main`
+  pipeline, which verifies before it delivers, remains the backstop behind it.
+  The setting lives in the repository host, outside the configuration this
+  repository can test, so no gate test observes it.
 
 ## Alternatives considered
 

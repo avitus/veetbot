@@ -81,6 +81,7 @@ def reservation_cost(request: ModelRequest, model: ResolvedModel) -> Decimal:
 class ImportRecordResult(NamedTuple):
     complete: bool
     processed: bool
+    rejected: bool = False
 
 
 class EmailImportProcessor(Protocol):
@@ -477,7 +478,8 @@ class ImportSlice:
                     async with context.uow_factory() as uow:
                         job = await self.guard(uow)
                     result = await email.process(record, job)
-                    if not result.complete:
+                    incomplete = result.rejected
+                    if not (result.complete or incomplete):
                         break
                     selected = result.processed
                     cursor: dict[str, object] = {
@@ -486,6 +488,7 @@ class ImportSlice:
                         "email_current_key": None,
                         "email_passage_offset": None,
                         "email_current_processed": False,
+                        "email_current_failed": False,
                     }
                 else:
                     if selected:
@@ -502,22 +505,36 @@ class ImportSlice:
                     job = await self.guard(uow)
                     retrying = job.retry_source is not None
                     if incomplete:
-                        assert isinstance(record, EventEnvelope)
-                        from agent_core.domain.people_imports import PeopleImportRetry
+                        pause: dict[str, object]
+                        if isinstance(record, EmailRecord):
+                            # The record stays unread and its passage cursor stays
+                            # before the rejected passage, so resume reassesses it.
+                            current = job.email_current_key == record.key
+                            pause = {
+                                "failures": job.failures
+                                + int(not (current and job.email_current_failed)),
+                                "email_current_key": record.key,
+                                "email_passage_offset": job.email_passage_offset
+                                if current
+                                else None,
+                                "email_current_processed": current and job.email_current_processed,
+                                "email_current_failed": True,
+                            }
+                        else:
+                            from agent_core.domain.people_imports import PeopleImportRetry
 
+                            pause = {
+                                "records_read": job.records_read + int(not retrying),
+                                "failures": job.failures + int(not retrying),
+                                "retry_source": PeopleImportRetry(
+                                    session_id=record.session_id,
+                                    event_id=record.id,
+                                    sequence=record.sequence,
+                                    created_at=record.created_at,
+                                ),
+                            }
                         await self.save(
-                            uow,
-                            job,
-                            state="failed",
-                            error_code="analysis_incomplete",
-                            records_read=job.records_read + int(not retrying),
-                            failures=job.failures + int(not retrying),
-                            retry_source=PeopleImportRetry(
-                                session_id=record.session_id,
-                                event_id=record.id,
-                                sequence=record.sequence,
-                                created_at=record.created_at,
-                            ),
+                            uow, job, state="failed", error_code="analysis_incomplete", **pause
                         )
                         return finished(
                             "People import paused at a source that needs another analysis attempt."

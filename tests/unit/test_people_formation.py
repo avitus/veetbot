@@ -148,6 +148,7 @@ async def test_owner_formation_creates_grounded_people_and_directional_link() ->
                 valid_from=None,
                 valid_to=None,
                 precision="unknown",
+                source_timezone=None,
             ),
             commitment=None,
         ),
@@ -220,6 +221,7 @@ async def test_people_extractor_extends_only_new_policy_and_keeps_three_calls() 
             valid_from=None,
             valid_to=None,
             precision="unknown",
+            source_timezone=None,
         ),
         commitment=None,
     )
@@ -319,6 +321,7 @@ async def test_reported_interaction_forms_without_creating_an_atomic_belief() ->
         interaction_kind="meeting",
         occurred_at=None,
         precision="unknown",
+        source_timezone=None,
         mentions=[mention],
         participant_keys=["maya"],
     )
@@ -503,6 +506,78 @@ async def test_explicit_people_reference_accepts_confirmed_alias_but_rejects_col
         await tool.execute(arguments, context)
 
 
+async def test_explicit_people_reference_is_governed_like_remember_at_memory_trust() -> None:
+    """A person-linked remember follows the base tool's trust and portability rules.
+
+    Production refused "Erin is my wife" three times with tool.trust_rejected:
+    a turn whose context holds recalled memory runs at memory trust, which the
+    base tool accepts as an affirmed statement, but the person-linked path
+    demanded user trust and so could never succeed for an owner with memories.
+    The owner's message must still name each referenced person.
+    """
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from agent_core.domain.errors import ToolTrustRejectedError
+    from agent_core.domain.memory import MemoryAuthority
+    from agent_core.domain.policies import TrustLevel
+    from agent_core.tools.memory_remember import PeopleMemoryRememberTool
+    from tests.contract.support import tool_context
+
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    erin = Person(
+        id=uuid4(),
+        display_name="Erin",
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        created_at=clock.now(),
+        updated_at=clock.now(),
+    )
+    async with factory() as uow:
+        await uow.people.put(erin, expected_revision=0)
+    await user_event(factory, "Kyrri and Riv are my daughters. Erin is my wife")
+    service = GovernedMemoryService(factory, clock, ids(), owner, people_enabled=True)
+    tool = PeopleMemoryRememberTool(service)
+    # The production call, verbatim apart from the person identifier.
+    arguments: dict[str, Any] = {
+        "scope": "veetbot",
+        "subject": "Erin",
+        "statement": "Andy Vitus confirmed that Erin is his wife.",
+        "belief_type": "relationship",
+        "person_refs": [{"person_id": str(erin.id), "expected_revision": 1}],
+        "portability": "portable",
+    }
+    recalled = replace(tool_context(), principal=owner, origin_trust=TrustLevel.MEMORY)
+    refused = await tool.execute(arguments, recalled)
+    assert not refused.ok and refused.failure is not None
+    assert refused.failure.reason_code == "tool.invalid_arguments.portability_ceiling"
+    assert refused.failure.retryable
+
+    del arguments["portability"]
+    untrusted = replace(tool_context(), principal=owner, origin_trust=TrustLevel.EXTERNAL_UNTRUSTED)
+    with pytest.raises(ToolTrustRejectedError):
+        await tool.execute(arguments, untrusted)
+    assert await service.list_memories() == []
+
+    result = await tool.execute(arguments, recalled)
+    assert result.ok and result.structured is not None
+    [belief] = await service.list_memories()
+    assert belief.statement == "Andy Vitus confirmed that Erin is his wife."
+    assert belief.authority is MemoryAuthority.AFFIRMED
+    async with factory() as uow:
+        links = await uow.people.query(
+            PeopleQuery(
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                sensitivity_ceiling=Sensitivity.SENSITIVE,
+                person_id=erin.id,
+                kinds=["memory_link"],
+            )
+        )
+    assert [link.belief_id for link in links if isinstance(link, PersonMemoryLink)] == [belief.id]
+
+
 @pytest.mark.parametrize(
     "policy, enabled",
     [
@@ -662,6 +737,7 @@ async def test_only_direct_owner_kinship_escapes_idle_decay() -> None:
                     valid_from=None,
                     valid_to=None,
                     precision="unknown",
+                    source_timezone=None,
                 ),
                 commitment=None,
             ),
@@ -733,6 +809,7 @@ async def test_affiliation_uses_organization_endpoint_and_preserves_source() -> 
             valid_from=None,
             valid_to=None,
             precision="unknown",
+            source_timezone=None,
         ),
         commitment=None,
     )
@@ -813,6 +890,8 @@ async def test_a_draft_cannot_complete_a_person_commitment() -> None:
                 state="completed",
                 source_event_id=sequence,
                 due_at=None,
+                due_precision="unknown",
+                source_timezone=None,
             ),
         ),
     )
