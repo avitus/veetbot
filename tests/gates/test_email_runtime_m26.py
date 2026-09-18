@@ -1263,6 +1263,203 @@ async def test_unsupported_ranking_quotes_cannot_create_attention_or_auto_drafts
         assert (await app.runs.get(task.run_id)).model_call_count == 1
 
 
+def _second_page() -> dict[str, Any]:
+    page = _page()
+    [message] = page["messages"]
+    page.update(
+        thread_id="thread-2",
+        messages=[
+            {
+                **message,
+                "id": "m3",
+                "thread_id": "thread-2",
+                "subject": "Budget",
+                "message_id_header": "<m3@example.test>",
+                "body": "Please approve the board materials. The budget changed.",
+            }
+        ],
+    )
+    return page
+
+
+async def _two_thread_factory() -> MailboxFactory:
+    import json
+
+    from agent_core.domain.mcp import MCPCallResult
+
+    base = await _current_mail_factory()
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+        single = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            if name == "search_threads" and "in:inbox" in arguments["query"]:
+                value = {"threads": [{"thread_id": "thread-1"}, {"thread_id": "thread-2"}]}
+            elif name == "get_thread_page" and arguments["thread_id"] == "thread-2":
+                value = _second_page()
+            else:
+                return await single(name, arguments)
+            return MCPCallResult(content=(json.dumps(value),), structured=value)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    return factory
+
+
+@pytest.mark.parametrize("malformed", ["schema", "truncated", "tools"])
+async def test_rejected_assessment_abstains_for_its_thread_and_refresh_continues(
+    malformed: str,
+) -> None:
+    """One invalid model result degrades its own thread, not the whole refresh."""
+    import json
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, StopReason
+    from tests.gates.test_email_m18 import _email_settings
+
+    rejected = {
+        # Well-formed JSON outside a declared bound, as in production on 2026-09-17.
+        "schema": ScriptedTurn(
+            text=json.dumps(json.loads(_assessment_turn().text) | {"content_importance": 1.5})
+        ),
+        "truncated": ScriptedTurn(text='{"summary": "Board', stop_reason=StopReason.MAX_TOKENS),
+        "tools": ScriptedTurn(tool_calls=[ScriptedToolCall(name="search_threads", arguments={})]),
+    }[malformed]
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[rejected, _assessment_turn(), rejected]),
+        mcp_client_factory=await _two_thread_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert run.model_call_count == 2
+        async with app.uow_factory() as uow:
+            threads = {
+                row.key: EmailThread.model_validate(row.payload)
+                for row in await uow.email.list(app.principal, "thread")
+            }
+            assessments = {
+                row.key: row.payload for row in await uow.email.list(app.principal, "assessment")
+            }
+        assert set(assessments) == set(threads) and len(threads) == 2
+        [abstained] = [key for key, value in assessments.items() if value["grounded"] is False]
+        [assessed] = set(threads) - {abstained}
+        assert threads[assessed].summary == "Board request"
+        # The rejected result is no evidence, and no model text survives it.
+        assert threads[abstained].priority == 0
+        assert threads[abstained].needs_reply is False
+        assert threads[abstained].summary == "Review the original conversation."
+        assert threads[abstained].reason == "Automatic assessment returned an invalid result."
+        # A completed response settles its attempt; no reservation is stranded.
+        task = await app.services.email.get_task(app.principal, run.id)
+        assert task is not None
+        assert task.stage == "completed"
+        assert task.settled_cost == run.usage.cost
+        # The next refresh retries that thread once. A second rejection is
+        # cached like an ungrounded result, so polling cannot keep spending on it.
+        retry = await app.services.email.submit_task(app.principal, kind="refresh")
+        retry_run = await app.runs.get(retry.run_id)
+        assert retry_run.status is RunStatus.COMPLETED, retry_run.failure
+        assert retry_run.model_call_count == 1
+        async with app.uow_factory() as uow:
+            row = await uow.email.get(app.principal, "assessment", abstained)
+        assert row is not None and row.payload["grounded"] is False
+        again = await app.services.email.submit_task(app.principal, kind="refresh")
+        again_run = await app.runs.get(again.run_id)
+        assert again_run.status is RunStatus.COMPLETED
+        assert again_run.model_call_count == 0
+
+
+async def test_rejected_assessment_is_replaced_by_a_valid_retry() -> None:
+    import json
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript
+    from tests.gates.test_email_m18 import _email_settings
+
+    rejected = ScriptedTurn(
+        text=json.dumps(json.loads(_assessment_turn().text) | {"content_importance": 1.5})
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[rejected, _assessment_turn(), _assessment_turn()]),
+        mcp_client_factory=await _two_thread_factory(),
+    ) as app:
+        first = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(first.run_id)).status is RunStatus.COMPLETED
+        retry = await app.services.email.submit_task(app.principal, kind="refresh")
+        retry_run = await app.runs.get(retry.run_id)
+        assert retry_run.status is RunStatus.COMPLETED
+        assert retry_run.model_call_count == 1
+        async with app.uow_factory() as uow:
+            threads = [
+                EmailThread.model_validate(row.payload)
+                for row in await uow.email.list(app.principal, "thread")
+            ]
+            assessments = await uow.email.list(app.principal, "assessment")
+        assert [thread.summary for thread in threads] == ["Board request", "Board request"]
+        assert all(row.payload["grounded"] is True for row in assessments)
+        again = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(again.run_id)).model_call_count == 0
+
+
+async def test_rejected_automatic_draft_leaves_thread_undrafted_and_refresh_completes() -> None:
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript
+    from tests.gates.test_email_m18 import _email_settings
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(
+            turns=[_assessment_turn(needs_reply=True), ScriptedTurn(text='{"body": ""}')]
+        ),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert run.model_call_count == 2
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+            drafts = await uow.email.list(app.principal, "draft")
+        assert drafts == []
+        assert EmailThread.model_validate(thread.payload).needs_reply is True
+        task = await app.services.email.get_task(app.principal, run.id)
+        assert task is not None
+        assert task.stage == "completed"
+        assert task.settled_cost == run.usage.cost
+
+
+async def test_rejected_requested_draft_fails_its_task_and_keeps_the_prior_draft() -> None:
+    from dataclasses import replace
+
+    from agent_core.domain.messages import FakeModelScript
+    from tests.gates.test_email_m18 import _email_settings
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[ScriptedTurn(text='{"body": "", "note": "private"}')]),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        thread, _ = await _seed_draft(app)
+        operation = await app.services.email.submit_task(
+            app.principal, kind="draft", thread_id=thread.id
+        )
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.FAILED
+        assert run.failure is not None
+        assert run.failure.error_class == "EmailModelResultError"
+        assert "private" not in run.failure.model_dump_json()
+        draft = (await app.services.email.thread(app.principal, thread.id))["draft"]
+        assert isinstance(draft, dict) and draft["body"] == "Thanks. I will review them."
+
+
 async def test_refresh_recovery_accounts_completed_pending_read_before_new_work() -> None:
     from dataclasses import replace
     from uuid import UUID

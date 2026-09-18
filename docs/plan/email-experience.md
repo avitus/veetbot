@@ -593,6 +593,17 @@ nested semantic facts, for strict structured output. Nullable values and empty
 lists express absence explicitly. Domain defaults and local evidence validation
 remain unchanged, and token estimation uses the actual transmitted schema.
 
+A completed response that local validation rejects (malformed or out-of-bound
+JSON, tool calls, or no final message) is neither assessment nor draft
+evidence, and its text is not stored or reported. During a refresh it affects
+only its own thread. A rejected assessment records the explicit abstention that
+ungrounded evidence receives: no importance, urgency or reply need, and a
+generic review summary. The next slice retries the same passage once. A second
+rejection is reused until the ordinary invalidation rules reassess the thread.
+A rejected automatic draft leaves the thread undrafted. The slice continues and
+its attempt settles as a completed response. An owner-requested draft still
+fails its task. Provider failures and request rejections still end the run.
+
 The conversation index excludes the server-owned operational marker and draft-only
 email thread sessions within each repository query before cursor limits apply.
 An email thread session becomes visible after an owner `user.message.created`

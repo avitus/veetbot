@@ -80,6 +80,10 @@ class EmailToolError(Exception):
     """A normalized unavailable/denied read; never contains provider content."""
 
 
+class EmailModelResultError(EmailToolError):
+    """A completed model response that is not a valid email result; never contains its text."""
+
+
 class _ModelOutcomeError(Exception):
     def __init__(self, outcome: RunOutcome) -> None:
         self.outcome = outcome
@@ -861,6 +865,7 @@ class _TaskIO:
                 and thread.profile_revision == revision
                 and prior is not None
                 and prior.payload.get("analysis_complete") is True
+                and prior.payload.get("retry_pending") is not True
                 and prior.payload.get("model_revision") == self._model_revision()
                 and prior.payload.get("source_fingerprint") == thread.source_fingerprint
             )
@@ -868,8 +873,11 @@ class _TaskIO:
         def assessment_order(thread: EmailThread) -> tuple[float, float, str]:
             """Prioritize the oldest unfinished assessments with deterministic tie breaking."""
             prior = assessments.get(str(thread.id))
+            # A rejected result's single retry runs in the next slice.
             return (
-                float("-inf") if prior is None else prior.updated_at.timestamp(),
+                float("-inf")
+                if prior is None or prior.payload.get("retry_pending") is True
+                else prior.updated_at.timestamp(),
                 -thread.updated_at.timestamp(),
                 str(thread.id),
             )
@@ -934,7 +942,9 @@ class _TaskIO:
             eligible, key=lambda item: (-item.priority, -item.updated_at.timestamp())
         )[:3]:
             if thread.draft_id is None:
-                await self.generate_draft(thread.id)
+                # A rejected proposal leaves only this thread undrafted.
+                with suppress(EmailModelResultError):
+                    await self.generate_draft(thread.id)
 
     async def _changes(
         self, account: EmailAccount, sync: EmailSyncState
@@ -1212,15 +1222,19 @@ class _TaskIO:
         invoked = await _invoke_model(c, step, request, None)
         if isinstance(invoked, RunOutcome):
             raise _ModelOutcomeError(invoked)
+        # The completed attempt is already accounted, whatever its result holds.
+        await checkpoint(c, "email_model_completed")
         if invoked.tool_calls:
-            raise EmailToolError("The model returned tools instead of an email result.")
+            raise EmailModelResultError("The model returned tools instead of an email result.")
         message = select_final_message(invoked)
         if message is None:
-            raise EmailToolError("The model returned no email result.")
+            raise EmailModelResultError("The model returned no email result.")
         text = "\n".join(part.text for part in message.content if isinstance(part, TextPart))
-        value = schema.model_validate_json(text)
-        await checkpoint(c, "email_model_completed")
-        return value
+        try:
+            return schema.model_validate_json(text)
+        except ValueError:
+            # Validation errors quote their input, which can repeat private mail.
+            raise EmailModelResultError("The model returned an invalid email result.") from None
 
     def _model_revision(self) -> str:
         """Identify the pinned provider, registry, and assessment prompt revision."""
@@ -1242,8 +1256,10 @@ class _TaskIO:
             previous.get("source_fingerprint") == thread.source_fingerprint
             and previous.get("model_revision") == self._model_revision()
         )
+        retrying = same_source and previous.get("retry_pending") is True
         if (
             same_source
+            and not retrying
             and thread.assessment_version == EMAIL_POLICY_VERSION
             and previous.get("analysis_complete") is True
             and previous.get("assessment_context") == learning.get("assessment_context")
@@ -1300,13 +1316,29 @@ class _TaskIO:
             },
         }
         next_cursor = len(segments) if was_complete else selected_index + 1
-        assessment = await self.model(
-            assessment_instruction(
-                self.context.clock.now(), people_enabled=self.semantics.people_enabled
-            ),
-            evidence,
-            EmailPeopleAssessment if self.semantics.people_enabled else EmailAssessment,
-        )
+        rejected = False
+        try:
+            assessment = await self.model(
+                assessment_instruction(
+                    self.context.clock.now(), people_enabled=self.semantics.people_enabled
+                ),
+                evidence,
+                EmailPeopleAssessment if self.semantics.people_enabled else EmailAssessment,
+            )
+        except EmailModelResultError:
+            # A rejected result is no evidence. Abstain for this thread as for an
+            # ungrounded one, and let the rest of the slice continue.
+            rejected = True
+            assessment = EmailAssessment(
+                summary="",
+                reason="",
+                topics=[],
+                content_importance=0,
+                relationship_importance=0,
+                urgency=0,
+                needs_reply=False,
+                bulk=False,
+            )
         assert isinstance(assessment, EmailAssessment)
         value = assessment.model_dump(mode="json")
         quotes = assessment.supported_evidence
@@ -1321,7 +1353,11 @@ class _TaskIO:
             # so the same bad extraction does not consume every refresh budget.
             value.update(
                 summary="Review the original conversation.",
-                reason="Automatic assessment could not be grounded in the retrieved text.",
+                reason=(
+                    "Automatic assessment returned an invalid result."
+                    if rejected
+                    else "Automatic assessment could not be grounded in the retrieved text."
+                ),
                 topics=[],
                 content_importance=0,
                 urgency=0,
@@ -1329,12 +1365,16 @@ class _TaskIO:
                 attention_expires_at=None,
                 supported_evidence=[],
             )
+        # A first rejection keeps its analysis position for one retry of the
+        # same passage; a second is cached like any other abstention.
+        retry = rejected and not retrying
         value.update(
             grounded=grounded,
             assessment_context=learning.get("assessment_context"),
             profile_revision=int(str(learning.get("profile_revision", 0))),
-            analysis_cursor=next_cursor,
-            analysis_complete=next_cursor >= len(segments),
+            analysis_cursor=cursor if retry else next_cursor,
+            analysis_complete=was_complete if retry else next_cursor >= len(segments),
+            retry_pending=retry,
             source_fingerprint=thread.source_fingerprint,
             model_revision=self._model_revision(),
         )

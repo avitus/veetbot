@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-18 — One malformed model response no longer fails an Email refresh
+
+- A refresh at 22:48 UTC on 2026-09-17 failed as an internal error after one
+  assessment response did not match its schema. The parse raised a raw
+  validation error outside every per-thread guard, so the remaining threads
+  were not assessed and the client reported that Mail could not be updated.
+- A rejected response (invalid JSON, out-of-bound values, tool calls or no
+  result) now records the same abstention as ungrounded evidence for that
+  thread, keeps none of its text, and lets the refresh continue. The next
+  refresh retries that thread once; a second rejection is kept until the
+  thread is next invalidated. A rejected automatic draft leaves its thread
+  undrafted. The attempt still settles, and an owner-requested draft still
+  fails. The Email experience design states the behavior.
+
 ## 2026-09-18 — Chat remembers the people it is told about
 
 - Every chat consolidation since People formation (`formation@11`) became the
