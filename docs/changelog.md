@@ -17,6 +17,10 @@ title: Changelog
   thread is next invalidated. A rejected automatic draft leaves its thread
   undrafted. The attempt still settles, and an owner-requested draft still
   fails. The Email experience design states the behavior.
+- The run's response event had still recorded the text and arguments of any
+  tool calls in the rejected response, which can repeat the mail that
+  induced them. Email assessments and drafts now keep only the tool names
+  there, and the hostile-mail privacy gate checks it.
 
 ## 2026-09-18 — Chat remembers the people it is told about
 

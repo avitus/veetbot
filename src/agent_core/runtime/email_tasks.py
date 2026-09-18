@@ -1219,7 +1219,8 @@ class _TaskIO:
             else 60,
         )
         c.checkpoint.context_origin_trust = TrustLevel.EXTERNAL_UNTRUSTED
-        invoked = await _invoke_model(c, step, request, None)
+        # A rejected result keeps no text, so the response event keeps none of it.
+        invoked = await _invoke_model(c, step, request, None, retain_response=False)
         if isinstance(invoked, RunOutcome):
             raise _ModelOutcomeError(invoked)
         # The completed attempt is already accounted, whatever its result holds.

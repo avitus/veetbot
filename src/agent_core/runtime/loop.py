@@ -425,8 +425,15 @@ async def _invoke_model(
     step: Step,
     request: ModelRequest,
     initial_synthesis_reserve: str | None,
+    *,
+    retain_response: bool = True,
 ) -> ModelTurn | RunOutcome:
-    """Consume one bounded model attempt sequence and persist authoritative usage."""
+    """Consume one bounded model attempt sequence and persist authoritative usage.
+
+    A caller that validates the turn itself and must not store what it rejects
+    passes ``retain_response=False``: the response event then keeps its tool
+    names and stop reason but none of the returned text or arguments.
+    """
 
     while step.attempt_count < context.max_internal_attempts:
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
@@ -583,7 +590,9 @@ async def _invoke_model(
                         *(terminal.turn.assistant_messages if terminal.turn.tool_calls else []),
                         *terminal.turn.tool_calls,
                     ]
-                ],
+                ]
+                if retain_response
+                else [],
             },
         )
         await context.budgets.record_model_usage(

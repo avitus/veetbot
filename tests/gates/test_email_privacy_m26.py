@@ -162,6 +162,13 @@ async def _hostile_mail(*, failure: str | None = None) -> None:
         assert all(server == "gmail_read" for server, _ in calls)
         assert all(item.tool_name.startswith("mcp.gmail_read.") for item in invocations)
         assert not any(event.event_type == "user.message.created" for event in events)
+        # A rejected model result keeps no text: the tool calls the hostile mail
+        # induced must not survive in the run's model-response events.
+        responses = [e for e in events if e.event_type == "model.response.completed"]
+        assert responses and all(
+            MAIL_CANARY not in str(e.payload) and "thief@example.test" not in str(e.payload)
+            for e in responses
+        )
         assert not await app.approvals.list_pending(run_id=run.id)
         assert MAIL_CANARY not in str(processes)
         if failure == "model":
