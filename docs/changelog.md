@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-18 — Chat remembers the people it is told about
+
+- Every chat consolidation since People formation (`formation@11`) became the
+  default failed its distillation call: four optional time-zone and precision
+  fields made OpenAI reject the structured-output schema as `invalid_json_schema`.
+  Only the local fallback ran, so "Kyrri and Riv are my daughters. Erin is my
+  wife" formed a single nameless "User has a wife." The fields are now required,
+  and the guard test that caught the same fault in `formation@9` covers the
+  People schema too.
+- In the same turn, all three explicit saves were refused as untrusted. Recalled
+  memory in context runs the turn at memory trust, which `memory.remember`
+  accepts; its person-linked version demanded user trust and so could not
+  succeed for an owner with memories. It now follows the base tool: memory trust
+  is accepted as an affirmed statement, external content is still refused, the
+  owner's message must still name each person, and an over-portable
+  relationship gets the same retryable refusal.
+
 ## 2026-09-17 — One unusable assessment no longer fails a People email import
 
 - A historical email import parsed each passage assessment without a guard. A

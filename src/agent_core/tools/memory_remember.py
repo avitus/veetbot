@@ -38,6 +38,26 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _portability_refusal(
+    belief_type: BeliefType, portability: Portability | None
+) -> ToolResult | None:
+    if portability is Portability.PORTABLE and belief_type in {
+        BeliefType.FACT,
+        BeliefType.RELATIONSHIP,
+    }:
+        return ToolResult(
+            ok=False,
+            content=[],
+            failure=ToolFailure(
+                kind=ToolFailureKind.INVALID_ARGUMENTS,
+                reason_code="tool.invalid_arguments.portability_ceiling",
+                detail="portable exceeds the selected belief type's portability ceiling",
+                retryable=True,
+            ),
+        )
+    return None
+
+
 class MemoryRememberTool:
     spec = ToolSpec(
         name="memory.remember",
@@ -68,20 +88,8 @@ class MemoryRememberTool:
             if arguments.get("portability") is None
             else Portability(str(arguments["portability"]))
         )
-        if portability is Portability.PORTABLE and belief_type in {
-            BeliefType.FACT,
-            BeliefType.RELATIONSHIP,
-        }:
-            return ToolResult(
-                ok=False,
-                content=[],
-                failure=ToolFailure(
-                    kind=ToolFailureKind.INVALID_ARGUMENTS,
-                    reason_code="tool.invalid_arguments.portability_ceiling",
-                    detail="portable exceeds the selected belief type's portability ceiling",
-                    retryable=True,
-                ),
-            )
+        if (refusal := _portability_refusal(belief_type, portability)) is not None:
+            return refusal
         belief = await self._service.remember(
             session_id=context.session_id,
             run_id=context.run_id,
@@ -137,6 +145,8 @@ class PeopleMemoryRememberTool(MemoryRememberTool):
             return await super().execute(
                 {key: value for key, value in arguments.items() if key != "person_refs"}, context
             )
+        if (refusal := _portability_refusal(parsed.belief_type, parsed.portability)) is not None:
+            return refusal
         belief = await self._service.remember_people(
             parsed,
             session_id=context.session_id,

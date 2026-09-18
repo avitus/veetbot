@@ -109,7 +109,9 @@ async def remember_linked(
 ) -> MemoryRecord:
     if "people.write" not in principal.scopes:
         raise AuthorizationError("missing required scope: people.write")
-    if origin_trust is not TrustLevel.USER:
+    # Recalled memory in context is memory trust, as for any explicit remember;
+    # owner intent is the owner message below, which must name every person.
+    if origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY}:
         raise ToolTrustRejectedError("person-linked explicit memory requires owner intent")
     refs = arguments.person_refs
     if not refs or len({ref.person_id for ref in refs}) != len(refs):
@@ -153,9 +155,13 @@ async def remember_linked(
             portability=arguments.portability,
             sensitivity=sensitivity,
             source_event_ids=[source.event.sequence],
-            origin_trust=TrustLevel.USER,
+            origin_trust=origin_trust,
             explicit=True,
-            authority=MemoryAuthority.USER,
+            authority=(
+                MemoryAuthority.AFFIRMED
+                if origin_trust is TrustLevel.MEMORY
+                else MemoryAuthority.USER
+            ),
             polarity=Polarity.ASSERT,
             confidence=None,
             valid_from=None,

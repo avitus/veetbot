@@ -8,6 +8,8 @@ from agent_core.domain.people_time import SourceTimezone
 
 
 class Proposal(BaseModel):
+    """Provider output: strict structured output refuses any optional property."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
@@ -62,7 +64,7 @@ class RelationshipProposal(Proposal):
     valid_from: AwareDatetime | None
     valid_to: AwareDatetime | None
     precision: Literal["instant", "day", "month", "year", "unknown"]
-    source_timezone: SourceTimezone = None
+    source_timezone: SourceTimezone
 
 
 class CommitmentProposal(Proposal):
@@ -71,8 +73,8 @@ class CommitmentProposal(Proposal):
     state: Literal["proposed", "open", "completed", "cancelled", "uncertain"]
     source_event_id: int = Field(gt=0)
     due_at: AwareDatetime | None
-    due_precision: Literal["instant", "day", "month", "year", "unknown"] = "unknown"
-    source_timezone: SourceTimezone = None
+    due_precision: Literal["instant", "day", "month", "year", "unknown"]
+    source_timezone: SourceTimezone
 
 
 class OrganizationEvidence(Proposal):
@@ -130,7 +132,7 @@ class InteractionEvidence(Proposal):
     ]
     occurred_at: AwareDatetime | None
     precision: Literal["instant", "day", "month", "year", "unknown"]
-    source_timezone: SourceTimezone = None
+    source_timezone: SourceTimezone
     mentions: list[PersonEvidence] = Field(min_length=1, max_length=64)
     participant_keys: list[str] = Field(min_length=1, max_length=64)
 

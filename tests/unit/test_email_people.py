@@ -75,6 +75,8 @@ async def test_unsent_email_draft_cannot_establish_a_committed_action(
                     "state": state,
                     "source_event_id": 1,
                     "due_at": None,
+                    "due_precision": "unknown",
+                    "source_timezone": None,
                 },
             },
         }
@@ -189,6 +191,7 @@ async def test_email_people_reuses_source_and_keeps_attributed_tentative_authori
                 valid_from=None,
                 valid_to=None,
                 precision="unknown",
+                source_timezone=None,
             ),
             commitment=None,
         ),
