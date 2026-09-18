@@ -1482,9 +1482,10 @@ milestones:
     deferred_scope:
     - private in-call tools, automatic commitments, transfers, SMS and call-derived memory
     open_items:
-    - Apply and verify the prepared provider configuration during authorized activation
-    - Verify provider-side admission controls and real signed-byte convention; authorize live test calls
-    - Hosted CI, explicitly authorized CodeRabbit review and production delivery evidence
+    - Read back the applied inbound provider configuration against the reviewed revision
+    - Verify provider-side admission controls and the real signed-byte convention; receipts so far arrived through reconciliation
+    - Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
+    - Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
     evidence:
     - check: private account and receptionist preparation
       outcome: prepared_not_activated
@@ -1528,6 +1529,59 @@ milestones:
         five website tests. Provider redaction fixes passed their focused
         contract and the contract partition; no real Bland calls,
         provider publication or production deployment were performed.
+    - check: production activation of calling and call-result notifications on the owner host
+      outcome: pass
+      detail: >-
+        Calling and signed intake were enabled with release
+        20260917-060736-c43532a; every calling unit ran without a restart from
+        06:09Z on 2026-09-17, and the provider's edge answered the host with 401
+        rather than the earlier 403. AGENT_CALL_NOTIFICATIONS_ENABLED was still
+        0, so no call result could enqueue a push. On 2026-09-17 the owner set it
+        in all three environment files, adding AGENT_NOTIFICATION_API_ENABLED and
+        AGENT_NOTIFICATION_DISPATCH_ENABLED to both calling role files, which
+        each validate the pair on their own. The files kept 0640 root:veetbot,
+        veetbot_call already held SELECT and INSERT on notification_outbox, and
+        the five affected units restarted to active at 18:32Z. The running call
+        worker's and interactive worker's /proc environments carried the flag.
+    - check: live inbound calls to the owner number
+      outcome: pass
+      detail: >-
+        Three inbound calls on 2026-09-17, at 06:14Z, 18:34Z and 23:51Z, were
+        each retained with transcript and summary, and first-run reconciliation
+        backfilled a 2026-09-11 call. The receptionist introduced itself by the
+        reviewed assistant and owner names and disclosed AI identity and
+        transcription. The 06:14Z result stayed unreadable to the owner: pushes
+        were off, and the Chat tool-definition budget excluded every discovered
+        tool (ADR-0105). The 18:34Z push failed on all five devices as
+        TransportError until its retries ran out, because the APNs alert builder
+        had no call_finished case. After both fixes shipped, the 23:51Z result
+        reached all five devices on the first attempt. Signed webhook delivery is
+        not established: the 06:14Z and 18:34Z receipts were created 22 and 31
+        seconds after those calls began and before they ended, which only
+        reconciliation can do, and the 23:51Z receipt's timing fits either path.
+    - check: live outbound call approved through Chat
+      outcome: pass
+      detail: >-
+        On 2026-09-18 at 00:03Z the owner asked Chat to call a phone they
+        control. The question and approval notifications were delivered, and the
+        owner approved. The dispatch reservation bound the recipient hash,
+        argument fingerprint, account and configuration revision before the
+        provider accepted the call at 00:04Z. The call completed after 0.80
+        minutes, and reconciliation matched the provider's record to that
+        reservation rather than rejecting it. The call-result push reached all
+        five devices on the first attempt. The owner reported that the call went
+        well; voice quality rests on that report.
+    - check: production delivery of the calling fixes
+      outcome: pass
+      detail: >-
+        PR 120 merged at 8ae32c9c, carrying the ADR-0105 tool-definition cap and
+        the call_finished alert case. Every status on that commit succeeded,
+        including the deploy-app and deploy-nginx jobs, and the API readiness
+        header, docs.veetbot.com and www.veetbot.com all reported release
+        20260917-202850-8ae32c9. The last Chat plan before the release held 26
+        tools at the 6,000-token budget with no discovered tools. The first after
+        it held 30 at 9,000, including list_calls, get_call and start_call, and
+        the owner listed calls from Chat.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
