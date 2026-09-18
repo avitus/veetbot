@@ -66,11 +66,15 @@ satisfies the same criterion as a local run.
 - A requested pipeline has no previous revision, so the reading-lane floor
   falls back to `origin/main` as its base, which is the range a promotion
   should be judged on.
-- GitHub enforces the requested run. `main` carried no branch protection under
-  ADR-0035, so the exact-head gate was procedural; on 2026-09-17 the owner
-  enabled protection requiring the seven verification contexts as status
-  checks, and a pull request whose head has no requested run can no longer
-  merge. The owner keeps an admin override for an emergency, and the `main`
+- GitHub enforces the requested run's verification jobs. `main` carried no
+  branch protection under ADR-0035, so the exact-head gate was procedural; on
+  2026-09-17 the owner enabled protection requiring the seven verification
+  contexts as status checks, and a pull request whose head has no requested run
+  can no longer merge. The Apple signing smoke is not one of those contexts: it
+  is not a verification partition and runs only in a requested `dev` pipeline
+  (decision 5), so its required pass on the exact revision proposed for `main`
+  remains a check of the review gate, not of branch protection. The owner keeps
+  an admin override for an emergency, and the `main`
   pipeline, which verifies before it delivers, remains the backstop behind it.
   The setting lives in the repository host, outside the configuration this
   repository can test, so no gate test observes it.
