@@ -16,7 +16,17 @@ enum ConversationNavigationUITestFixture {
     static let foldersLaunchArgument = "--ui-testing-folders"
     static let folderID = "00000000-0000-0000-0000-000000000F01"
     static let proposedFolderID = "00000000-0000-0000-0000-000000000F02"
+    static let workFolderID = "00000000-0000-0000-0000-000000000F03"
     static let proposalID = "00000000-0000-0000-0000-000000000E01"
+    /// The pass's next proposal, served once the first has been declined.
+    static let followUpProposalID = "00000000-0000-0000-0000-000000000E02"
+    /// Folder journeys only: a conversation filed in Work and three more that
+    /// join the first in the Lisbon proposal, so it names four as a real one would.
+    static let planningSessionID = "00000000-0000-0000-0000-0000000004A1"
+    static let flightsSessionID = "00000000-0000-0000-0000-0000000004A2"
+    static let hotelSessionID = "00000000-0000-0000-0000-0000000004A3"
+    static let sintraSessionID = "00000000-0000-0000-0000-0000000004A4"
+    static let proposalMemberIDs = [firstSessionID, flightsSessionID, hotelSessionID, sintraSessionID]
 
     static func makeAppearanceIfRequested() -> AppearancePreferences? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument),
@@ -29,6 +39,17 @@ enum ConversationNavigationUITestFixture {
         let preferences = AppearancePreferences(defaults: defaults)
         preferences.textSize = size
         return preferences
+    }
+
+    /// Folder expansion starts from the default on every launch, in a suite of
+    /// its own so a journey never inherits another's, or the owner's, folders.
+    @MainActor
+    static func makeFolderSidebarIfRequested() -> FolderSidebarPreferences? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.folders"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        defaults.removePersistentDomain(forName: suiteName)
+        return FolderSidebarPreferences(defaults: defaults)
     }
 
     @MainActor
@@ -118,6 +139,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var folderDeleted = false
     private static var createdFolderName: String?
     private static var proposalResolved = false
+    private static var proposalDeclined = false
     private static var sessionFolders: [String: String] = [:]
     private static var foldersEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.foldersLaunchArgument)
@@ -125,8 +147,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     /// What a server without the folder routes answers for every one of them.
     private static let foldersUnavailableJSON =
         #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"ui-test"}}"#
-    /// Starts each folder journey with one folder holding the second conversation
-    /// and one open new-folder proposal over the first.
+    /// Starts each folder journey with Travel holding the second conversation,
+    /// Work holding the planning one, and one open new-folder proposal over the
+    /// first conversation and three more.
     static func resetFolders() {
         folderLock.lock()
         defer { folderLock.unlock() }
@@ -134,8 +157,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         folderDeleted = false
         createdFolderName = nil
         proposalResolved = false
+        proposalDeclined = false
         sessionFolders = foldersEnabled
-            ? [ConversationNavigationUITestFixture.secondSessionID: ConversationNavigationUITestFixture.folderID]
+            ? [
+                ConversationNavigationUITestFixture.secondSessionID: ConversationNavigationUITestFixture.folderID,
+                ConversationNavigationUITestFixture.planningSessionID: ConversationNavigationUITestFixture.workFolderID,
+            ]
             : [:]
     }
     /// Starts each native UI test with independent draft, learning and attention state.
@@ -311,8 +338,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = Self.emailApprovalJSON
         case ("GET", "/v1/sessions"):
             statusCode = 200
+            let folderSessions = Self.foldersEnabled ? "," + Self.folderJourneySessionsJSON : ""
             body = """
-                {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)],"next_cursor":null}
+                {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)\(folderSessions)],"next_cursor":null}
                 """
         case ("POST", "/v1/sessions"):
             statusCode = 201
@@ -380,8 +408,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 break
             }
             statusCode = 200
-            let open = Self.folderLock.withLock { !Self.proposalResolved }
-            body = "{\"items\":[\(open ? Self.proposalJSON(state: "proposed", resultingFolderID: nil) : "")],\"next_cursor\":null}"
+            let (open, declined) = Self.folderLock.withLock { (!Self.proposalResolved, Self.proposalDeclined) }
+            let item = open
+                ? Self.proposalJSON(state: "proposed", resultingFolderID: nil)
+                : declined ? Self.followUpProposalJSON : ""
+            body = "{\"items\":[\(item)],\"next_cursor\":null}"
         case ("POST", "/v1/folders"):
             guard Self.foldersEnabled else {
                 statusCode = 404
@@ -420,10 +451,22 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 body = Self.foldersUnavailableJSON
                 break
             }
+            let override = requestJSON()["name"] as? String
+            let name = override ?? "Lisbon Trip"
+            let taken = Self.folderLock.withLock {
+                [Self.folderName, "Work"].contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+            }
+            if taken {
+                statusCode = 409
+                body = #"{"error":{"code":"conflict","message":"A folder with that name already exists.","details":{"reason":"folder_name_taken"},"request_id":"ui-test"}}"#
+                break
+            }
             Self.folderLock.withLock {
                 Self.proposalResolved = true
-                Self.createdFolderName = "Lisbon Trip"
-                Self.sessionFolders[ConversationNavigationUITestFixture.firstSessionID] = ConversationNavigationUITestFixture.proposedFolderID
+                Self.createdFolderName = name
+                for member in ConversationNavigationUITestFixture.proposalMemberIDs {
+                    Self.sessionFolders[member] = ConversationNavigationUITestFixture.proposedFolderID
+                }
             }
             statusCode = 200
             body = Self.proposalJSON(state: "accepted", resultingFolderID: ConversationNavigationUITestFixture.proposedFolderID)
@@ -433,7 +476,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 body = Self.foldersUnavailableJSON
                 break
             }
-            Self.folderLock.withLock { Self.proposalResolved = true }
+            Self.folderLock.withLock {
+                Self.proposalResolved = true
+                Self.proposalDeclined = true
+            }
             statusCode = 200
             body = Self.proposalJSON(state: "declined", resultingFolderID: nil)
         case ("PUT", "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/folder"),
@@ -658,15 +704,36 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let (deleted, name, created) = folderLock.withLock { (folderDeleted, folderName, createdFolderName) }
         var items: [String] = []
         if !deleted { items.append(folderJSON(id: ConversationNavigationUITestFixture.folderID, name: name)) }
+        items.append(folderJSON(id: ConversationNavigationUITestFixture.workFolderID, name: "Work"))
         if let created { items.append(folderJSON(id: ConversationNavigationUITestFixture.proposedFolderID, name: created)) }
         return items.joined(separator: ",")
     }
 
     private static func proposalJSON(state: String, resultingFolderID: String?) -> String {
         let resulting = resultingFolderID.map { "\"\($0)\"" } ?? "null"
+        let members = ConversationNavigationUITestFixture.proposalMemberIDs.map { "\"\($0)\"" }.joined(separator: ",")
         return """
-            {"id":"\(ConversationNavigationUITestFixture.proposalID)","kind":"new_folder","proposed_name":"Lisbon Trip","target_folder_id":null,"member_session_ids":["\(ConversationNavigationUITestFixture.firstSessionID)"],"rationale":null,"derivation":"lexical","state":"\(state)","withdrawal_reason":null,"resulting_folder_id":\(resulting),"created_at":"2026-09-16T12:00:00Z","resolved_at":null}
+            {"id":"\(ConversationNavigationUITestFixture.proposalID)","kind":"new_folder","proposed_name":"Lisbon Trip","target_folder_id":null,"member_session_ids":[\(members)],"rationale":null,"derivation":"lexical","state":"\(state)","withdrawal_reason":null,"resulting_folder_id":\(resulting),"created_at":"2026-09-16T12:00:00Z","resolved_at":null}
             """
+    }
+
+    /// After the Lisbon folder is declined, the next pass proposes filing its
+    /// travel conversations in Travel instead.
+    private static let followUpProposalJSON = """
+        {"id":"\(ConversationNavigationUITestFixture.followUpProposalID)","kind":"add_to_folder","proposed_name":null,"target_folder_id":"\(ConversationNavigationUITestFixture.folderID)","member_session_ids":["\(ConversationNavigationUITestFixture.flightsSessionID)","\(ConversationNavigationUITestFixture.hotelSessionID)"],"rationale":null,"derivation":"lexical","state":"proposed","withdrawal_reason":null,"resulting_folder_id":null,"created_at":"2026-09-16T12:15:00Z","resolved_at":null}
+        """
+
+    private static var folderJourneySessionsJSON: String {
+        [
+            (ConversationNavigationUITestFixture.planningSessionID, "Quarterly planning notes", "2026-08-12"),
+            (ConversationNavigationUITestFixture.flightsSessionID, "Flights to Lisbon in October", "2026-08-11"),
+            (ConversationNavigationUITestFixture.hotelSessionID, "Alfama hotel shortlist", "2026-08-10"),
+            (ConversationNavigationUITestFixture.sintraSessionID, "Day trip to Sintra and Cascais", "2026-08-09"),
+        ]
+        .map { id, title, day in
+            sessionJSON(id: id, title: title, createdAt: "\(day)T00:00:00Z", updatedAt: "\(day)T00:04:00Z")
+        }
+        .joined(separator: ",")
     }
 
     private static let personJSON = """

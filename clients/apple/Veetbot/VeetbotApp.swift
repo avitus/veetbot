@@ -5,6 +5,7 @@ struct VeetbotApp: App {
     @StateObject private var model: ChatViewModel
     @StateObject private var appearance: AppearancePreferences
     @StateObject private var smsIntegration = SmsIntegrationPreferences()
+    @StateObject private var folderSidebar: FolderSidebarPreferences
     #if os(iOS)
     @UIApplicationDelegateAdaptor(NotificationApplicationDelegate.self)
     private var notificationDelegate
@@ -23,9 +24,14 @@ struct VeetbotApp: App {
             wrappedValue: ConversationNavigationUITestFixture.makeAppearanceIfRequested()
                 ?? AppearancePreferences()
         )
+        _folderSidebar = StateObject(
+            wrappedValue: ConversationNavigationUITestFixture.makeFolderSidebarIfRequested()
+                ?? FolderSidebarPreferences()
+        )
         #else
         _model = StateObject(wrappedValue: ChatViewModel())
         _appearance = StateObject(wrappedValue: AppearancePreferences())
+        _folderSidebar = StateObject(wrappedValue: FolderSidebarPreferences())
         #endif
     }
 
@@ -36,7 +42,8 @@ struct VeetbotApp: App {
             VeetbotSceneRoot(
                 model: model,
                 appearance: appearance,
-                smsIntegration: smsIntegration
+                smsIntegration: smsIntegration,
+                folderSidebar: folderSidebar
             )
             .onAppear {
                 notificationDelegate.attach(to: model, smsPreferences: smsIntegration)

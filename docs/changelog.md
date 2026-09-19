@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — Chat folders stay as the owner leaves them, one open at a time
+
+- Folders no longer spring open when Veetbot proposes a new one. Which folders
+  are open is remembered on each device and changes only when the owner opens
+  or closes one; a proposal, a refresh, or a new folder leaves it alone.
+- Solo mode, on by default, keeps one folder open at a time: opening a folder
+  closes the one that was open. A right-click on a folder on the Mac, or a long
+  press on iPhone and iPad, turns it off. Clicking a folder's row opens or
+  closes it.
+- A suggested folder lists each conversation it would file on a line of its
+  own, so the proposal can be read on an iPhone, and a new-folder suggestion
+  has a Rename… button that accepts it under the owner's name. A name that is
+  already taken is shown in the sheet and the suggestion stays open; accepting
+  without renaming now reports a taken name instead of doing nothing.
+- On the Mac, the folder name sheet is a compact dialog rather than a split
+  view with a cramped field, and folders are spaced like conversations rather
+  than each sitting in a section of its own.
+
 ## 2026-09-19 — Willow uses the owner's introduction and can leave a voicemail
 
 - Calls open the way the owner chose: "Hi, this is Willow, Andy's assistant."

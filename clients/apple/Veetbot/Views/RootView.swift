@@ -20,12 +20,14 @@ struct VeetbotSceneRoot: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject var appearance: AppearancePreferences
     @ObservedObject var smsIntegration: SmsIntegrationPreferences
+    @ObservedObject var folderSidebar: FolderSidebarPreferences
 
     /// Applies shared appearance and platform bounds without changing the scene's autosave identity.
     var body: some View {
         RootView(model: model)
             .environmentObject(appearance)
             .environmentObject(smsIntegration)
+            .environmentObject(folderSidebar)
             .appTypography(appearance)
             .tint(AppTheme.turquoise)
         #if DEBUG && !SWIFT_PACKAGE
@@ -396,7 +398,7 @@ private struct SessionSidebar: View {
     @State private var showingPersonaEditor = false
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
-    @State private var collapsedFolderIDs: Set<UUID> = []
+    @EnvironmentObject private var folderSidebar: FolderSidebarPreferences
     @State private var folderEditor: FolderEditorRequest?
     @State private var folderDeletionCandidate: FolderView?
 
@@ -453,6 +455,10 @@ private struct SessionSidebar: View {
         }
         .sheet(item: $folderEditor) { request in
             FolderNameSheet(request: request, model: model)
+        }
+        .onChange(of: model.folders.map(\.id)) { folderIDs in
+            guard model.foldersAvailable else { return }
+            folderSidebar.expansion.retain(only: Set(folderIDs))
         }
         #if os(iOS)
         .toolbar {
@@ -621,6 +627,8 @@ private struct SessionSidebar: View {
     /// between the direct-activation and the compact-navigation sidebars.
     /// Order: suggested folders, the folders, then the unfiled history; with
     /// folders unavailable this renders exactly the flat history of before.
+    /// The folders share one section, each header followed by its conversations
+    /// while it is expanded, so no per-folder section gap separates them.
     @ViewBuilder
     private func historySections<Row: View>(
         @ViewBuilder row: @escaping (SessionHistoryEntry) -> Row
@@ -629,23 +637,34 @@ private struct SessionSidebar: View {
         if model.foldersAvailable, !model.suggestedFolders.isEmpty {
             Section("Suggested folders") {
                 ForEach(model.suggestedFolders) { proposal in
-                    SuggestedFolderRow(proposal: proposal, model: model)
+                    SuggestedFolderRow(proposal: proposal, model: model) {
+                        folderEditor = .acceptProposal(proposal)
+                    }
                 }
             }
         }
-        ForEach(grouped.folders) { section in
+        if !grouped.folders.isEmpty {
             Section {
-                DisclosureGroup(isExpanded: expansionBinding(section.id)) {
-                    ForEach(section.entries) { entry in
-                        row(entry)
-                    }
-                } label: {
-                    FolderSectionLabel(
+                ForEach(grouped.folders) { section in
+                    let expanded = folderSidebar.expansion.isExpanded(section.id)
+                    FolderHeaderRow(
                         folder: section.folder,
                         count: section.entries.count,
+                        isExpanded: expanded,
+                        solo: folderSidebar.expansion.solo,
+                        onToggle: { setFolder(section.id, expanded: !expanded) },
                         onRename: { folderEditor = .rename(section.folder) },
-                        onDelete: { folderDeletionCandidate = section.folder }
+                        onDelete: { folderDeletionCandidate = section.folder },
+                        onSetSolo: { solo in
+                            folderSidebar.expansion.setSolo(solo, order: grouped.folders.map(\.id))
+                        }
                     )
+                    if expanded {
+                        ForEach(section.entries) { entry in
+                            row(entry)
+                                .padding(.leading, 24)
+                        }
+                    }
                 }
             }
         }
@@ -665,17 +684,12 @@ private struct SessionSidebar: View {
         }
     }
 
-    private func expansionBinding(_ folderID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { !collapsedFolderIDs.contains(folderID) },
-            set: { expanded in
-                if expanded {
-                    collapsedFolderIDs.remove(folderID)
-                } else {
-                    collapsedFolderIDs.insert(folderID)
-                }
-            }
-        )
+    /// Only the owner's own toggle changes what is expanded; in solo mode,
+    /// expanding one folder collapses the one that was open.
+    private func setFolder(_ folderID: UUID, expanded: Bool) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            folderSidebar.expansion.setExpanded(expanded, folder: folderID)
+        }
     }
 
     @ViewBuilder

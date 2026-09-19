@@ -137,6 +137,12 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingAFolderThroughItsMenuUpdatesTheSection \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAcceptingASuggestedFolderFilesTheConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testDecliningASuggestedFolderRemovesIt \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testOpeningAFolderInSoloModeClosesTheOpenOne \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testANewProposalLeavesFolderExpansionAlone \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testASuggestedFolderListsEachConversationItWouldFile \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingASuggestedFolderBeforeAcceptingIt \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderNameSheetIsSizedForItsContentOnMac \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAdjacentFoldersSitOneRowApartOnMac \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

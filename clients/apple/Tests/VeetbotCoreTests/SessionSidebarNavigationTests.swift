@@ -174,7 +174,11 @@ import Testing
         #expect(!directList.contains("ForEach(model.history)"))
         #expect(!navigationList.contains("ForEach(model.history)"))
         #expect(source.contains("Section(\"Suggested folders\")"))
-        #expect(source.contains("DisclosureGroup(isExpanded:"))
+        // A folder expands from the device's remembered state, never from a
+        // list control's own, so a proposal or refresh cannot reopen it.
+        #expect(source.contains("FolderHeaderRow("))
+        #expect(source.contains("folderSidebar.expansion.isExpanded(section.id)"))
+        #expect(!source.contains("DisclosureGroup(isExpanded:"))
     }
 
     /// Every folder control carries a stable identifier and is gated on
@@ -200,6 +204,7 @@ import Testing
             "sidebar.new-folder",
             "sidebar.folder.rename",
             "sidebar.folder.delete",
+            "sidebar.folder.solo",
             "sidebar.session.move.none",
             "folder.name",
             "folder.save",
@@ -213,6 +218,7 @@ import Testing
             "sidebar.session.move.to.\\(",
             "sidebar.proposal.\\(",
             "sidebar.proposal.accept.\\(",
+            "sidebar.proposal.rename.\\(",
             "sidebar.proposal.decline.\\(",
         ] {
             #expect(combined.contains(prefix), "missing \(prefix)")

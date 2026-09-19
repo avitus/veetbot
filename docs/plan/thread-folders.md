@@ -431,15 +431,24 @@ the server-assigned `folder_id` beside the title, the server's value wins on
 every reconciliation, and the list of folders and open proposals is fetched
 with the history and held in memory. The sidebar renders, in order, a
 suggested-folders section with one row per open proposal — the proposed name
-or target, the member titles resolved from the cached history, and accept and
-decline controls — then one collapsible section per folder whose context
-menu renames or deletes it, then the flat history of unfiled conversations,
-then a new-folder control. Each conversation row gains a move menu listing the
-folders, an unfile action, and a new-folder action. Creating and renaming use
-a sheet with a text field and an inline error, so a duplicate name or a
-refused value is shown where it was typed; deleting a folder uses the same
-confirmation idiom as deleting a conversation, with a message saying that the
-conversations return to history and nothing is deleted.
+or target, each member title resolved from the cached history on a line of
+its own, and accept and decline controls, plus for a new folder a rename
+control that accepts it under the owner's name through the route's optional
+override — then one section holding the folders, each a row that expands to
+its conversations and whose context menu renames or deletes it or switches
+solo mode, then the flat history of unfiled conversations, then a new-folder
+control. Which folders are expanded is device state, remembered across
+launches and never sent to the server, and only the owner's own toggles
+change it: a proposal, a refresh, or a new folder never reopens a closed one.
+In solo mode, the default, at most one folder is open and opening one closes
+the other; with solo off, every folder is open until the owner closes it.
+Each conversation row gains a move menu listing the folders, an unfile
+action, and a new-folder action. Creating, renaming, and accepting under a new
+name use a sheet with a text field and an inline error, so a duplicate name or
+a refused value is shown where it was typed and the proposal stays open;
+deleting a folder uses the same confirmation idiom as deleting a conversation,
+with a message saying that the conversations return to history and nothing is
+deleted.
 
 Against a server without the flag — a 404 or 405 on the folder list — the
 client marks folders unavailable, renders exactly today's flat history, hides
@@ -650,8 +659,10 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
    add-to-folder proposals without a learned policy; whether that is enough
    is a metric question.
 2. Whether a folder should collapse by default once it exceeds some size.
-   The sidebar keeps sections expanded and remembers the owner's choice per
-   device; a default can follow the unfiled-share and folder-size metrics.
+   The sidebar remembers the owner's expansion per device; in solo mode, the
+   owner's default since 2026-09-19, every folder starts collapsed and one is
+   open at a time, and with solo off every folder starts expanded. A
+   size-based default can follow the unfiled-share and folder-size metrics.
 
 ## Implementation checkpoint: 2026-09-16
 
