@@ -63,25 +63,30 @@ public struct GroupedConversationHistory: Equatable, Sendable {
 
 /// A proposal as the sidebar shows it: a headline and the member titles it can
 /// resolve from the cached history. A kind this build does not know is hidden.
+/// A new-folder proposal also carries the name the owner may change before
+/// accepting.
 public struct FolderProposalPresentation: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let kind: FolderProposalKind
     public let headline: String
     public let memberTitles: [String]
     public let unresolvedMemberCount: Int
+    public let proposedName: String?
 
     public init(
         id: UUID,
         kind: FolderProposalKind,
         headline: String,
         memberTitles: [String],
-        unresolvedMemberCount: Int
+        unresolvedMemberCount: Int,
+        proposedName: String? = nil
     ) {
         self.id = id
         self.kind = kind
         self.headline = headline
         self.memberTitles = memberTitles
         self.unresolvedMemberCount = unresolvedMemberCount
+        self.proposedName = proposedName
     }
 
     public static func make(
@@ -114,8 +119,95 @@ public struct FolderProposalPresentation: Identifiable, Equatable, Sendable {
                 kind: kind,
                 headline: headline,
                 memberTitles: resolved,
-                unresolvedMemberCount: proposal.memberSessionIDs.count - resolved.count
+                unresolvedMemberCount: proposal.memberSessionIDs.count - resolved.count,
+                proposedName: kind == .newFolder ? proposal.proposedName : nil
             )
         }
+    }
+}
+
+/// Which folders this device shows expanded. In solo mode, the default, at most
+/// one folder is open and expanding one collapses the rest, so a folder the
+/// owner has not opened stays closed. Without solo, every folder is open until
+/// the owner closes it. Only the owner's own toggles change this: a folder or
+/// proposal arriving from the server never does.
+public struct FolderExpansionState: Equatable, Codable, Sendable {
+    public private(set) var solo: Bool
+    /// In solo mode, the one open folder, if any.
+    private var soloExpandedID: UUID?
+    /// Without solo, the folders the owner has closed.
+    private var collapsedIDs: Set<UUID>
+
+    public init(solo: Bool = true) {
+        self.solo = solo
+        soloExpandedID = nil
+        collapsedIDs = []
+    }
+
+    public func isExpanded(_ folderID: UUID) -> Bool {
+        solo ? soloExpandedID == folderID : !collapsedIDs.contains(folderID)
+    }
+
+    public mutating func setExpanded(_ expanded: Bool, folder folderID: UUID) {
+        if solo {
+            if expanded {
+                soloExpandedID = folderID
+            } else if soloExpandedID == folderID {
+                soloExpandedID = nil
+            }
+        } else if expanded {
+            collapsedIDs.remove(folderID)
+        } else {
+            collapsedIDs.insert(folderID)
+        }
+    }
+
+    /// Switches mode, keeping what is on screen as far as the new rule allows:
+    /// turning solo on keeps the first open folder in `order` open, and turning
+    /// it off keeps the open folder open and every other listed folder closed.
+    public mutating func setSolo(_ enabled: Bool, order: [UUID]) {
+        guard enabled != solo else { return }
+        if enabled {
+            soloExpandedID = order.first { !collapsedIDs.contains($0) }
+            collapsedIDs = []
+        } else {
+            collapsedIDs = Set(order.filter { $0 != soloExpandedID })
+            soloExpandedID = nil
+        }
+        solo = enabled
+    }
+
+    /// Forgets folders the server no longer lists, so the remembered state
+    /// stays bounded by the folders that exist.
+    public mutating func retain(only folderIDs: Set<UUID>) {
+        if let open = soloExpandedID, !folderIDs.contains(open) {
+            soloExpandedID = nil
+        }
+        collapsedIDs.formIntersection(folderIDs)
+    }
+}
+
+/// The sidebar's folder expansion, remembered on this device and never sent to
+/// the server. An unreadable stored value falls back to the default.
+@MainActor
+public final class FolderSidebarPreferences: ObservableObject {
+    static let expansionKey = "veetbot.folders.expansion"
+
+    @Published public var expansion: FolderExpansionState {
+        didSet {
+            guard expansion != oldValue,
+                let data = try? JSONEncoder().encode(expansion)
+            else { return }
+            defaults.set(data, forKey: Self.expansionKey)
+        }
+    }
+
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        expansion = defaults.data(forKey: Self.expansionKey)
+            .flatMap { try? JSONDecoder().decode(FolderExpansionState.self, from: $0) }
+            ?? FolderExpansionState()
     }
 }

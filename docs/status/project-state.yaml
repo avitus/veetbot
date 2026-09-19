@@ -18,6 +18,9 @@ project:
   # retention, and conditional native time-zone presentation.
   # ADR-0091 records the owner's non-milestone notification extension:
   # the pinned schedule title and nominal occurrence time may appear in alerts.
+  # ADR-0109 records the owner's non-milestone repair to chat-created schedules:
+  # pause on the second consecutive failure, a USD 5 budget with a synthesis
+  # reserve, and a failure classification on the accounting event.
   authorized_milestones:
     - 0
     - 1

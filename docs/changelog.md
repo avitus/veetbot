@@ -16,6 +16,44 @@ title: Changelog
   full queue each have their own reason. No body, signature or call identifier
   is logged.
 
+## 2026-09-19 — Chat-created schedules no longer pause on their first failure
+
+- The two recurring briefings failed six times between 2026-09-01 and
+  2026-09-17, for unrelated reasons that were each repaired, and every failure
+  paused its schedule until it was resumed by hand, up to seven days later.
+  `schedule.create` had pinned the one-time-reminder value of one allowed
+  failure onto recurring schedules. A schedule created in chat now tolerates
+  one failed occurrence and pauses on the second consecutive failure.
+- Chat-created schedules had also pinned a USD 1 budget with no final-synthesis
+  reserve, the configuration that failed the 2026-09-01 briefing. They now get
+  USD 5 with a reserve of 2 steps, 2 model calls, and USD 1, so a research run
+  near its budget writes its answer instead of failing.
+- The cause of three failures was lost when their conversations were deleted.
+  `schedule.run_accounted` now keeps the failed run's reason, error class, and
+  sanitized provider code, without any run content.
+- Existing schedules keep their pinned values until an API client revises
+  them (ADR-0109). Both briefings were revised to these values through the API
+  on 2026-09-19. Each still carries one failure from its last pause, which its
+  next completed run clears.
+
+## 2026-09-19 — Chat folders stay as the owner leaves them, one open at a time
+
+- Folders no longer spring open when Veetbot proposes a new one. Which folders
+  are open is remembered on each device and changes only when the owner opens
+  or closes one; a proposal, a refresh, or a new folder leaves it alone.
+- Solo mode, on by default, keeps one folder open at a time: opening a folder
+  closes the one that was open. A right-click on a folder on the Mac, or a long
+  press on iPhone and iPad, turns it off. Clicking a folder's row opens or
+  closes it.
+- A suggested folder lists each conversation it would file on a line of its
+  own, so the proposal can be read on an iPhone, and a new-folder suggestion
+  has a Rename… button that accepts it under the owner's name. A name that is
+  already taken is shown in the sheet and the suggestion stays open; accepting
+  without renaming now reports a taken name instead of doing nothing.
+- On the Mac, the folder name sheet is a compact dialog rather than a split
+  view with a cramped field, and folders are spaced like conversations rather
+  than each sitting in a section of its own.
+
 ## 2026-09-19 — Willow uses the owner's introduction and can leave a voicemail
 
 - Calls open the way the owner chose: "Hi, this is Willow, Andy's assistant."

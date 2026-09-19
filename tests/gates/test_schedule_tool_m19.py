@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import cast
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.schedules import ScheduleDefinitionLimits
 from agent_core.domain.tools import ToolFailureKind
 from agent_core.tools.registry import RegisteredTool
 from agent_core.tools.schedule_create import ScheduleCreateTool
@@ -281,3 +283,90 @@ async def test_schedule_create_tool_replays_a_cancelled_schedule_as_terminal() -
     [narration] = replay.content
     assert isinstance(narration, TextPart)
     assert "will not fire again" in narration.text
+
+
+BRIEFING_ARGUMENTS = {
+    "title": "Weekday venture briefing",
+    "instruction": "Research this morning's venture technology news and brief me.",
+    "cadence": {
+        "kind": "WEEKLY",
+        "local_time": "09:00:00",
+        "timezone": "America/Los_Angeles",
+        "weekdays": [1, 2, 3, 4, 5],
+    },
+}
+
+
+async def test_schedule_create_pins_failure_tolerance_and_synthesis_headroom() -> None:
+    async with build(
+        settings=_enabled_settings(),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        enabled_tools=["schedule.create"],
+    ) as composition:
+        registered = cast(
+            RegisteredTool,
+            composition.tool_pipeline._registry.get("schedule.create"),
+        )
+        tool = cast(ScheduleCreateTool, registered.implementation)
+        context = replace(
+            tool_context(),
+            principal=composition.principal,
+            idempotency_key="briefing-defaults",
+        )
+        result = await tool.execute(BRIEFING_ARGUMENTS, context)
+        page = await composition.schedules.list(composition.principal, 10, None)
+
+    assert result.ok is True
+    [record] = page.items
+    revision = record.revision
+    # One failed morning is tolerated; the second consecutive failure pauses.
+    assert revision.max_consecutive_failures == 2
+    # A research run near its budget writes its answer instead of failing.
+    assert revision.limits.max_cost == Decimal("5")
+    assert revision.limits.synthesis_reserve_cost == Decimal("1")
+    assert revision.limits.synthesis_reserve_steps == 2
+    assert revision.limits.synthesis_reserve_model_calls == 2
+
+
+async def test_schedule_create_omits_a_reserve_its_pinned_limit_cannot_hold() -> None:
+    async with build(
+        settings=_enabled_settings(),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        enabled_tools=["schedule.create"],
+    ) as composition:
+        registered = cast(
+            RegisteredTool,
+            composition.tool_pipeline._registry.get("schedule.create"),
+        )
+        default_tool = cast(ScheduleCreateTool, registered.implementation)
+        tool = ScheduleCreateTool(
+            default_tool._service,
+            default_tool._agent,
+            ScheduleDefinitionLimits(
+                max_run_timeout_seconds=300,
+                max_misfire_grace_seconds=3600,
+                max_steps_per_run=2,
+                max_model_calls_per_run=3,
+                max_tool_calls_per_run=4,
+                max_cost_per_run=Decimal("1"),
+            ),
+        )
+        context = replace(
+            tool_context(),
+            principal=composition.principal,
+            idempotency_key="briefing-tight-ceilings",
+        )
+        result = await tool.execute(BRIEFING_ARGUMENTS, context)
+        page = await composition.schedules.list(composition.principal, 10, None)
+
+    assert result.ok is True
+    [record] = page.items
+    limits = record.revision.limits
+    assert limits.max_cost == Decimal("1")
+    assert limits.synthesis_reserve_cost == Decimal("0")
+    assert limits.max_steps == 2
+    assert limits.synthesis_reserve_steps == 0
+    assert limits.max_model_calls == 3
+    assert limits.synthesis_reserve_model_calls == 2
