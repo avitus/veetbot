@@ -116,7 +116,10 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
                 "or binding commitments. Caller ID must be " + client.number + "; config_revision "
                 "must be " + revision + ". Audio recording is disabled; calls are transcribed. "
                 "Maximum duration is " + str(configuration["max_duration_minutes"]) + " minutes. "
-                "Accepted does not mean answered. Never redial an uncertain call."
+                "Accepted does not mean answered. Never redial an uncertain call. "
+                "The recipient speaks first. To leave a voicemail if no one answers, set "
+                "voicemail_message to the exact words for the owner to approve; otherwise "
+                "the call hangs up at voicemail."
             )
         )
         async def start_call(
@@ -128,6 +131,7 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
             max_duration_minutes: Annotated[int, Field(ge=1, le=5)] = 5,
             record: bool = False,
             request_id: str | None = None,
+            voicemail_message: Annotated[str, Field(min_length=1, max_length=1000)] | None = None,
         ) -> CallToolResult:
             if (
                 config_revision != revision
@@ -145,13 +149,15 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
                 + str(configuration["assistant_name"])
                 + ", an AI assistant making a single call on behalf of "
                 + str(configuration["public_name"])
-                + ". Introduce yourself with: Hi, I'm "
+                + ". Introduce yourself with: Hi, this is "
                 + str(configuration["assistant_name"])
                 + ", "
                 + str(configuration["public_name"])
                 + "'s assistant. "
-                "Then disclose that you are an AI assistant and explain that the call is "
-                "transcribed for that person. Pursue only the approved objective below. "
+                "If asked whether you are an AI or whether the call is recorded, say "
+                "truthfully that you are an AI assistant and that the call is transcribed for "
+                + str(configuration["public_name"])
+                + ". Pursue only the approved objective below. "
                 "Use only the disclosed facts. You have no access to private tools, accounts, "
                 "or memories. Do not make purchases, bookings, transfers, or commitments. "
                 "If additional authority is needed, take a message and end the call.\n"
@@ -170,6 +176,12 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
                         "voice": configuration["voice"],
                         "webhook": configuration["webhook_url"],
                         "metadata": {"veetbot_request_id": correlation},
+                        # ADR-0108: the answering side speaks first, and voicemail
+                        # handling is explicit rather than a provider default.
+                        "wait_for_greeting": True,
+                        "voicemail": {"action": "hangup"}
+                        if voicemail_message is None
+                        else {"action": "leave_message", "message": voicemail_message},
                     }
                 )
             )

@@ -230,4 +230,5 @@ nav:
       - ADR-0105 The tool-definition token cap: adr/0105-tool-definition-token-cap.md
       - ADR-0106 Headed authentication ceremony: adr/0106-headed-authentication-ceremony.md
       - ADR-0107 On-demand hosted verification: adr/0107-on-demand-hosted-verification.md
+      - ADR-0108 The owner's introduction and outbound voicemail: adr/0108-owner-introduction-and-outbound-voicemail.md
   - Changelog: changelog.md

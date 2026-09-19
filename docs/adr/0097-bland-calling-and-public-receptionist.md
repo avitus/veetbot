@@ -1,6 +1,7 @@
 # ADR-0097: Bland calling and a public receptionist
 
 - Status: Accepted; owner approved implementation on 2026-09-11 as Milestone 27
+  (amended by ADR-0108, 2026-09-19)
 - Date: 2026-09-11
 - Related: engineering plan Sections 2.5, 21 (roadmap B11), 22, and 29;
   ADR-0017, ADR-0064, ADR-0071, ADR-0082, ADR-0090

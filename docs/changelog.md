@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — Willow uses the owner's introduction and can leave a voicemail
+
+- Calls open the way the owner chose: "Hi, this is Willow, Andy's assistant."
+  Neither direction announces AI identity or transcription unprompted. Asked
+  directly, Willow says truthfully that she is an AI assistant and that the call
+  is transcribed for Andy. The profile generator reproduces the owner's live
+  inbound prompt, so the configuration readback can match again (ADR-0108).
+- An approved outbound call can leave a voicemail. `start_call` takes an
+  optional `voicemail_message` that the owner approves word for word with the
+  brief. Without one, the call hangs up at voicemail, as before, but now by
+  explicit instruction. The SMS variants stay refused.
+- Outbound calls wait for the other side to speak first, so Willow no longer
+  talks over a greeting or iPhone call screening. The first no-answer test was
+  cut off that way.
+
 ## 2026-09-18 — One malformed model response no longer fails an Email refresh
 
 - A refresh at 22:48 UTC on 2026-09-17 failed as an internal error after one

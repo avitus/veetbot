@@ -217,6 +217,26 @@ async def test_outbound_reservation_never_redials_uncertain_dispatch() -> None:
     assert "Ticket 12" not in json.dumps(records[0].payload)
 
 
+async def test_changed_voicemail_message_cannot_reuse_an_approval() -> None:
+    """ADR-0108: the approval fingerprint covers the voicemail the owner approved."""
+    clock, factory = await memory_uow_factory()
+    service = CallService(factory, clock, principal(), call_configuration())
+    dispatched: list[dict[str, Any]] = []
+
+    async def accepted(args: dict[str, Any]) -> MCPCallResult:
+        dispatched.append(args)
+        return MCPCallResult(structured={"provider_call_id": CALL_ID, "status": "accepted"})
+
+    approved = {**arguments(), "voicemail_message": "Please call back about ticket 12."}
+    first = await service.invoke(tool_context(), "bland_call", "start_call", approved, accepted)
+    assert not first.is_error
+    changed = {**approved, "voicemail_message": "Please wire the payment today."}
+    replay = await service.invoke(tool_context(), "bland_call", "start_call", changed, accepted)
+    assert replay.is_error and "bland.approval_changed" in replay.content
+    assert len(dispatched) == 1
+    assert dispatched[0]["voicemail_message"] == approved["voicemail_message"]
+
+
 async def test_simultaneous_outbound_calls_admit_only_one() -> None:
     clock, factory = await memory_uow_factory()
     service = CallService(factory, clock, principal(), call_configuration())
