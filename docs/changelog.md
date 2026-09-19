@@ -4,6 +4,26 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — Chat-created schedules no longer pause on their first failure
+
+- The two recurring briefings failed six times between 2026-09-01 and
+  2026-09-17, for unrelated reasons that were each repaired, and every failure
+  paused its schedule until it was resumed by hand, up to seven days later.
+  `schedule.create` had pinned the one-time-reminder value of one allowed
+  failure onto recurring schedules. A schedule created in chat now tolerates
+  one failed occurrence and pauses on the second consecutive failure.
+- Chat-created schedules had also pinned a USD 1 budget with no final-synthesis
+  reserve, the configuration that failed the 2026-09-01 briefing. They now get
+  USD 5 with a reserve of 2 steps, 2 model calls, and USD 1, so a research run
+  near its budget writes its answer instead of failing.
+- The cause of three failures was lost when their conversations were deleted.
+  `schedule.run_accounted` now keeps the failed run's reason, error class, and
+  sanitized provider code, without any run content.
+- Existing schedules keep their pinned values until an API client revises
+  them (ADR-0109). Both briefings were revised to these values through the API
+  on 2026-09-19. Each still carries one failure from its last pause, which its
+  next completed run clears.
+
 ## 2026-09-19 — Chat folders stay as the owner leaves them, one open at a time
 
 - Folders no longer spring open when Veetbot proposes a new one. Which folders

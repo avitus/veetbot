@@ -433,7 +433,12 @@ After a linked run reaches `COMPLETED`, a post-run hook resets
 failure, and a missed occurrence increment it. User-cancelled runs and overlap
 skips do not. Reaching `max_consecutive_failures` pauses the schedule with
 `pause_reason = failure_limit` and emits `schedule.auto_paused`. The hook is
-idempotent on occurrence ID.
+idempotent on occurrence ID. Its `schedule.run_accounted` event records the
+terminal run status, the resulting failure count, and `failure`: null unless
+the run failed, otherwise the failure reason, error class, and any sanitized
+`provider`, `provider_code`, `http_status`, and `provider_parameter` the run
+recorded (ADR-0109). The failure message and other details stay with the run,
+so the classification survives session erasure without retaining run content.
 
 ## Materialization transaction
 
@@ -911,11 +916,14 @@ future occurrence is an argument failure and leaves no schedule.
 The definition pins the active agent version and its policy profile and always
 sets `requested_scopes = frozenset()`. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
-ceilings. Cost is the minimum of the active agent's finite cost or `1` and the
+ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its
-ceiling; misfire grace is the lesser of 3,600 seconds and its ceiling; the
-schedule permits one consecutive failure before automatic pause. No model
-argument can widen any of these values.
+ceiling; misfire grace is the lesser of 3,600 seconds and its ceiling. The
+limits pin final-synthesis reserves of 2 steps, 2 model calls, and USD 1, each
+kept only when strictly below its pinned total. `max_consecutive_failures` is
+2, so the schedule tolerates one failed occurrence and pauses automatically on
+the second consecutive failure (ADR-0109). No model argument can widen any of
+these values.
 
 The successful result contains `schedule_id`, `state`, `next_fire_at`, and
 whether the application request replayed. After the occurrence's run is
