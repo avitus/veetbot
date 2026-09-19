@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -323,6 +324,34 @@ async def test_signed_intake_deduplicates_then_verifies_provider_ownership() -> 
     assert calls.count("provider_get_call") == 1
     with pytest.raises(NotFoundError):
         await service.get_call(principal().model_copy(update={"principal_id": "attacker"}), CALL_ID)
+
+
+async def test_each_callback_logs_one_content_free_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Neither the proxy nor the listener keeps an access log; the outcome must show."""
+    clock, factory = await memory_uow_factory()
+    service = CallService(factory, clock, principal(), call_configuration())
+    body, signature = signed_body()
+    unparsable = b"not json"
+    unparsable_signature = hmac.new(
+        SIGNING_FIXTURE.encode(), unparsable, hashlib.sha256
+    ).hexdigest()
+    cases = [
+        (body, "", "calling.callback_rejected reason=signature_missing"),
+        (body, signature.upper(), "calling.callback_rejected reason=signature_malformed"),
+        (body, "0" * 64, "calling.callback_rejected reason=signature_mismatch"),
+        (unparsable, unparsable_signature, "calling.callback_rejected reason=payload_invalid"),
+        (body, signature, "calling.callback_accepted"),
+    ]
+    caplog.set_level(logging.WARNING, logger="agent_core.application.calling")
+    for payload, header, expected in cases:
+        caplog.clear()
+        await service.receive(payload, header, SIGNING_FIXTURE)
+        assert [record.getMessage() for record in caplog.records] == [expected]
+        assert [record.levelno for record in caplog.records] == [logging.WARNING]
+        assert "never persist" not in caplog.text
+        assert signature not in caplog.text and CALL_ID not in caplog.text
 
 
 @pytest.mark.parametrize(

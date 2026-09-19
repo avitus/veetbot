@@ -200,7 +200,13 @@ Callback processing:
 Call records include provider identity, direction, timestamps, duration, caller
 claims, transcript, summary, result status, and provenance. Full records are
 owner-only. Logs, metrics, rejection records, and push payloads contain no call
-content. Initial retention is thirty days for transcripts and
+content. Neither the proxy nor the listener keeps an access log, so each
+delivery writes one content-free warning: `calling.callback_accepted`, or
+`calling.callback_rejected` with a fixed reason. The reasons are `oversize`,
+`timeout`, `signature_missing`, `signature_malformed`, `signature_mismatch`,
+`payload_invalid` and `queue_full`. It carries no body, signature, call
+identifier or caller data, and it is the only evidence of whether the signed
+convention holds. Initial retention is thirty days for transcripts and
 summaries, with owner deletion and durable erasure of derived local copies.
 Provider-side retention is a separate account setting to verify during setup;
 local deletion must never be presented as deletion from Bland.

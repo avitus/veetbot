@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — Every call-result webhook leaves a trace
+
+- Nothing recorded whether Bland's post-call webhook ever arrived or passed its
+  signature check. The proxy route deliberately keeps no access log, the
+  listener runs without one, and a rejection returned 401 silently. Every
+  result so far arrived through the worker's polling, so the gap was invisible.
+- Each delivery now writes one content-free warning: `calling.callback_accepted`,
+  or `calling.callback_rejected` with a fixed reason. A missing or malformed
+  signature, a mismatch, an invalid payload, an oversize body, a timeout and a
+  full queue each have their own reason. No body, signature or call identifier
+  is logged.
+
 ## 2026-09-19 — Willow uses the owner's introduction and can leave a voicemail
 
 - Calls open the way the owner chose: "Hi, this is Willow, Andy's assistant."
