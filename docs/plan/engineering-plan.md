@@ -4142,6 +4142,23 @@ authorized production delivery. The verified sequential ceiling stays at
 Milestone 12. Nested or shared folders, Email-mode conversations, automatic
 filing, embeddings and search remain outside this milestone.
 
+ADR-0110 amended this milestone on 2026-09-19. Implement
+[typed-judgment.md](typed-judgment.md): a provider-neutral port for closed,
+typed questions — the probability that a statement holds, a choice among
+offered options, a position on an ordered scale — with the TypeSafe Jev
+adapter as its first provider over a fixed egress endpoint and a call-time
+credential, off by default, with typed failures and a deterministic fallback
+named by every consumer. Its first consumer is the judgment matcher of
+[thread-folders.md](thread-folders.md), which decides which existing folder an
+unfiled conversation belongs in and only ever proposes. The amendment declares
+five further gates — four `gate.judgment.*` and one `gate.folder.*` — which
+join this milestone's acceptance set. It registers no model profile, so
+roadmap B2's model routing is untouched, it adds no embedding, so B6 is
+unamended, and the policy advisory layer stays in B8 until its own policy ADR.
+The same ADR admits an offline, non-activating email-importance evaluation; it
+cannot satisfy or waive a Milestone 26 gate, and Milestone 26's deferral of
+model routing changes stands.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

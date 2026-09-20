@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona|whatsapp|call|people|folder)"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona|whatsapp|call|people|folder|judgment)"
     r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
@@ -31,6 +31,8 @@ MAP_ROW = re.compile(
 # authorized milestone whose specification has not yet declared gates.
 # Milestone 26 was authorized on 2026-09-11 under ADR-0092, Milestone 28 on
 # 2026-09-15 under ADR-0100, and Milestone 29 on 2026-09-16 under ADR-0102.
+# ADR-0110 amended Milestone 29 on 2026-09-19 to admit the typed-judgment port
+# and its `gate.judgment.*` area.
 MAX_MILESTONE = 29
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
@@ -65,7 +67,8 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "email-experience.md": (32, 0),
     "bland-calling.md": (14, 0),
     "people-and-relationships.md": (36, 0),
-    "thread-folders.md": (12, 0),
+    "thread-folders.md": (13, 0),
+    "typed-judgment.md": (4, 0),
     "device-channel-and-sms.md": (12, 0),
     "whatsapp-surface.md": (12, 0),
     "milestone-map.md": (7, 0),

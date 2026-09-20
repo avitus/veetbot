@@ -99,6 +99,7 @@ nav:
       - Adaptive Memory Distillation: plan/adaptive-memory-distillation.md
       - Persona Surface: plan/persona-surface.md
       - Chat Thread Folders: plan/thread-folders.md
+      - Typed Judgment: plan/typed-judgment.md
       - Email Integration: plan/email-integration.md
       - Client Modes and Email Experience: plan/email-experience.md
       - Device Channel & SMS: plan/device-channel-and-sms.md
@@ -232,4 +233,5 @@ nav:
       - ADR-0107 On-demand hosted verification: adr/0107-on-demand-hosted-verification.md
       - ADR-0108 The owner's introduction and outbound voicemail: adr/0108-owner-introduction-and-outbound-voicemail.md
       - ADR-0109 Conversational schedule failure tolerance: adr/0109-conversational-schedule-failure-tolerance-and-headroom.md
+      - ADR-0110 Typed-judgment port and TypeSafe Jev: adr/0110-typed-judgment-port-and-typesafe-jev.md
   - Changelog: changelog.md

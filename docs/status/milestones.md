@@ -242,14 +242,18 @@ functionality or release. Production delivery still follows exact-head CI/review
 
 ### Milestone 29 — Chat thread folders
 
-Twelve gates; independent workstream under ADR-0102. Flat, single-parent
-folders over chat conversations as server-owned state; a maintenance pass
-proposes groupings the owner accepts or declines; nothing files a conversation
-without the owner's acceptance. The schema, both store adapters, the manual
-operations, the proposal lifecycle, the grounded grouping with its lexical
-fallback, the routes behind the flag and the native sidebar are implemented
-with every gate bound to an executable check.
+Seventeen gates; independent workstream under ADR-0102, amended by ADR-0110.
+Flat, single-parent folders over chat conversations as server-owned state; a
+maintenance pass proposes groupings the owner accepts or declines; nothing
+files a conversation without the owner's acceptance. The schema, both store
+adapters, the manual operations, the proposal lifecycle, the grounded grouping
+with its lexical fallback, the routes behind the flag and the native sidebar
+are implemented with their twelve gates bound to executable checks. ADR-0110
+admitted the typed-judgment port and an optional judgment matcher on
+2026-09-19; their five gates are registered pending.
 
+- [ ] Land the typed-judgment port, the TypeSafe adapter and the fake under one contract suite, default off
+- [ ] Implement the judgment folder matcher with its two knobs, audit fields and whole fallback
 - [ ] Exact-head hosted CI and explicitly authorized review evidence
 
 ## Authorized

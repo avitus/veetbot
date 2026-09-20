@@ -1,0 +1,25 @@
+# Canonical gate registry entries for the typed-judgment area (Milestone 29).
+- id: gate.judgment.fixed_egress
+  milestone: 29
+  kind: case
+  spec: docs/plan/typed-judgment.md#hard-gates
+  statement: "**Egress is fixed and the credential is resolved at call time.** The TypeSafe adapter dials exactly one hard-coded HTTPS endpoint and follows no redirect; it resolves the `typesafe` credential through the credential resolver on every call, sends it only as that request's authorization header, and holds it on no object; and no setting, request field, or response changes the destination."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.judgment.default_off
+  milestone: 29
+  kind: case
+  spec: docs/plan/typed-judgment.md#hard-gates
+  statement: "**The port is off until selected, and a credential alone enables nothing.** With `JUDGMENT_PROVIDER` unset or `disabled` no provider is composed and no consumer dials; an unknown selector value fails at load; and with the selector on and the credential missing, startup succeeds, one warning names variables only, and every call fails `judgment.auth_failed` without dialing."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.judgment.typed_failure
+  milestone: 29
+  kind: case
+  spec: docs/plan/typed-judgment.md#hard-gates
+  statement: "**Failures are typed, bounded, and content-free.** Every adapter failure is a `JudgmentProviderError` carrying one of six reason codes and nothing else; an oversize request fails without dialing; an oversize, non-JSON, or schema-invalid response, an unknown choice, and an out-of-range probability are `judgment.output_invalid`; retries are bounded in count and total time and limited to transient failures; and no exception, log line, or event carries request state, a response body, or the credential."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.judgment.priced_contract
+  milestone: 29
+  kind: property
+  spec: docs/plan/typed-judgment.md#hard-gates
+  statement: "**Usage is priced locally and one contract binds every provider.** Cost is the returned input-token count at the pinned, dated price with `docs_snapshot` as its source; the shipped adapter and the fake pass one contract suite through the provider census; and `validate_result` rejects an answer of the wrong type, a choice that was not offered, and a probability out of range on both."
+  check: tests/gates/pending.py::pending_gate

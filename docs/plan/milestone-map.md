@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 32 subject specifications declare 532 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 541
-declarations, 538 registry entries once the 3 aliases are subtracted.
+The 33 subject specifications declare 537 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 546
+declarations, 543 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1622,7 +1622,8 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 
 ### Chat thread folders
 
-[thread-folders.md](thread-folders.md) declares twelve Milestone 29 gates.
+[thread-folders.md](thread-folders.md) declares thirteen Milestone 29 gates.
+The thirteenth arrived with ADR-0110's judgment matcher.
 
 ```text
 1 gate.folder.schema_additive case 29
@@ -1637,6 +1638,19 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 10 gate.folder.routes_exact_scope structural 29
 11 gate.folder.content_free case 29
 12 gate.folder.native_degradation case 29
+13 gate.folder.judgment_matching property 29
+```
+
+### Typed judgment
+
+[typed-judgment.md](typed-judgment.md) declares four Milestone 29 gates,
+admitted with the port by ADR-0110.
+
+```text
+1 gate.judgment.fixed_egress case 29
+2 gate.judgment.default_off case 29
+3 gate.judgment.typed_failure case 29
+4 gate.judgment.priced_contract property 29
 ```
 
 ## The census
@@ -1734,7 +1748,8 @@ milestone  new gates  cumulative  the earliest of them
                                   shared semantic memory and lifecycle
 27                14         490  Bland calling and public correspondence intake
 28                36         526  People identity, temporal relationships, history and governed recall
-29                12         538  chat thread folders, owner-resolved grouping proposals, grounded grouping
+29                17         543  chat thread folders, owner-resolved grouping proposals, grounded grouping,
+                                  the typed-judgment port and judgment folder matching
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1755,14 +1770,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of five hundred and thirty-eight gates are green before
+2.  **Forty-one of five hundred and forty-three gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches five hundred and thirty-eight, which is every
+The cumulative column reaches five hundred and forty-three, which is every
 registry entry, at Milestone 29. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
@@ -1779,7 +1794,8 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
 area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
 entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
-and Milestone 28 adds thirty-six `gate.people.*` entries. Every authorized milestone now has a specification
+and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thirteen
+`gate.folder.*` entries and four `gate.judgment.*` entries. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

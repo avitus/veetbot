@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — ADR-0110 admits a typed-judgment port under Milestone 29
+
+- The owner authorized a provider-neutral port for closed, typed questions —
+  the probability that a statement holds, a choice among offered options, a
+  position on an ordered scale — with TypeSafe's Jev as its first provider.
+  [typed-judgment.md](plan/typed-judgment.md) is its design. It is not a
+  model-gateway provider, registers no model profile, and is off by default
+  behind `JUDGMENT_PROVIDER`.
+- Its first consumer is an optional judgment matcher for chat thread folders:
+  one closed choice per unfiled conversation over the existing folders and an
+  explicit no-match option. It only ever proposes, and any failure leaves the
+  existing grouping unchanged.
+- The same ADR admits an offline, non-activating email-importance evaluation
+  under Milestone 26 and records the owner's acceptance of the vendor's
+  published data terms, which state no deletion period.
+- Five gates are registered pending, four `gate.judgment.*` and
+  `gate.folder.judgment_matching`. Nothing is implemented.
+
 ## 2026-09-19 — The Mac UI lane runs again on macOS 27
 
 - Every `make test-apple-ui-macos` case failed after the macOS 27 upgrade: the

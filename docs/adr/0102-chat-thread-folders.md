@@ -1,6 +1,6 @@
 # ADR-0102: Chat thread folders and grouping proposals
 
-- Status: Accepted — owner authorized Milestone 29 implementation on 2026-09-16
+- Status: Accepted — owner authorized Milestone 29 implementation on 2026-09-16 (amended by ADR-0110, 2026-09-19)
 - Date: 2026-09-16
 - Related: ADR-0045, ADR-0049, ADR-0050, ADR-0077, ADR-0079, ADR-0092, ADR-0100
 - Design: [Chat thread folders](../plan/thread-folders.md)
@@ -84,6 +84,11 @@ checked-in tuning document of seven knobs, one environment flag, and the
 native sidebar work. It admits no new dependency. Model-assisted grouping is
 capped at one call per pass under a fixed cost ceiling and is subject to the
 existing provider egress policy.
+
+ADR-0110 amends this paragraph: Milestone 29 additionally admits the
+typed-judgment port, one vendor adapter behind it with a fixed egress
+endpoint, and an optional judgment matcher for add-to-folder proposals, all
+default off. Decisions 1 through 8 above are unchanged.
 
 ## Alternatives considered
 

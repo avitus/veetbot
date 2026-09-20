@@ -74,6 +74,10 @@ title: Current Milestone
   deterministic fallback, scoped routes behind a default-off flag, and the
   native sidebar. All twelve gates are bound to executable checks; hosted
   CI, review and delivery evidence remain open and the milestone is in progress.
+  ADR-0110 amended it on 2026-09-19 to admit the
+  [typed-judgment port](typed-judgment.md), the TypeSafe Jev adapter behind it
+  and an optional judgment matcher for add-to-folder proposals, all default
+  off; their five gates are registered pending and nothing is implemented.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -479,3 +483,13 @@ sections with proposal review. The implementation landed on 2026-09-16 with
 every gate bound to an executable check; exact-head hosted CI, review and
 delivery evidence remain open. This independent workstream is in progress;
 the verified ceiling remains 12.
+
+ADR-0110 amended the milestone on 2026-09-19. [Typed judgment](typed-judgment.md)
+specifies a provider-neutral port for closed, typed questions with the TypeSafe
+Jev adapter as its first provider and declares four `gate.judgment.*` gates;
+[Chat thread folders](thread-folders.md) gains a thirteenth gate for an
+optional judgment matcher that decides which existing folder an unfiled
+conversation belongs in. Both are default off, the matcher only ever proposes,
+and any failure returns the existing grouping unchanged. The same ADR admits
+an offline, non-activating email-importance evaluation under Milestone 26. The
+five new gates are pending; nothing is implemented.
