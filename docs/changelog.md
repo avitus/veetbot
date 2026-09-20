@@ -4,6 +4,30 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — The Mac UI lane runs again on macOS 27
+
+- Every `make test-apple-ui-macos` case failed after the macOS 27 upgrade: the
+  application under test opened no main window, so every query timed out.
+  XCTest ends the application without quitting it, so AppKit kept the window
+  list each launch had saved. The first launch after the upgrade could not
+  restore the window saved before it, saved an empty list in its place, and
+  every later launch restored that empty list and opened nothing. Mac cases now
+  launch with `-ApplePersistenceIgnoreState YES`.
+- That pair comes before the `--ui-testing-*` flags. AppKit reads launch
+  arguments as `-key value` pairs, so a flag ahead of it takes the key as its
+  value and AppKit opens the leftover `YES` as a document, which also opens no
+  window. The same pairing left the application windowless on 2026-09-15.
+- macOS 27 floats a Writing Tools affordance beside the focused composer, over
+  controls the cases click and hit-test. The composer turns Writing Tools off
+  under the UI-testing fixture only.
+- macOS 27 also reports SwiftUI message text as disabled, and reports a scroll
+  child clipped out of view as hittable. The mixed-tool summary and People
+  identity cases check frames instead of hittability.
+- macOS ignores the touch-style press-and-drag on a divider; the mouse
+  click-and-drag still moves it. The email sidebar case uses the mouse gesture.
+- CircleCI's four Apple jobs move from Xcode 26.6.0 to 27.0.0, so hosted runs
+  and the owner's Mac exercise the same system behavior.
+
 ## 2026-09-18 — One malformed model response no longer fails an Email refresh
 
 - A refresh at 22:48 UTC on 2026-09-17 failed as an internal error after one

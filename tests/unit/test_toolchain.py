@@ -820,9 +820,9 @@ def test_ci_has_the_required_partitions() -> None:
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
         if name in {"apple", "apple-ios", "apple-signing-smoke", "apple-testflight"}:
-            assert job["macos"]["xcode"] == "26.6.0"
+            assert job["macos"]["xcode"] == "27.0.0"
             if name in {"apple", "apple-ios"}:
-                assert job["macos"] == {"xcode": "26.6.0"}
+                assert job["macos"] == {"xcode": "27.0.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = {
@@ -1236,7 +1236,7 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
     smoke_job = jobs["apple-signing-smoke"]
 
     assert smoke_job["macos"] == {
-        "xcode": "26.6.0",
+        "xcode": "27.0.0",
         "code_signing": ["veetbot-app-store"],
     }
     assert smoke_job["resource_class"] == "m4pro.medium"
@@ -2162,6 +2162,31 @@ def test_apple_ui_cases_configure_the_fixture_before_one_launch() -> None:
                 r"app\.launch\(\)|launchFullEmailInbox\(\)|submitSlowChatMessage\(", body
             )
             assert launches, f"{name} never launches the app"
+
+
+def test_apple_ui_mac_cases_launch_without_restoring_saved_windows() -> None:
+    """Each Mac case opens a new main window instead of restoring saved ones.
+
+    XCTest ends the app without quitting it, so AppKit kept whatever window list
+    the previous launch saved. After the macOS 27 upgrade SwiftUI could not
+    restore the saved window, the launch saved an empty list, and every later
+    launch restored that empty list and opened no window.
+
+    The pair must come before the bare fixture flags. Launch arguments are read
+    as ``-key value`` pairs, so a flag ahead of it takes the key as its value and
+    leaves ``YES`` for AppKit to open as a document, which also opens no window.
+    """
+    source = (
+        ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+    setup = _swift_functions(source)["setUp"]
+
+    mac = re.search(r"#if os\(macOS\)\n(.*?)#endif", setup, re.S)
+    assert mac, "setUp has no macOS launch configuration"
+    assert 'app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]' in mac.group(1)
+    assert mac.start() < setup.index('app.launchArguments.append("--ui-testing-'), (
+        "a fixture flag precedes the state pair and would consume its key"
+    )
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:

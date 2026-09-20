@@ -10,6 +10,15 @@ final class ConversationNavigationUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
+        #if os(macOS)
+        // XCTest ends the app without quitting it, so AppKit would restore the
+        // window list the previous launch saved. Once that list is empty, the
+        // app restores no window and never opens one. Launch arguments are read
+        // as -key value pairs: keep this pair ahead of the bare fixture flags,
+        // or a flag takes the key as its value and AppKit opens YES as a
+        // document instead of a window.
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        #endif
         app.launchArguments.append("--ui-testing-conversation-navigation")
         // Each case adds its fixture options and then launches once; launching
         // here would make those cases pay for a second launch.
@@ -62,9 +71,10 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(summary.label.contains("6 Failed"))
         XCTAssertEqual(summary.value as? String, "Collapsed")
         XCTAssertLessThan(summary.frame.height, 80)
-        let answer = app.staticTexts["Your answer is visible below the tool summary."]
+        // SwiftUI nests a second copy of the text, so resolve one match for frames.
+        let answer = app.staticTexts["Your answer is visible below the tool summary."].firstMatch
         XCTAssertTrue(answer.waitForExistence(timeout: 5))
-        XCTAssertTrue(answer.isHittable)
+        checkAnswerStaysVisible(answer, below: summary)
         #if os(macOS)
         summary.click()
         #else
@@ -85,7 +95,23 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         XCTAssertEqual(summary.value as? String, "Collapsed")
         XCTAssertFalse(app.staticTexts["Example result 1"].exists)
+        checkAnswerStaysVisible(answer, below: summary)
+    }
+
+    /// Keeps the answer on screen under the summary row.
+    ///
+    /// macOS 27 reports SwiftUI's message text as disabled in the accessibility
+    /// tree, so hittability no longer follows from visibility there.
+    private func checkAnswerStaysVisible(_ answer: XCUIElement, below summary: XCUIElement) {
+        #if os(macOS)
+        XCTAssertTrue(
+            app.windows.firstMatch.frame.contains(answer.frame),
+            app.debugDescription
+        )
+        XCTAssertGreaterThan(answer.frame.minY, summary.frame.maxY)
+        #else
         XCTAssertTrue(answer.isHittable)
+        #endif
     }
 
     /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
@@ -687,7 +713,11 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(macOS)
         let scrolls = app.sheets.firstMatch.scrollViews
         let detailScroll = scrolls.element(boundBy: scrolls.count - 1)
-        for _ in 0..<6 where !repair.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        // SwiftUI may report an offscreen scroll child as hittable. Bring its
+        // complete frame into the viewport before exercising the action.
+        for _ in 0..<6 where !repair.isHittable || !detailScroll.frame.contains(repair.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
         #else
         scrollUntilVisible(repair)
         #endif
@@ -706,14 +736,18 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(apply)
         let saved = app.staticTexts["Identity change saved."]
         #if os(macOS)
-        for _ in 0..<6 where !saved.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        for _ in 0..<6 where !saved.isHittable || !detailScroll.frame.contains(saved.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
         #else
         scrollUntilVisible(saved)
         #endif
         XCTAssertTrue(saved.waitForExistence(timeout: 5))
         let undo = app.buttons["Preview undo"]
         #if os(macOS)
-        for _ in 0..<6 where !undo.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        for _ in 0..<6 where !undo.isHittable || !detailScroll.frame.contains(undo.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
         #else
         scrollUntilVisible(undo)
         #endif
@@ -1110,9 +1144,11 @@ final class ConversationNavigationUITests: XCTestCase {
         let divider = app.splitters.firstMatch
         XCTAssertTrue(divider.waitForExistence(timeout: 5))
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
+        // macOS 27 ignores the touch-style press-drag on a divider; the mouse
+        // click-drag still moves it.
+        start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
         XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
-                      "Dragging the divider must widen the email list")
+                      "Dragging the divider must widen the email list\n\(app.debugDescription)")
         let resizedWidth = search.frame.width
         XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
         app.buttons["mode.chat"].click()

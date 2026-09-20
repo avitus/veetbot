@@ -106,6 +106,15 @@ or credential. It runs `make test-apple-ui-macos` and then
 family changed. Each UI case sets its launch arguments and environment before
 calling `app.launch()` once. Terminate and relaunch only in a case that tests
 relaunch behavior.
+Every Mac case also launches with `-ApplePersistenceIgnoreState YES`. XCTest
+ends the app without quitting it, so AppKit would otherwise restore the window
+list the previous launch saved; an empty list leaves the app with no window.
+The main window's saved size is the app's own preference and still persists.
+AppKit reads launch arguments as `-key value` pairs, so the pair comes before
+the bare `--ui-testing-*` flags: a flag ahead of it would take the key as its
+value, and AppKit would open the leftover `YES` as a document instead of a
+window. Under the fixture the composer also turns off Writing Tools, whose
+macOS 27 affordance window otherwise floats over the controls the cases click.
 The keyboard-dismissal case holds its fake submission pending until teardown,
 so a slow accessibility query cannot consume the response-delay window.
 
