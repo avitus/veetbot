@@ -77,8 +77,8 @@ title: Current Milestone
   ADR-0110 amended it on 2026-09-19 to admit the
   [typed-judgment port](typed-judgment.md), the TypeSafe Jev adapter behind it
   and an optional judgment matcher for add-to-folder proposals, all default
-  off. The port and adapter are implemented with their four gates bound to
-  executable checks; the matcher and its gate are pending.
+  off. The port, the adapter and the matcher are implemented and all seventeen
+  gates are bound to executable checks; the matcher is off in every deployment.
 - **Milestone 30 — Advisory approval layer:** authorized on 2026-09-19 as a new
   independent parallel workstream under ADR-0111, the restrictive-only half of
   roadmap item B8; [policy-and-approvals.md](policy-and-approvals.md) declares
@@ -502,9 +502,10 @@ conversation belongs in. Both are default off, the matcher only ever proposes,
 and any failure returns the existing grouping unchanged. The same ADR admits
 an offline, non-activating email-importance evaluation under Milestone 26. The
 port, the adapter, the fake and the selector landed on 2026-09-20 with the
-four `gate.judgment.*` gates bound to executable checks; the matcher and
-`gate.folder.judgment_matching` are pending, and no judgment request is made
-in any deployment until a consumer exists.
+four `gate.judgment.*` gates bound to executable checks, and the judgment
+matcher landed the same day with `gate.folder.judgment_matching` bound to a
+composed end-to-end check. No judgment request is made in any deployment until
+the owner sets the selector, the key, and the matcher's knob.
 
 ## Milestone 30: Advisory approval layer
 

@@ -228,7 +228,7 @@ SHIPPED_CONFIGS = (
     "memory/profiles.yaml",
     "folders/profiles.yaml",
 )
-# The design corpus declares 168 operator-reviewable knobs. Metadata such as
+# The design corpus declares 179 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -423,6 +423,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "proposals.model_policy",
             "proposals.similarity_threshold",
             "proposals.max_members",
+            "proposals.judgment_matching_enabled",
+            "proposals.judgment_match_threshold",
         ),
     }
 )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,8 @@ from agent_core.domain.judgment import (
     JudgmentRequest,
     NoulQuestion,
 )
+from agent_core.folders.grouping import ModelAssistedThreadGrouper
+from agent_core.folders.matching import JudgmentFolderMatcher
 from tests.unit.test_config import base_environment
 
 CREDENTIAL = "synthetic-typesafe-credential"
@@ -89,3 +92,55 @@ async def test_an_override_is_composed_and_closed_on_shutdown() -> None:
         assert fake.closed is False
 
     assert fake.closed is True
+
+
+def _folder_environment(tmp_path: Path, *, matching: bool, **overrides: str) -> dict[str, str]:
+    overlay = tmp_path / "folders" / "profiles.yaml"
+    overlay.parent.mkdir(parents=True, exist_ok=True)
+    overlay.write_text(
+        f"schema_version: 1\nproposals:\n  judgment_matching_enabled: {str(matching).lower()}\n",
+        encoding="utf-8",
+    )
+    return _environment(
+        AGENT_THREAD_FOLDERS_API_ENABLED="1", AGENT_CONFIG_DIR=str(tmp_path), **overrides
+    )
+
+
+async def test_the_matcher_wraps_the_grouper_only_with_its_knob_and_a_provider(
+    tmp_path: Path,
+) -> None:
+    fake = FakeJudgmentProvider([])
+    settings = load_settings(_folder_environment(tmp_path, matching=True))
+
+    async with build(settings=settings, judgment_provider_override=fake) as composition:
+        assert composition.folder_proposals is not None
+        grouper = composition.folder_proposals._grouper
+        assert isinstance(grouper, JudgmentFolderMatcher)
+        assert isinstance(grouper._inner, ModelAssistedThreadGrouper)
+        assert grouper._judge is fake
+        assert grouper._match_threshold == 0.8
+
+
+async def test_a_provider_without_the_knob_leaves_the_grouper_exactly_as_before(
+    tmp_path: Path,
+) -> None:
+    fake = FakeJudgmentProvider([])
+    settings = load_settings(_folder_environment(tmp_path, matching=False))
+
+    async with build(settings=settings, judgment_provider_override=fake) as composition:
+        assert composition.folder_proposals is not None
+        assert isinstance(composition.folder_proposals._grouper, ModelAssistedThreadGrouper)
+
+
+async def test_the_knob_without_a_provider_uses_the_inner_grouper_and_says_so_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    settings = load_settings(_folder_environment(tmp_path, matching=True))
+
+    with caplog.at_level(logging.WARNING, logger="agent_core.bootstrap"):
+        async with build(settings=settings) as composition:
+            assert composition.folder_proposals is not None
+            assert isinstance(composition.folder_proposals._grouper, ModelAssistedThreadGrouper)
+
+    unavailable = [r for r in caplog.records if r.message == "folder_judgment_matching_unavailable"]
+    assert len(unavailable) == 1

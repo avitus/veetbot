@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-20 — The judgment matcher proposes add-to-folder matches, default off
+
+- An optional matcher wraps the chat-folder grouper and asks the typed-judgment
+  port one closed question per unfiled conversation: which existing folder it
+  belongs in, or none. A match is accepted only above
+  `proposals.judgment_match_threshold` (0.8), and it only ever becomes an
+  add-to-folder proposal the owner accepts or declines.
+- A conversation with a hazardous title is not judged, hazardous snippets and
+  sample titles are omitted, option keys are opaque, and no identifier leaves
+  the process. Any provider error, deadline, or budget breach discards every
+  judgment and leaves the existing grouping unchanged; the first request runs
+  alone so an outage costs one call.
+- `folder.proposal.pass` always carries eight content-free `judgment_*` fields.
+- It needs `JUDGMENT_PROVIDER`, the key, and
+  `proposals.judgment_matching_enabled`, which ships false. The knob census is
+  179.
+
 ## 2026-09-20 — The typed-judgment port and the TypeSafe adapter land, default off
 
 - `agent_core.ports.judgment.JudgmentProvider` answers closed, typed questions

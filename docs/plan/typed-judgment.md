@@ -171,7 +171,7 @@ audit.
 `JUDGMENT_PROVIDER` selects the provider and accepts `disabled` and
 `typesafe`; it defaults to `disabled` and an unknown value is a configuration
 error at load. It is an environment value by the corpus's own test
-(bootstrap-and-composition.md:336-338): whether a deployment holds a vendor
+(bootstrap-and-composition.md:337-339): whether a deployment holds a vendor
 account differs between two deployments of one revision. It appears in
 `.env.example` and the production template with `TYPESAFE_API_KEY` left empty,
 and in neither the schedule nor the notification worker's template, because

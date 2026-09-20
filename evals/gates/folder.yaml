@@ -76,4 +76,4 @@
   kind: property
   spec: docs/plan/thread-folders.md#hard-gates
   statement: "**Judgment matching only proposes, is cleaned before egress, and falls back whole.** The matcher sends only cleaned titles, snippets, folder names, and member titles: a conversation whose title fails a hazard scan is not judged, and a hazardous snippet, member title, or folder is omitted. A match is accepted only when the chosen option is not the explicit no-match option and its probability meets the configured threshold; its output is only ever an add-to-folder candidate the pass re-checks; any provider error, deadline, or budget breach discards every judgment and yields the inner grouper's candidates unchanged; and the pass audit carries the eight `judgment_*` fields and never a title, snippet, or name."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_folder_m29.py::test_judgment_matching

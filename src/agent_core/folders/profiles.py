@@ -33,6 +33,11 @@ class FolderProposalProfile(_ProfileModel):
     model_policy: str = Field(default="balanced", pattern=r"^[a-z][a-z0-9_-]*$", max_length=64)
     similarity_threshold: float = Field(default=0.2, gt=0.0, le=1.0)
     max_members: int = Field(default=12, ge=2)
+    # The judgment matcher's own switch (ADR-0110). It also needs a composed
+    # judgment provider; the selector alone enables no consumer.
+    judgment_matching_enabled: bool = False
+    # Above one half, so at most one option of a question can clear it.
+    judgment_match_threshold: float = Field(default=0.8, gt=0.5, le=1.0)
 
     @model_validator(mode="after")
     def members_cover_the_threshold(self) -> FolderProposalProfile:

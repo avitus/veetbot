@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:633` named `ApprovalService` as one of
+`bootstrap-and-composition.md:634` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -1921,8 +1921,9 @@ registers four gates in a new `gate.judgment.*` area.
 registers a thirteenth folder gate. The amendment touches no roadmap item: it
 registers no model profile, so B2's model routing stays deferred, it adds no
 embedding, so B6 is unamended, and the policy advisory layer stays in B8 until
-its own policy ADR. The four `gate.judgment.*` gates are bound to executable
-checks as of 2026-09-20; the matcher's gate is pending.
+its own policy ADR. The four `gate.judgment.*` gates and
+`gate.folder.judgment_matching` are bound to executable checks as of
+2026-09-20.
 
 ## Milestone 30: Advisory approval layer
 
