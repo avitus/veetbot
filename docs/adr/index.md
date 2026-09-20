@@ -116,3 +116,5 @@ implementation without one.
 - [ADR-0105 — The tool-definition token cap rises to 9,000 so the item cap binds first (Proposed)](0105-tool-definition-token-cap.md)
 - [ADR-0106 — The authentication ceremony runs a headed browser and never disguises it (Proposed)](0106-headed-authentication-ceremony.md)
 - [ADR-0107 — Hosted verification is automatic on `main` and on request elsewhere (Proposed)](0107-on-demand-hosted-verification.md)
+- [ADR-0108 — The owner's introduction, honest answers, and approved outbound voicemail (Proposed)](0108-owner-introduction-and-outbound-voicemail.md)
+- [ADR-0109 — Conversational schedules tolerate one failure and keep synthesis headroom (Accepted)](0109-conversational-schedule-failure-tolerance-and-headroom.md)

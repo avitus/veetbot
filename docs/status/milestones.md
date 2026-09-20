@@ -222,8 +222,7 @@ Chat and announced to every device. Reaching that point took two fixes: ADR-0105
 tool-definition budget and the missing `call_finished` lock-screen alert. Call
 results so far arrived through reconciliation, not a proven signed webhook.
 
-- [ ] Read back the applied inbound provider configuration against the reviewed revision
-- [ ] Verify provider-side admission controls and the real signed-byte convention; receipts so far arrived through reconciliation
+- [ ] Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
 - [ ] Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
 - [ ] Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
 

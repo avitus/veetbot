@@ -20,21 +20,22 @@ Veetbot gains a dedicated phone number and two capabilities:
   shop and ask whether my laptop is ready” produces a proposed recipient,
   objective, and the specific identifying information permitted to leave.
 - **Answer calls for the owner.** Anyone may call the dedicated number. The
-  receptionist introduces itself as an AI assistant, answers using an
-  owner-curated public profile, and takes a message. Veetbot receives a call
+  receptionist introduces itself by name as the owner's assistant, answers
+  using an owner-curated public profile, and takes a message. Veetbot receives a call
   record, transcript, and summary for the owner to read and act on.
 
-Suggested initial greeting: “Hi, you've reached Veetbot, an AI assistant. I can
-take a message for the person you are calling. Who's calling, and how can I
-help?” The production greeting uses the owner's chosen public name and explains
-that the conversation is transcribed and shared with them. Audio recording is
-disabled by default; transcription is still part of the service.
+The greeting is the owner's chosen introduction, “Hi, this is Willow, Andy's
+assistant.” ([ADR-0108](../adr/0108-owner-introduction-and-outbound-voicemail.md)
+replaced the original proactive disclosure). Neither inbound nor outbound calls
+announce AI identity or transcription unprompted. Asked directly, the assistant
+confirms that it is an AI assistant and that the call is transcribed for the
+owner. Audio recording is disabled by default; transcription is still part of
+the service.
 
 The reviewed configuration distinguishes `assistant_name` (default `Veetbot`)
 from `public_name`, the owner the assistant represents, and from `voice`, the
 provider voice selection. Both inbound greetings and outbound instructions use
-the assistant and owner names: “Hi, I'm Willow, Andy's assistant.” AI identity
-and transcription disclosure follow that introduction. All three values are
+the assistant and owner names: “Hi, this is Willow, Andy's assistant.” All three values are
 included in the configuration revision that binds outbound approval; renaming
 the assistant requires a fresh approval and an inbound configuration readback.
 
@@ -69,10 +70,23 @@ versioned; provider configuration drift disables activation until reconciled.
 The owner approves an outbound **brief**, not a verbatim transcript: a voice
 model generates its actual replies during the call. The approval includes the
 recipient in E.164 format, caller ID, purpose, disclosed facts, maximum duration,
-recording setting, and pinned call-agent configuration. A changed recipient,
-brief, or configuration invalidates that approval. Veetbot must not claim to
+recording setting, any voicemail message, and pinned call-agent configuration.
+A changed recipient, brief, voicemail message, or configuration invalidates that
+approval. Veetbot must not claim to
 guarantee the wording of generated speech or use this initial integration for
 binding commitments.
+
+An unanswered call either hangs up or leaves the approved voicemail. The
+provider's voicemail action is always explicit, `hangup` or `leave_message`. Its
+SMS variants are refused because SMS is deferred scope. A voicemail is exact text
+the owner approves, at most 1,000 characters, never speech generated during the
+call. Every outbound call waits for the recipient to speak first. Its opening is
+then neither clipped at connection nor spoken over a voicemail greeting or a
+call-screening prompt. The provider documents no silence timeout, so a person
+who answers and stays silent hears nothing until they speak, within the call's
+duration limit. The provider may not mark a reached voicemail as such: it
+reported one screened call as `answered_by: "unknown"`. The transcript and
+summary show what happened.
 
 ## Repository fit and the required plan change
 
@@ -186,7 +200,13 @@ Callback processing:
 Call records include provider identity, direction, timestamps, duration, caller
 claims, transcript, summary, result status, and provenance. Full records are
 owner-only. Logs, metrics, rejection records, and push payloads contain no call
-content. Initial retention is thirty days for transcripts and
+content. Neither the proxy nor the listener keeps an access log, so each
+delivery writes one content-free warning: `calling.callback_accepted`, or
+`calling.callback_rejected` with a fixed reason. The reasons are `oversize`,
+`timeout`, `signature_missing`, `signature_malformed`, `signature_mismatch`,
+`payload_invalid` and `queue_full`. It carries no body, signature, call
+identifier or caller data, and it is the only evidence of whether the signed
+convention holds. Initial retention is thirty days for transcripts and
 summaries, with owner deletion and durable erasure of derived local copies.
 Provider-side retention is a separate account setting to verify during setup;
 local deletion must never be presented as deletion from Bland.
@@ -279,7 +299,7 @@ performed as part of local implementation.
 
 2. **Tool separation.** Scoped read and call rosters are fixed and honestly classified with no provider administration or arbitrary API passthrough. **M27.**
 
-3. **Approval binding.** Every outbound call requires approval of the exact recipient, brief, facts, limits and pinned configuration; changes, denial, expiry and revocation prevent dispatch. **M27.**
+3. **Approval binding.** Every outbound call requires approval of the exact recipient, brief, facts, limits, voicemail message and pinned configuration; changes, denial, expiry and revocation prevent dispatch. **M27.**
 
 4. **Dispatch recovery.** Crashes or lost responses after possible dispatch never redial and preserve uncertain outcomes. **M27.**
 

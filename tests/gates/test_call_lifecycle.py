@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -217,6 +218,26 @@ async def test_outbound_reservation_never_redials_uncertain_dispatch() -> None:
     assert "Ticket 12" not in json.dumps(records[0].payload)
 
 
+async def test_changed_voicemail_message_cannot_reuse_an_approval() -> None:
+    """ADR-0108: the approval fingerprint covers the voicemail the owner approved."""
+    clock, factory = await memory_uow_factory()
+    service = CallService(factory, clock, principal(), call_configuration())
+    dispatched: list[dict[str, Any]] = []
+
+    async def accepted(args: dict[str, Any]) -> MCPCallResult:
+        dispatched.append(args)
+        return MCPCallResult(structured={"provider_call_id": CALL_ID, "status": "accepted"})
+
+    approved = {**arguments(), "voicemail_message": "Please call back about ticket 12."}
+    first = await service.invoke(tool_context(), "bland_call", "start_call", approved, accepted)
+    assert not first.is_error
+    changed = {**approved, "voicemail_message": "Please wire the payment today."}
+    replay = await service.invoke(tool_context(), "bland_call", "start_call", changed, accepted)
+    assert replay.is_error and "bland.approval_changed" in replay.content
+    assert len(dispatched) == 1
+    assert dispatched[0]["voicemail_message"] == approved["voicemail_message"]
+
+
 async def test_simultaneous_outbound_calls_admit_only_one() -> None:
     clock, factory = await memory_uow_factory()
     service = CallService(factory, clock, principal(), call_configuration())
@@ -303,6 +324,34 @@ async def test_signed_intake_deduplicates_then_verifies_provider_ownership() -> 
     assert calls.count("provider_get_call") == 1
     with pytest.raises(NotFoundError):
         await service.get_call(principal().model_copy(update={"principal_id": "attacker"}), CALL_ID)
+
+
+async def test_each_callback_logs_one_content_free_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Neither the proxy nor the listener keeps an access log; the outcome must show."""
+    clock, factory = await memory_uow_factory()
+    service = CallService(factory, clock, principal(), call_configuration())
+    body, signature = signed_body()
+    unparsable = b"not json"
+    unparsable_signature = hmac.new(
+        SIGNING_FIXTURE.encode(), unparsable, hashlib.sha256
+    ).hexdigest()
+    cases = [
+        (body, "", "calling.callback_rejected reason=signature_missing"),
+        (body, signature.upper(), "calling.callback_rejected reason=signature_malformed"),
+        (body, "0" * 64, "calling.callback_rejected reason=signature_mismatch"),
+        (unparsable, unparsable_signature, "calling.callback_rejected reason=payload_invalid"),
+        (body, signature, "calling.callback_accepted"),
+    ]
+    caplog.set_level(logging.WARNING, logger="agent_core.application.calling")
+    for payload, header, expected in cases:
+        caplog.clear()
+        await service.receive(payload, header, SIGNING_FIXTURE)
+        assert [record.getMessage() for record in caplog.records] == [expected]
+        assert [record.levelno for record in caplog.records] == [logging.WARNING]
+        assert "never persist" not in caplog.text
+        assert signature not in caplog.text and CALL_ID not in caplog.text
 
 
 @pytest.mark.parametrize(

@@ -32,8 +32,13 @@ SCHEDULE_CREATE_TOOL_NAME = "schedule.create"
 SCHEDULE_WRITE_SCOPE = "schedule.write"
 DEFAULT_RUN_TIMEOUT_SECONDS = 300
 DEFAULT_MISFIRE_GRACE_SECONDS = 3600
-DEFAULT_MAX_CONSECUTIVE_FAILURES = 1
-DEFAULT_MAX_COST = Decimal("1")
+DEFAULT_MAX_CONSECUTIVE_FAILURES = 2
+DEFAULT_MAX_COST = Decimal("5")
+# Final-synthesis headroom (ADR-0078): near its budget, a research run writes its
+# answer from the evidence it already has instead of failing without one.
+DEFAULT_SYNTHESIS_RESERVE_STEPS = 2
+DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS = 2
+DEFAULT_SYNTHESIS_RESERVE_COST = Decimal("1")
 
 _FORBIDDEN_CADENCE_FIELD_SCHEMA: dict[str, Any] = {"not": {}}
 
@@ -325,23 +330,31 @@ class ScheduleCreateTool:
 
     def _run_limits(self) -> RunLimits:
         current = self._agent.limits
+        max_steps = min(current.max_steps, self._limits.max_steps_per_run)
+        max_model_calls = min(current.max_model_calls, self._limits.max_model_calls_per_run)
+        max_cost = min(current.max_cost or DEFAULT_MAX_COST, self._limits.max_cost_per_run)
         return RunLimits(
-            max_steps=min(current.max_steps, self._limits.max_steps_per_run),
-            max_model_calls=min(
-                current.max_model_calls,
-                self._limits.max_model_calls_per_run,
-            ),
+            max_steps=max_steps,
+            max_model_calls=max_model_calls,
             max_tool_calls=min(
                 current.max_tool_calls,
                 self._limits.max_tool_calls_per_run,
             ),
             max_input_tokens=current.max_input_tokens,
             max_output_tokens=current.max_output_tokens,
-            max_cost=min(
-                current.max_cost or DEFAULT_MAX_COST,
-                self._limits.max_cost_per_run,
+            max_cost=max_cost,
+            synthesis_reserve_steps=_reserve_within(DEFAULT_SYNTHESIS_RESERVE_STEPS, max_steps),
+            synthesis_reserve_model_calls=_reserve_within(
+                DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS, max_model_calls
             ),
+            synthesis_reserve_cost=_reserve_within(DEFAULT_SYNTHESIS_RESERVE_COST, max_cost),
         )
+
+
+def _reserve_within[T: (int, Decimal)](reserve: T, limit: T) -> T:
+    """Keep a reserve only when its limit leaves room to research before it."""
+
+    return reserve if reserve < limit else type(reserve)(0)
 
 
 def parse_cadence(arguments: dict[str, Any]) -> Cadence:

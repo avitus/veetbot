@@ -28,6 +28,71 @@ title: Changelog
 - CircleCI's four Apple jobs move from Xcode 26.6.0 to 27.0.0, so hosted runs
   and the owner's Mac exercise the same system behavior.
 
+## 2026-09-19 — Every call-result webhook leaves a trace
+
+- Nothing recorded whether Bland's post-call webhook ever arrived or passed its
+  signature check. The proxy route deliberately keeps no access log, the
+  listener runs without one, and a rejection returned 401 silently. Every
+  result so far arrived through the worker's polling, so the gap was invisible.
+- Each delivery now writes one content-free warning: `calling.callback_accepted`,
+  or `calling.callback_rejected` with a fixed reason. A missing or malformed
+  signature, a mismatch, an invalid payload, an oversize body, a timeout and a
+  full queue each have their own reason. No body, signature or call identifier
+  is logged.
+
+## 2026-09-19 — Chat-created schedules no longer pause on their first failure
+
+- The two recurring briefings failed six times between 2026-09-01 and
+  2026-09-17, for unrelated reasons that were each repaired, and every failure
+  paused its schedule until it was resumed by hand, up to seven days later.
+  `schedule.create` had pinned the one-time-reminder value of one allowed
+  failure onto recurring schedules. A schedule created in chat now tolerates
+  one failed occurrence and pauses on the second consecutive failure.
+- Chat-created schedules had also pinned a USD 1 budget with no final-synthesis
+  reserve, the configuration that failed the 2026-09-01 briefing. They now get
+  USD 5 with a reserve of 2 steps, 2 model calls, and USD 1, so a research run
+  near its budget writes its answer instead of failing.
+- The cause of three failures was lost when their conversations were deleted.
+  `schedule.run_accounted` now keeps the failed run's reason, error class, and
+  sanitized provider code, without any run content.
+- Existing schedules keep their pinned values until an API client revises
+  them (ADR-0109). Both briefings were revised to these values through the API
+  on 2026-09-19. Each still carries one failure from its last pause, which its
+  next completed run clears.
+
+## 2026-09-19 — Chat folders stay as the owner leaves them, one open at a time
+
+- Folders no longer spring open when Veetbot proposes a new one. Which folders
+  are open is remembered on each device and changes only when the owner opens
+  or closes one; a proposal, a refresh, or a new folder leaves it alone.
+- Solo mode, on by default, keeps one folder open at a time: opening a folder
+  closes the one that was open. A right-click on a folder on the Mac, or a long
+  press on iPhone and iPad, turns it off. Clicking a folder's row opens or
+  closes it.
+- A suggested folder lists each conversation it would file on a line of its
+  own, so the proposal can be read on an iPhone, and a new-folder suggestion
+  has a Rename… button that accepts it under the owner's name. A name that is
+  already taken is shown in the sheet and the suggestion stays open; accepting
+  without renaming now reports a taken name instead of doing nothing.
+- On the Mac, the folder name sheet is a compact dialog rather than a split
+  view with a cramped field, and folders are spaced like conversations rather
+  than each sitting in a section of its own.
+
+## 2026-09-19 — Willow uses the owner's introduction and can leave a voicemail
+
+- Calls open the way the owner chose: "Hi, this is Willow, Andy's assistant."
+  Neither direction announces AI identity or transcription unprompted. Asked
+  directly, Willow says truthfully that she is an AI assistant and that the call
+  is transcribed for Andy. The profile generator reproduces the owner's live
+  inbound prompt, so the configuration readback can match again (ADR-0108).
+- An approved outbound call can leave a voicemail. `start_call` takes an
+  optional `voicemail_message` that the owner approves word for word with the
+  brief. Without one, the call hangs up at voicemail, as before, but now by
+  explicit instruction. The SMS variants stay refused.
+- Outbound calls wait for the other side to speak first, so Willow no longer
+  talks over a greeting or iPhone call screening. The first no-answer test was
+  cut off that way.
+
 ## 2026-09-18 — One malformed model response no longer fails an Email refresh
 
 - A refresh at 22:48 UTC on 2026-09-17 failed as an internal error after one

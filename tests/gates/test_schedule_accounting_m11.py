@@ -9,7 +9,7 @@ from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.bootstrap import build
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import FakeModelScript, ModelPermanentError, ScriptedTurn
 from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.schedules import DailyCadence, Schedule, ScheduleRevision, ScheduleState
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
@@ -267,3 +267,88 @@ async def test_executor_completion_hook_resets_schedule_failures() -> None:
         assert current.consecutive_failures == 0
         assert len(accounted) == 1
         assert accounted[0].payload["run_id"] == str(occurrence.run_id)
+    assert accounted[0].payload["failure"] is None
+
+
+async def test_failed_run_accounting_keeps_its_content_free_failure_classification() -> None:
+    principal = _principal()
+    schedule = Schedule(
+        id=SCHEDULE_ID,
+        tenant_id=principal.tenant_id,
+        principal_id=principal.principal_id,
+        state=ScheduleState.ACTIVE,
+        current_revision=1,
+        next_fire_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    revision = ScheduleRevision(
+        schedule_id=SCHEDULE_ID,
+        revision=1,
+        title="Rejected accounting",
+        instruction="Fail at the provider.",
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        requested_scopes=frozenset(),
+        limits=RunLimits(
+            max_steps=4,
+            max_model_calls=4,
+            max_tool_calls=4,
+            max_cost=Decimal("1"),
+        ),
+        run_timeout_seconds=60,
+        cadence=DailyCadence(local_time=time(16), timezone="UTC"),
+        timezone="UTC",
+        misfire_grace_seconds=60,
+        max_consecutive_failures=2,
+        created_by_principal_id=principal.principal_id,
+        created_at=NOW,
+    )
+    rejected = ModelPermanentError(
+        provider="fake",
+        model="scripted",
+        attempt_id=UUID("00000000-0000-0000-0000-000000000799"),
+        message="the model provider rejected the request",
+        provider_code="sdk_error",
+        http_status=400,
+        provider_parameter="input[3].summary",
+    )
+    async with build(
+        settings=memory_settings(),
+        storage="memory",
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        principal=principal,
+        script=FakeModelScript(turns=[ScriptedTurn(fail_with=rejected)]),
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(_agent())
+            await uow.schedules.create(schedule, revision)
+        occurrence = await ScheduleMaterializer(
+            uow_factory=composition.uow_factory,
+            principals=StaticSchedulePrincipalDirectory(principal),
+            admission=AllowScheduleAdmissionController(),
+            clock=composition.clock,
+            ids=composition.ids,
+            seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+        ).materialize(SCHEDULE_ID)
+        assert occurrence is not None and occurrence.run_id is not None
+
+        await composition.executor.execute(occurrence.run_id)
+
+        async with composition.uow_factory() as uow:
+            run = await uow.runs.get(occurrence.run_id, principal)
+            [accounted] = await uow.process_events.list("schedule.run_accounted")
+    assert run.status is RunStatus.FAILED
+    # The classification outlives the run: deleting the conversation erases
+    # the run and its events, but not this process event.
+    assert accounted.payload["failure"] == {
+        "reason": "model_permanent_error",
+        "error_class": "ModelPermanentError",
+        "provider": "fake",
+        "provider_code": "sdk_error",
+        "http_status": 400,
+        "provider_parameter": "input[3].summary",
+    }
+    assert "rejected the request" not in str(accounted.payload)

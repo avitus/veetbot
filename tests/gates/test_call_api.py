@@ -1,9 +1,11 @@
 """HTTP calling boundaries, including disabled routing and public signed intake."""
 
 import json
+import logging
 from dataclasses import replace
 
 import httpx
+import pytest
 from pydantic import SecretStr
 
 from agent_core.api import create_app
@@ -93,3 +95,39 @@ async def test_public_ingress_authenticates_bytes_before_any_content_storage() -
     async with factory() as uow:
         assert await uow.calls.list(principal(), "call") == []
         assert len(await uow.calls.list(principal(), "receipt")) == 1
+
+
+async def test_ingress_logs_rejections_it_answers_itself(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Oversize bodies and a full queue never reach signature checks; they still show."""
+    from agent_core.api.call_ingress import create_call_ingress
+    from agent_core.application.calling import CallService
+    from agent_core.domain.calls import MAX_CALLBACK_BYTES
+    from agent_core.domain.errors import ConflictError
+    from tests.contract.support import memory_uow_factory, principal
+    from tests.gates.test_call_lifecycle import SIGNING_FIXTURE, signed_body
+
+    clock, factory = await memory_uow_factory()
+    service = CallService(factory, clock, principal(), call_configuration())
+    app = create_call_ingress(service, SIGNING_FIXTURE)
+    body, signature = signed_body()
+    caplog.set_level(logging.WARNING, logger="agent_core.api.call_ingress")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/webhooks/bland", content=b"x" * (MAX_CALLBACK_BYTES + 1))
+        assert response.status_code == 413
+        assert caplog.messages == ["calling.callback_rejected reason=oversize"]
+
+        caplog.clear()
+
+        async def full(*_: object) -> bool:
+            raise ConflictError("call callback queue is full")
+
+        monkeypatch.setattr(service, "receive", full)
+        response = await client.post(
+            "/webhooks/bland", content=body, headers={"X-Webhook-Signature": signature}
+        )
+        assert response.status_code == 429
+        assert caplog.messages == ["calling.callback_rejected reason=queue_full"]

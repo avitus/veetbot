@@ -18,6 +18,9 @@ project:
   # retention, and conditional native time-zone presentation.
   # ADR-0091 records the owner's non-milestone notification extension:
   # the pinned schedule title and nominal occurrence time may appear in alerts.
+  # ADR-0109 records the owner's non-milestone repair to chat-created schedules:
+  # pause on the second consecutive failure, a USD 5 budget with a synthesis
+  # reserve, and a failure classification on the accounting event.
   authorized_milestones:
     - 0
     - 1
@@ -1482,8 +1485,7 @@ milestones:
     deferred_scope:
     - private in-call tools, automatic commitments, transfers, SMS and call-derived memory
     open_items:
-    - Read back the applied inbound provider configuration against the reviewed revision
-    - Verify provider-side admission controls and the real signed-byte convention; receipts so far arrived through reconciliation
+    - Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
     - Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
     - Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
     evidence:
@@ -1582,6 +1584,26 @@ milestones:
         tools at the 6,000-token budget with no discovered tools. The first after
         it held 30 at 9,000, including list_calls, get_call and start_call, and
         the owner listed calls from Chat.
+    - check: inbound provider configuration readback against the reviewed revision
+      outcome: pass
+      detail: >-
+        On 2026-09-19 a readback of the live inbound number found three
+        departures from the reviewed payload. The owner had changed the
+        greeting to "Hi, this is Willow, Andy's assistant." and removed the
+        prompt's AI-identity sentence, adding a blank line. A malformed
+        fallback number, "+1", had also appeared. The owner kept both edits,
+        and ADR-0108 records the decision. The regenerated payload then added a
+        truthful answer for a caller who asks about AI identity or
+        transcription. The guarded apply refused to send unless those two
+        fields were the only changes. It kept the owner's greeting and backed
+        up the prior settings on the host first. Bland accepted the update with
+        HTTP 200, and a second readback matched every reviewed field. Pathway,
+        memory, tools, transfers, fallback and dynamic data were all cleared,
+        recording was off, and the duration limit, webhook and voice matched.
+        The comparison used the dev revision's generator (8029c862); the
+        running release carries the earlier template until its next delivery.
+        Account-level memory and persona attachments are outside this readback
+        and remain open.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

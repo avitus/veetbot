@@ -116,7 +116,8 @@ public final class ChatViewModel: ObservableObject {
     /// False until a server answers the folder list; a 404 or 405 keeps the
     /// flat history and hides every folder control without an error.
     @Published public private(set) var foldersAvailable = false
-    /// The create or rename sheet's inline error; never the global banner.
+    /// The name sheet's inline error — create, rename, or accepting a proposal
+    /// under a new name; never the global banner.
     @Published public private(set) var folderEditorError: String?
     @Published public private(set) var pendingFolderProposalIDs: Set<UUID> = []
 
@@ -560,16 +561,24 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func acceptFolderProposal(_ proposalID: UUID) async {
-        guard let api, let proposal = folderProposals.first(where: { $0.id == proposalID })
-        else { return }
+    /// Accept a proposal, under a name the owner typed when one is given. From
+    /// the name sheet, a taken or refused name — or any other failure — stays in
+    /// `folderEditorError` with the proposal still open; a proposal resolved
+    /// elsewhere is a refresh either way. True once the proposal is no longer
+    /// open here, which is when the sheet may close.
+    @discardableResult
+    public func acceptFolderProposal(_ proposalID: UUID, name: String? = nil) async -> Bool {
+        guard let api else { return false }
+        guard let proposal = folderProposals.first(where: { $0.id == proposalID }) else { return true }
         let generation = connectionGeneration
+        let override = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if override != nil { folderEditorError = nil }
         pendingFolderProposalIDs.insert(proposalID)
         defer { pendingFolderProposalIDs.remove(proposalID) }
         historyReconciliationID = nil
         do {
-            let resolved = try await api.acceptFolderProposal(proposalID)
-            guard generation == connectionGeneration else { return }
+            let resolved = try await api.acceptFolderProposal(proposalID, name: override)
+            guard generation == connectionGeneration else { return false }
             folderProposals.removeAll { $0.id == proposalID }
             if let folderID = resolved.resultingFolderID {
                 try await applyFolderMembership(
@@ -577,9 +586,15 @@ public final class ChatViewModel: ObservableObject {
                 )
             }
             try? await reconcileHistory()
+            return true
         } catch {
-            guard generation == connectionGeneration else { return }
+            guard generation == connectionGeneration else { return false }
+            if override != nil, !Self.isResolvedElsewhere(error) {
+                folderEditorError = Self.folderErrorMessage(error)
+                return false
+            }
             await handleProposalResolutionFailure(error, proposalID: proposalID)
+            return !folderProposals.contains { $0.id == proposalID }
         }
     }
 
@@ -601,16 +616,25 @@ public final class ChatViewModel: ObservableObject {
 
     public func clearFolderEditorError() { folderEditorError = nil }
 
-    /// A proposal resolved elsewhere (404 or 409) is a refresh, not an error.
+    /// A proposal resolved elsewhere is a refresh, not an error.
     private func handleProposalResolutionFailure(_ error: Error, proposalID: UUID) async {
-        if case HTTPTransportError.api(let apiError) = error,
-            apiError.statusCode == 404 || apiError.statusCode == 409
-        {
+        if Self.isResolvedElsewhere(error) {
             folderProposals.removeAll { $0.id == proposalID }
             try? await reconcileHistory()
             return
         }
         present(error)
+    }
+
+    /// A 404, or a 409 other than a taken name: the proposal was resolved or
+    /// withdrawn elsewhere. A taken name leaves it open for another name.
+    private static func isResolvedElsewhere(_ error: Error) -> Bool {
+        guard case HTTPTransportError.api(let apiError) = error else { return false }
+        switch apiError.statusCode {
+        case 404: return true
+        case 409: return apiError.details.reason != "folder_name_taken"
+        default: return false
+        }
     }
 
     private func upsertFolder(_ folder: FolderView) {
