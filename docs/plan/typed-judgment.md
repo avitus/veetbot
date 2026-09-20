@@ -282,7 +282,10 @@ steered answer costs a bad proposal or an unnecessary escalation.
 
 ## Implementation checkpoint: 2026-09-20
 
-Build steps 1 through 3 landed. The domain types, the port, the TypeSafe
+Build steps 1 through 3 landed, and the offline email-importance replay that
+ADR-0110 admits as an evaluation-only consumer landed the same day in
+`agent_core.evals.email_importance_replay`; it obtains its provider from the
+composition and no production module imports it. The domain types, the port, the TypeSafe
 adapter, the scripted fake, and the production census bind under
 `tests/contract/test_judgment_provider_contract.py`; the selector and the
 composition bind under `tests/unit/test_judgment_composition.py`; and

@@ -1432,6 +1432,70 @@ def eval_email_people(
         raise typer.Exit(1) from exc
 
 
+@eval_app.command("email-importance")
+def eval_email_importance(
+    check_bundle: Annotated[bool, typer.Option("--check-bundle")] = False,
+    run: Annotated[bool, typer.Option("--run")] = False,
+    compare: Annotated[bool, typer.Option("--compare")] = False,
+    corpus: Annotated[Path | None, typer.Option("--corpus")] = None,
+    bundle: Annotated[Path | None, typer.Option("--bundle")] = None,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    model_policy: Annotated[str | None, typer.Option("--model-policy")] = None,
+    policy_profile: Annotated[str, typer.Option("--policy-profile")] = "default",
+    build_ref: Annotated[str | None, typer.Option("--build-ref")] = None,
+    max_cost_usd: Annotated[str | None, typer.Option("--max-cost-usd")] = None,
+    production_corpus: Annotated[Path | None, typer.Option("--production-corpus")] = None,
+    candidate_corpus: Annotated[Path | None, typer.Option("--candidate-corpus")] = None,
+) -> None:
+    """Check a private bundle, run the offline importance replay, or compare two results.
+
+    Non-activating: no result here can satisfy or waive a Milestone 26 gate.
+    """
+    if sum((check_bundle, run, compare)) != 1:
+        raise typer.BadParameter("select exactly one of --check-bundle, --run, or --compare")
+    if (check_bundle or run) and (corpus is None or bundle is None):
+        raise typer.BadParameter("--check-bundle and --run require --corpus and --bundle")
+    if run and (
+        output is None or model_policy is None or build_ref is None or max_cost_usd is None
+    ):
+        raise typer.BadParameter(
+            "--run requires --output, --model-policy, --build-ref, and --max-cost-usd"
+        )
+    if compare and (production_corpus is None or candidate_corpus is None):
+        raise typer.BadParameter("--compare requires --production-corpus and --candidate-corpus")
+    try:
+        replay = cast(Any, importlib.import_module("agent_core.evals.email_importance_replay"))
+        if run:
+            maximum = Decimal(cast(str, max_cost_usd))
+            if not maximum.is_finite() or maximum <= 0:
+                raise ValueError("the replay requires a finite positive monetary cap")
+            result = asyncio.run(
+                replay.run_replay(
+                    Path.cwd(),
+                    corpus_path=cast(Path, corpus),
+                    bundle_path=cast(Path, bundle),
+                    output=cast(Path, output),
+                    build_ref=cast(str, build_ref),
+                    maximum_cost=maximum,
+                    model_policy=cast(str, model_policy),
+                    policy_profile=policy_profile,
+                )
+            )
+        elif check_bundle:
+            result = replay.bundle_report(
+                cast(Path, corpus), cast(Path, bundle), repository_root=Path.cwd()
+            )
+        else:
+            result = replay.compare_files(
+                cast(Path, production_corpus), cast(Path, candidate_corpus)
+            )
+        typer.echo(json.dumps(result, sort_keys=True))
+    except (ConfigurationError, OSError, ValueError, InvalidOperation, RuntimeError) as exc:
+        # The message is a reason code or a count; it never quotes the private inputs.
+        typer.echo(f"Email importance evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
 @eval_app.command("email-people-evidence")
 def eval_email_people_evidence(
     run_directory: Annotated[Path, typer.Option("--run-directory")],
