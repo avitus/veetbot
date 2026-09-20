@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
@@ -151,6 +152,18 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
             or spec.output_trust is not TrustLevel.EXTERNAL_UNTRUSTED
         ):
             raise ToolValidationError("browser provider target classification is invalid")
+    if (spec.target_kind == UNSUBSCRIBE_TARGET_KIND) != (spec.name == UNSUBSCRIBE_TOOL_NAME) or (
+        spec.name == UNSUBSCRIBE_TOOL_NAME
+        and (
+            spec.source is not ToolSource.BUILTIN
+            or spec.side_effect is not SideEffectClass.EXTERNAL_WRITE
+            or spec.risk is not RiskLevel.MEDIUM
+            or spec.idempotency is not IdempotencyClass.IDEMPOTENT
+            or spec.allow_parallel
+        )
+    ):
+        # The public-HTTPS unsubscribe transport is granted to one tool by name (ADR-0108).
+        raise ToolValidationError("unsubscribe endpoint target classification is invalid")
     if spec.source in {ToolSource.MCP, ToolSource.DEVICE, ToolSource.SANDBOX} or (
         spec.target_kind == "sandbox"
     ):

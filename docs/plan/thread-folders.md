@@ -480,7 +480,7 @@ moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none
 of them differs between two deployments of the same revision
-(bootstrap-and-composition.md:336-338). `folders/profiles.yaml` ships:
+(bootstrap-and-composition.md:337-339). `folders/profiles.yaml` ships:
 
 ```yaml
 schema_version: 1
@@ -498,7 +498,7 @@ Its seven knobs join the executable inventory and the knob table in
 bootstrap-and-composition.md. One environment key,
 `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and the pass together,
 defaults off, and appears in `.env.example` in the same change
-(bootstrap-and-composition.md:510-515).
+(bootstrap-and-composition.md:511-516).
 
 **Disabling.** Unsetting the flag hides the routes and stops the pass; the
 tables, folders, memberships, and proposals remain, `SessionView.folder_id`

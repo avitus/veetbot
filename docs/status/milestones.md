@@ -253,6 +253,19 @@ with every gate bound to an executable check.
 
 - [ ] Exact-head hosted CI and explicitly authorized review evidence
 
+### Milestone 30 — Email unsubscribe assistance
+
+Twenty gates; independent workstream under ADR-0108. A header-derived census
+of bulk senders, the authenticated one-click unsubscribe request to a
+server-derived destination through a dedicated public-HTTPS transport, and
+Report spam, `mailto:` and sender-cleanup fallbacks, each behind the owner's
+tap. Eighteen gates bind passing checks; the feature stays default-off.
+
+- [ ] Verify the native Subscriptions view and thread action on the Apple package and simulator lanes
+- [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
+- [ ] Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
+- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -260,12 +273,6 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 30 — Email unsubscribe assistance** — twenty gates; independent
-  workstream under ADR-0108. A header-derived census of bulk senders, the
-  authenticated one-click unsubscribe request to a server-derived destination,
-  and Report spam, `mailto:` and sender-cleanup fallbacks, each behind the
-  owner's tap. Design and pending gates registered on 2026-09-19;
-  implementation follows the owner's review of the design.
 
 
 

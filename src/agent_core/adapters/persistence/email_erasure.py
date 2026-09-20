@@ -239,7 +239,13 @@ def source_tool(name: object, server: str | None) -> bool:
         and name
         in {
             f"mcp.{server}.{operation}"
-            for operation in ("get_thread", "get_thread_page", "get_message_body", "search_threads")
+            for operation in (
+                "get_thread",
+                "get_thread_page",
+                "get_message_body",
+                "search_threads",
+                "get_unsubscribe",
+            )
         }
     )
 

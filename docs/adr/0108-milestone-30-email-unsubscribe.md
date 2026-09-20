@@ -1,6 +1,6 @@
 # ADR-0108: Milestone 30 email unsubscribe assistance
 
-- Status: Proposed — the owner requested the capability and decided its surfaces, consent model, server-side egress, and fallbacks on 2026-09-19
+- Status: Accepted — the owner requested the capability, decided its surfaces, consent model, server-side egress, and fallbacks, and directed implementation on 2026-09-19
 - Date: 2026-09-19
 - Related: ADR-0017, ADR-0040, ADR-0054, ADR-0071, ADR-0085, ADR-0092, ADR-0095, ADR-0096, ADR-0098, ADR-0099, ADR-0104
 - Design: [Email unsubscribe assistance](../plan/email-unsubscribe.md)
@@ -192,9 +192,9 @@ Consequences:
 
 The owner requested the capability and answered the four shaping decisions in
 chat on 2026-09-19, including explicit approval of the server-side egress
-posture in decision 5. This change registers the design and twenty pending
-gates; nothing is implemented. Implementation proceeds through the design's
-build sequence under the repository's red-green rule once the owner has
-reviewed the design. Pull request creation, merge, production activation, and
-any live unsubscribe request, send, or mailbox write retain their explicit
-authorization boundaries.
+posture in decision 5, and then directed implementation through the design's
+build sequence the same day. Implementation proceeds under the repository's
+red-green rule with the feature default-off. Pull request creation, merge,
+production activation, and any live unsubscribe request, send, or mailbox write
+retain their explicit authorization boundaries; the owner's real-mailbox smoke
+is the milestone's own release evidence and no fake provider stands in for it.

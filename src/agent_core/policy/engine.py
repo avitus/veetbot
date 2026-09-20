@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.policies import (
     ActionKind,
     IdempotencyClass,
@@ -155,16 +156,18 @@ def evaluate_deterministic(
         not confirmed_by_human and TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
     )
     if (
-        action.target.kind == "mcp"
-        and (
-            is_mutating_email_server_id(action.target.server_id)
-            or action.target.server_id == "bland_call"
+        (
+            action.target.kind == "mcp"
+            and (
+                is_mutating_email_server_id(action.target.server_id)
+                or action.target.server_id == "bland_call"
+            )
         )
-        and _RANK[decision] < PolicyDecisionRank.REQUIRE_APPROVAL
-    ):
-        # ADRs 0071 and 0097 forbid policy profiles from turning mailbox mutations,
-        # sends, or telephone calls into standing allows. A standing-grant design must own
-        # any relaxation rather than hiding it in a profile.
+        or action.name == UNSUBSCRIBE_TOOL_NAME
+    ) and _RANK[decision] < PolicyDecisionRank.REQUIRE_APPROVAL:
+        # ADRs 0071, 0097 and 0108 forbid policy profiles from turning mailbox mutations,
+        # sends, telephone calls, or unsubscribe requests into standing allows. A
+        # standing-grant design must own any relaxation rather than hiding it in a profile.
         decision = PolicyDecisionType.REQUIRE_APPROVAL
     if (
         decision

@@ -134,6 +134,12 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
                 expected_history_id,
             )
 
+        @server.tool(meta={"veetbot/application-only": True})
+        async def get_unsubscribe(message_id: str) -> CallToolResult:
+            """Read one message's closed unsubscribe evidence without dialing any sender."""
+
+            return await _call(client.get_unsubscribe, message_id)
+
     elif mode == "write":
 
         @server.tool()

@@ -78,7 +78,10 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
 
 - `search_threads(query, max_results, page_token?)` — Gmail query syntax,
   one through twenty-five results, opaque page token. Returns thread id,
-  senders, subject, date, snippet, and label ids per thread.
+  senders, subject, date, snippet, and label ids per thread, plus the closed
+  Milestone 30 `bulk` block: the newest received message's id, sender, and
+  date, its normalized list identifier, and the unauthenticated unsubscribe
+  offer. No unsubscribe address appears in a search result.
 - `get_thread(thread_id)` — every message in one thread: headers, plain-text
   body, label ids. HTML bodies are reduced to text; attachments are named
   with filename, type, and size but never fetched.
@@ -569,8 +572,10 @@ completion requirements remain independently binding.
 [email unsubscribe assistance](email-unsubscribe.md) as a new parallel
 milestone. It widens the read server's closed header projection by one bounded
 `bulk` block on thread summaries and adds one application-only read tool,
-`get_unsubscribe`; the roster above is amended in the change that implements
-them. The package still dials only its two fixed endpoints, follows no
+`get_unsubscribe`. The roster above carries the `bulk` block, and
+`get_unsubscribe` joins the application-only synchronization tools Milestone
+26 added, never advertised to a model. The package still dials only its two
+fixed endpoints, follows no
 redirect, and imports nothing from `agent_core`: the unsubscribe request is
 sent by a builtin tool through the platform's own egress proxy and never by
 this package. No new OAuth scope is requested. Report spam, Not spam and

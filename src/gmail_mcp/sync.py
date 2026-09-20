@@ -10,6 +10,7 @@ import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from gmail_mcp import unsubscribe
 from gmail_mcp.constants import OUTPUT_MAXIMUM_BYTES, UPSTREAM_MAXIMUM_BYTES
 from gmail_mcp.errors import GmailError, GmailResourceNotFoundError
 
@@ -429,6 +430,48 @@ class GmailSync:
         if next_offset < len(identifiers):
             result["next_page_token"] = self._page_token(thread_id, revision, next_offset)
         return _bounded(result)
+
+    async def get_unsubscribe(self, message_id: str) -> dict[str, Any]:
+        """Read one message's closed unsubscribe evidence in a single metadata request."""
+        message_id = self.client._required_text(message_id, "message_id", maximum=1024)
+        raw = await self.client._request(
+            "GET",
+            f"/messages/{quote(message_id, safe='')}",
+            params={
+                "format": "metadata",
+                "metadataHeaders": list(unsubscribe.EVIDENCE_HEADERS),
+            },
+        )
+        if raw.get("id") != message_id:
+            raise GmailError("gmail.provider_output_invalid")
+        payload = raw.get("payload")
+        offer = unsubscribe.offer(payload)
+        covered = unsubscribe.covered_headers(payload)
+        fields = unsubscribe.mailto_fields(offer.mailto)
+        if offer.offered == "one_click" and set(covered) == unsubscribe.MECHANISM_HEADERS:
+            mechanism = "one_click"
+        elif fields is not None and unsubscribe.LIST_UNSUBSCRIBE in covered:
+            mechanism = "mailto"
+        else:
+            mechanism = unsubscribe.NO_OFFER
+        return _bounded(
+            {
+                "schema_version": 1,
+                "message_id": message_id,
+                "thread_id": _text(raw.get("threadId")),
+                "history_id": _history(raw.get("historyId")),
+                "from": unsubscribe.last_header(payload, "From"),
+                "list_id": unsubscribe.normalize_list_id(
+                    unsubscribe.last_header(payload, "List-Id")
+                ),
+                "offered": offer.offered,
+                "mechanism": mechanism,
+                "https_uri": offer.https_uri,
+                "mailto": fields,
+                "authenticated": unsubscribe.LIST_UNSUBSCRIBE in covered,
+                "covered_headers": covered,
+            }
+        )
 
     async def get_message_body(
         self,

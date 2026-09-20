@@ -149,6 +149,7 @@ class Settings:
     call_webhook_secret: SecretStr | None = None
     email_enabled: bool = False
     email_mode_enabled: bool = False
+    email_unsubscribe_enabled: bool = False
     email_semantic_evidence: Path | None = None
     email_account_ids: tuple[str, ...] = ()
     push_provider: PushProviderKind = PushProviderKind.DISABLED
@@ -331,6 +332,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "run_defaults.max_tool_calls",
             "email.daily_cost",
             "email.monthly_cost",
+            "email.unsubscribe_grace_days",
             "scheduling.scan_batch",
             "scheduling.fallback_poll_seconds",
             "scheduling.admission_backoff_seconds",
@@ -432,6 +434,7 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:run_defaults.max_tool_calls": 1,
         "runtime/limits.yaml:email.daily_cost": 0.01,
         "runtime/limits.yaml:email.monthly_cost": 0.01,
+        "runtime/limits.yaml:email.unsubscribe_grace_days": 2,
         "runtime/limits.yaml:worker.heartbeat_divisor": 2,
         "runtime/limits.yaml:worker.lease_seconds": 1,
         "runtime/limits.yaml:worker.reserved_interactive_slots": 1,
@@ -1642,6 +1645,12 @@ def _load_settings(
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
+    email_unsubscribe_enabled = _parse_flag(values, "AGENT_EMAIL_UNSUBSCRIBE_ENABLED")
+    if email_unsubscribe_enabled and not (email_enabled and email_mode_enabled):
+        raise ConfigurationError(
+            "AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
+            "and AGENT_EMAIL_MODE_ENABLED=1"
+        )
     raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
     email_semantic_evidence = (
         Path(raw_email_semantic_evidence).expanduser().resolve()
@@ -1830,6 +1839,7 @@ def _load_settings(
         call_webhook_secret=call_webhook_secret,
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
+        email_unsubscribe_enabled=email_unsubscribe_enabled,
         email_semantic_evidence=email_semantic_evidence,
         email_account_ids=email_account_ids,
         push_provider=push_provider,

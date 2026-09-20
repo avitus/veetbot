@@ -55,7 +55,7 @@ project:
 milestones:
   '30':
     title: Email unsubscribe assistance
-    status: authorized
+    status: in_progress
     authorized_on: '2026-09-19'
     design: docs/plan/email-unsubscribe.md
     adr: docs/adr/0108-milestone-30-email-unsubscribe.md
@@ -70,6 +70,50 @@ milestones:
     - Unsubscribe links in message bodies and web-form unsubscribes through browser automation
     - Standing or automatic unsubscribe rules (B8), background or scheduled cleanup
     - Gmail filters and blocked senders (new OAuth scope), a durable Keep from Chat, another provider
+    open_items:
+    - Verify the native Subscriptions view and thread action on the Apple package and simulator lanes
+    - Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
+    - Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
+    - Exact-head hosted CI and explicitly authorized review and production delivery evidence
+    evidence:
+    - check: Milestone 30 registry authorization red phase
+      outcome: observed_expected_failure
+      detail: >-
+        The focused registry-bound and documentation-bound tests failed at their
+        behavioral assertions on 2026-09-19: the registry held 538 entries rather
+        than 558, the census had no Milestone 30 row, MAX_MILESTONE was 29 rather
+        than 30, and the plan check did not require a Milestone 30 section. An
+        earlier attempt that failed on a missing pytest in a fresh worktree was
+        discarded as an environment error.
+    - check: Milestone 30 backend gates (local, 2026-09-20)
+      outcome: passed_locally
+      detail: >-
+        Eighteen of the twenty gates bind executable checks and pass: the closed
+        Google-only read contract and the authenticated-eligibility property in
+        tests/gates/test_email_unsubscribe_gmail_m30.py (46 cases); the fixed
+        request and public-HTTPS egress gates in
+        tests/gates/test_email_unsubscribe_transport_m30.py with the port contract;
+        and the server-derived destination, approval floor, exact gesture consent,
+        by-value Chat approval, idempotent recovery, closed mailto path, fixed
+        label actions, census projection property, durable decisions, honest
+        outcomes, flagged and scoped routes, confined Chat tools, privacy under
+        adversarial mail with source exclusion, and persistence parity gates in
+        tests/gates/test_email_unsubscribe_m30.py. Valid regressions first
+        observed a replayed command refused before its idempotency lookup, a
+        consent fenced before its task was confirmed, an evidence digest projected
+        for a sender with no mechanism, a sender stranded in pending behind a dead
+        run, and a get_unsubscribe tool-event copy surviving source exclusion; the
+        last was confirmed by removing the fix and watching the gate fail. The
+        native experience and integrated release evidence gates remain pending.
+    - check: PostgreSQL subscription record parity
+      outcome: passed_locally
+      detail: >-
+        Against a freshly migrated scratch PostgreSQL database, the shared
+        subscription-records contract and the existing Milestone 26 email
+        persistence lane pass eighteen checks. No migration is needed: the new
+        state is three kinds in the existing email_records table. The local role
+        is a superuser, so forced row-level security is exercised by the hosted
+        integration lane rather than by this run.
   '29':
     title: Chat thread folders
     status: in_progress

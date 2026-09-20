@@ -21,6 +21,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalRequest, ApprovalStatus
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.delegations import Delegation, DelegationRequest
+from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
@@ -91,6 +92,8 @@ from agent_core.tools.validation import validate_and_normalize, validate_output
 logger = logging.getLogger(__name__)
 
 PIPELINE_STEP_SEQUENCE = tuple(range(1, 15))
+# Builtins whose constructed target dials out; each kind is pinned at registration.
+_NETWORK_TARGET_KINDS = frozenset({"web_provider", "browser_provider", UNSUBSCRIBE_TARGET_KIND})
 
 
 class DelegationStarter(Protocol):
@@ -1128,7 +1131,7 @@ class ToolPipeline:
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
-                network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
+                network_enabled=tool.spec.target_kind in _NETWORK_TARGET_KINDS,
                 device_id=tool.spec.device_id,
             ),
             workspace=(
@@ -1445,7 +1448,7 @@ class ToolPipeline:
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
-                network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
+                network_enabled=tool.spec.target_kind in _NETWORK_TARGET_KINDS,
                 device_id=tool.spec.device_id,
                 server_id=tool.spec.server_id,
             ),

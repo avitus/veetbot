@@ -1845,3 +1845,23 @@ all execution bounds. People context shares the ordinary recall budget and
 cannot grant permission to send a message or change an email recipient.
 The governed `memory.remember` surface adds explicit person references only
 while People is enabled; old pinned catalogs retain their prior contract.
+
+## Milestone 30 Chat access to the subscription census
+
+Two further conditional `email` tools are owned by
+[email-unsubscribe.md](email-unsubscribe.md#the-chat-tools). The composition
+root registers and enables them only when `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` is
+true; they do not change an unenabled deployment's roster.
+
+| Tool | Required scopes | Side effect / risk / idempotency | Result trust |
+| --- | --- | --- | --- |
+| `email.subscriptions` | `email.read` | `NONE` / `LOW` / `READ_ONLY` | `EXTERNAL_UNTRUSTED` |
+| `email.unsubscribe` | `email.read`, `email.write` | `EXTERNAL_WRITE` / `MEDIUM` / `IDEMPOTENT` | `INTERNAL_TOOL` |
+
+`email.subscriptions` reads the owner's scoped census and never returns an
+unsubscribe address. `email.unsubscribe` sends the RFC 8058 one-click request
+for one to twenty-five senders. Its closed input names subscription ids and
+evidence digests only, its destination is server-derived, its result is closed
+outcome codes with no remote content, and it always requires approval. It is
+`IDEMPOTENT` because the request is a constant whose repetition changes
+nothing, which is what lets recovery re-execute a call that has no read-back.

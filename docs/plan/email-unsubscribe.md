@@ -104,7 +104,7 @@ not find it here should find the reason here.
 
 - **The first-party Gmail servers.** `gmail_mcp` stays the only code that
   speaks to Google, still dials exactly its two fixed endpoints
-  (email-integration.md:331-339), and still imports nothing from
+  (email-integration.md:334-342), and still imports nothing from
   `agent_core`. It already fetches complete headers; it projects a closed
   allowlist of them, and this milestone widens that projection by one closed
   block. It never dials a sender.
@@ -181,15 +181,20 @@ adds `List-Unsubscribe`, `List-Unsubscribe-Post`, and `List-Id` to its header
 allowlist, and each returned summary carries:
 
 ```json
-{"bulk": {"list_id": "news.example.com", "unsubscribe": "one_click"}}
+{"bulk": {"message_id": "18c…", "from": "Example News <news@example.com>",
+          "date": "Fri, 18 Sep 2026 09:00:00 +0000",
+          "list_id": "news.example.com", "unsubscribe": "one_click"}}
 ```
 
-`unsubscribe` is `one_click`, `mailto`, `link`, or `none`, read from the
-newest received message in the thread; `list_id` is bounded to 255
-characters and empty when absent. No address and no URI appears here. This
-tool is model-visible, and the block tells a conversation which results are
-bulk mail without handing it a destination. The value is unauthenticated at
-this stage and is never sufficient to act on.
+All five values come from the newest *received* message in the thread, so an
+owner's own reply never stands in for the sender; a thread with no received
+message carries empty strings and `none`. `unsubscribe` is `one_click`,
+`mailto`, `link`, or `none`; `list_id` is bounded to 255 characters and empty
+when absent; `message_id` is the opaque provider id that names the evidence
+message. No unsubscribe address and no URI appears here. This tool is
+model-visible, and the block tells a conversation which results are bulk mail
+without handing it a destination. The value is unauthenticated at this stage
+and is never sufficient to act on.
 
 **`get_unsubscribe(message_id)` is a new application-only tool.** It carries
 the `veetbot/application-only` marker the Milestone 26 synchronization tools
@@ -202,6 +207,7 @@ carry, so it is never advertised to a model. It reads one message with
   "message_id": "…", "thread_id": "…", "history_id": "…",
   "from": "Example News <news@example.com>",
   "list_id": "news.example.com",
+  "offered": "one_click",
   "mechanism": "one_click",
   "https_uri": "https://example.com/u/…",
   "mailto": null,
@@ -216,8 +222,11 @@ characters, extracted syntactically. `mailto` is `null` or a closed object of
 characters, a body of at most 1,024, and nothing else. A `mailto:` address
 carrying any other header field — `cc`, `bcc`, or an arbitrary one, all of
 which RFC 6068 permits — or more than one recipient normalizes to no `mailto`
-at all rather than to a trimmed one. `mechanism` and `authenticated` apply
-the rules of the previous section.
+at all rather than to a trimmed one. `offered` is what the headers claim,
+as the summary block reports it; `mechanism` and `authenticated` apply the
+rules of the previous section, so a message whose signature covers only
+`List-Unsubscribe` and that also carries a valid `mailto:` offers `one_click`
+and yields `mailto`.
 
 The package normalizes; it does not authorize. It cannot import
 `agent_core`'s public-address rule and does not try to. `agent_core` applies
@@ -242,7 +251,11 @@ hosting domain carries thousands of unrelated lists.
 
 Records live in `email_records` under the kind `subscription`, keyed by a
 digest of the account and identity, with the store's ordinary revision,
-tenant and principal predicates, and forced row-level security.
+tenant and principal predicates, and forced row-level security. A second
+kind, `subscription_thread`, is the index from an account-qualified provider
+thread to its subscription; it holds an opaque id and nothing else, is written
+and pruned with the record's thread set, and is what places the action on a
+thread without scanning the census.
 
 | Field | Content |
 | --- | --- |
@@ -273,12 +286,15 @@ leaves the ninety-day window leaves the count. When a newer message from the
 sender carries the header, evidence moves to it, because a newer token is the
 one most likely to still work.
 
-**Verification** fills the evidence block. After a slice's summaries are
-applied, the same task calls `get_unsubscribe` for at most twenty-five
-subscriptions per account whose evidence is new or unverified, highest volume
-first, and stores the result. An unverified subscription shows as *Checking*
-and cannot be selected for Unsubscribe; Keep and Report spam never wait on
-verification. Message headers are immutable for a provider message id, so a
+**Verification** fills the evidence block. It runs last in a refresh slice,
+after synchronization, assessment, and drafting, and only with the tool and
+step headroom the slice has left, so it can never starve the work Milestone
+26 defined. Within that headroom the task calls `get_unsubscribe` for at most
+twenty-five subscriptions per account whose evidence is new or unverified,
+highest volume first, and stores the result; it stops quietly when the
+headroom or the read server runs out. An unverified subscription shows as
+*Checking* and cannot be selected for Unsubscribe; Keep and Report spam never
+wait on verification. Message headers are immutable for a provider message id, so a
 verified block does not go stale and dispatch needs no second read.
 
 **Protection** keeps bulk selection away from mail the owner values. A
@@ -301,6 +317,15 @@ active ──tap──▶ pending ──accepted──▶ unsubscribed ──mai
 `kept` is durable: a kept sender is never suggested again, through new mail,
 re-import, and resynchronization, until the owner reverses it. `unsubscribed`
 and `reported_spam` are equally durable against re-suggestion.
+
+`pending` never outlives its run. When a gesture's run is terminal and a
+sender is still pending — the worker died, was cancelled, or ran out of
+budget — the next read or command settles it under the owner lock, the way
+Archive reconciles its own operation: a send or label write that may have
+been dispatched becomes `uncertain` with `unsubscribe.outcome_unknown`, and
+anything else becomes `failed` with `unsubscribe.not_attempted`. A one-click
+request that left no outcome is safe to offer again, because repeating the
+constant request changes nothing.
 
 A row in `active` whose newest message leaves the window is deleted. A row
 that records an owner decision or an outcome persists as a minimal decision
@@ -388,6 +413,13 @@ deadline.
 the sender will honor it, and the interface does not say it is; the follow-up
 below is what finds out. A `failed` row offers the actions that remain: try
 again, Report spam, or Keep.
+
+The other actions record closed codes of their own on the sender's durable
+operation: `unsubscribe.sent`, `unsubscribe.send_failed`, and
+`unsubscribe.send_uncertain` for a `mailto` message; `labels.completed`,
+`labels.failed`, and `labels.uncertain` for a spam report or its reversal; and
+`unsubscribe.not_attempted` for a sender a task never reached, which returns
+it to the state it was in. No code carries provider or sender text.
 
 ## The egress transport
 
@@ -498,7 +530,7 @@ unsub@lists.example.org* — because a tap that sends mail must say so and say
 where. Dispatch is the account's ordinary send server under Milestone 18's
 rules without exception: `NON_IDEMPOTENT`, and an outcome lost after
 dispatch is `uncertain`, shown as *Send status unknown*, and never sent again
-automatically (email-integration.md:378-391).
+automatically (email-integration.md:381-394).
 
 **Report spam** applies `SPAM` and removes `INBOX`. It is what the interface
 offers when a sender has no safe mechanism, when it failed authentication,
@@ -567,9 +599,9 @@ their durable result; a stale revision conflicts without changing state.
 
 Two projections grow additively. The account projection advertises
 `unsubscribe_supported`. The thread projection carries a nullable
-`subscription` block — id, state, mechanism, evidence digest, and revision —
-when the thread's newest received message belongs to one, which is what
-places the action on a thread.
+`subscription` block — id, state, mechanism, destination, evidence digest,
+and revision — on thread detail when the conversation belongs to one, which
+is what places the action on a thread.
 
 ## The native experience
 
@@ -639,8 +671,12 @@ constructed, refresh builds no census, and `get_unsubscribe` is never
 called. `runtime/limits.yaml` gains `email.unsubscribe_grace_days`, default
 10, bounded from 2 through 60. The request's shape, its deadlines, the batch
 bound, and the consent expiry are constants, because a knob on any of them
-would be a way to weaken a gate. The flag and the one limit join the
-executable knob inventory when the implementation lands.
+would be a way to weaken a gate. That limit is the one versioned knob this
+milestone adds to the executable inventory; the flag is an environment
+variable like every other feature flag. A subscription task has a 300-second
+deadline, because one gesture may send mail and page a sender's Inbox after
+its one-click request; the consent's 120-second expiry still bounds every
+approval it resolves.
 
 Typed unsubscribe, spam, and cleanup tasks perform no model work and reserve
 no automatic-email dollars, so an exhausted learning allowance never blocks

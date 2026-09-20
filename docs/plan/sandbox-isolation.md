@@ -1684,3 +1684,19 @@ build failure.
    all? The 512 MiB cap is a guard against a runaway, not a product
    decision, and a tenant legitimately producing a 2 GiB export has
    no answer today.
+
+
+## Public-HTTPS transports
+
+Two process-local transports run through the same proxy code under one rule
+that is not the operator allowlist: `CONNECT` only, port 443 only, a public
+hostname shape, one resolution with every resolved address checked against
+the non-configurable denylist (sandbox-isolation.md:884-898), and a dial to
+the checked address. [ADR-0098](../adr/0098-automatic-browser-site-resources.md)
+introduced the first for browser page resources.
+[ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md) adds the second for
+the one-click unsubscribe request, constructed only for the `email.unsubscribe`
+builtin and logged under its own refusal reason so the two stay separately
+auditable. Neither is selectable from a serialized sandbox policy, neither
+changes what an approved `SANDBOX_NETWORK` grants, and the operator's
+`egress` grammar above is unchanged.

@@ -2094,3 +2094,14 @@ are classified in [builtin-tools.md](builtin-tools.md). Registration is
 conditional on `AGENT_EMAIL_MODE_ENABLED`; neither tool invokes Gmail, admits
 a model task, nor bypasses the normal approval path. Feedback remains a scoped,
 replay-safe write to the same owner ledger used by the Email APIs.
+
+
+Milestone 30 adds `email.subscriptions` and `email.unsubscribe` to the builtin
+`email` domain, conditional on `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` and classified
+in [builtin-tools.md](builtin-tools.md). `email.unsubscribe` constructs the
+`unsubscribe_endpoint` target, the third network-enabled builtin target after
+`web_provider` and `browser_provider`. Registration pins it both ways: that
+target is valid only for the builtin named `email.unsubscribe` with
+`EXTERNAL_WRITE`, `MEDIUM`, `IDEMPOTENT` and no parallelism, and that name is
+valid only with that target, so no other tool can claim the public-HTTPS
+unsubscribe transport ([ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md)).

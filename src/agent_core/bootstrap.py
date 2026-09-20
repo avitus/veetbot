@@ -227,6 +227,7 @@ from agent_core.adapters.telegram import (
     TelegramBotTransport,
     TelegramPoller,
 )
+from agent_core.adapters.unsubscribe.http import HttpOneClickTransport
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.keenable import KeenableWebProvider
 from agent_core.adapters.web.routing import WeightedWebProviderRouter
@@ -377,6 +378,7 @@ from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits
+from agent_core.domain.email_subscriptions import SUBSCRIPTIONS_TOOL_NAME, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.execution import (
@@ -426,7 +428,11 @@ from agent_core.domain.surfaces import (
 from agent_core.domain.tools import ToolExecutionContext, ToolInvocation, ToolSpec
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
-from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
+from agent_core.execution.proxy import (
+    WorkerEgressProxy,
+    start_unsubscribe_egress_proxy,
+    start_worker_egress_proxy,
+)
 from agent_core.folders.grouping import ModelAssistedThreadGrouper
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
@@ -498,6 +504,7 @@ from agent_core.ports.persistence import (
 )
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.tools import DeviceChannel
+from agent_core.ports.unsubscribe import OneClickTransport
 from agent_core.ports.web import WebProvider, WebProviderRouter
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
@@ -523,6 +530,7 @@ from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolRuntime
 from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
+from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
@@ -2077,6 +2085,7 @@ async def _compose(
     mcp_server_configs: tuple[MCPServerConfig, ...],
     web_search_provider: WebProvider | WebProviderRouter | None,
     web_fetch_provider: WebProvider | WebProviderRouter | None,
+    one_click_transport: OneClickTransport | None,
     memory_provider_evaluation_mode: bool,
     memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
@@ -3018,6 +3027,10 @@ async def _compose(
         ) -> None:
             """Revalidate the exact owner gesture at the provider dispatch watermark."""
             task = await public_services.email.get_task(owner, run.id)
+            if task is not None and task.kind == "subscription":
+                if not settings.email_unsubscribe_enabled:
+                    raise ConflictError("Email unsubscribe assistance is disabled")
+                await public_services.email.subscriptions.guard(owner, run, invocation, lease)
             if task is not None and task.kind == "archive":
                 if task.archive_consent is not None and invocation.tool_name.startswith(
                     f"mcp.{task.archive_consent.read_server_id}."
@@ -3684,6 +3697,8 @@ async def _compose(
                     else principal.model_copy(update={"scopes": set()})
                 ),
                 archive_self_approval_enabled=ruleset.self_approval_enabled,
+                unsubscribe_enabled=settings.email_unsubscribe_enabled,
+                unsubscribe_grace_days=email_budget_limits.unsubscribe_grace_days,
             ),
         )
         if people_service is not None:
@@ -3691,6 +3706,15 @@ async def _compose(
         if settings.email_mode_enabled:
             registry.register(EmailContextTool(public_services.email))
             registry.register(EmailFeedbackTool(public_services.email))
+        if settings.email_unsubscribe_enabled and one_click_transport is not None:
+            registry.register(EmailSubscriptionsTool(public_services.email.subscriptions))
+            registry.register(
+                EmailUnsubscribeTool(
+                    public_services.email.subscriptions,
+                    one_click_transport,
+                    owner=lambda: principal,
+                )
+            )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 
         def schedule_worker_factory() -> WorkerService:
@@ -4003,6 +4027,7 @@ async def build(
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
+    one_click_transport_override: OneClickTransport | None = None,
     browser_provider_override: BrowserProvider | None = None,
     device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
@@ -4271,6 +4296,11 @@ async def build(
             else []
         ),
         *(["email.context", "email.feedback"] if effective_settings.email_mode_enabled else []),
+        *(
+            [SUBSCRIPTIONS_TOOL_NAME, UNSUBSCRIBE_TOOL_NAME]
+            if effective_settings.email_unsubscribe_enabled
+            else []
+        ),
         *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
@@ -4322,6 +4352,8 @@ async def build(
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
     web_provider_cache: dict[WebProviderKind, WebProvider] = {}
+    one_click_transport: OneClickTransport | None = None
+    unsubscribe_proxy: WorkerEgressProxy | None = None
     browser_provider: BrowserProvider | None = None
     browser_profile_http_client: httpx.AsyncClient | None = None
     browser_sessions: BrowserSessionControlPlane | None = None
@@ -4490,6 +4522,16 @@ async def build(
             if displaced is not None:
                 await displaced.close()
             provider_adapters[name] = override
+        if effective_settings.email_unsubscribe_enabled:
+            # The public-HTTPS transport is constructed for one tool and handed to
+            # nothing else; the operator's egress policy cannot select it (ADR-0108).
+            if one_click_transport_override is not None:
+                one_click_transport = one_click_transport_override
+            else:
+                unsubscribe_proxy = await start_unsubscribe_egress_proxy(
+                    tenant_id=effective_principal.tenant_id
+                )
+                one_click_transport = HttpOneClickTransport(unsubscribe_proxy.url)
         composition, model_providers = await _compose(
             storage=storage,
             settings=effective_settings,
@@ -4546,6 +4588,7 @@ async def build(
             mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
+            one_click_transport=one_click_transport,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
             memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
@@ -4589,6 +4632,18 @@ async def build(
                     "model_provider_close_failed",
                     extra={"error_class": type(exc).__name__},
                 )
+        for closing in (
+            one_click_transport if one_click_transport_override is None else None,
+            unsubscribe_proxy,
+        ):
+            if closing is not None:
+                try:
+                    await closing.close()
+                except Exception as exc:
+                    logger.warning(
+                        "unsubscribe_transport_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
         for web_provider in web_providers:
             try:
                 await web_provider.close()

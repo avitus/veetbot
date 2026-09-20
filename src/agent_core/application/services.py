@@ -590,8 +590,48 @@ class FolderService(Protocol):
     async def decline(self, principal: Principal, proposal_id: UUID) -> FolderProposalView: ...
 
 
+class EmailSubscriptionService(Protocol):
+    """The bulk-sender census and its three owner gestures (Milestone 30)."""
+
+    async def browse(
+        self,
+        principal: Principal,
+        *,
+        account_id: str | None = None,
+        state: str | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, object]: ...
+
+    async def keep(
+        self, principal: Principal, subscription_id: str, expected_revision: int, *, kept: bool
+    ) -> dict[str, object]: ...
+
+    async def unsubscribe(
+        self,
+        principal: Principal,
+        targets: list[tuple[str, str, int]],
+        *,
+        archive_existing: bool,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+    async def spam(
+        self,
+        principal: Principal,
+        subscription_id: str,
+        expected_revision: int,
+        *,
+        spam: bool,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+
 class EmailService(Protocol):
     """Email projections and commands; entry points cannot reach repositories."""
+
+    @property
+    def subscriptions(self) -> EmailSubscriptionService: ...
 
     async def accounts(self, principal: Principal) -> dict[str, object]: ...
 

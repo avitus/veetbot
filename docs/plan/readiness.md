@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:633` named `ApprovalService` as one of
+`bootstrap-and-composition.md:634` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -1927,5 +1927,6 @@ native experience, and integrated release evidence. The design touches no
 roadmap item: every action keeps its approval, nothing runs unattended, and
 no new Google permission is requested. Its one posture change, a dedicated
 public-HTTPS egress transport for a single tool, is owned by ADR-0108
-decision 5. Gate bindings remain pending until executable implementation
-evidence lands; the verified ceiling remains 12.
+decision 5. Eighteen gates bind executable checks as of 2026-09-20; the native
+experience gate and integrated release evidence remain pending, and the
+verified ceiling remains 12.

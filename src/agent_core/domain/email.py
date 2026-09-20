@@ -9,9 +9,11 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, ConfigDict, Field
 
+from agent_core.domain.email_base import EmailValue as EmailValue
 from agent_core.domain.email_semantics import EmailSemanticFact
+from agent_core.domain.email_subscriptions import EmailSubscriptionConsent
 
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
@@ -19,15 +21,13 @@ EMAIL_HISTORY_DAYS = 90
 EMAIL_BODY_RETENTION = timedelta(days=30)
 
 
-class EmailValue(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
 class EmailBudgetLimits(EmailValue):
     """Finite operator-configured aggregate allowances for automatic email work."""
 
     daily_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
     monthly_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
+    # How long an unsubscribed sender has to comply before it is shown as still sending.
+    unsubscribe_grace_days: int = Field(default=10, ge=2, le=60)
 
 
 class EmailImportBudget(EmailValue):
@@ -234,13 +234,14 @@ class EmailTask(EmailValue):
     id: UUID
     run_id: UUID
     session_id: UUID
-    kind: Literal["refresh", "draft", "send", "archive"]
+    kind: Literal["refresh", "draft", "send", "archive", "subscription"]
     account_ids: list[str]
     thread_id: UUID | None = None
     draft_id: UUID | None = None
     expected_revision: int | None = None
     instruction: str | None = None
     archive_consent: EmailArchiveConsent | None = None
+    subscription_consent: EmailSubscriptionConsent | None = None
     created_at: datetime
     reservation: Decimal = Decimal("0")
     settled_cost: Decimal | None = None

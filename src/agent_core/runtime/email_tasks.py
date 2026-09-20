@@ -58,6 +58,7 @@ from agent_core.ports.persistence import RepositoryUnitOfWork
 from agent_core.ports.tools import ToolRegistry
 from agent_core.runtime.email_assessment import assessment_instruction
 from agent_core.runtime.email_state import read_value, records, save_value, thread_summaries
+from agent_core.runtime.email_subscription_tasks import run_subscription, subscription_modes
 from agent_core.runtime.loop import RunContext, _invoke_model, checkpoint, select_final_message
 
 EMAIL_MESSAGE_WINDOW = 100
@@ -71,6 +72,8 @@ EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
     "archive": ("read", "write"),
     "send": ("read", "send"),
     "draft": (),
+    # A consented batch starts only what its mechanisms call; see ``subscription_modes``.
+    "subscription": (),
 }
 
 type ServerPreparation = Callable[[UUID, Principal, frozenset[str]], Awaitable[None]]
@@ -151,7 +154,11 @@ class EmailTaskRunner:
         servers = frozenset(
             server
             for account_id in task.account_ids
-            for mode in EMAIL_TASK_SERVER_MODES[task.kind]
+            for mode in (
+                subscription_modes(task, account_id)
+                if task.kind == "subscription"
+                else EMAIL_TASK_SERVER_MODES[task.kind]
+            )
             if (server := self.service.account_servers[account_id].get(mode)) is not None
         )
         if servers:
@@ -162,6 +169,8 @@ class EmailTaskRunner:
             await io.recover_reads()
             if task.kind == "archive":
                 return await io.archive()
+            if task.kind == "subscription":
+                return await run_subscription(io)
             if task.kind == "refresh":
                 await io.refresh()
                 return _finished(
@@ -258,21 +267,51 @@ class _TaskIO:
         *,
         operation: str | None = None,
     ) -> dict[str, Any]:
-        c = self.context
-        c.token.raise_if_cancelled()
         mode = (
             "send" if remote == "send_message" else "write" if remote == "modify_labels" else "read"
         )
         server = self.service.account_servers[account_id][mode]
-        name = f"mcp.{server}.{remote}"
         if account_id not in self.task.account_ids:
             raise ConflictError("email task cannot use an unrelated account")
+        value = await self._dispatch(f"mcp.{server}.{remote}", server, arguments, operation)
+        if remote == "get_thread_page":
+            await self._register_sources(account_id, value)
+        return value
+
+    async def call_builtin(
+        self, name: str, arguments: dict[str, Any], *, operation: str
+    ) -> dict[str, Any]:
+        """Invoke one first-party builtin through the same frozen, governed pipeline."""
+        return await self._dispatch(name, None, arguments, operation)
+
+    async def _dispatch(
+        self,
+        name: str,
+        server: str | None,
+        arguments: dict[str, Any],
+        operation: str | None,
+    ) -> dict[str, Any]:
+        c = self.context
+        c.token.raise_if_cancelled()
+        remote = name.rsplit(".", 1)[-1]
+        account_id = next(
+            (
+                account
+                for account, servers in self.service.account_servers.items()
+                if server is not None and server in servers.values()
+            ),
+            "",
+        )
         permitted = {
             spec.name: spec
             for spec in self.registry.specs_for_session(c.agent, c.principal, None, None)
         }
         spec = permitted.get(name)
-        if spec is None or spec.source is not ToolSource.MCP or spec.server_id != server:
+        if spec is None or (
+            spec.source is not ToolSource.BUILTIN
+            if server is None
+            else spec.source is not ToolSource.MCP or spec.server_id != server
+        ):
             raise EmailToolError("The configured email tool is unavailable.")
         pins = c.checkpoint.working_state.setdefault("email_tool_pins", {})
         if not isinstance(pins, dict):
@@ -380,8 +419,6 @@ class _TaskIO:
             )
         if event is not None and event.payload.get("call_id") == call.call_id:
             value = {**value, "source_event_sequence": event.sequence, "source_tool_name": name}
-        if remote == "get_thread_page":
-            await self._register_sources(account_id, value)
         return value
 
     async def _register_sources(self, account_id: str, value: dict[str, Any]) -> None:
@@ -788,6 +825,7 @@ class _TaskIO:
                             ),
                         },
                     )
+                    await self._census(account_id, page)
                     sync.inbox_pending = list(
                         dict.fromkeys(item["thread_id"] for item in page["threads"])
                     )
@@ -947,6 +985,47 @@ class _TaskIO:
                 # A rejected proposal leaves only this thread undrafted.
                 with suppress(EmailModelResultError):
                     await self.generate_draft(thread.id)
+        await self._verify_subscriptions()
+
+    async def _census(self, account_id: str, page: dict[str, Any]) -> None:
+        """Fold the summaries this slice already read; the census issues no query."""
+        c = self.context
+        threads = page.get("threads")
+        if isinstance(threads, list):
+            await self.service.subscriptions.observe(
+                c.principal,
+                account_id,
+                [item for item in threads if isinstance(item, dict)],
+                run=c.run,
+                lease=c.lease,
+            )
+
+    async def _verify_subscriptions(self) -> None:
+        """Read unsubscribe evidence with whatever bounded headroom the slice has left.
+
+        It runs last so it can never starve mailbox synchronization, assessment or
+        drafting, and it stops quietly: an unverified sender simply stays unselectable.
+        """
+        c = self.context
+        for account_id in self.task.account_ids:
+            with suppress(EmailToolError, ConflictError):
+                await self.service.subscriptions.sweep(
+                    c.principal, account_id, run=c.run, lease=c.lease
+                )
+                pending = await self.service.subscriptions.unverified(c.principal, account_id)
+                for subscription_id, message_id in pending:
+                    limits = c.run.limits
+                    if (
+                        limits.max_tool_calls - c.run.tool_call_count <= 2
+                        or limits.max_steps - c.run.step_count <= 2
+                    ):
+                        return
+                    block = await self.call(
+                        account_id, "get_unsubscribe", {"message_id": message_id}
+                    )
+                    await self.service.subscriptions.apply_verification(
+                        c.principal, subscription_id, block, run=c.run, lease=c.lease
+                    )
 
     async def _changes(
         self, account: EmailAccount, sync: EmailSyncState
@@ -1150,6 +1229,7 @@ class _TaskIO:
                     **({"page_token": account.history_cursor} if account.history_cursor else {}),
                 },
             )
+            await self._census(account.id, page)
             sync.history_pending = list(
                 dict.fromkeys(item["thread_id"] for item in page["threads"])
             )
