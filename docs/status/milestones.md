@@ -250,9 +250,10 @@ adapters, the manual operations, the proposal lifecycle, the grounded grouping
 with its lexical fallback, the routes behind the flag and the native sidebar
 are implemented with their twelve gates bound to executable checks. ADR-0110
 admitted the typed-judgment port and an optional judgment matcher on
-2026-09-19; their five gates are registered pending.
+2026-09-19. The port, the TypeSafe adapter, the fake and the default-off
+selector are implemented with the four `gate.judgment.*` gates bound to
+executable checks; the matcher's gate is registered pending.
 
-- [ ] Land the typed-judgment port, the TypeSafe adapter and the fake under one contract suite, default off
 - [ ] Implement the judgment folder matcher with its two knobs, audit fields and whole fallback
 - [ ] Exact-head hosted CI and explicitly authorized review evidence
 

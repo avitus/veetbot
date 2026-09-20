@@ -61,6 +61,11 @@ class WebProviderKind(StrEnum):
     KEENABLE = "keenable"
 
 
+class JudgmentProviderKind(StrEnum):
+    DISABLED = "disabled"
+    TYPESAFE = "typesafe"
+
+
 @dataclass(frozen=True, slots=True)
 class WebProviderAllocation:
     provider: WebProviderKind
@@ -168,6 +173,7 @@ class Settings:
     web_search_providers: tuple[WebProviderAllocation, ...] = ()
     web_fetch_providers: tuple[WebProviderAllocation, ...] = ()
     browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
+    judgment_provider: JudgmentProviderKind = JudgmentProviderKind.DISABLED
     browser_allowed_origins: tuple[str, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
@@ -1741,6 +1747,12 @@ def _load_settings(
         values.get("BROWSER_PROVIDER", "disabled").strip(),
         "BROWSER_PROVIDER",
     )
+    # The selector is the only switch: TYPESAFE_API_KEY alone enables nothing.
+    judgment_provider = _parse_enum(
+        JudgmentProviderKind,
+        values.get("JUDGMENT_PROVIDER", "disabled").strip(),
+        "JUDGMENT_PROVIDER",
+    )
     raw_browser_origins = tuple(
         value.strip()
         for value in values.get("BROWSER_ALLOWED_ORIGINS", "").split(",")
@@ -1849,6 +1861,7 @@ def _load_settings(
         web_search_providers=web_search_providers,
         web_fetch_providers=web_fetch_providers,
         browser_provider=browser_provider,
+        judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
         browser_profile_service_url=browser_profile_service_url,
         browser_profile_id=browser_profile_id,

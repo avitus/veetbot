@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-20 — The typed-judgment port and the TypeSafe adapter land, default off
+
+- `agent_core.ports.judgment.JudgmentProvider` answers closed, typed questions
+  over frozen domain types: the probability that a statement holds, a choice
+  among offered options, and a position on ordered levels.
+- The TypeSafe adapter speaks raw HTTP to one fixed endpoint, follows no
+  redirect, resolves its credential on every call, bounds request and response
+  size, retries only transient failures on the injected clock, and raises one
+  typed error whose message is a reason code. No failure carries a response
+  body, request state, or the key. Cost is computed locally at the pinned,
+  dated price.
+- `JUDGMENT_PROVIDER` selects it and defaults to `disabled`; a key alone
+  enables nothing, and a selector without a key warns once and never refuses
+  startup. No consumer exists yet, so no judgment request is made anywhere.
+- The four `gate.judgment.*` gates are bound to executable checks.
+
 ## 2026-09-19 — ADR-0111 authorizes Milestone 30, the advisory approval layer
 
 - The owner authorized the restrictive-only half of roadmap item B8: an

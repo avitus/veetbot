@@ -17,6 +17,7 @@ from agent_core.config import (
     AuthMode,
     ConfigurationError,
     DeploymentMode,
+    JudgmentProviderKind,
     MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     PushProviderKind,
@@ -595,6 +596,26 @@ def test_apns_key_file_must_be_absolute_regular_and_private(
 def test_unknown_push_provider_is_refused() -> None:
     with pytest.raises(ConfigurationError, match="PUSH_PROVIDER"):
         load_settings({**base_environment(), "PUSH_PROVIDER": "surprise"})
+
+
+def test_judgment_provider_is_disabled_until_selected() -> None:
+    assert load_settings(base_environment()).judgment_provider is JudgmentProviderKind.DISABLED
+    # A credential alone enables nothing: the selector is the only switch.
+    credentialed = load_settings({**base_environment(), "TYPESAFE_API_KEY": "synthetic-key"})
+    assert credentialed.judgment_provider is JudgmentProviderKind.DISABLED
+    assert "typesafe" in credentialed.credentials
+
+
+def test_judgment_provider_selects_typesafe() -> None:
+    settings = load_settings({**base_environment(), "JUDGMENT_PROVIDER": "typesafe"})
+    assert settings.judgment_provider is JudgmentProviderKind.TYPESAFE
+
+
+def test_unknown_judgment_provider_fails_at_load() -> None:
+    with pytest.raises(
+        ConfigurationError, match="JUDGMENT_PROVIDER must be one of: disabled, typesafe"
+    ):
+        load_settings({**base_environment(), "JUDGMENT_PROVIDER": "jev"})
 
 
 def test_web_provider_selection_is_per_capability() -> None:

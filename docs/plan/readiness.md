@@ -1921,7 +1921,8 @@ registers four gates in a new `gate.judgment.*` area.
 registers a thirteenth folder gate. The amendment touches no roadmap item: it
 registers no model profile, so B2's model routing stays deferred, it adds no
 embedding, so B6 is unamended, and the policy advisory layer stays in B8 until
-its own policy ADR. The five gates are pending and nothing is implemented.
+its own policy ADR. The four `gate.judgment.*` gates are bound to executable
+checks as of 2026-09-20; the matcher's gate is pending.
 
 ## Milestone 30: Advisory approval layer
 
