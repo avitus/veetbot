@@ -4,6 +4,25 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-20 — The advisory approval layer lands, off, observing before enforcing
+
+- `PolicyAdvisor` is a port that receives only the proposed action, and
+  `AdvisedPolicyEngine` consults it only on a plain allow for a web search, a
+  page fetch or a browser navigation. It can only escalate to an approval, never
+  denies as shipped, and abstains on a timeout, an error or a missing provider.
+- The first advisor asks the typed-judgment port three narrow questions about
+  redacted, escaped and delimited outbound arguments; any one signal escalates.
+  Its thresholds are untuned initial values.
+- The tool pipeline holds the deterministic engine as its recovery policy, so a
+  resumed or re-approved invocation never asks the advisor twice and an
+  escalation recorded before a crash survives it.
+- ADR-0111 is amended: observing is the environment flag
+  `AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`, which moves no policy version;
+  enforcing is the profile value `advisory.enabled`, which does, and so unbinds
+  the memory-formation release evidence until it is regenerated. The shipped
+  profile is byte-identical.
+- The five `gate.policy.advisory_*` gates are bound to executable checks.
+
 ## 2026-09-20 — The judgment matcher proposes add-to-folder matches, default off
 
 - An optional matcher wraps the chat-folder grouper and asks the typed-judgment

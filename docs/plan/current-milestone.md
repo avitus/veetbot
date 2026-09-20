@@ -85,7 +85,8 @@ title: Current Milestone
   five further gates for an advisor port, a composite engine that can only
   escalate an allowed web or browser network read, a judgment-backed advisor
   that never denies, a deterministic recovery policy in the tool pipeline, and
-  observe before enforce. Nothing is implemented; the milestone is authorized.
+  observe before enforce. All five gates are bound to executable checks; the
+  layer is off in every deployment and the milestone is in progress.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -518,6 +519,12 @@ to the rules and sees only redacted, delimited arguments; and the layer off or
 observing changes no decision. The first advisor uses the
 [typed-judgment port](typed-judgment.md) rather than the model gateway, a
 divergence ADR-0111 records, and the tool pipeline gains a deterministic
-recovery policy. General standing approval grants stay on the roadmap. This
-independent workstream is authorized and not begun; the verified ceiling
-remains 12.
+recovery policy. General standing approval grants stay on the roadmap. The
+implementation landed on 2026-09-20 with every gate bound to an executable
+check. Observing is the environment flag
+`AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`, which moves no policy version;
+enforcing is the profile value `advisory.enabled`, which does and therefore
+unbinds the memory-formation release evidence until it is regenerated
+(ADR-0111, amended 2026-09-20). Threshold calibration, hosted CI, review and
+delivery evidence remain open. This independent workstream is in progress;
+the verified ceiling remains 12.

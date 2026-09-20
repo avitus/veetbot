@@ -84,28 +84,28 @@
   kind: property
   spec: docs/plan/policy-and-approvals.md#hard-gates
   statement: "**The composite cannot lower a rank.** Over the full cross product of deterministic decisions and advisor verdicts, evaluated through `AdvisedPolicyEngine` rather than the combination function alone, the result's rank is never below the deterministic rank, it never carries modifications the deterministic layer did not produce, and its `policy_version` is the deterministic one."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_policy_advisory.py::test_advisory_monotonic
 - id: gate.policy.advisory_allow_path_once
   milestone: 30
   kind: case
   spec: docs/plan/policy-and-approvals.md#hard-gates
   statement: "**The advisor runs on allow paths only, and once.** It is never called after a hardline block, a `DENY`, a `REQUIRE_APPROVAL`, or an `ALLOW_WITH_MODIFICATIONS`, never for an action outside the consulted class, never at revalidation, and never for an invocation that already has a row; a persisted escalation survives a restart."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_policy_advisory.py::test_advisory_allow_path_once
 - id: gate.policy.advisory_abstains
   milestone: 30
   kind: case
   spec: docs/plan/policy-and-approvals.md#hard-gates
   statement: "**An unavailable advisor abstains.** A timeout, a provider error, a missing credential, and an invalid response each return the deterministic decision byte-identical and fail no run; with the layer enabled and no provider composed, composition uses the deterministic engine."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_policy_advisory.py::test_advisory_abstains
 - id: gate.policy.advisory_blind_redacted
   milestone: 30
   kind: structural
   spec: docs/plan/policy-and-approvals.md#hard-gates
   statement: "**The advisor is blind to the rules, and what it sees is redacted.** No advisor request contains a hardline pattern, path, range, or identifier, the profile's name or contents, a `policy_version`, or a deterministic decision; sensitive keys and credential-shaped values are masked, every untrusted string is escaped and delimited, and the advisor module imports neither the loader nor the hardline module."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_policy_advisory.py::test_advisory_blind_redacted
 - id: gate.policy.advisory_default_off
   milestone: 30
   kind: case
   spec: docs/plan/policy-and-approvals.md#hard-gates
-  statement: "**Off and observing change nothing.** With `advisory.enabled` false no advisor is constructed and no judgment request is made; in `observe` mode every decision is byte-identical to the deterministic decision while the verdict is recorded; and no shipped advisor returns `deny`."
-  check: tests/gates/pending.py::pending_gate
+  statement: "**Off and observing change nothing.** With `advisory.enabled` false and the observe flag unset no advisor is constructed and no judgment request is made; the shipped profile compiles to the policy version the bundled release evidence is bound to; when observing, every decision is byte-identical to the deterministic decision and the policy version is unmoved while the verdict is recorded; and no shipped advisor returns `deny`."
+  check: tests/gates/test_policy_advisory.py::test_advisory_default_off

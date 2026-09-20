@@ -237,6 +237,7 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "WEB_SEARCH_PROVIDERS=" in environment
     assert "WEB_FETCH_PROVIDERS=" in environment
     assert "JUDGMENT_PROVIDER=disabled" in environment
+    assert "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED=0" in environment
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment

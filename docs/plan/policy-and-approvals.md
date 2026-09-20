@@ -775,14 +775,19 @@ before a crash survives it. Standing authorization evaluates against the
 deterministic engine, so a standing grant never satisfies an advisory
 escalation.
 
-**Observe before enforce.** `advisory.enabled` turns the layer on and
-`advisory.mode` is `observe` or `enforce`, default `observe`. In observe mode
-the advisor runs, its verdict is recorded, and the deterministic decision is
-returned unchanged. Both are profile values and hash into `policy_version`;
-changing either voids a pending approval whose re-evaluation is not `ALLOW`,
-so they are changed when none is pending. With the layer enabled and no
-judgment provider composed, composition warns once and uses the deterministic
-engine.
+**Observe before enforce.** Observing is the environment flag
+`AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`: the advisor runs, its verdict is
+recorded, and the deterministic decision is returned unchanged. It changes no
+effective rule, so it is not a profile value and does not move
+`policy_version`. Enforcing is the profile value `advisory.enabled`: it changes
+decisions, so it hashes into `policy_version` like every profile value, and
+with both set it wins. ADR-0111's amendment records why the two differ: the
+bundled memory-formation release evidence is bound to the compiled
+`policy_version`, so a profile change — and therefore enforcing — voids a
+pending approval whose re-evaluation is not `ALLOW` and unbinds that evidence
+until it is regenerated, while observing costs neither. The shipped profile is
+unchanged. With the layer on in either way and no judgment provider composed,
+composition warns once and uses the deterministic engine.
 
 **What an escalation looks like.** `REQUIRE_APPROVAL` with
 `reason_code = policy.advisory.escalated`, an explanation naming signal
@@ -1323,11 +1328,13 @@ warning.
     untrusted string is escaped and delimited, and the advisor module imports
     neither the loader nor the hardline module. Registered as
     `gate.policy.advisory_blind_redacted`, structural. **M30.**
-18. **Off and observing change nothing.** With `advisory.enabled` false no
-    advisor is constructed and no judgment request is made; in `observe` mode
-    every decision is byte-identical to the deterministic decision while the
-    verdict is recorded; and no shipped advisor returns `deny`. Registered as
-    `gate.policy.advisory_default_off`, case. **M30.**
+18. **Off and observing change nothing.** With `advisory.enabled` false and
+    the observe flag unset no advisor is constructed and no judgment request
+    is made; the shipped profile compiles to the policy version the bundled
+    release evidence is bound to; when observing, every decision is
+    byte-identical to the deterministic decision and the policy version is
+    unmoved while the verdict is recorded; and no shipped advisor returns
+    `deny`. Registered as `gate.policy.advisory_default_off`, case. **M30.**
 
 ## Tracked metrics
 
@@ -1368,7 +1375,7 @@ Extending Section 19's `approval_requests_total`:
 10. The reaper and the cancellation edge, including the race test.
 11. The `ApprovalService` read methods and the CLI commands that call them.
 12. The advisory layer, behind a flag, default off, after Milestone 6. In
-    order: the `advisory.mode` knob and the ruleset's two advisory fields; the
+    order: the ruleset's advisory field and the observe environment flag; the
     `PolicyAdvisor` port with its contract suite; `AdvisedPolicyEngine`; the
     argument-redaction helpers moved into the domain so this package may use
     them; the judgment-backed advisor; the pipeline's recovery policy; the
@@ -1458,6 +1465,18 @@ those routes already says.
 35. `Principal.roles` is populated and never read as an authorization
     input in 0.1, because one configured principal has no bundle to
     resolve.
+
+## Advisory layer implementation checkpoint: 2026-09-20
+
+Build step 12 landed. `PolicyAdvisor` and the verdict types, `AdvisedPolicyEngine`
+in `agent_core.policy.advised`, the judgment-backed advisor in
+`agent_core.policy.judgment_advisor`, the argument-redaction helpers in
+`agent_core.domain.argument_views`, the pipeline's recovery policy, the observe
+flag, the composition wiring, and the metrics in `agent_core.observability.policy`.
+Gates 14 through 18 bind through `tests/gates/test_policy_advisory.py`; the
+composed check approves an escalated search and finds it executed once with
+the vendor asked once. The layer is off in every deployment, and the thresholds
+are untuned initial values to be calibrated while observing.
 
 ## Open questions
 
