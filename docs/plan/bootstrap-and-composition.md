@@ -1463,12 +1463,14 @@ the executable inventory and the knob table. The detailed contracts are
 ## Milestone 30 advisory approval composition
 
 The composition root always builds the deterministic policy engine. Only when
-the loaded profile has `advisory.enabled` true and a judgment provider is
-composed does it wrap that engine in the advised engine over a judgment-backed
-advisor, in the profile's `advisory.mode`; with the layer enabled and no
-provider it logs one warning and uses the deterministic engine, and never
-refuses startup. The tool pipeline receives the advised engine as its policy
-and the deterministic engine as its recovery policy, and the standing
-authorizer keeps the deterministic engine. The `advisory.mode` knob joins the
-executable inventory and the knob table when the implementation lands. The
-detailed contract is [policy-and-approvals.md](policy-and-approvals.md).
+the loaded profile has `advisory.enabled` true, which enforces, or
+`AGENT_POLICY_ADVISORY_OBSERVE_ENABLED` is set, which only observes, and a
+judgment provider is composed, does it wrap that engine in the advised engine
+over a judgment-backed advisor; with the layer on and no provider it logs one
+`policy_advisory_unavailable` warning and uses the deterministic engine, and
+never refuses startup. The tool pipeline receives the advised engine as its
+policy and the deterministic engine as its recovery policy, and the standing
+authorizer keeps the deterministic engine. The observe flag is an environment
+value because it changes no effective rule; enforcing stays in the hashed
+profile. No knob is added: the shipped profile is unchanged. The detailed
+contract is [policy-and-approvals.md](policy-and-approvals.md).

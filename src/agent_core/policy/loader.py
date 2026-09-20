@@ -196,6 +196,7 @@ def _build_ruleset(
         unknown_tool_decision=unknown_tool_decision,
         external_untrusted_requires_approval=external_requires_approval,
         self_approval_enabled=profile["self_approval"]["enabled"],
+        advisory_enabled=profile["advisory"]["enabled"],
         approval_expiry_seconds=expiry_values,
     )
 

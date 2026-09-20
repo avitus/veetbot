@@ -478,8 +478,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1201-1202` and the resolve at
-`policy-and-approvals.md:1228`, and one reference in
+at `policy-and-approvals.md:1206-1207` and the resolve at
+`policy-and-approvals.md:1233`, and one reference in
 `runtime-loop.md:1192` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -561,7 +561,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4520-4597`
+Section 28 of the plan is not empty — `engineering-plan.md:4522-4599`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -580,7 +580,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1436`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4595` requires a container-escape attempt as
+    `engineering-plan.md:4597` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -1544,7 +1544,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4599-4756` for links to other documents returned
+`engineering-plan.md:4601-4758` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1774,7 +1774,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4595` requires a test the harness's case set
+    `engineering-plan.md:4597` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1942,5 +1942,8 @@ design depends on the typed-judgment port of
 plan's sequencing table, which named the model gateway. One correction is
 recorded rather than absorbed: the specification's claim that the layer
 composes without changing any caller does not hold for an advisor whose
-answer can differ between calls. Every gate is pending and nothing is
-implemented; the verified ceiling remains 12.
+answer can differ between calls. Every gate is bound to an executable check
+as of 2026-09-20. ADR-0111's amendment of the same day moves observing to an
+environment flag, because any profile change moves the policy version the
+memory-formation release evidence is bound to. The verified ceiling remains
+12.

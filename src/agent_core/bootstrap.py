@@ -475,8 +475,11 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
+from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import BrowserProvider
@@ -501,6 +504,7 @@ from agent_core.ports.persistence import (
     TransactionCallbackRegistrar,
     UnitOfWorkFactory,
 )
+from agent_core.ports.policies import PolicyEngine
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.tools import DeviceChannel
 from agent_core.ports.web import WebProvider, WebProviderRouter
@@ -2989,7 +2993,27 @@ async def _compose(
                     completed += 1
             return completed
 
-        policy_engine = DeterministicPolicyEngine(ruleset)
+        # The deterministic engine is always built and stays the recovery policy and
+        # the standing authorizer's engine: an advisory escalation can never be
+        # satisfied by a standing grant, and a resumed invocation never re-asks.
+        deterministic_engine = DeterministicPolicyEngine(ruleset)
+        policy_engine: PolicyEngine = deterministic_engine
+        if ruleset.advisory_enabled or settings.policy_advisory_observe_enabled:
+            if judgment_provider is None:
+                # Never fail closed on the advisor's availability.
+                logger.warning(
+                    "policy_advisory_unavailable", extra={"selector": "JUDGMENT_PROVIDER"}
+                )
+            else:
+                policy_engine = AdvisedPolicyEngine(
+                    deterministic_engine,
+                    JudgmentPolicyAdvisor(judgment_provider),
+                    # Enforcing is a profile value and hashes into `policy_version`;
+                    # observing changes no decision and is an environment flag.
+                    enforce=ruleset.advisory_enabled,
+                    clock=clock,
+                    observer=AdvisoryMetrics(),
+                )
         standing_authorizer = None
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
@@ -3000,7 +3024,7 @@ async def _compose(
                 purpose=settings.browser_run_purpose,
                 provider=browser_provider,
                 uow_factory=uow_factory,
-                policy=policy_engine,
+                policy=deterministic_engine,
                 now=clock.now,
             )
         checkpoint_seeder = DurableCheckpointSeeder(clock)
@@ -3045,6 +3069,7 @@ async def _compose(
             clock,
             ids,
             policy=policy_engine,
+            recovery_policy=deterministic_engine,
             workspace_factory=sandbox_manager,
             artifact_writers=artifact_writers,
             current_principal=principal,

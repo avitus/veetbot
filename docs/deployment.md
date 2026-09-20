@@ -322,6 +322,19 @@ workers refuse to start when their environment holds a provider key. The
 adapter dials one fixed endpoint, `api.typesafe.ai` on port 443, and needs no
 egress-policy entry.
 
+The policy advisory layer (ADR-0111) has two switches, and they are not
+equivalent. `AGENT_POLICY_ADVISORY_OBSERVE_ENABLED=1` in that same file consults
+the advisor on allowed web searches, page fetches and browser navigations and
+records what it would have escalated; no decision changes and `policy_version`
+does not move. Enforcing is the policy-profile value `advisory.enabled: true`,
+set in an operator overlay at `policy/default.yaml` under `AGENT_CONFIG_DIR`.
+That changes `policy_version`: a pending approval whose re-evaluation is not an
+allow is voided, and the bundled memory-formation, People and email-People
+release evidence no longer matches the running composition, so
+provider-assisted formation falls back to deterministic until the evidence is
+regenerated on the new version. Observe first, read the
+`agent.policy.advisory.*` metrics, and enforce only when no approval is pending.
+
 Run `docker compose ls` before the first automated release. If an existing
 Veetbot PostgreSQL container was created under a Compose project name other than
 `veetbot`, set `COMPOSE_PROJECT_NAME` to that exact existing name. Changing it

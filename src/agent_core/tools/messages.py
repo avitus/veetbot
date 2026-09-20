@@ -66,6 +66,7 @@ TOOL_MESSAGES: dict[str, str] = {
     "policy.matrix.workspace_read": "Not performed. The path is outside the workspace.",
     "policy.tool.device.sms.send": "Not performed. Approval is required.",
     "policy.unclassifiable_action": "Not performed. The action could not be classified.",
+    "policy.advisory.escalated": "Not performed. Approval is required.",
     "policy.revalidation.changed": "Not performed. The approved action changed.",
     "policy.revalidation.escalated": "Not performed. Policy changed before execution.",
     "approval.denied": "Not performed. Approval was required and was denied.",

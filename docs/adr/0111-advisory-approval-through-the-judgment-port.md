@@ -1,6 +1,6 @@
 # ADR-0111: Milestone 30 — restrictive-only advisory approval through the judgment port
 
-- Status: Accepted — owner authorized Milestone 30 implementation on 2026-09-19
+- Status: Accepted — owner authorized Milestone 30 implementation on 2026-09-19 (decision 10 amended 2026-09-20)
 - Date: 2026-09-19
 - Related: ADR-0005, ADR-0017, ADR-0054, ADR-0076, ADR-0110
 - Design: [Policy and approvals](../plan/policy-and-approvals.md), [Typed judgment](../plan/typed-judgment.md)
@@ -125,6 +125,34 @@ run unapproved.
     recorded from the first enabled day, and "disagreement rate", which it
     never defined, is the share of owner-resolved advisory approvals that were
     approved.
+
+## Amendment, 2026-09-20: observe by environment, enforce by profile
+
+Decision 10 put both the switch and the mode in the policy profile, where every
+value hashes into the policy version. Implementation found what that costs. The
+bundled memory-formation, People, and email-People release evidence is bound to
+the compiled policy version, and activation compares it with the version the
+running composition compiles, operator overlays included. A change to the
+shipped profile fails the release-evidence guard, and enabling the layer through
+any profile value — even to observe, which changes no decision — would drop
+provider-assisted formation to its deterministic fallback until the evidence is
+regenerated. That happened once already, on 2026-09-03.
+
+The owner decided on 2026-09-20:
+
+- **Observing is an environment flag.** `AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`
+  composes the advisor in observe-only mode. It changes no decision, so it is
+  not a policy value, does not move the policy version, and leaves the release
+  evidence bound. This is within the composition rule that an environment
+  variable may not change an effective rule: observing changes none.
+- **Enforcing is the existing profile value.** `advisory.enabled: true` means
+  enforce. It changes decisions, so it stays in the hashed document and is
+  visible in the audit trail. Setting it moves the policy version: pending
+  approvals whose re-evaluation is not an allow are voided, and the release
+  evidence must be regenerated on the new version before provider-assisted
+  formation activates again. That is the owner's act, taken deliberately.
+- **No `advisory.mode` key exists.** The shipped profile is byte-identical and
+  the knob census is unchanged. With both set, enforcing wins.
 
 ## Scope admission and consequences
 

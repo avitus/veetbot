@@ -4176,7 +4176,9 @@ rather than the model gateway; ADR-0111 records that divergence from Section
 outbound arguments, never denies, and is consulted at most once per
 invocation: the tool pipeline holds the deterministic engine as its recovery
 policy for revalidation and resumed invocations. The layer is off by default
-and observes before it enforces. The design declares five gates.
+and observes before it enforces: observing is an environment flag that moves
+no policy version, and enforcing is the profile value. The design declares
+five gates.
 
 This admits no standing approval grant; that half of B8 stays on the roadmap.
 It registers no model profile, so B2's model routing is untouched. The

@@ -120,6 +120,9 @@ class Settings:
     trajectory_export_enabled: bool = False
     skill_authoring_enabled: bool = False
     skill_background_review_enabled: bool = False
+    # Observe-only: the advisor is consulted and recorded and no decision changes,
+    # so this is not a policy value and does not move `policy_version`.
+    policy_advisory_observe_enabled: bool = False
     memory_provider_extraction_mode: MemoryProviderExtractionMode = (
         MemoryProviderExtractionMode.AUTO
     )
@@ -1533,6 +1536,7 @@ def _load_settings(
     trajectory_export_enabled = _parse_flag(values, "AGENT_TRAJECTORY_EXPORT_ENABLED")
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
+    policy_advisory_observe_enabled = _parse_flag(values, "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED")
     raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
     legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip()
     if raw_memory_mode and legacy_memory_enablement:
@@ -1812,6 +1816,7 @@ def _load_settings(
         trajectory_export_enabled=trajectory_export_enabled,
         skill_authoring_enabled=skill_authoring_enabled,
         skill_background_review_enabled=skill_background_review_enabled,
+        policy_advisory_observe_enabled=policy_advisory_observe_enabled,
         memory_provider_extraction_mode=memory_provider_extraction_mode,
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         memory_formation_policy_pin=memory_formation_policy_pin,

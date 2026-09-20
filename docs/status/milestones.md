@@ -256,6 +256,20 @@ gates are bound to executable checks. The matcher is off in every deployment.
 
 - [ ] Exact-head hosted CI and explicitly authorized review evidence
 
+### Milestone 30 — Advisory approval layer
+
+Five gates; independent workstream under ADR-0111, the restrictive-only half
+of roadmap item B8. An optional advisor behind a port can only escalate an
+allowed web search, page fetch or browser navigation to an approval; it never
+denies, abstains on any failure, and is consulted once per invocation. The
+port, the composite engine, the judgment-backed advisor and the pipeline's
+recovery policy are implemented with all five gates bound to executable
+checks. Observing is an environment flag that moves no policy version;
+enforcing is the profile value and does. The layer is off in every deployment.
+
+- [ ] Calibrate the advisor's thresholds while observing, then decide whether to enforce
+- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.
@@ -263,12 +277,6 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
-- **Milestone 30 — Advisory approval layer** — five gates; independent
-  workstream under ADR-0111, the restrictive-only half of roadmap item B8. An
-  optional advisor behind a port can only escalate an allowed web or browser
-  network read to an approval, never denies, abstains on any failure, is
-  consulted once per invocation, and observes before it enforces. It depends
-  on the typed-judgment port Milestone 29 admits.
 
 
 
