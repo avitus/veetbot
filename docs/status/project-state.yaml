@@ -115,7 +115,7 @@ milestones:
         operation, restore-on-failure for failed and uncertain outcomes, Keep,
         spam and Not spam, mailto wording naming the recipient, and the surface
         being hidden without server support. The Python bridge
-        tests/native/test_email_unsubscribe_m30.py runs those suites and requires
+        tests/native/test_email_unsubscribe_native_m30.py runs those suites and requires
         each named case to report passing. Unsigned macOS and iOS Simulator app
         builds compile the new views. One unrelated Email polling test failed once
         under a cold parallel build and passed in three isolated reruns and the

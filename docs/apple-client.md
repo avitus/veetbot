@@ -465,7 +465,7 @@ projection carries a `subscription` block shows the same Unsubscribe action
 beside its sender and opens the same confirmation with one row; each surface
 presents only the confirmation it opened.
 
-Run `uv run pytest tests/native/test_email_unsubscribe_m30.py -q` for the
+Run `uv run pytest tests/native/test_email_unsubscribe_native_m30.py -q` for the
 executable native unsubscribe gate check. This integration-marked bridge runs
 the real `EmailSubscriptionModelTests`, `EmailSubscriptionsViewModelTests` and
 `EmailSubscriptionViewStructureTests` Swift suites and verifies each case
