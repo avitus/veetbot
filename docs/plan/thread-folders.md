@@ -372,9 +372,10 @@ comes back.
 The matcher's budgets are fixed module constants, as the model-assisted
 grouper's are: at most sixty-four conversations per pass in index order, eight
 concurrent requests, a twenty-second deadline, 16 KiB per encoded request, and
-a cost ceiling of USD 0.01 per pass. The first request runs alone and the rest
-fan out only if it succeeds, so an outage or a refused credential costs one
-call. Any provider error, deadline, or budget breach cancels the outstanding
+a cost ceiling of USD 0.01 per pass. An encoded request over its ceiling is
+rebuilt without the example titles, and one still over it is a budget breach.
+The first request runs alone and the rest fan out only if it succeeds, so an
+outage or a refused credential costs one call. Any provider error, deadline, or budget breach cancels the outstanding
 requests, discards every judgment, and returns the inner grouper's candidates
 unchanged with the matcher's fallback flag set; accumulated usage is kept for
 the audit. Conversations beyond the cap keep their inner placement.
@@ -400,7 +401,9 @@ event always carries eight further fields for the matcher —
 `judgment_provider`, `judgment_model`, `judgment_requests`,
 `judgment_matched`, `judgment_input_tokens`, `judgment_cost`,
 `judgment_fallback_used`, and `judgment_error_class` — which read `none`, zero,
-or false when the matcher did not run, and which are likewise content-free.
+or false when the matcher did not run, and which are likewise content-free. The
+error class is the judgment provider's reason code, or the error's class name
+for a deadline or a budget breach.
 
 ## The maintenance pass
 
@@ -539,7 +542,7 @@ moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none
 of them differs between two deployments of the same revision
-(bootstrap-and-composition.md:336-338). `folders/profiles.yaml` ships:
+(bootstrap-and-composition.md:337-339). `folders/profiles.yaml` ships:
 
 ```yaml
 schema_version: 1
@@ -561,7 +564,7 @@ the two judgment knobs ship with the matcher. `judgment_match_threshold` is
 above 0.5 and at most 1, so at most one option of a question can clear it.
 One environment key, `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and
 the pass together, defaults off, and appears in `.env.example` in the same
-change (bootstrap-and-composition.md:510-515). The matcher additionally needs
+change (bootstrap-and-composition.md:511-516). The matcher additionally needs
 the `JUDGMENT_PROVIDER` selector [typed-judgment.md](typed-judgment.md)
 defines; with the knob on and no provider composed, the pass uses the inner
 grouper alone and says so once in the log.
@@ -767,3 +770,17 @@ never passes on a skipped lane. The `folders/profiles.yaml` document ships the
 seven knobs of the configuration section and joins the executable inventory.
 Registration is not release evidence: exact-head hosted CI, review, and
 production delivery remain the open items in project state.
+
+## Implementation checkpoint: 2026-09-20
+
+Build step 6 landed under ADR-0110. `agent_core.folders.matching` holds the
+judgment matcher; the pass audit carries the eight `judgment_*` fields on
+every pass; `folders/profiles.yaml` ships the two judgment knobs, off and at
+0.8, which join the executable inventory; and the composition root wraps the
+grouper only when the knob is on and a judgment provider is composed. Gate 13
+binds through `tests/gates/test_folder_m29.py::test_judgment_matching`, which
+drives the composed pass through the maintenance worker with a scripted judge,
+accepts the resulting proposal through the routes, forces a provider failure
+and finds the lexical proposal unchanged, and re-runs the matcher's unit cases
+for cleaning, thresholds, deadlines, budgets, and pruning. The matcher is off
+in every deployment until the owner sets the selector, the key, and the knob.

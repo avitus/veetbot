@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
@@ -84,6 +85,20 @@ class GroupCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class JudgmentAudit:
+    """Content-free facts about one pass of the judgment matcher."""
+
+    provider: str = "none"
+    model: str = "none"
+    requests: int = 0
+    matched: int = 0
+    input_tokens: int = 0
+    cost: Decimal = Decimal("0")
+    fallback_used: bool = False
+    error_class: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class GroupingOutcome:
     """The candidates plus the content-free audit facts of how they were made."""
 
@@ -93,6 +108,7 @@ class GroupingOutcome:
     usage: ModelUsage | None = None
     fallback_used: bool = False
     error_class: str | None = None
+    judgment: JudgmentAudit | None = None
 
 
 class ThreadGrouper(Protocol):

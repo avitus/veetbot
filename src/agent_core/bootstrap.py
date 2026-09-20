@@ -429,7 +429,9 @@ from agent_core.domain.tools import ToolExecutionContext, ToolInvocation, ToolSp
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
+from agent_core.folders.clustering import ThreadGrouper
 from agent_core.folders.grouping import ModelAssistedThreadGrouper
+from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
 from agent_core.knowledge.service import KnowledgeService
@@ -3628,19 +3630,34 @@ async def _compose(
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:
+            thread_grouper: ThreadGrouper = ModelAssistedThreadGrouper(
+                router=model_router,
+                providers=model_providers,
+                clock=clock,
+                ids=ids,
+                model_policy=folder_profiles.proposals.model_policy,
+            )
+            if folder_profiles.proposals.judgment_matching_enabled:
+                if judgment_provider is None:
+                    # The knob needs a composed provider; the pass keeps its
+                    # existing grouper and never refuses startup over it.
+                    logger.warning(
+                        "folder_judgment_matching_unavailable",
+                        extra={"selector": "JUDGMENT_PROVIDER"},
+                    )
+                else:
+                    thread_grouper = JudgmentFolderMatcher(
+                        judge=judgment_provider,
+                        inner=thread_grouper,
+                        match_threshold=folder_profiles.proposals.judgment_match_threshold,
+                    )
             folder_proposal_pass = FolderProposalPass(
                 uow_factory=uow_factory,
                 clock=clock,
                 ids=ids,
                 principal=principal,
                 profile=folder_profiles.proposals,
-                grouper=ModelAssistedThreadGrouper(
-                    router=model_router,
-                    providers=model_providers,
-                    clock=clock,
-                    ids=ids,
-                    model_policy=folder_profiles.proposals.model_policy,
-                ),
+                grouper=thread_grouper,
             )
         public_services = ApplicationServices(
             sessions=public_session_service,

@@ -35,6 +35,7 @@ from agent_core.folders.clustering import (
     GroupCandidate,
     GroupingInput,
     GroupingOutcome,
+    JudgmentAudit,
     ThreadGrouper,
     ThreadSummary,
 )
@@ -378,6 +379,7 @@ class FolderProposalPass:
         outcome: GroupingOutcome | None = None,
     ) -> None:
         usage = outcome.usage if outcome is not None else None
+        judgment = (outcome.judgment if outcome is not None else None) or JudgmentAudit()
         await record_folder_event(
             uow,
             event_type="folder.proposal.pass",
@@ -394,6 +396,16 @@ class FolderProposalPass:
                 "input_tokens": usage.input_tokens if usage is not None else 0,
                 "output_tokens": usage.output_tokens if usage is not None else 0,
                 "cost": str(usage.cost) if usage is not None else "0",
+                # Always present and content-free; they read none, zero, or false
+                # when the judgment matcher did not run.
+                "judgment_provider": judgment.provider,
+                "judgment_model": judgment.model,
+                "judgment_requests": judgment.requests,
+                "judgment_matched": judgment.matched,
+                "judgment_input_tokens": judgment.input_tokens,
+                "judgment_cost": str(judgment.cost),
+                "judgment_fallback_used": judgment.fallback_used,
+                "judgment_error_class": judgment.error_class,
             },
             key=str(attempt_id),
             clock=self._clock,
