@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-20 — An offline email-importance replay compares production with a judgment arm
+
+- `agent eval email-importance` checks a private source bundle, runs the replay,
+  or compares two results. It is the ranking producer Milestone 26's quality
+  gate lacked, with the production assessor as one arm and the typed-judgment
+  port as the other. It is non-activating and can satisfy or waive no gate.
+- Each frozen snapshot is replayed in a fresh composition at its observation
+  time, with profile evidence cut at its declared date and no later message
+  imported. Both arms run the production `assess()`; the judgment arm replaces
+  only the model call.
+- Four arms separate what a judgment provider cannot represent, a future
+  expiry, from what it can. The report states its limits in its header, and
+  the decision rule is declared before any provider call.
+- Artifacts are label-only. A malformed bundle is refused without quoting it,
+  and the replay is a boundary of the email privacy gate.
+- The real run waits on the owner's frozen labelled corpus and source bundle.
+
 ## 2026-09-20 — The advisory approval layer lands, off, observing before enforcing
 
 - `PolicyAdvisor` is a port that receives only the proposed action, and

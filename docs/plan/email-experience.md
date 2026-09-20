@@ -1126,6 +1126,44 @@ its report can neither satisfy nor waive a gate of this milestone; model
 routing changes stay excluded below, and any production use of a judgment
 provider for email needs a later ADR amending ADR-0092.
 
+The replay is `agent_core.evals.email_importance_replay`, driven by
+`agent eval email-importance` with exactly one of `--check-bundle`, `--run`, or
+`--compare`. Its inputs are the owner's label-only corpus and a private source
+bundle bound to that corpus by digest and refused if it sits inside the
+repository, repeats or invents a thread, omits a replayed thread, or holds a
+candidate with no message at its observation time. Each snapshot is replayed in
+a fresh in-memory composition with its clock fixed at the observation time:
+profile threads are imported only up to `profile_evidence_through` and never
+assessed, and a candidate's messages after `observed_at` are not imported, so
+no future evidence is visible. Both arms run the production `assess()`
+unchanged; the judgment arm replaces only the model call, mapping three Scores
+and three Nouls onto the production assessment, so passage selection, evidence
+assembly, the priority formula, its clamps, and the list order are production
+code in both. The ranking is production's own list order over the complete
+candidate pool.
+
+Four arms are reported rather than two, because a judgment provider cannot
+emit a timestamp: production, production with expiry stripped, judgment with a
+Noul for "every reason to attend has already ended", and judgment without it.
+The report header states the limits instead of hiding them: the judgment arm
+quotes nothing, so production's grounding check is vacuous for it; a future
+expiry cannot be represented; owner feedback and shared memories are not
+replayed from the bundle; and drafts, style, and semantic memory are not
+evaluated. A run needs `RUN_LIVE_MODEL_TESTS=1`, a committed tree, a
+non-production deployment mode, a model policy for the production arm, and a
+positive `--max-cost-usd` that both arms spend against through one journal;
+its output directory is created `0700` and never reused, so one holdout run
+exists per question-set digest. The decision rule is declared in the run
+header before any provider call: a judgment arm merits a follow-up ADR only if
+production passes the three importance checks, the arm passes them too, the
+paired top-five precision difference has a 95% lower bound of at least minus
+five points, at most a tenth of snapshots regress, and failures plus
+abstentions are at most two percent. If production itself misses, no
+conclusion is drawn, and a synthetic corpus is always `pending`. Reports and
+artifacts carry opaque identifiers and aggregates; a malformed bundle is
+refused without quoting it, because validation errors repeat their input. The
+privacy gate exercises the replay as one of its boundaries.
+
 The semantic source contract accepts bounded passages from `get_thread_page`
 and `get_message_body`. A continuation carries its byte offset and the original
 header event/session, so the service checks the same account, message, provider

@@ -51,6 +51,7 @@ from tests.gates.test_email_runtime_m26 import (
     _profile,
     _seed_draft,
 )
+from tests.unit import test_email_importance_replay as importance_replay
 from tests.unit.test_email_quality_eval import fixture as quality_fixture
 
 MAIL_CANARY = "SYNTHETIC_PRIVATE_BOARD_DETAIL_917"
@@ -370,6 +371,22 @@ def _label_only_eval() -> None:
     )
 
 
+async def _importance_replay(tmp_path: Path) -> None:
+    """The offline replay sends planted mail to its judge and writes it nowhere."""
+
+    assert importance_replay.MAIL_CANARY == MAIL_CANARY
+    with pytest.MonkeyPatch.context() as patch:
+        await importance_replay.test_a_run_follows_the_live_conventions_and_writes_no_mail(
+            tmp_path / "run", patch
+        )
+    await importance_replay.test_both_arms_rank_the_pool_in_production_order_with_no_future_mail(
+        tmp_path / "arms"
+    )
+    importance_replay.test_a_malformed_bundle_is_refused_without_quoting_private_mail(
+        tmp_path / "malformed"
+    )
+
+
 @pytest.mark.parametrize(
     "boundary",
     [
@@ -382,6 +399,7 @@ def _label_only_eval() -> None:
         "internal_api_error",
         "label_only_eval",
         "gmail_child_log",
+        "importance_replay",
     ],
 )
 async def test_email_privacy_boundaries(
@@ -393,6 +411,8 @@ async def test_email_privacy_boundaries(
         _label_only_eval()
     elif boundary == "gmail_child_log":
         await _gmail_child_log(tmp_path)
+    elif boundary == "importance_replay":
+        await _importance_replay(tmp_path)
     else:
         await {
             "hostile_mail": _hostile_mail,
