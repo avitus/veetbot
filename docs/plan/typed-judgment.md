@@ -71,19 +71,19 @@ pattern `tests/contract/README.md` prescribes.
 
 All are frozen and live in `agent_core.domain.judgment`.
 
-- **`NoulQuestion`** — `instructions` and optional `true` and `false` criteria.
-  The answer is the probability, from 0 to 1, that the statement holds. A
-  value near one half means the provider finds yes and no similarly likely; it
-  is not a medium intensity.
+- **`NoulQuestion`** — `instructions` and optional `true_when` and `false_when`
+  criteria, given together or not at all. The answer is the probability, from
+  0 to 1, that the statement holds. A value near one half means the provider
+  finds yes and no similarly likely; it is not a medium intensity.
 - **`ChoiceQuestion`** — `instructions` and between two and sixteen
   `ChoiceOption`s, each an opaque key, a description, and optional examples.
   The answer is the chosen key, the probability of every key, and a
   confidence. A consumer that may have no match offers an explicit no-match
   option rather than thresholding a forced choice.
-- **`ScoreQuestion`** — `instructions` and at least two ordered level
-  descriptions. The answer is a position between the first level and the
-  last, the probability of each level, and a confidence. A score is a
-  threshold signal; consumers do not interpolate magnitudes from it.
+- **`ScoreQuestion`** — `instructions` and between two and eight ordered level
+  descriptions. The answer is a position from 0, the first level, to the index
+  of the last, the probability of each level in order, and a confidence. A
+  score is a threshold signal; consumers do not interpolate magnitudes from it.
 - **`JudgmentRequest`** — JSON-serializable `state` and between one and eight
   questions keyed by identifiers matching `^[a-z][a-z0-9_]{0,31}$`. Questions
   in one request are answered independently over the same state, so a
@@ -144,6 +144,13 @@ already follow.
   vendor is kept only when it matches `^[A-Za-z0-9._-]{1,64}$`; otherwise the
   requested alias stands in, because that string reaches audits. Nothing logs
   state, criteria, a body, or a header.
+
+On the wire the adapter follows the vendor's documented shapes: a Noul's
+criteria are its `true` and `false` entries, a Choice option with examples is
+sent as a structured description of `what` and `examples`, and a Score's
+probabilities arrive keyed by level index and are returned in level order. An
+answer whose type, keys, or level indexes do not match the question asked is
+`judgment.output_invalid`.
 
 `FakeJudgmentProvider` is scripted, records every request it receives, and
 runs the same `validate_result`, so a consumer test can assert exactly what
@@ -272,6 +279,18 @@ steered answer costs a bad proposal or an unnecessary escalation.
 5. **Judgment calls stay out of the model ledger.** They are not model calls,
    their cost is orders of magnitude smaller, and consumers already own the
    audit events that carry their usage.
+
+## Implementation checkpoint: 2026-09-20
+
+Build steps 1 through 3 landed. The domain types, the port, the TypeSafe
+adapter, the scripted fake, and the production census bind under
+`tests/contract/test_judgment_provider_contract.py`; the selector and the
+composition bind under `tests/unit/test_judgment_composition.py`; and
+`tests/gates/test_judgment_m29.py` gives each of the four gates one check. No
+consumer exists yet, so no judgment request is made in any deployment. A live
+round trip against the vendor is an opt-in test and is not gate evidence.
+Registration and local checks are not release evidence: exact-head hosted CI,
+review, and production delivery remain open items in project state.
 
 ## Open questions
 

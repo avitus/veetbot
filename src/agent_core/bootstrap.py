@@ -67,6 +67,7 @@ from agent_core.adapters.identity import (
     ConfiguredSchedulePrincipalDirectory,
     StaticPrincipalResolver,
 )
+from agent_core.adapters.judgment import TypeSafeJudgmentProvider
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
@@ -346,6 +347,7 @@ from agent_core.config import (
     BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
+    JudgmentProviderKind,
     MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     PushProviderKind,
@@ -484,6 +486,7 @@ from agent_core.ports.browser_sessions import (
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
+from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.memory import MemoryCandidateExtractor
@@ -619,6 +622,7 @@ class Composition:
     mcp_proxy: WorkerEgressProxy | None
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
+    judgment_provider: JudgmentProvider | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2077,6 +2081,7 @@ async def _compose(
     mcp_server_configs: tuple[MCPServerConfig, ...],
     web_search_provider: WebProvider | WebProviderRouter | None,
     web_fetch_provider: WebProvider | WebProviderRouter | None,
+    judgment_provider: JudgmentProvider | None,
     memory_provider_evaluation_mode: bool,
     memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
@@ -3821,6 +3826,7 @@ async def _compose(
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
                 local_import_tasks=local_import_tasks,
+                judgment_provider=judgment_provider,
             ),
             list(effective_providers.values()),
         )
@@ -3888,6 +3894,18 @@ def _web_provider(
     if kind is WebProviderKind.KEENABLE:
         return KeenableWebProvider(credentials=credentials)
     raise ConfigurationError(f"unsupported web provider {kind.value!r}")
+
+
+def _judgment_provider(
+    kind: JudgmentProviderKind,
+    credentials: CredentialResolver,
+    clock: Clock,
+) -> JudgmentProvider | None:
+    if kind is JudgmentProviderKind.DISABLED:
+        return None
+    if kind is JudgmentProviderKind.TYPESAFE:
+        return TypeSafeJudgmentProvider(credentials=credentials, clock=clock)
+    raise ConfigurationError(f"unsupported judgment provider {kind.value!r}")
 
 
 def _configured_web_provider_route(
@@ -4003,6 +4021,7 @@ async def build(
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
+    judgment_provider_override: JudgmentProvider | None = None,
     browser_provider_override: BrowserProvider | None = None,
     device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
@@ -4322,6 +4341,7 @@ async def build(
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
     web_provider_cache: dict[WebProviderKind, WebProvider] = {}
+    judgment_provider: JudgmentProvider | None = None
     browser_provider: BrowserProvider | None = None
     browser_profile_http_client: httpx.AsyncClient | None = None
     browser_sessions: BrowserSessionControlPlane | None = None
@@ -4463,6 +4483,27 @@ async def build(
             for provider in web_provider_cache.values()
             if all(provider is not tracked for tracked in web_providers)
         )
+        judgment_provider = (
+            judgment_provider_override
+            if judgment_provider_override is not None
+            else _judgment_provider(
+                effective_settings.judgment_provider,
+                effective_credential_resolver,
+                effective_clock,
+            )
+        )
+        if (
+            judgment_provider_override is None
+            and credential_resolver is None
+            and effective_settings.judgment_provider is JudgmentProviderKind.TYPESAFE
+            and "typesafe" not in effective_settings.credentials
+        ):
+            # Degrade, never refuse startup: every call then fails without dialing
+            # and each consumer takes its deterministic fallback.
+            logger.warning(
+                "judgment_credential_missing",
+                extra={"selector": "JUDGMENT_PROVIDER", "credential": "TYPESAFE_API_KEY"},
+            )
         browser_provider = (
             browser_provider_override
             if browser_provider_override is not None
@@ -4546,6 +4587,7 @@ async def build(
             mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
+            judgment_provider=judgment_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
             memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
@@ -4596,6 +4638,17 @@ async def build(
                 logger.warning(
                     "web_provider_close_failed",
                     extra={"provider": web_provider.name, "error_class": type(exc).__name__},
+                )
+        if judgment_provider is not None:
+            try:
+                await judgment_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "judgment_provider_close_failed",
+                    extra={
+                        "provider": judgment_provider.name,
+                        "error_class": type(exc).__name__,
+                    },
                 )
         if browser_provider is not None:
             try:
