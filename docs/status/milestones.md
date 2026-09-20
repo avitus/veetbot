@@ -260,6 +260,12 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
+- **Milestone 30 — Email unsubscribe assistance** — twenty gates; independent
+  workstream under ADR-0108. A header-derived census of bulk senders, the
+  authenticated one-click unsubscribe request to a server-derived destination,
+  and Report spam, `mailto:` and sender-cleanup fallbacks, each behind the
+  owner's tap. Design and pending gates registered on 2026-09-19;
+  implementation follows the owner's review of the design.
 
 
 

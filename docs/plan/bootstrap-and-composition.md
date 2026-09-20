@@ -1443,3 +1443,17 @@ providers with the lexical grouper as its fallback, and registers the proposal
 pass as a maintenance sweep on its own timer. Its seven knobs join the
 executable inventory when the implementation lands. The detailed contract is
 [thread-folders.md](thread-folders.md).
+
+## Milestone 30 email unsubscribe composition
+
+`AGENT_EMAIL_UNSUBSCRIBE_ENABLED` defaults to off and requires both
+`AGENT_EMAIL_ENABLED` and `AGENT_EMAIL_MODE_ENABLED`; set without them it is a
+configuration error at composition. When set, the composition root mounts the
+subscription routes, registers the `email.subscriptions` and
+`email.unsubscribe` builtin tools, lets the refresh task build the census, and
+constructs the process-local public-HTTPS unsubscribe transport, handing its
+address to `email.unsubscribe` and to nothing else. The operator's egress
+policy is not consulted for that transport and cannot select it. Unset, none
+of these exists. The flag and the `email.unsubscribe_grace_days` limit join the
+executable inventory when the implementation lands. The detailed contract is
+[email-unsubscribe.md](email-unsubscribe.md).

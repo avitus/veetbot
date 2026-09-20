@@ -101,6 +101,7 @@ nav:
       - Chat Thread Folders: plan/thread-folders.md
       - Email Integration: plan/email-integration.md
       - Client Modes and Email Experience: plan/email-experience.md
+      - Email Unsubscribe Assistance: plan/email-unsubscribe.md
       - Device Channel & SMS: plan/device-channel-and-sms.md
       - WhatsApp Surface: plan/whatsapp-surface.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
@@ -230,4 +231,5 @@ nav:
       - ADR-0105 The tool-definition token cap: adr/0105-tool-definition-token-cap.md
       - ADR-0106 Headed authentication ceremony: adr/0106-headed-authentication-ceremony.md
       - ADR-0107 On-demand hosted verification: adr/0107-on-demand-hosted-verification.md
+      - ADR-0108 Email unsubscribe assistance: adr/0108-milestone-30-email-unsubscribe.md
   - Changelog: changelog.md

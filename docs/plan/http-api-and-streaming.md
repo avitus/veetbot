@@ -2114,3 +2114,20 @@ absent unless `AGENT_THREAD_FOLDERS_API_ENABLED=1` and require the existing
 returns it. All folder responses carry `Cache-Control: private, no-store`,
 and a foreign or unknown folder, proposal or session is an indistinguishable
 404.
+
+## Milestone 30 email unsubscribe routes
+
+[email-unsubscribe.md](email-unsubscribe.md#the-routes) owns four routes and
+their request and response contracts: `GET /v1/email/subscriptions`,
+`POST /v1/email/subscriptions/unsubscribe`,
+`POST /v1/email/subscriptions/{id}/spam`, and
+`POST /v1/email/subscriptions/{id}/keep`. They are absent unless
+`AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1` and require the existing `email.read` or
+`email.write` scope, with the run, session, approval-resolution and exact
+account MCP scopes on the two commands that admit a task; no new scope enters
+the vocabulary. Operation status reuses
+`GET /v1/email/operations/{operation_id}`. The account projection gains an
+additive `unsubscribe_supported` and the thread projection an additive
+nullable `subscription` block. Every response carries
+`Cache-Control: private, no-store`, never includes an unsubscribe address, and
+answers a foreign or unknown subscription with an indistinguishable 404.

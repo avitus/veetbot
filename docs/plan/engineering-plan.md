@@ -4142,6 +4142,40 @@ authorized production delivery. The verified sequential ceiling stays at
 Milestone 12. Nested or shared folders, Email-mode conversations, automatic
 filing, embeddings and search remain outside this milestone.
 
+### Milestone 30: Email unsubscribe assistance
+
+The owner requested this scope and decided its surfaces, consent model, egress
+and fallbacks on 2026-09-19 under ADR-0108. Implement
+[email-unsubscribe.md](email-unsubscribe.md): a census of bulk senders per
+account, derived from header metadata inside the existing foreground refresh
+and the ninety-day window with no model call; the RFC 8058 one-click request,
+offered only when Gmail's own verdict reports a DKIM signature covering the
+headers, sent by one builtin tool whose destination is server-derived and never
+an argument; a dedicated public-HTTPS egress transport for that tool alone,
+with a constant credential-free body, no redirect and a discarded response;
+the header's `mailto:` message through the account's send server; Report spam,
+Not spam and sender cleanup as fixed label deltas over server-selected
+threads; owner-gesture consent for one bounded batch of at most twenty-five
+senders, and one by-value approval per batch in Chat; four routes under
+`/v1/email/subscriptions` behind a default-off flag; two builtin Chat tools;
+and the native Subscriptions view and thread action. The design declares
+twenty gates.
+
+This amends no roadmap item. Every action keeps `REQUIRE_APPROVAL` and no
+standing authorization satisfies one, so roadmap B8 is untouched; the census
+advances only in foreground slices, so Milestone 26's exclusion of unattended
+monitoring holds; and no new Google permission is requested. The server-side
+request is the platform's first direct dial to a host selected by mail
+content, which the owner approved explicitly in ADR-0108 decision 5.
+
+Acceptance requires all twenty gates, both repository adapters, the Apple
+package and simulator lanes, an owner-authorized real-mailbox smoke on both
+accounts, and final-head hosted CI/review plus separately authorized
+production delivery. The verified sequential ceiling stays at Milestone 12.
+Body links, web-form unsubscribes through browser automation, standing or
+automatic unsubscribe rules, background cleanup, Gmail filters and blocked
+senders, and another provider remain outside this milestone.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

@@ -562,3 +562,18 @@ value. Primary mailbox identity can be verified through the existing read grant;
 no new OAuth scope is authorized for automatic alias discovery. Only explicitly
 verified existing aliases may be used. Milestone 18's gates and owner-smoke
 completion requirements remain independently binding.
+
+## Milestone 30 unsubscribe extension
+
+[ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md) authorizes
+[email unsubscribe assistance](email-unsubscribe.md) as a new parallel
+milestone. It widens the read server's closed header projection by one bounded
+`bulk` block on thread summaries and adds one application-only read tool,
+`get_unsubscribe`; the roster above is amended in the change that implements
+them. The package still dials only its two fixed endpoints, follows no
+redirect, and imports nothing from `agent_core`: the unsubscribe request is
+sent by a builtin tool through the platform's own egress proxy and never by
+this package. No new OAuth scope is requested. Report spam, Not spam and
+sender cleanup reuse `modify_labels`, and a `mailto:` unsubscribe reuses
+`send_message`, each under its existing classification, approval floor and
+uncertainty rule. Milestone 18's gates remain independently binding.
