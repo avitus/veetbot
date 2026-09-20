@@ -82,7 +82,7 @@ validates the floor, and no trailer means lane A.
 | The WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Bland calling and public reception | `bland-calling.md` |
 | People, relationships, and interaction history | `people-and-relationships.md` |
-| Chat thread folders and grouping proposals | `thread-folders.md` |
+| Chat thread folders, proposals; typed judgment | `thread-folders.md`, `typed-judgment.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
@@ -96,10 +96,10 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
-  18 through 29 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102). Milestone 21 is limited to adaptive
+  18 through 30 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0111). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
-  the owner's iPhone, 25 to the WhatsApp business surface, 26 to the approved client modes and adaptive email experience, 27 to Bland calling, 28 to People and relationship memory, and 29 to chat thread folders. Model routing and the plan's remaining roadmap items
-  are not authorized. The grouped summary with each in-progress milestone's open items is `docs/status/milestones.md`.
+  the owner's iPhone, 25 to the WhatsApp business surface, 26 to the approved client modes and adaptive email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders and typed judgment, and 30 to advisory approval. Model routing and the plan's remaining roadmap items
+  are not authorized. Open items: `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

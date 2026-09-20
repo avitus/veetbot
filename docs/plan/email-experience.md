@@ -1113,6 +1113,19 @@ threshold results. Missing owner evidence and synthetic corpora remain pending.
 Its report is distinct from an operator-reviewed activation artifact; unit
 tests of the scorer never satisfy the private quality gates.
 
+ADR-0110 admits one offline, non-activating evaluation beside it. An
+importance replay builds, for each frozen snapshot, the evidence the
+production assessor sees, ranks the candidate pool once through the unchanged
+production assessment and once through a typed-judgment arm
+([typed-judgment.md](typed-judgment.md)) that feeds the same priority formula
+and clamps, and scores both rankings with the unchanged label-only scorer. Its
+source bundle stays outside the repository, its outputs carry opaque
+identifiers and aggregates only, and its decision rule is declared before a
+run. It changes no production behavior, no production module imports it, and
+its report can neither satisfy nor waive a gate of this milestone; model
+routing changes stay excluded below, and any production use of a judgment
+provider for email needs a later ADR amending ADR-0092.
+
 The semantic source contract accepts bounded passages from `get_thread_page`
 and `get_message_body`. A continuation carries its byte offset and the original
 header event/session, so the service checks the same account, message, provider

@@ -9,10 +9,10 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 29 are independently authorized parallel
+  # Milestones 16 through 30 are independently authorized parallel
   # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
-  # 0080, 0081, 0082, 0092, 0097, 0100, and 0102; their gates do not advance
-  # the verified ceiling past the sequential work through 15.
+  # 0080, 0081, 0082, 0092, 0097, 0100, 0102, and 0111; their gates do not
+  # advance the verified ceiling past the sequential work through 15.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
   # retention, and conditional native time-zone presentation.
@@ -21,6 +21,9 @@ project:
   # ADR-0109 records the owner's non-milestone repair to chat-created schedules:
   # pause on the second consecutive failure, a USD 5 budget with a synthesis
   # reserve, and a failure classification on the accounting event.
+  # ADR-0110 amends Milestone 29 on 2026-09-19: the typed-judgment port, the
+  # TypeSafe Jev adapter and judgment folder matching, all default off, plus
+  # an offline non-activating email-importance evaluation under Milestone 26.
   authorized_milestones:
     - 0
     - 1
@@ -52,26 +55,52 @@ project:
     - 27
     - 28
     - 29
+    - 30
 
 
 milestones:
+  '30':
+    title: Advisory approval layer
+    status: authorized
+    authorized_on: '2026-09-19'
+    design: docs/plan/policy-and-approvals.md
+    adr: docs/adr/0111-advisory-approval-through-the-judgment-port.md
+    gates_registered: 5
+    authorized_scope:
+    - A PolicyAdvisor port and a composite policy engine that can only escalate, consulted on plain allows for web and browser network reads, abstaining on any timeout or error
+    - A judgment-backed advisor over redacted, delimited outbound arguments that never denies; thresholds in code under a hashed advisor version
+    - A deterministic recovery policy in the tool pipeline so the advisor is consulted at most once per invocation; the advisory.mode knob with observe before enforce; escalation and disagreement metrics
+    deferred_scope:
+    - General standing approval grants (the rest of roadmap item B8) and any advisor that emits deny
+    - Consultation on file writes, code execution, MCP reads or SMS; a model-gateway advisor; conversation context for the advisor
+    evidence:
+    - check: uv run pytest tests/gates/test_gate_registry.py (ADR-0111 registry authorization red phase)
+      outcome: observed_expected_failure
+      detail: The registry held 543 entries rather than 548, no Milestone 30 entries rather than five, and MAX_MILESTONE was 29 rather than 30, at the behavioral assertions (local, 2026-09-19). The five gate.policy.advisory_* gates are registered pending; registration is not passing evidence.
   '29':
     title: Chat thread folders
     status: in_progress
     authorized_on: '2026-09-16'
     design: docs/plan/thread-folders.md
     adr: docs/adr/0102-chat-thread-folders.md
-    gates_registered: 12
+    gates_registered: 17
     authorized_scope:
     - Flat single-parent principal-scoped folders as server-owned session state with create, rename, delete and move
     - Maintenance-pass folder proposals with owner acceptance, durable decline, a bounded open set and withdrawal
     - Model-assisted grouping with grounding, budgets and a deterministic lexical fallback; scoped routes, flag and native sidebar
+    - The typed-judgment port with the TypeSafe Jev adapter behind it, default off, and an optional judgment matcher for add-to-folder proposals (ADR-0110, authorized 2026-09-19)
     deferred_scope:
     - Nested or shared folders, Email-mode threads, automatic filing without acceptance
     - Embeddings or semantic search over threads, folder text in conversation prompts
+    - Any further typed-judgment consumer, each of which needs its own authorization; model routing through the port
     open_items:
+    - Land the typed-judgment port, the TypeSafe adapter and the fake under one contract suite, default off
+    - Implement the judgment folder matcher with its two knobs, audit fields and whole fallback
     - Exact-head hosted CI and explicitly authorized review evidence
     evidence:
+    - check: uv run pytest tests/gates/test_gate_registry.py::test_identifier_grammar tests/gates/test_gate_registry.py::test_census_is_derived (ADR-0110 registry authorization red phase)
+      outcome: observed_expected_failure
+      detail: The registry held 538 entries rather than 543 and twelve Milestone 29 entries rather than seventeen, at the behavioral assertions (local, 2026-09-19). The four gate.judgment.* gates and gate.folder.judgment_matching are registered pending; registration is not passing evidence.
     - check: uv run pytest tests/unit/test_folder_domain.py tests/unit/test_folder_clustering.py tests/unit/test_folder_grouping.py tests/unit/test_folder_proposals.py tests/contract/test_folder_store_contract.py tests/gates/test_folder_api_boundary_m29.py tests/gates/test_folder_m29.py
       outcome: pass
       detail: Domain, lexical and model-assisted grouping, the pass, the store contract, the nine-route boundary and the composed end-to-end gate on 2026-09-16 (local).
@@ -1327,6 +1356,7 @@ milestones:
       - evaluated attributed semantic email memory shared with Chat and both accounts
       - scoped source erasure, retention and bounded automatic email accounting
       - USD 20 per UTC day and USD 200 per rolling thirty days for aggregate automatic email work
+      - an offline, non-activating importance replay comparing the production assessor with a typed-judgment arm (ADR-0110); it cannot satisfy or waive a Milestone 26 gate
     deferred_scope:
       - unattended monitoring, Gmail push, scheduled digests and interval scheduling
       - autonomous sending, automatic Gmail writes and Gmail draft synchronization
@@ -1699,5 +1729,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-16T18:54:28Z
+last_updated: 2026-09-20T05:19:37Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

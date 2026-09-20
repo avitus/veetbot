@@ -12,7 +12,9 @@ requirement; this document states the mechanism. It is subordinate to
 the session index, the persona nomination lifecycle, the memory extractor's
 provider discipline, and the http-api-and-streaming conventions.
 [ADR-0102](../adr/0102-chat-thread-folders.md) records the architectural
-decisions and the owner's authorization.
+decisions and the owner's authorization, and
+[ADR-0110](../adr/0110-typed-judgment-port-and-typesafe-jev.md) amends it to
+admit the typed-judgment port and the judgment matcher.
 
 A chat conversation is a `sessions` row shared by every surface, and every
 client lists those rows as one flat, activity-ordered history
@@ -44,7 +46,10 @@ and the surfaces that operate them.
   durable; a proposal whose members change before review withdraws itself.
 - **Grouping.** A model-assisted grouper under a strict schema, a byte and
   cost budget, and a grounding check, with a deterministic lexical grouper as
-  the fallback the pass can always fall back to.
+  the fallback the pass can always fall back to. An optional judgment matcher
+  (ADR-0110) decides which existing folder an unfiled conversation belongs in
+  through the [typed-judgment port](typed-judgment.md); it is off by default,
+  wraps the other two, and returns their result unchanged on any failure.
 - **Surfaces.** Nine routes under `/v1/folders` and `/v1/sessions/{id}/folder`,
   an additive `folder_id` on `SessionView`, and the native sidebar's folder
   sections, move menu, name sheet, and suggested-folder rows.
@@ -67,7 +72,9 @@ not find it here should find the reason here.
 4. **Embeddings and a vector extension.** Roadmap item B6 keeps the semantic
    arm and `pgvector` deferred behind benchmark evidence, and ADR-0045
    recorded the no-embedding decision. Grouping here is a bounded structured
-   model call over a few dozen titles, falling back to token overlap.
+   model call over a few dozen titles, falling back to token overlap. The
+   judgment matcher changes none of this: it asks a closed question about one
+   conversation at a time and stores no vector.
 5. **Folder text in a conversation prompt.** Folder names and proposal
    rationale never render in the frozen prefix, the runtime-metadata row, or
    recall. They are organization, not instruction.
@@ -340,17 +347,60 @@ appended. Any exception on the model path — resolution, transport, timeout,
 budget, schema, parse — records an audit with the error class and the pass
 proceeds with the lexical result alone.
 
+**The judgment matcher decides add-to-folder, and only that.** When
+`judgment_matching_enabled` is true and a judgment provider is composed, a
+matcher wraps whichever grouper the pass would otherwise use. It runs the
+inner grouper first and keeps its result, then asks the
+[typed-judgment port](typed-judgment.md) one question per unfiled
+conversation: a Choice whose options are the existing folders and one explicit
+no-match option. Each folder option is described by the folder's name with up
+to five member titles as examples; option keys are opaque — `f0`, `f1`, and so
+on over folders ordered by name key and then identifier, plus `none` — and the
+key-to-folder mapping never leaves the process. More than twelve folders
+become parallel questions in the same request, up to forty-eight folders;
+beyond that the folders are first narrowed deterministically by the lexical
+overlap score. A match is accepted only when the chosen option is not `none`
+and its probability is at or above `judgment_match_threshold`; across
+parallel questions the highest accepted probability wins, ties broken by name
+key and then identifier. Accepted conversations are grouped per folder into
+add-to-folder candidates that come first in the output, and a conversation
+the matcher placed is removed from the inner grouper's add-to-folder
+candidates. New-folder candidates are untouched, because a judgment provider
+names nothing. The pass still re-applies every eligibility rule to whatever
+comes back.
+
+The matcher's budgets are fixed module constants, as the model-assisted
+grouper's are: at most sixty-four conversations per pass in index order, eight
+concurrent requests, a twenty-second deadline, 16 KiB per encoded request, and
+a cost ceiling of USD 0.01 per pass. The first request runs alone and the rest
+fan out only if it succeeds, so an outage or a refused credential costs one
+call. Any provider error, deadline, or budget breach cancels the outstanding
+requests, discards every judgment, and returns the inner grouper's candidates
+unchanged with the matcher's fallback flag set; accumulated usage is kept for
+the audit. Conversations beyond the cap keep their inner placement.
+
 **Injection defense on the way in.** A title, snippet, or folder name that
 matches the injection-pattern scan is replaced by `[BLOCKED]` in the encoded
 input, the substitution the memory extractor makes for existing beliefs, and
 a snippet that matches the secret-material scan is dropped so that the title
 alone represents its session. The system instruction says the inputs are data
-to group and never instructions to follow.
+to group and never instructions to follow. The judgment matcher is stricter,
+because a placeholder is noise to a classifier: a conversation whose title
+matches either scan is not judged at all, a snippet or member title that
+matches either scan is omitted, a folder whose name matches either scan is not
+offered, and titles are cut to 256 characters. Instructions and option
+descriptions are platform-authored; conversation text travels only in named
+state fields.
 
 **Audit.** Every pass records one `folder.proposal.pass` event carrying the
 provider and model resolved, token usage, cost, whether the fallback was
 used, the error class if any, and counts of candidates, proposals created,
-and proposals withdrawn — never a title, snippet, name, or rationale.
+and proposals withdrawn — never a title, snippet, name, or rationale. The
+event always carries eight further fields for the matcher —
+`judgment_provider`, `judgment_model`, `judgment_requests`,
+`judgment_matched`, `judgment_input_tokens`, `judgment_cost`,
+`judgment_fallback_used`, and `judgment_error_class` — which read `none`, zero,
+or false when the matcher did not run, and which are likewise content-free.
 
 ## The maintenance pass
 
@@ -501,13 +551,20 @@ proposals:
   model_policy: balanced    # a non-routed policy makes the grouper lexical-only
   similarity_threshold: 0.2 # Jaccard floor for a lexical link
   max_members: 12           # members per proposal
+  judgment_matching_enabled: false # the judgment matcher's own switch
+  judgment_match_threshold: 0.8    # probability floor for an accepted match
 ```
 
-Its seven knobs join the executable inventory and the knob table in
-bootstrap-and-composition.md. One environment key,
-`AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and the pass together,
-defaults off, and appears in `.env.example` in the same change
-(bootstrap-and-composition.md:510-515).
+Its nine knobs join the executable inventory and the knob table in
+bootstrap-and-composition.md; the first seven shipped with the milestone and
+the two judgment knobs ship with the matcher. `judgment_match_threshold` is
+above 0.5 and at most 1, so at most one option of a question can clear it.
+One environment key, `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and
+the pass together, defaults off, and appears in `.env.example` in the same
+change (bootstrap-and-composition.md:510-515). The matcher additionally needs
+the `JUDGMENT_PROVIDER` selector [typed-judgment.md](typed-judgment.md)
+defines; with the knob on and no provider composed, the pass uses the inner
+grouper alone and says so once in the log.
 
 **Disabling.** Unsetting the flag hides the routes and stops the pass; the
 tables, folders, memberships, and proposals remain, `SessionView.folder_id`
@@ -517,7 +574,9 @@ Rolling the schema back is a restore, as it is for every revision.
 
 **Cost.** The pass makes at most one model call per interval per principal,
 capped at USD 0.10, and none when the set is full or fewer than `threshold`
-unfiled sessions exist and no folder does. The audit event is the ledger.
+unfiled sessions exist and no folder does. The judgment matcher adds at most
+sixty-four judgment requests per pass under its own USD 0.01 ceiling, and none
+when no folder exists. The audit event is the ledger.
 
 ## Safety
 
@@ -531,6 +590,10 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
 - **The grouping call is data in, document out.** User-trust labels on the
   input, a closed response schema, no tools, a fixed budget, and a local
   grounding check that discards anything the input does not support.
+- **A judgment can only propose.** The matcher's answer is one of the options
+  the pass offered or no match; it becomes an add-to-folder candidate the pass
+  re-checks and the owner resolves. A judgment provider can be steered by text
+  in what it judges, and here a steered answer costs one bad suggestion.
 - **Ownership is a repository predicate.** Every read and write on all three
   tables carries tenant and principal in both stores under one contract, and
   a cross-principal read is an indistinguishable 404.
@@ -606,6 +669,17 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
     and the proposal rows reconcile with the authoritative index, and the
     server's value wins. Registered as `gate.folder.native_degradation`,
     case. **M29.**
+13. **Judgment matching only proposes, is cleaned before egress, and falls
+    back whole.** The matcher sends only cleaned titles, snippets, folder
+    names, and member titles: a conversation whose title fails a hazard scan is
+    not judged, and a hazardous snippet, member title, or folder is omitted. A
+    match is accepted only when the chosen option is not the explicit no-match
+    option and its probability meets the configured threshold; its output is
+    only ever an add-to-folder candidate the pass re-checks; any provider
+    error, deadline, or budget breach discards every judgment and yields the
+    inner grouper's candidates unchanged; and the pass audit carries the eight
+    `judgment_*` fields and never a title, snippet, or name. Registered as
+    `gate.folder.judgment_matching`, property. **M29.**
 
 ## Tracked metrics
 
@@ -614,6 +688,9 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
 - **Fallback share** — passes that used the lexical result alone; a rising
   share means the provider path is failing or over budget.
 - **Pass cost** — tokens and cost per pass against the ceiling.
+- **Judgment share** — add-to-folder proposals the matcher produced, and the
+  share of them the owner accepts, against the lexical and model-assisted
+  shares. It is the number that says whether the matcher earns its place.
 - **Unfiled share** — unfiled chat sessions as a share of the index; the
   number the feature exists to lower.
 
@@ -628,6 +705,9 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
 4. The lexical grouper, the model-assisted grouper, the pass, its profile,
    and the maintenance sweep. Gates 4, 8, and 11.
 5. The native sidebar, on the existing Swift lanes. Gate 12.
+6. The judgment matcher, after the typed-judgment port of
+   [typed-judgment.md](typed-judgment.md) exists: the matcher, its two knobs,
+   the audit fields, and the composed wrap. Gate 13.
 
 ## Decisions
 
@@ -651,6 +731,12 @@ unfiled sessions exist and no folder does. The audit event is the ledger.
    the provider is down is a feature that silently stops; token overlap over
    title and first message is weak but honest, and it is what the model
    refines rather than replaces.
+7. **The matcher wraps; it does not replace.** Token overlap cannot see that a
+   conversation about a carburetor belongs with motorcycle restoration, and a
+   closed Choice can. But a judgment provider names nothing, so new folders
+   stay with the groupers that can name them, and wrapping keeps the lexical
+   floor exactly where gate 8 put it. The existing `model` derivation labels
+   the matcher's candidates; a new wire literal would buy the client nothing.
 
 ## Open questions
 

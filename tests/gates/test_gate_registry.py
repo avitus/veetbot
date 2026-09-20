@@ -98,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 538
+    assert len(entries) == 548
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -175,7 +175,8 @@ def test_census_is_derived() -> None:
         26: 32,
         27: 14,
         28: 36,
-        29: 12,
+        29: 17,
+        30: 5,
     }
 
 
@@ -292,10 +293,10 @@ def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> No
 
 
 def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> None:
-    """Milestone 29 is authorized; the registry admits it and stops there."""
+    """Milestone 30 is authorized; the registry admits it and stops there."""
     import scripts.gate_registry as gate_registry
 
-    assert getattr(gate_registry, "MAX_MILESTONE", None) == 29
+    assert getattr(gate_registry, "MAX_MILESTONE", None) == 30
 
     gates = tmp_path / "evals" / "gates"
     gates.mkdir(parents=True)
@@ -305,8 +306,8 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         (plan_dir / filename).write_text("## Hard gates\n", encoding="utf-8")
     (plan_dir / "milestone-map.md").write_text(
         "## The gate table\n\n```text\n"
-        "gate.schedule.roadmap_probe   case   29\n"
-        "gate.schedule.beyond_probe    case   30\n"
+        "gate.schedule.roadmap_probe   case   30\n"
+        "gate.schedule.beyond_probe    case   31\n"
         "```\n\n## The census\n\n```text\n```\n",
         encoding="utf-8",
     )
@@ -322,12 +323,12 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         }
 
     (gates / "schedule.yaml").write_text(
-        yaml.safe_dump([entry("roadmap_probe", 29), entry("beyond_probe", 30)]),
+        yaml.safe_dump([entry("roadmap_probe", 30), entry("beyond_probe", 31)]),
         encoding="utf-8",
     )
     errors = registry_errors(tmp_path)
-    assert "gate.schedule.roadmap_probe has invalid milestone 29" not in errors
-    assert "gate.schedule.beyond_probe has invalid milestone 30" in errors
+    assert "gate.schedule.roadmap_probe has invalid milestone 30" not in errors
+    assert "gate.schedule.beyond_probe has invalid milestone 31" in errors
 
 
 def test_notifications_and_devices_have_complete_milestone_12_gate_areas() -> None:

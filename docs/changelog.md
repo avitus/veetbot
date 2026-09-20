@@ -4,6 +4,43 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — ADR-0111 authorizes Milestone 30, the advisory approval layer
+
+- The owner authorized the restrictive-only half of roadmap item B8: an
+  optional advisor that can only turn an allowed action into an approval
+  request. ADR-0017 accepted the idea in July and the policy specification
+  designed it; nothing had been built. General standing approval grants stay
+  on the roadmap.
+- The advisor is a port, and its first implementation uses the typed-judgment
+  port rather than the model gateway, a divergence from the plan's sequencing
+  table that ADR-0111 records. It is consulted only on allowed web searches,
+  page fetches and browser navigations, where private data can leave inside a
+  query or a URL; it never denies, abstains on any failure, and observes
+  before it enforces.
+- The specification's claim that the layer needs no caller change is
+  corrected: the tool pipeline gains a deterministic recovery policy so a
+  resumed or re-approved action never asks the advisor twice.
+- Five `gate.policy.advisory_*` gates are registered pending at Milestone 30.
+  Nothing is implemented.
+
+## 2026-09-19 — ADR-0110 admits a typed-judgment port under Milestone 29
+
+- The owner authorized a provider-neutral port for closed, typed questions —
+  the probability that a statement holds, a choice among offered options, a
+  position on an ordered scale — with TypeSafe's Jev as its first provider.
+  [typed-judgment.md](plan/typed-judgment.md) is its design. It is not a
+  model-gateway provider, registers no model profile, and is off by default
+  behind `JUDGMENT_PROVIDER`.
+- Its first consumer is an optional judgment matcher for chat thread folders:
+  one closed choice per unfiled conversation over the existing folders and an
+  explicit no-match option. It only ever proposes, and any failure leaves the
+  existing grouping unchanged.
+- The same ADR admits an offline, non-activating email-importance evaluation
+  under Milestone 26 and records the owner's acceptance of the vendor's
+  published data terms, which state no deletion period.
+- Five gates are registered pending, four `gate.judgment.*` and
+  `gate.folder.judgment_matching`. Nothing is implemented.
+
 ## 2026-09-19 — The Mac UI lane runs again on macOS 27
 
 - Every `make test-apple-ui-macos` case failed after the macOS 27 upgrade: the

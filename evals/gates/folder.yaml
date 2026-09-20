@@ -71,3 +71,9 @@
   spec: docs/plan/thread-folders.md#hard-gates
   statement: "**The native sidebar degrades and reconciles.** Against a server without the flag the sidebar renders the flat index with no error and no folder control; against one with it, folder sections, the cached `folder_id`, and the proposal rows reconcile with the authoritative index, and the server's value wins."
   check: tests/native/test_folders_m29.py::test_folder_native_degradation
+- id: gate.folder.judgment_matching
+  milestone: 29
+  kind: property
+  spec: docs/plan/thread-folders.md#hard-gates
+  statement: "**Judgment matching only proposes, is cleaned before egress, and falls back whole.** The matcher sends only cleaned titles, snippets, folder names, and member titles: a conversation whose title fails a hazard scan is not judged, and a hazardous snippet, member title, or folder is omitted. A match is accepted only when the chosen option is not the explicit no-match option and its probability meets the configured threshold; its output is only ever an add-to-folder candidate the pass re-checks; any provider error, deadline, or budget breach discards every judgment and yields the inner grouper's candidates unchanged; and the pass audit carries the eight `judgment_*` fields and never a title, snippet, or name."
+  check: tests/gates/pending.py::pending_gate

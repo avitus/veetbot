@@ -1443,3 +1443,30 @@ providers with the lexical grouper as its fallback, and registers the proposal
 pass as a maintenance sweep on its own timer. Its seven knobs join the
 executable inventory when the implementation lands. The detailed contract is
 [thread-folders.md](thread-folders.md).
+
+ADR-0110 adds one selector and one optional wrap. `JUDGMENT_PROVIDER` accepts
+`disabled` and `typesafe` and defaults to `disabled`; only `typesafe` makes the
+composition root construct the TypeSafe judgment provider over the credential
+resolver and the injected clock, and close it on shutdown. `TYPESAFE_API_KEY`
+enters the credential broker as the reference `typesafe`. A selector with no
+credential logs one warning that names variables only and never refuses
+startup; the provider then fails each call without dialing. When a provider is
+composed and `proposals.judgment_matching_enabled` is true, the root wraps the
+grouper above in the judgment matcher; otherwise the grouper is composed
+exactly as before. The two judgment knobs join the executable inventory and
+the knob table when the matcher lands. The detailed contracts are
+[typed-judgment.md](typed-judgment.md) and
+[thread-folders.md](thread-folders.md).
+
+## Milestone 30 advisory approval composition
+
+The composition root always builds the deterministic policy engine. Only when
+the loaded profile has `advisory.enabled` true and a judgment provider is
+composed does it wrap that engine in the advised engine over a judgment-backed
+advisor, in the profile's `advisory.mode`; with the layer enabled and no
+provider it logs one warning and uses the deterministic engine, and never
+refuses startup. The tool pipeline receives the advised engine as its policy
+and the deterministic engine as its recovery policy, and the standing
+authorizer keeps the deterministic engine. The `advisory.mode` knob joins the
+executable inventory and the knob table when the implementation lands. The
+detailed contract is [policy-and-approvals.md](policy-and-approvals.md).
