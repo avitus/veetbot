@@ -72,6 +72,7 @@ public struct RootView: View {
     #if os(macOS)
     @StateObject private var settingsWindowPresenter = SettingsWindowPresenter()
     @State private var showingEmailLearning = false
+    @State private var showingEmailSubscriptions = false
     #endif
 
     public init(model: ChatViewModel) {
@@ -244,6 +245,15 @@ public struct RootView: View {
                     .accessibilityLabel("Schedules")
                     .accessibilityIdentifier("sidebar.schedules")
                 } else {
+                    // The entry exists only where an account advertises support.
+                    if coordinator.email.unsubscribeAvailable {
+                        Button { showingEmailSubscriptions = true } label: {
+                            Image(systemName: "tray.full")
+                                .foregroundColor(AppTheme.turquoise)
+                        }
+                        .accessibilityLabel("Subscriptions").help("Subscriptions")
+                        .accessibilityIdentifier("email.subscriptions.open")
+                    }
                     Button { showingEmailLearning = true } label: {
                         Image(systemName: "slider.horizontal.3")
                     }
@@ -254,6 +264,12 @@ public struct RootView: View {
             }
         }
         .sheet(isPresented: $showingEmailLearning) { EmailLearningScreen(model: coordinator.email) }
+        .sheet(isPresented: $showingEmailSubscriptions) {
+            EmailSubscriptionsScreen(model: coordinator.email.subscriptions, accounts: coordinator.email.accounts)
+        }
+        .onChange(of: coordinator.email.unsubscribeAvailable) { available in
+            if !available { showingEmailSubscriptions = false }
+        }
         #endif
     }
 

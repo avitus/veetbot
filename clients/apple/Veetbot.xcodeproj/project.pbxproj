@@ -49,6 +49,10 @@
 		100000000000000000000029 /* PersonaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* PersonaEditorView.swift */; };
 		1000000000000000000000D1 /* ConversationFolders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D1 /* ConversationFolders.swift */; };
 		1000000000000000000000D2 /* ConversationFolderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D2 /* ConversationFolderViews.swift */; };
+		10000000000000000000D3 /* EmailSubscriptionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000D3 /* EmailSubscriptionModels.swift */; };
+		10000000000000000000D4 /* EmailSubscriptionAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000D4 /* EmailSubscriptionAPIClient.swift */; };
+		10000000000000000000D5 /* EmailSubscriptionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000D5 /* EmailSubscriptionsViewModel.swift */; };
+		10000000000000000000D6 /* EmailSubscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000D6 /* EmailSubscriptionsView.swift */; };
 		10000000000000000000002A /* SmsIntegrationPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SmsIntegrationPreferences.swift */; };
 		10000000000000000000002B /* DeviceInvocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* DeviceInvocationService.swift */; };
 		10000000000000000000002C /* SmsComposeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* SmsComposeSheet.swift */; };
@@ -124,6 +128,10 @@
 		20000000000000000000002A /* PersonaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaEditorView.swift; sourceTree = "<group>"; };
 		2000000000000000000000D1 /* ConversationFolders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolders.swift; sourceTree = "<group>"; };
 		2000000000000000000000D2 /* ConversationFolderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolderViews.swift; sourceTree = "<group>"; };
+		20000000000000000000D3 /* EmailSubscriptionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSubscriptionModels.swift; sourceTree = "<group>"; };
+		20000000000000000000D4 /* EmailSubscriptionAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSubscriptionAPIClient.swift; sourceTree = "<group>"; };
+		20000000000000000000D5 /* EmailSubscriptionsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSubscriptionsViewModel.swift; sourceTree = "<group>"; };
+		20000000000000000000D6 /* EmailSubscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSubscriptionsView.swift; sourceTree = "<group>"; };
 		20000000000000000000002B /* SmsIntegrationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsIntegrationPreferences.swift; sourceTree = "<group>"; };
 		20000000000000000000002C /* DeviceInvocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInvocationService.swift; sourceTree = "<group>"; };
 		20000000000000000000002D /* SmsComposeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmsComposeSheet.swift; sourceTree = "<group>"; };
@@ -203,6 +211,7 @@
 				200000000000000000000004 /* JSONValue.swift */,
 				20000000000000000000001F /* NotificationModels.swift */,
 				2000000000000000000000A1 /* EmailModels.swift */,
+				20000000000000000000D3 /* EmailSubscriptionModels.swift */,
 				2000000000000000000000B1 /* CallModels.swift */,
 			);
 			path = Models;
@@ -218,6 +227,7 @@
 				200000000000000000000020 /* DeviceRegistrationCoordinator.swift */,
 				20000000000000000000002C /* DeviceInvocationService.swift */,
 				2000000000000000000000A2 /* EmailAPIClient.swift */,
+				20000000000000000000D4 /* EmailSubscriptionAPIClient.swift */,
 				2000000000000000000000B2 /* CallAPIClient.swift */,
 			);
 			path = Networking;
@@ -258,6 +268,7 @@
 				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
 				2000000000000000000000A3 /* EmailViewModel.swift */,
+				20000000000000000000D5 /* EmailSubscriptionsViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -284,6 +295,7 @@
 				20000000000000000000002D /* SmsComposeSheet.swift */,
 				200000000000000000000015 /* RootView.swift */,
 				2000000000000000000000A4 /* EmailModeView.swift */,
+				20000000000000000000D6 /* EmailSubscriptionsView.swift */,
 				2000000000000000000000B3 /* CallResultSheet.swift */,
 			);
 			path = Views;
@@ -466,6 +478,10 @@
 				1000000000000000000000A2 /* EmailAPIClient.swift in Sources */,
 				1000000000000000000000B2 /* CallAPIClient.swift in Sources */,
 				1000000000000000000000A1 /* EmailModels.swift in Sources */,
+				10000000000000000000D3 /* EmailSubscriptionModels.swift in Sources */,
+				10000000000000000000D4 /* EmailSubscriptionAPIClient.swift in Sources */,
+				10000000000000000000D5 /* EmailSubscriptionsViewModel.swift in Sources */,
+				10000000000000000000D6 /* EmailSubscriptionsView.swift in Sources */,
 				1000000000000000000000B1 /* CallModels.swift in Sources */,
 				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */,

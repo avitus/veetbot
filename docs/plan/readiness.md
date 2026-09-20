@@ -1927,6 +1927,5 @@ native experience, and integrated release evidence. The design touches no
 roadmap item: every action keeps its approval, nothing runs unattended, and
 no new Google permission is requested. Its one posture change, a dedicated
 public-HTTPS egress transport for a single tool, is owned by ADR-0108
-decision 5. Eighteen gates bind executable checks as of 2026-09-20; the native
-experience gate and integrated release evidence remain pending, and the
-verified ceiling remains 12.
+decision 5. Nineteen gates bind executable checks as of 2026-09-20; integrated
+release evidence remains pending, and the verified ceiling remains 12.

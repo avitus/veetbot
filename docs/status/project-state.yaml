@@ -71,7 +71,7 @@ milestones:
     - Standing or automatic unsubscribe rules (B8), background or scheduled cleanup
     - Gmail filters and blocked senders (new OAuth scope), a durable Keep from Chat, another provider
     open_items:
-    - Verify the native Subscriptions view and thread action on the Apple package and simulator lanes
+    - Add and pass simulator UI journeys for the native Subscriptions view on iPhone, iPad and Mac
     - Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
     - Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
     - Exact-head hosted CI and explicitly authorized review and production delivery evidence
@@ -104,7 +104,22 @@ milestones:
         for a sender with no mechanism, a sender stranded in pending behind a dead
         run, and a get_unsubscribe tool-event copy surviving source exclusion; the
         last was confirmed by removing the fix and watching the gate fail. The
-        native experience and integrated release evidence gates remain pending.
+        integrated release evidence gate remains pending.
+    - check: Milestone 30 native experience (local, 2026-09-20)
+      outcome: passed_locally
+      detail: >-
+        make test-apple passes 387 Swift package tests in 37 suites, including
+        the three Milestone 30 suites for wire decoding against older servers,
+        request shapes, the twenty-five sender selection cap, Select all skipping
+        protected and ineligible rows, optimistic rows settling from the durable
+        operation, restore-on-failure for failed and uncertain outcomes, Keep,
+        spam and Not spam, mailto wording naming the recipient, and the surface
+        being hidden without server support. The Python bridge
+        tests/native/test_email_unsubscribe_m30.py runs those suites and requires
+        each named case to report passing. Unsigned macOS and iOS Simulator app
+        builds compile the new views. One unrelated Email polling test failed once
+        under a cold parallel build and passed in three isolated reruns and the
+        full rerun. No XCUITest simulator journey exists yet for this surface.
     - check: PostgreSQL subscription record parity
       outcome: passed_locally
       detail: >-

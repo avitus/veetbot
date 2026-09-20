@@ -409,7 +409,7 @@
   kind: case
   spec: docs/plan/email-unsubscribe.md#hard-gates
   statement: "**The native experience is complete and honest** — iPhone, compact and regular iPad, and Mac present the Subscriptions view, the thread action, and the confirmation naming each mechanism; rows settle from the durable operation and restore with an actionable error; selection stops at twenty-five and skips protected rows; and a server or account without support shows nothing in its place."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/native/test_email_unsubscribe_m30.py::test_unsubscribe_native_experience
 - id: gate.email.unsubscribe_release_evidence
   milestone: 30
   kind: case

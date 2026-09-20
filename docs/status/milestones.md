@@ -259,9 +259,9 @@ Twenty gates; independent workstream under ADR-0108. A header-derived census
 of bulk senders, the authenticated one-click unsubscribe request to a
 server-derived destination through a dedicated public-HTTPS transport, and
 Report spam, `mailto:` and sender-cleanup fallbacks, each behind the owner's
-tap. Eighteen gates bind passing checks; the feature stays default-off.
+tap. Nineteen gates bind passing checks; the feature stays default-off.
 
-- [ ] Verify the native Subscriptions view and thread action on the Apple package and simulator lanes
+- [ ] Add and pass simulator UI journeys for the native Subscriptions view on iPhone, iPad and Mac
 - [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
 - [ ] Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence

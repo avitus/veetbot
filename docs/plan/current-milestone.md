@@ -82,9 +82,9 @@ title: Current Milestone
   server-derived destination, `mailto:` unsubscribe, Report spam and sender
   cleanup as fixed label actions, owner-gesture consent for a bounded batch,
   scoped routes behind a default-off flag, two Chat tools, and the native
-  Subscriptions view. The backend is implemented default-off with eighteen
-  gates bound to passing checks; the native experience and the owner's
-  real-mailbox release evidence remain open.
+  Subscriptions view. It is implemented default-off with nineteen gates bound
+  to passing checks; simulator UI journeys and the owner's real-mailbox release
+  evidence remain open.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -506,6 +506,6 @@ account's send server; Report spam, Not spam and sender cleanup as fixed label
 deltas; owner-gesture consent for a batch of at most twenty-five senders and
 one by-value approval per batch in Chat; four routes behind a default-off
 flag; and the native Subscriptions view and thread action. The owner directed
-implementation on 2026-09-19. Eighteen gates bind passing checks; the native
-experience gate and integrated release evidence remain open. This independent
+implementation on 2026-09-19. Nineteen gates bind passing checks; simulator UI
+journeys and integrated release evidence remain open. This independent
 workstream is in progress; the verified ceiling remains 12.

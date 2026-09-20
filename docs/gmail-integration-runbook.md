@@ -700,6 +700,73 @@ The closing commit is a full-contract change and must carry a
 path; do not treat credential installation or a local smoke alone as milestone
 completion.
 
+## Milestone 30 — Activate and smoke unsubscribe assistance
+
+Unsubscribe assistance is off until `AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1`. It
+needs both existing email flags, no new Google permission, and no credential.
+It sends a request to a sender only on the owner's tap or approval. The
+contract is [Email unsubscribe assistance](plan/email-unsubscribe.md); the
+egress decision is ADR-0108 decision 5.
+
+### Activate
+
+1. Confirm Email mode already works for both accounts and the installed client
+   build includes the Subscriptions view.
+2. Append the flag with `tee -a` so `/etc/veetbot/veetbot.env` keeps its
+   `0640 root:veetbot` mode:
+
+   ```bash
+   echo 'AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1' | sudo tee -a /etc/veetbot/veetbot.env >/dev/null
+   ```
+
+3. Restart `veetbot-api`, `veetbot-worker`, `veetbot-async-worker`, and
+   `veetbot-maintenance`, and confirm each is active. The API mounts the routes,
+   the async worker builds the census during refresh, and the interactive worker
+   owns the process-local public-HTTPS transport that sends the request.
+4. Probe the mount without credentials from the host. `401` means the routes
+   exist; `404` means the flag did not take effect:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/v1/email/subscriptions
+   ```
+
+### Smoke (owner-authorized; each step is a real, irreversible-or-visible act)
+
+Choose low-stakes senders. Record outcome codes and counts only — never a
+sender name, an address, or an unsubscribe address.
+
+1. Open Email mode and leave it open for a few refreshes. The Subscriptions
+   list fills from headers; rows read *Checking…* until their evidence is
+   verified. Confirm both accounts appear under their badges.
+2. **One-click.** Pick one newsletter showing *One-click request to …*,
+   confirm the sheet, and expect *Unsubscribed*. An unsubscribe cannot be
+   undone. The interactive worker's journal shows one audit line with the
+   destination host, port 443 and an allowed decision, and no path or query.
+3. **mailto.** Pick one sender showing *Sends an email to …*. Afterwards, find
+   that exact message in Gmail's Sent mail with the header's recipient, subject
+   and body and nothing else.
+4. **Report spam, then Not spam.** Report one junk sender; confirm its threads
+   carry Gmail's Spam label and left the Inbox. Use Not spam and confirm exactly
+   those threads returned.
+5. **Cleanup.** Unsubscribe from one sender with *Also archive existing mail*
+   on; confirm its Inbox threads moved to All Mail.
+6. **Chat.** Ask Veetbot to list subscriptions, then to unsubscribe from one
+   named sender. The run must wait for approval; the approval names the sender
+   and destination host and never a path. Approve it once.
+7. Over the following two weeks, a sender that keeps mailing after ten days
+   shows *Still sending* and offers Report spam. Nothing is sent on its own.
+
+A `failed` row with `unsubscribe.redirect_refused` means that sender answered
+with a redirect, which is never followed. Note the count: the design's
+open question on redirects is decided from this evidence.
+
+### Deactivate
+
+Set `AGENT_EMAIL_UNSUBSCRIBE_ENABLED=0` and restart the same four services.
+The routes, both Chat tools, the transport and the census stop existing.
+Stored decisions remain, so re-enabling never re-suggests a kept or
+unsubscribed sender.
+
 ## Rollback and recovery
 
 If activation fails before any successful write or send:
