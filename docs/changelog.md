@@ -4,6 +4,25 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-19 — ADR-0111 authorizes Milestone 30, the advisory approval layer
+
+- The owner authorized the restrictive-only half of roadmap item B8: an
+  optional advisor that can only turn an allowed action into an approval
+  request. ADR-0017 accepted the idea in July and the policy specification
+  designed it; nothing had been built. General standing approval grants stay
+  on the roadmap.
+- The advisor is a port, and its first implementation uses the typed-judgment
+  port rather than the model gateway, a divergence from the plan's sequencing
+  table that ADR-0111 records. It is consulted only on allowed web searches,
+  page fetches and browser navigations, where private data can leave inside a
+  query or a URL; it never denies, abstains on any failure, and observes
+  before it enforces.
+- The specification's claim that the layer needs no caller change is
+  corrected: the tool pipeline gains a deterministic recovery policy so a
+  resumed or re-approved action never asks the advisor twice.
+- Five `gate.policy.advisory_*` gates are registered pending at Milestone 30.
+  Nothing is implemented.
+
 ## 2026-09-19 — ADR-0110 admits a typed-judgment port under Milestone 29
 
 - The owner authorized a provider-neutral port for closed, typed questions —

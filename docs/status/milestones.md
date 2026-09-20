@@ -263,6 +263,12 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; follows
   Milestone 14, though its backup tranche depends on none of the three before
   it.
+- **Milestone 30 — Advisory approval layer** — five gates; independent
+  workstream under ADR-0111, the restrictive-only half of roadmap item B8. An
+  optional advisor behind a port can only escalate an allowed web or browser
+  network read to an approval, never denies, abstains on any failure, is
+  consulted once per invocation, and observes before it enforces. It depends
+  on the typed-judgment port Milestone 29 admits.
 
 
 

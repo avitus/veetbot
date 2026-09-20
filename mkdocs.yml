@@ -234,4 +234,5 @@ nav:
       - ADR-0108 The owner's introduction and outbound voicemail: adr/0108-owner-introduction-and-outbound-voicemail.md
       - ADR-0109 Conversational schedule failure tolerance: adr/0109-conversational-schedule-failure-tolerance-and-headroom.md
       - ADR-0110 Typed-judgment port and TypeSafe Jev: adr/0110-typed-judgment-port-and-typesafe-jev.md
+      - ADR-0111 Advisory approval through the judgment port: adr/0111-advisory-approval-through-the-judgment-port.md
   - Changelog: changelog.md

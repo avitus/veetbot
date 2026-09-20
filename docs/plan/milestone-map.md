@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 33 subject specifications declare 537 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 546
-declarations, 543 registry entries once the 3 aliases are subtracted.
+The 33 subject specifications declare 542 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 551
+declarations, 548 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -529,14 +529,15 @@ the precondition recorded. Without the field the choice is a forbidden
 skip or a gate that fails on every machine without vendor keys, and
 both are worse than naming the exception once.
 
-### Policy and approvals, thirteen gates
+### Policy and approvals, eighteen gates
 
-All thirteen are Milestone 4, which the section states and the build
+The first thirteen are Milestone 4, which the section states and the build
 sequence confirms — steps 1 through 11 are Milestone 4 and step 12 is
-sequenced separately and is not a dependency. The last three arrived
+sequenced separately and is not a dependency. The last three of those arrived
 with the scope vocabulary, which that section owns because the check
 runs at this milestone and the API document that enumerated the first
-nine strings is Milestone 5.
+nine strings is Milestone 5. Gates 14 through 18 are step 12, the advisory
+layer, authorized as Milestone 30 by ADR-0111.
 
 ```text
 #   id                              kind         M
@@ -554,6 +555,11 @@ nine strings is Milestone 5.
 11  gate.policy.scope_grammar       structural   4
 12  gate.policy.scope_match         case         4
 13  gate.policy.scope_stamped       case         4
+14  gate.policy.advisory_monotonic  property     30
+15  gate.policy.advisory_allow_path_once  case   30
+16  gate.policy.advisory_abstains   case         30
+17  gate.policy.advisory_blind_redacted  structural  30
+18  gate.policy.advisory_default_off  case       30
 ```
 
 ### Event log and persistence, fourteen gates
@@ -1750,6 +1756,7 @@ milestone  new gates  cumulative  the earliest of them
 28                36         526  People identity, temporal relationships, history and governed recall
 29                17         543  chat thread folders, owner-resolved grouping proposals, grounded grouping,
                                   the typed-judgment port and judgment folder matching
+30                 5         548  restrictive-only advisory approval through the judgment port
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1770,15 +1777,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of five hundred and forty-three gates are green before
+2.  **Forty-one of five hundred and forty-eight gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches five hundred and forty-three, which is every
-registry entry, at Milestone 29. Six of Milestone 10's gates are
+The cumulative column reaches five hundred and forty-eight, which is every
+registry entry, at Milestone 30. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1795,7 +1802,8 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
 entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
 and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thirteen
-`gate.folder.*` entries and four `gate.judgment.*` entries. Every authorized milestone now has a specification
+`gate.folder.*` entries and four `gate.judgment.*` entries, and Milestone 30
+returns to the `gate.policy.*` area with five. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

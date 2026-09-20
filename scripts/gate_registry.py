@@ -32,8 +32,9 @@ MAP_ROW = re.compile(
 # Milestone 26 was authorized on 2026-09-11 under ADR-0092, Milestone 28 on
 # 2026-09-15 under ADR-0100, and Milestone 29 on 2026-09-16 under ADR-0102.
 # ADR-0110 amended Milestone 29 on 2026-09-19 to admit the typed-judgment port
-# and its `gate.judgment.*` area.
-MAX_MILESTONE = 29
+# and its `gate.judgment.*` area. Milestone 30 was authorized on 2026-09-19
+# under ADR-0111.
+MAX_MILESTONE = 30
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -42,7 +43,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "tool-system.md": (16, 1),
     "builtin-tools.md": (15, 0),
     "model-gateway.md": (12, 0),
-    "policy-and-approvals.md": (13, 0),
+    "policy-and-approvals.md": (18, 0),
     "event-log-and-persistence.md": (14, 0),
     "context-engine.md": (6, 0),
     "memory-formation-and-consolidation.md": (20, 0),
