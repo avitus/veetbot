@@ -504,7 +504,7 @@ private struct SessionSidebar: View {
         }
         #endif
         .sheet(isPresented: $showingMemoryBrowser) {
-            MemoryBrowserView(model: memoryViewModel)
+            MemoryBrowserView(model: memoryViewModel, sessionID: model.selectedSessionID)
         }
         .onChange(of: model.connectionGeneration) { _ in showingMemoryBrowser = false }
         .sheet(isPresented: $showingPersonaEditor) {

@@ -230,4 +230,42 @@ import Testing
         #expect(root.contains("sidebar.new-conversation"))
         #expect(root.contains("sidebar.session.\\(entry.sessionID.uuidString)"))
     }
+
+    /// Every People write carries an audit session, and the client invents a
+    /// hidden `people-management` session whenever the browser is opened
+    /// without one. Both Memory browser presentations sit alongside a
+    /// conversation list that already knows the selection, so both must hand
+    /// it down; otherwise the same correction is attributed to the open
+    /// conversation on macOS and to a synthetic session on iOS.
+    @Test
+    func testEveryMemoryBrowserPresentationCarriesTheSelectedSession() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
+            encoding: .utf8
+        )
+
+        var searchStart = source.startIndex
+        var presentations = 0
+        while let call = source.range(
+            of: "MemoryBrowserView(",
+            range: searchStart ..< source.endIndex
+        ) {
+            let close = try #require(
+                source.range(of: ")", range: call.upperBound ..< source.endIndex)
+            )
+            let arguments = source[call.upperBound ..< close.lowerBound]
+            #expect(
+                arguments.contains("sessionID: model.selectedSessionID"),
+                "MemoryBrowserView(\(arguments)) omits the selected session, so People corrections made through it are attributed to a synthetic people-management session"
+            )
+            presentations += 1
+            searchStart = close.upperBound
+        }
+
+        #expect(presentations == 2, "expected the macOS toolbar and iOS overflow presentations")
+    }
 }
