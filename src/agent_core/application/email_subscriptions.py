@@ -852,7 +852,12 @@ class EmailSubscriptions:
             "task_id": str(task.id),
             "action": consent.action,
             "subscription_ids": [target.subscription_id for target in consent.targets],
-            "consent_digest": hashlib.sha256(consent.model_dump_json().encode()).hexdigest(),
+            # Canonical, because a stored consent comes back with its keys reordered.
+            "consent_digest": hashlib.sha256(
+                json.dumps(
+                    consent.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
         }
 
     # -- consent consumption (typed task, under its worker lease) ----------------------------
