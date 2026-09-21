@@ -6,31 +6,17 @@ title: Changelog
 
 ## 2026-09-20 — The simulator UI lane boots both simulators before its runs
 
-- On the owner's Mac (macOS 27.0, Xcode 27.0, iOS 26.5 simulators)
-  `make test-apple-ui-ios` exited before any case ran: one or both concurrent
-  runs ended 65 with `Busy ("Application failed preflight checks")`. The
-  simulator's own log gives the reason the xcodebuild error omits: SpringBoard
-  logged "Cannot launch application scene … while it's application is being
-  updated" for each launch retry, then "Exhausted retry attempts".
-- Xcode 27.0's xcodebuild installs the UI-test runner about four seconds into a
-  boot it starts itself, without waiting for SpringBoard. In a single cold boot
-  SpringBoard was running two seconds in and logged "Placeholder add BEGIN" for
-  the install. With two cold boots at once it started about seven seconds in,
-  after the install had completed, never observed it, and held the runner as
-  still being updated for the rest of that boot.
-- Separate copies of the test products for each device failed the same way, so
-  the shared `.xctestproducts` is not the cause. Starting the second run 15 or
-  30 seconds late passed but only moves the race.
+- `make test-apple-ui-ios` could end before any case ran, with the UI-test
+  runner's launch refused as Busy. Xcode 27.0's xcodebuild installs the runner
+  early in a boot it starts itself, and two cold boots at once bring SpringBoard
+  up after that install.
 - The target now boots both simulators to completion, concurrently with
   `xcrun simctl bootstatus -b`, before it starts the two concurrent runs, and
-  shuts down only the simulators it booted, as xcodebuild did. Six of six
-  pre-booted concurrent runs passed in the 23 to 27 seconds a cold run took.
-- The iPhone Air simulator on that Mac ends `bootstatus` after a second or two
-  with "Data Migration Failed" and exit 0, while SpringBoard finished starting
-  about nine seconds in; the other iPhone simulators report "Finished". A boot
-  that does not report "Finished" therefore waits until
-  `com.apple.springboard.finishedstartup` holds SpringBoard's process id.
-  `xcrun simctl erase` repairs such a simulator and is left to the owner.
+  shuts down only the simulators it booted, as xcodebuild did. A boot that does
+  not report "Finished" waits until `com.apple.springboard.finishedstartup`
+  holds SpringBoard's process id.
+- Six of six pre-booted concurrent runs passed on the owner's Mac. The
+  diagnosis is in `clients/apple/README.md`.
 
 ## 2026-09-20 — The hosted Apple lanes pass on the Xcode 27.0.0 image
 

@@ -2144,6 +2144,58 @@ def test_apple_ui_simulators_finish_booting_before_the_concurrent_runs() -> None
         assert build < recipe.index(step) < first_run, step
 
 
+@pytest.mark.parametrize(
+    ("boot_report", "startup_states", "expected_exit", "expected_polls"),
+    [
+        ("Finished", [], 0, 0),
+        ("Data Migration Failed", ["no-answer", "0", "4242"], 0, 3),
+        ("Data Migration Failed", ["0"], 1, 120),
+    ],
+    ids=["finished-boot", "springboard-starts-late", "springboard-never-starts"],
+)
+def test_apple_ui_boot_waits_until_springboard_has_started(
+    tmp_path: Path,
+    boot_report: str,
+    startup_states: list[str],
+    expected_exit: int,
+    expected_polls: int,
+) -> None:
+    """A boot that does not report Finished returns only once SpringBoard is up.
+
+    ``finishedstartup`` answers nothing or 0 until SpringBoard has started and
+    its process id afterwards. Returning on the first answer would start the
+    runs early and restore the refused launch, so the helper is run here
+    against a stand-in ``xcrun`` instead of being matched as text.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+    helper = re.search(r"^\tboot_ios_simulator\(\) \{.*?^\t\}; \\\n", recipe, re.M | re.S)
+    assert helper, "boot_ios_simulator is missing"
+    states = tmp_path / "states"
+    states.write_text("".join(f"{state}\n" for state in startup_states), encoding="utf-8")
+
+    result = _run_recipe_shell(
+        tmp_path,
+        f"{helper.group(0)}\tboot_ios_simulator DEVICE-1\n",
+        xcrun=(
+            'case "$2" in\n'
+            f"bootstatus) echo '{boot_report}' ;;\n"
+            "spawn)\n"
+            f'  polls=$(($(cat "{tmp_path}/polls" 2>/dev/null || echo 0) + 1))\n'
+            f'  echo "$polls" > "{tmp_path}/polls"\n'
+            f'  state=$(sed -n "${{polls}}p" "{states}")\n'
+            f'  test -n "$state" || state=$(tail -n 1 "{states}")\n'
+            '  test "$state" = no-answer ||\n'
+            '    echo "com.apple.springboard.finishedstartup $state" ;;\n'
+            "esac\n"
+        ),
+    )
+
+    assert result.returncode == expected_exit, result.stderr
+    polls = tmp_path / "polls"
+    assert (int(polls.read_text()) if polls.exists() else 0) == expected_polls
+
+
 def test_apple_ui_shuts_down_only_the_simulators_it_booted() -> None:
     """xcodebuild shuts down a simulator it booted but not one it found booted.
 
@@ -2161,6 +2213,64 @@ def test_apple_ui_shuts_down_only_the_simulators_it_booted() -> None:
     assert 'xcrun simctl shutdown "$$device_id"' in finish
     assert 'rm -rf -- "$$apple_ui_tmp"' in finish
     assert "trap finish_apple_ui EXIT" in recipe
+
+
+@pytest.mark.parametrize(
+    ("already_booted", "expected"),
+    [
+        ([], ["IPHONE-1", "IPAD-1"]),
+        (["IPAD-1"], ["IPHONE-1"]),
+        (["IPHONE-1", "IPAD-1"], []),
+    ],
+    ids=["none-booted", "ipad-booted", "both-booted"],
+)
+def test_apple_ui_records_only_the_simulators_that_were_not_booted(
+    tmp_path: Path, already_booted: list[str], expected: list[str]
+) -> None:
+    """A simulator found booted is left out of the list the target shuts down."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+    record = re.search(
+        r'^\tfor device_id in "\$\$iphone_device_id" "\$\$ipad_device_id"; do \\\n.*?^\tdone; \\\n',
+        recipe,
+        re.M | re.S,
+    )
+    assert record, "the booted-simulator check is missing"
+    assert record.start() < recipe.index('boot_ios_simulator "$$iphone_device_id" &')
+    booted = "".join(f"    Simulator ({device_id}) (Booted)\n" for device_id in already_booted)
+
+    result = _run_recipe_shell(
+        tmp_path,
+        'iphone_device_id=IPHONE-1; ipad_device_id=IPAD-1; simulators_booted_here=""; \\\n'
+        f'{record.group(0)}\techo "$$simulators_booted_here"\n',
+        xcrun=f"test \"$*\" = 'simctl list devices booted' || exit 64\nprintf '%s' '{booted}'\n",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == expected
+
+
+def _run_recipe_shell(
+    tmp_path: Path, fragment: str, *, xcrun: str
+) -> subprocess.CompletedProcess[str]:
+    """Run part of a Makefile recipe as make would, with a stand-in ``xcrun``.
+
+    ``sleep`` is replaced as well, so a wait loop costs no wall-clock time.
+    """
+    stand_ins = tmp_path / "bin"
+    stand_ins.mkdir()
+    for name, body in (("xcrun", xcrun), ("sleep", "")):
+        (stand_ins / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+        (stand_ins / name).chmod(0o755)
+    script = f"apple_developer_dir=/unused; \\\n{fragment}".replace("$$", "$")
+    return subprocess.run(
+        ["/bin/sh", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env={"PATH": f"{stand_ins}:/usr/bin:/bin"},
+    )
 
 
 def _make_recipe(makefile: str, target: str) -> str:
