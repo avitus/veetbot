@@ -284,11 +284,21 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
     /// then reads the rows back: only the server says what actually happened.
     private func settle(_ operation: EmailOperationView, targets: [String], connection: UUID) async {
         var consecutiveFailures = 0
+        var attempts = 0
         var status = operation.status
         while !status.isTerminal {
+            guard attempts < Self.maxStatusPolls else {
+                restore(targets, reason: Self.unreadableStatus)
+                return
+            }
+            attempts += 1
             do {
                 try await statusBackoff(UInt64(2 << consecutiveFailures) * 1_000_000_000)
-                guard accepts(connection), let api = makeAPIClient() else { return }
+                guard accepts(connection) else { return }
+                guard let api = makeAPIClient() else {
+                    restore(targets, reason: Self.unreadableStatus)
+                    return
+                }
                 status = try await api.emailOperation(operation.operationID).status
                 guard accepts(connection) else { return }
                 consecutiveFailures = 0
@@ -329,6 +339,9 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
         guard let index = items.firstIndex(where: { $0.id == row.id }) else { return }
         items[index] = row
     }
+
+    /// Matches the bound the archive pollers in `EmailViewModel` use.
+    private static let maxStatusPolls = 60
 
     private static let unreadableStatus =
         "Veetbot could not confirm this request's outcome. Try again, report the sender as spam, or keep it."

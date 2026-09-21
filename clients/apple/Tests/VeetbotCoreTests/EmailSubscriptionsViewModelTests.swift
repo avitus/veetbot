@@ -207,6 +207,30 @@ import Testing
         #expect(model.confirmation == nil)
     }
 
+    /// An operation the server never settles stops polling and restores the row.
+    @Test func testAnOperationThatNeverSettlesStopsPollingAndRestoresTheRow() async throws {
+        let polls = EmailSubscriptionPollCounter()
+        let model = try makeModel(statusBackoff: { _ in }) { request in
+            if request.httpMethod == "POST" { return (202, self.operationJSON(status: "QUEUED")) }
+            if request.url!.path.contains("/operations/") {
+                // Settles only far past any sane bound, so an unbounded poller ends instead of hanging.
+                return (200, self.operationJSON(status: polls.increment() > 100 ? "COMPLETED" : "QUEUED"))
+            }
+            return (200, self.page(ids: [self.id(1)], verified: true))
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let target = try #require(model.items.first)
+        model.beginUnsubscribe(target)
+        await model.confirmUnsubscribe()
+
+        #expect(polls.count <= 60, "Polling must be bounded")
+        let restored = try #require(model.items.first)
+        #expect(model.rowErrors[restored.id] != nil, "A row whose outcome is unknown must say so")
+        #expect(model.status(for: restored) == model.rowErrors[restored.id])
+        #expect(restored.canUnsubscribe, "Try again remains available")
+    }
+
     /// Keep and its reversal are durable local decisions that change no mailbox.
     @Test(arguments: [true, false])
     func testKeepAndUnkeepReplaceTheRowFromTheServer(kept: Bool) async throws {
@@ -511,6 +535,13 @@ private final class EmailSubscriptionSignal: @unchecked Sendable {
     private var value = false
     var isSignalled: Bool { lock.withLock { value } }
     func signal() { lock.withLock { value = true } }
+}
+
+private final class EmailSubscriptionPollCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func increment() -> Int { lock.withLock { value += 1; return value } }
 }
 
 private final class EmailSubscriptionRequestRecorder: @unchecked Sendable {

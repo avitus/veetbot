@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
             This policy explains how Veetbot handles information on its public
             website and in its optional Gmail integration.
           </p>
-          <p className="effective-date">Effective September 11, 2026</p>
+          <p className="effective-date">Effective September 21, 2026</p>
         </header>
 
         <div className="legal-layout">
