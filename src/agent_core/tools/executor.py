@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import re
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
@@ -19,6 +18,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalRequest, ApprovalStatus
+from agent_core.domain.argument_views import approval_argument_digests, approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.delegations import Delegation, DelegationRequest
 from agent_core.domain.errors import (
@@ -45,6 +45,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
+    POLICY_DECISION_RANK,
     ActionKind,
     ExecutionTarget,
     IdempotencyClass,
@@ -109,66 +110,10 @@ class DelegationStarter(Protocol):
     ) -> Delegation: ...
 
 
-_SENSITIVE_ARGUMENT_KEY = re.compile(
-    r"(?:api[_-]?key|secret|password|token|authorization|credential)", re.I
-)
-_CREDENTIAL_SHAPE = re.compile(r"(?:api[_-]?key|secret|password|token|bearer)\s*[:=]\s*\S+", re.I)
-# The longest string an approval view carries whole. A longer one is truncated and
-# its full value is published as a digest instead, so exact client-side
-# verification survives redaction.
-_APPROVAL_ARGUMENT_CEILING = 512
-
-
-def _approval_argument_value(value: Any, *, key: str | None = None) -> Any:
-    if key is not None and _SENSITIVE_ARGUMENT_KEY.search(key) is not None:
-        return "[REDACTED]"
-    if isinstance(value, str):
-        if _CREDENTIAL_SHAPE.search(value) is not None:
-            return "[REDACTED]"
-        if len(value) <= _APPROVAL_ARGUMENT_CEILING:
-            return value
-        return f"{value[:_APPROVAL_ARGUMENT_CEILING]}…[TRUNCATED]"
-    if isinstance(value, dict):
-        items = list(value.items())[:50]
-        redacted = {
-            str(nested_key): _approval_argument_value(nested, key=str(nested_key))
-            for nested_key, nested in items
-        }
-        if len(value) > len(items):
-            redacted["[TRUNCATED]"] = f"{len(value) - len(items)} field(s) omitted"
-        return redacted
-    if isinstance(value, list):
-        items = value[:50]
-        redacted_items = [_approval_argument_value(item) for item in items]
-        if len(value) > len(items):
-            redacted_items.append(f"[TRUNCATED: {len(value) - len(items)} item(s) omitted]")
-        return redacted_items
-    return value
-
-
-def _approval_argument_view(arguments: dict[str, Any]) -> dict[str, Any]:
-    return cast(dict[str, Any], _approval_argument_value(arguments))
-
-
-def _approval_argument_digests(arguments: dict[str, Any]) -> dict[str, str]:
-    """Digest every top-level argument the view truncates for length.
-
-    The view cuts a long string to its first 512 characters, so a client holding
-    the original can no longer compare it for equality. The digest restores exact
-    verification without publishing the value. A value redacted for sensitivity is
-    never digested: the owner has no reason to verify a credential, and a digest of
-    one is a brute-force target.
-    """
-    digests: dict[str, str] = {}
-    for key, value in arguments.items():
-        if not isinstance(value, str) or len(value) <= _APPROVAL_ARGUMENT_CEILING:
-            continue
-        if _SENSITIVE_ARGUMENT_KEY.search(key) is not None:
-            continue
-        if _CREDENTIAL_SHAPE.search(value) is not None:
-            continue
-        digests[key] = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    return digests
+# The helpers moved to the domain so the policy package can use them; these names
+# remain for the modules and tests that read them from here.
+_approval_argument_view = approval_argument_view
+_approval_argument_digests = approval_argument_digests
 
 
 class _UnavailableCollaborator:
@@ -392,6 +337,7 @@ class ToolPipeline:
         ids: IdFactory,
         *,
         policy: PolicyEngine | None = None,
+        recovery_policy: PolicyEngine | None = None,
         workspace_factory: WorkspaceFactory | None = None,
         artifact_writers: ArtifactWriterProvider | None = None,
         credentials: CredentialResolver | None = None,
@@ -418,6 +364,9 @@ class ToolPipeline:
 
             policy = DeterministicPolicyEngine(DEFAULT_RULESET)
         self._policy = policy
+        # Deterministic re-evaluation for an invocation that already has a row and
+        # for revalidation; it defaults to the primary engine.
+        self._recovery_policy = recovery_policy or policy
         self._workspace_factory = workspace_factory
         self._artifact_writers = artifact_writers
         self._credentials = credentials or UnavailableCredentialResolver()
@@ -637,6 +586,36 @@ class ToolPipeline:
             )
         return result_item
 
+    async def _evaluate_once(
+        self, action: ProposedAction, principal: Principal, run: Run, key: str
+    ) -> PolicyDecision:
+        """Consult a non-deterministic policy at most once per invocation.
+
+        With one engine this is a plain evaluation. With a distinct recovery
+        policy, an invocation that already has a row was evaluated before: it is
+        re-evaluated deterministically and keeps the more restrictive of that
+        result and the decision persisted under the same policy version. A verdict
+        that differs between a first attempt and a resume therefore cannot move a
+        running invocation into a forbidden transition, and an escalation recorded
+        before a crash survives it.
+        """
+
+        if self._recovery_policy is self._policy:
+            return await self._policy.evaluate(action, principal, run)
+        async with self._uow_factory() as uow:
+            existing = await uow.invocations.find_by_idempotency_key(run.id, key)
+        if existing is None:
+            return await self._policy.evaluate(action, principal, run)
+        decision = await self._recovery_policy.evaluate(action, principal, run)
+        persisted = existing.policy_decision
+        if (
+            persisted is not None
+            and persisted.policy_version == decision.policy_version
+            and POLICY_DECISION_RANK[persisted.decision] > POLICY_DECISION_RANK[decision.decision]
+        ):
+            return persisted
+        return decision
+
     async def _execute_once(
         self,
         *,
@@ -697,7 +676,7 @@ class ToolPipeline:
                 arguments,
                 arguments_hash,
             )
-            decision = await self._policy.evaluate(action, principal, run)
+            decision = await self._evaluate_once(action, principal, run, key)
             progress.extend((6, 7))
             effective_hash = arguments_hash
             if decision.decision is PolicyDecisionType.ALLOW_WITH_MODIFICATIONS:
@@ -1634,7 +1613,10 @@ class ToolPipeline:
             arguments,
             arguments_hash,
         )
-        revalidated = await self._policy.evaluate(action, current, run)
+        # The owner has approved these exact bytes. A secondary signal whose only
+        # power is to summon the owner is not asked again; the recovery policy is
+        # the deterministic engine.
+        revalidated = await self._recovery_policy.evaluate(action, current, run)
         async with self._uow_factory() as uow:
             approval = await uow.approvals.record_revalidation(
                 invocation.id, revalidated.policy_version

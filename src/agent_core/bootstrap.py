@@ -67,6 +67,7 @@ from agent_core.adapters.identity import (
     ConfiguredSchedulePrincipalDirectory,
     StaticPrincipalResolver,
 )
+from agent_core.adapters.judgment import TypeSafeJudgmentProvider
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
@@ -346,6 +347,7 @@ from agent_core.config import (
     BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
+    JudgmentProviderKind,
     MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     PushProviderKind,
@@ -427,7 +429,9 @@ from agent_core.domain.tools import ToolExecutionContext, ToolInvocation, ToolSp
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
+from agent_core.folders.clustering import ThreadGrouper
 from agent_core.folders.grouping import ModelAssistedThreadGrouper
+from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
 from agent_core.knowledge.service import KnowledgeService
@@ -471,8 +475,11 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
+from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import BrowserProvider
@@ -484,6 +491,7 @@ from agent_core.ports.browser_sessions import (
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
+from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.memory import MemoryCandidateExtractor
@@ -496,6 +504,7 @@ from agent_core.ports.persistence import (
     TransactionCallbackRegistrar,
     UnitOfWorkFactory,
 )
+from agent_core.ports.policies import PolicyEngine
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.tools import DeviceChannel
 from agent_core.ports.web import WebProvider, WebProviderRouter
@@ -619,6 +628,7 @@ class Composition:
     mcp_proxy: WorkerEgressProxy | None
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
+    judgment_provider: JudgmentProvider | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2077,6 +2087,7 @@ async def _compose(
     mcp_server_configs: tuple[MCPServerConfig, ...],
     web_search_provider: WebProvider | WebProviderRouter | None,
     web_fetch_provider: WebProvider | WebProviderRouter | None,
+    judgment_provider: JudgmentProvider | None,
     memory_provider_evaluation_mode: bool,
     memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
@@ -2982,7 +2993,27 @@ async def _compose(
                     completed += 1
             return completed
 
-        policy_engine = DeterministicPolicyEngine(ruleset)
+        # The deterministic engine is always built and stays the recovery policy and
+        # the standing authorizer's engine: an advisory escalation can never be
+        # satisfied by a standing grant, and a resumed invocation never re-asks.
+        deterministic_engine = DeterministicPolicyEngine(ruleset)
+        policy_engine: PolicyEngine = deterministic_engine
+        if ruleset.advisory_enabled or settings.policy_advisory_observe_enabled:
+            if judgment_provider is None:
+                # Never fail closed on the advisor's availability.
+                logger.warning(
+                    "policy_advisory_unavailable", extra={"selector": "JUDGMENT_PROVIDER"}
+                )
+            else:
+                policy_engine = AdvisedPolicyEngine(
+                    deterministic_engine,
+                    JudgmentPolicyAdvisor(judgment_provider),
+                    # Enforcing is a profile value and hashes into `policy_version`;
+                    # observing changes no decision and is an environment flag.
+                    enforce=ruleset.advisory_enabled,
+                    clock=clock,
+                    observer=AdvisoryMetrics(),
+                )
         standing_authorizer = None
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
@@ -2993,7 +3024,7 @@ async def _compose(
                 purpose=settings.browser_run_purpose,
                 provider=browser_provider,
                 uow_factory=uow_factory,
-                policy=policy_engine,
+                policy=deterministic_engine,
                 now=clock.now,
             )
         checkpoint_seeder = DurableCheckpointSeeder(clock)
@@ -3038,6 +3069,7 @@ async def _compose(
             clock,
             ids,
             policy=policy_engine,
+            recovery_policy=deterministic_engine,
             workspace_factory=sandbox_manager,
             artifact_writers=artifact_writers,
             current_principal=principal,
@@ -3623,19 +3655,34 @@ async def _compose(
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:
+            thread_grouper: ThreadGrouper = ModelAssistedThreadGrouper(
+                router=model_router,
+                providers=model_providers,
+                clock=clock,
+                ids=ids,
+                model_policy=folder_profiles.proposals.model_policy,
+            )
+            if folder_profiles.proposals.judgment_matching_enabled:
+                if judgment_provider is None:
+                    # The knob needs a composed provider; the pass keeps its
+                    # existing grouper and never refuses startup over it.
+                    logger.warning(
+                        "folder_judgment_matching_unavailable",
+                        extra={"selector": "JUDGMENT_PROVIDER"},
+                    )
+                else:
+                    thread_grouper = JudgmentFolderMatcher(
+                        judge=judgment_provider,
+                        inner=thread_grouper,
+                        match_threshold=folder_profiles.proposals.judgment_match_threshold,
+                    )
             folder_proposal_pass = FolderProposalPass(
                 uow_factory=uow_factory,
                 clock=clock,
                 ids=ids,
                 principal=principal,
                 profile=folder_profiles.proposals,
-                grouper=ModelAssistedThreadGrouper(
-                    router=model_router,
-                    providers=model_providers,
-                    clock=clock,
-                    ids=ids,
-                    model_policy=folder_profiles.proposals.model_policy,
-                ),
+                grouper=thread_grouper,
             )
         public_services = ApplicationServices(
             sessions=public_session_service,
@@ -3821,6 +3868,7 @@ async def _compose(
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
                 local_import_tasks=local_import_tasks,
+                judgment_provider=judgment_provider,
             ),
             list(effective_providers.values()),
         )
@@ -3888,6 +3936,18 @@ def _web_provider(
     if kind is WebProviderKind.KEENABLE:
         return KeenableWebProvider(credentials=credentials)
     raise ConfigurationError(f"unsupported web provider {kind.value!r}")
+
+
+def _judgment_provider(
+    kind: JudgmentProviderKind,
+    credentials: CredentialResolver,
+    clock: Clock,
+) -> JudgmentProvider | None:
+    if kind is JudgmentProviderKind.DISABLED:
+        return None
+    if kind is JudgmentProviderKind.TYPESAFE:
+        return TypeSafeJudgmentProvider(credentials=credentials, clock=clock)
+    raise ConfigurationError(f"unsupported judgment provider {kind.value!r}")
 
 
 def _configured_web_provider_route(
@@ -4003,6 +4063,7 @@ async def build(
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
+    judgment_provider_override: JudgmentProvider | None = None,
     browser_provider_override: BrowserProvider | None = None,
     device_channel_override: DeviceChannel | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
@@ -4322,6 +4383,7 @@ async def build(
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
     web_provider_cache: dict[WebProviderKind, WebProvider] = {}
+    judgment_provider: JudgmentProvider | None = None
     browser_provider: BrowserProvider | None = None
     browser_profile_http_client: httpx.AsyncClient | None = None
     browser_sessions: BrowserSessionControlPlane | None = None
@@ -4463,6 +4525,27 @@ async def build(
             for provider in web_provider_cache.values()
             if all(provider is not tracked for tracked in web_providers)
         )
+        judgment_provider = (
+            judgment_provider_override
+            if judgment_provider_override is not None
+            else _judgment_provider(
+                effective_settings.judgment_provider,
+                effective_credential_resolver,
+                effective_clock,
+            )
+        )
+        if (
+            judgment_provider_override is None
+            and credential_resolver is None
+            and effective_settings.judgment_provider is JudgmentProviderKind.TYPESAFE
+            and "typesafe" not in effective_settings.credentials
+        ):
+            # Degrade, never refuse startup: every call then fails without dialing
+            # and each consumer takes its deterministic fallback.
+            logger.warning(
+                "judgment_credential_missing",
+                extra={"selector": "JUDGMENT_PROVIDER", "credential": "TYPESAFE_API_KEY"},
+            )
         browser_provider = (
             browser_provider_override
             if browser_provider_override is not None
@@ -4546,6 +4629,7 @@ async def build(
             mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
+            judgment_provider=judgment_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
             memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
@@ -4596,6 +4680,17 @@ async def build(
                 logger.warning(
                     "web_provider_close_failed",
                     extra={"provider": web_provider.name, "error_class": type(exc).__name__},
+                )
+        if judgment_provider is not None:
+            try:
+                await judgment_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "judgment_provider_close_failed",
+                    extra={
+                        "provider": judgment_provider.name,
+                        "error_class": type(exc).__name__,
+                    },
                 )
         if browser_provider is not None:
             try:

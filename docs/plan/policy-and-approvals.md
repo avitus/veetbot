@@ -686,7 +686,12 @@ home.
 
 ### 3. The advisory layer
 
-Optional, off by default, sequenced after Milestone 6 by Section 21.1.
+Optional, off by default, sequenced after Milestone 6 by Section 21.1, and
+authorized as Milestone 30 by
+[ADR-0111](../adr/0111-advisory-approval-through-the-judgment-port.md), the
+policy ADR roadmap item B8 requires. The five bullets below are the
+requirement and bind every advisor; the paragraphs after them are the first
+implementation.
 
 - Its output is constrained to `abstain`, `require_approval`, or `deny`, via a
   schema-validated structured response. It cannot emit `ALLOW` and it cannot
@@ -706,6 +711,92 @@ Optional, off by default, sequenced after Milestone 6 by Section 21.1.
   by Section 9.3. Blocking on it would make an optional component load-bearing
   for availability, which ADR-0017 forbids in the safety direction and which is
   no better in this one.
+
+**The advisor is a port.** `PolicyAdvisor.advise(action)` takes the proposed
+action and nothing else, and returns a verdict of `abstain`,
+`require_approval`, or `deny`; the verdict type has no `allow`. Because no
+ruleset, profile, or deterministic decision is in the signature, "never sees
+the rules" is a property of the interface rather than of an implementation's
+care. `AdvisedPolicyEngine` implements `PolicyEngine` over the deterministic
+engine and one advisor and combines through the `max` rule above. The first
+advisor is backed by the [typed-judgment port](typed-judgment.md), not the
+model gateway: the output was always a closed choice, abstaining on a timeout
+suits a call measured in tenths of a second, and this package may not reach
+the model gateway. ADR-0111 records that divergence from Section 21.1's
+dependency column. A model-gateway advisor remains possible behind the port.
+
+**What version one consults on, which is narrower than the requirement
+allows.** Only a plain `ALLOW`, and only a `NETWORK_READ` whose target is the
+web or browser provider: a search query, a fetch URL, a navigation URL. That
+is where an allowed action still carries model-written text outward —
+arguments are untrusted unless the owner's message supplied them, and the
+trust overlay already escalates every class but `NONE`, `WORKSPACE_READ`, and
+`NETWORK_READ`. `ALLOW_WITH_MODIFICATIONS` is passed through untouched:
+escalating it would ask the owner to approve arguments the deterministic layer
+had not yet narrowed. Reads with no outward side, MCP reads, file writes, code
+execution, and the human-confirmed SMS tool are not consulted on.
+
+**It asks narrow questions and code decides.** Three probabilities, each
+phrased positively: the outbound text addresses an AI system; the query or
+the URL's query carries private details of an identifiable person; the URL's
+path or query carries prose or an opaque encoded blob. Any one at or above its
+threshold escalates. No question can veto another and none asks whether the
+action is safe, so an answer steered downward yields exactly the advisor-off
+state and one steered upward costs a prompt. Thresholds are constants beside
+the questions, stricter when the turn's origin cannot authorize, and a hash of
+questions and thresholds is the `advisor_version`. They are not profile
+values: a tuning deploy would otherwise change `policy_version` and void
+unrelated pending approvals, and a vendor's model can drift regardless, so
+hashing them would not make an advisory decision replayable.
+
+**No shipped advisor emits `deny`.** A denial from an injectable component
+would be unappealable, would reach the model as a reason code, and would void
+an approval the owner had just given. The verdict type keeps `deny` so the
+monotonicity gate can exercise the full cross product.
+
+**The hardening, restated for a structured state.** Instructions and criteria
+are platform-authored and travel only in question fields. Every untrusted
+string is XML-entity-escaped and wrapped in an `untrusted_input` element inside
+a named state field, so content cannot close its own delimiter; HTML comments
+and a fetch URL's fragment are stripped. The state carries the tool name and
+the outbound string arguments after the approval view's redaction — sensitive
+keys and credential-shaped values masked, long strings truncated — with the
+URL split into host, path, and query in code, capped at 4 KiB. A truncated
+value escalates, because its tail cannot be judged. No identifier, scope,
+hash, trust label, rule, profile content, or deterministic decision is sent.
+
+**Once per invocation.** The tool pipeline holds the deterministic engine as
+its recovery policy and uses it at revalidation and whenever an invocation row
+already exists for the idempotency key, taking the `max` rank with the
+decision persisted on that row under the same `policy_version`. A resumed or
+revalidated invocation therefore makes no advisor call, a verdict cannot flip
+a running invocation into a forbidden transition, and an escalation recorded
+before a crash survives it. Standing authorization evaluates against the
+deterministic engine, so a standing grant never satisfies an advisory
+escalation.
+
+**Observe before enforce.** Observing is the environment flag
+`AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`: the advisor runs, its verdict is
+recorded, and the deterministic decision is returned unchanged. It changes no
+effective rule, so it is not a profile value and does not move
+`policy_version`. Enforcing is the profile value `advisory.enabled`: it changes
+decisions, so it hashes into `policy_version` like every profile value, and
+with both set it wins. ADR-0111's amendment records why the two differ: the
+bundled memory-formation release evidence is bound to the compiled
+`policy_version`, so a profile change — and therefore enforcing — voids a
+pending approval whose re-evaluation is not `ALLOW` and unbinds that evidence
+until it is regenerated, while observing costs neither. The shipped profile is
+unchanged. With the layer on in either way and no judgment provider composed,
+composition warns once and uses the deterministic engine.
+
+**What an escalation looks like.** `REQUIRE_APPROVAL` with
+`reason_code = policy.advisory.escalated`, an explanation naming signal
+identifiers and the `advisor_version` and no content, no `modified_arguments`,
+and the deterministic decision's `policy_version`. One coarse code is
+deliberate: `policy_reason` is visible through the approvals API. An
+abstention returns the deterministic decision byte-identical and is recorded
+as a metric and a structured log line by cause — timeout, provider error,
+missing credential, invalid response — never as a decision.
 
 ### 4. Human approval
 
@@ -864,6 +955,12 @@ denied with `reason_code = policy.revalidation.escalated`. Asking a second time
 would be defensible, but it admits a loop in which a ruleset that always
 escalates parks a run forever, and a denial the user can retry deliberately is
 better than a pause the system cannot leave.
+
+The engine re-run here is the deterministic engine, the pipeline's recovery
+policy, even when the advisory layer is enabled. The advisor's only power is
+to summon the owner, and the owner has just approved these exact bytes; asking
+it again could only void that approval on a judgment that may differ between
+two calls.
 
 ## Denial is a message to the model, and a message is an attack surface
 
@@ -1027,8 +1124,22 @@ state change would make every consumer count it twice.
 are additions.
 
 The deterministic core is a synchronous pure function; the port stays `async`
-so the advisory layer can be composed behind the same interface without
-changing any caller.
+so the advisory layer can be composed behind the same interface. ADR-0111
+corrects the claim this paragraph once made, that no caller changes: a
+deterministic engine may be evaluated twice for one invocation with no effect,
+and an advisor whose answer can differ between calls may not. The tool
+pipeline therefore takes a second, deterministic `PolicyEngine` as its
+recovery policy, used at revalidation and for an invocation that already has
+a row. It defaults to the primary engine, so a pipeline built with one engine
+behaves exactly as before.
+
+```python
+class PolicyAdvisor(Protocol):
+    async def advise(self, action: ProposedAction) -> AdvisoryVerdict: ...
+```
+
+`AdvisoryVerdict` carries the verdict, the identifiers of the signals that
+fired, and the `advisor_version`; it carries no content.
 
 ```python
 def evaluate_deterministic(
@@ -1133,6 +1244,8 @@ call the same methods are Milestone 4.
 | Ruleset edited at runtime | Decisions are unreplayable | Files, frozen at load, hashed into `policy_version` |
 | Advisory layer returns `allow` | A model judgment overrides policy | Output schema excludes it; `max` combination |
 | Advisory layer times out | Latency, or a stall on the common path | Abstain on timeout; runs only on allow paths |
+| Advisor is steered by text in the arguments it judges | A missed escalation, or a needless prompt | Escalate-only, any-signal mapping, no veto question; steered down equals advisor off |
+| Advisory verdict differs between first evaluation and resume | A forbidden status transition, or a recorded escalation lost | Recovery policy is deterministic; `max` with the persisted decision; one advisor call per invocation |
 | Approval approved, arguments then change | A human's consent is transferred | Hash compared at resume; `approval.invalidated` |
 | Two devices resolve at once | Double resolution, or a lost decision | Guarded update; 200 if equal, 409 if not |
 | Run cancelled with approval pending | Orphaned pending row, wrong metrics | Cancellation reaps to `CANCELLED`, not `DENIED` |
@@ -1147,8 +1260,9 @@ call the same methods are Milestone 4.
 
 ## Hard gates
 
-Section 20's harness gates Milestone 4 on these. Each is a hard gate: failing
-one blocks the milestone, not a warning.
+Section 20's harness gates Milestone 4 on the first thirteen and Milestone 30
+on the last five. Each is a hard gate: failing one blocks the milestone, not a
+warning.
 
 1. **Totality.** Every `SideEffectClass` value has exactly one rule in every
    loaded profile, and every Section 9.2 row maps to exactly one value. A
@@ -1189,6 +1303,38 @@ one blocks the milestone, not a warning.
 13. **The scope set is the run's.** Narrowing a principal's scopes after
     submission changes no decision in the run already submitted, and the
     next run that principal submits is denied. **M4.**
+14. **The composite cannot lower a rank.** Over the full cross product of
+    deterministic decisions and advisor verdicts, evaluated through
+    `AdvisedPolicyEngine` rather than the combination function alone, the
+    result's rank is never below the deterministic rank, it never carries
+    modifications the deterministic layer did not produce, and its
+    `policy_version` is the deterministic one. Registered as
+    `gate.policy.advisory_monotonic`, property. **M30.**
+15. **The advisor runs on allow paths only, and once.** It is never called
+    after a hardline block, a `DENY`, a `REQUIRE_APPROVAL`, or an
+    `ALLOW_WITH_MODIFICATIONS`, never for an action outside the consulted
+    class, never at revalidation, and never for an invocation that already
+    has a row; a persisted escalation survives a restart. Registered as
+    `gate.policy.advisory_allow_path_once`, case. **M30.**
+16. **An unavailable advisor abstains.** A timeout, a provider error, a missing
+    credential, and an invalid response each return the deterministic decision
+    byte-identical and fail no run; with the layer enabled and no provider
+    composed, composition uses the deterministic engine. Registered as
+    `gate.policy.advisory_abstains`, case. **M30.**
+17. **The advisor is blind to the rules, and what it sees is redacted.** No
+    advisor request contains a hardline pattern, path, range, or identifier,
+    the profile's name or contents, a `policy_version`, or a deterministic
+    decision; sensitive keys and credential-shaped values are masked, every
+    untrusted string is escaped and delimited, and the advisor module imports
+    neither the loader nor the hardline module. Registered as
+    `gate.policy.advisory_blind_redacted`, structural. **M30.**
+18. **Off and observing change nothing.** With `advisory.enabled` false and
+    the observe flag unset no advisor is constructed and no judgment request
+    is made; the shipped profile compiles to the policy version the bundled
+    release evidence is bound to; when observing, every decision is
+    byte-identical to the deterministic decision and the policy version is
+    unmoved while the verdict is recorded; and no shipped advisor returns
+    `deny`. Registered as `gate.policy.advisory_default_off`, case. **M30.**
 
 ## Tracked metrics
 
@@ -1200,7 +1346,12 @@ Extending Section 19's `approval_requests_total`:
   latency also rose.
 - Denial rate by `reason_code`, and the circuit-breaker trip rate.
 - Advisory escalation rate and advisory disagreement rate, tracked from the day
-  the layer is enabled so its value is measurable before it is trusted.
+  the layer is enabled so its value is measurable before it is trusted. The
+  escalation rate is escalations over consulted actions, counted in observe
+  mode as well as enforce. The disagreement rate is the share of
+  owner-resolved approvals with `policy_reason = policy.advisory.escalated`
+  that were approved: the owner disagreeing with the advisor. Abstentions are
+  counted by cause, with consulted-call latency and input tokens.
 - Revalidation void rate by cause.
 
 ## Build sequence
@@ -1223,10 +1374,16 @@ Extending Section 19's `approval_requests_total`:
 9. Resume and revalidation.
 10. The reaper and the cancellation edge, including the race test.
 11. The `ApprovalService` read methods and the CLI commands that call them.
-12. The advisory layer, behind a flag, default off, after Milestone 6.
+12. The advisory layer, behind a flag, default off, after Milestone 6. In
+    order: the ruleset's advisory field and the observe environment flag; the
+    `PolicyAdvisor` port with its contract suite; `AdvisedPolicyEngine`; the
+    argument-redaction helpers moved into the domain so this package may use
+    them; the judgment-backed advisor; the pipeline's recovery policy; the
+    composition wiring and the metrics.
 
-Steps 1 through 11 are Milestone 4. Step 12 is sequenced by Section 21.1 and is
-not a Milestone 4 dependency. The two routes that expose step 11's read methods
+Steps 1 through 11 are Milestone 4. Step 12 is Milestone 30, authorized by
+ADR-0111; it was sequenced by Section 21.1 and is not a Milestone 4
+dependency. The two routes that expose step 11's read methods
 over HTTP are Milestone 5, with every other route:
 [http-api-and-streaming.md](http-api-and-streaming.md) places them there, and
 Section 21 agrees, naming the whole HTTP surface at Milestone 5 and no approval
@@ -1262,7 +1419,9 @@ those routes already says.
 13. "Unknown tool" generalizes to `policy.unclassifiable_action`, which is
     reachable through three paths.
 14. The advisory layer may only escalate, runs only on allow paths, never sees
-    the rules, and abstains on timeout.
+    the rules, and abstains on timeout. As built under ADR-0111 it is a port
+    whose shipped advisor never denies, is consulted at most once per
+    invocation, and observes before it enforces.
 15. `policy_version` is `{profile}@{sha12}+h{sha8}`, a content hash rather than
     a counter.
 16. Profiles and hardline rules are files under version control, never database
@@ -1306,6 +1465,18 @@ those routes already says.
 35. `Principal.roles` is populated and never read as an authorization
     input in 0.1, because one configured principal has no bundle to
     resolve.
+
+## Advisory layer implementation checkpoint: 2026-09-20
+
+Build step 12 landed. `PolicyAdvisor` and the verdict types, `AdvisedPolicyEngine`
+in `agent_core.policy.advised`, the judgment-backed advisor in
+`agent_core.policy.judgment_advisor`, the argument-redaction helpers in
+`agent_core.domain.argument_views`, the pipeline's recovery policy, the observe
+flag, the composition wiring, and the metrics in `agent_core.observability.policy`.
+Gates 14 through 18 bind through `tests/gates/test_policy_advisory.py`; the
+composed check approves an escalated search and finds it executed once with
+the vendor asked once. The layer is off in every deployment, and the thresholds
+are untuned initial values to be calibrated while observing.
 
 ## Open questions
 

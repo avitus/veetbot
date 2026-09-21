@@ -26,6 +26,8 @@ def call_payload() -> dict[str, Any]:
         "tools": [],
         "transfer_list": {},
         "metadata": {"veetbot_request_id": CALL_ID},
+        "voicemail": {"action": "hangup"},
+        "wait_for_greeting": True,
     }
 
 
@@ -62,6 +64,49 @@ async def test_bland_dispatch_contract() -> None:
     assert str(requests[0].url) == "https://api.bland.ai/v1/calls"
     assert requests[0].headers["authorization"] == KEY
     assert json.loads(requests[0].content) == call_payload()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"voicemail": {"action": "leave_message_and_sms", "message": "x", "sms": {"message": "x"}}},
+        {"voicemail": {"action": "leave_message", "message": "x", "sms": {"message": "x"}}},
+        {"voicemail": {"action": "leave_message"}},
+        {"voicemail": {"action": "leave_message", "message": ""}},
+        {"voicemail": {"action": "leave_message", "message": "x" * 1001}},
+        {"voicemail": {"action": "ignore"}},
+        {"voicemail": {"action": "hangup", "message": "x"}},
+        {"voicemail": None},
+        {"wait_for_greeting": False},
+        {"wait_for_greeting": None},
+    ],
+)
+async def test_bland_dispatch_requires_explicit_voicemail_and_greeting_order(
+    change: dict[str, Any],
+) -> None:
+    """ADR-0108: leave the approved message or hang up; never SMS; recipient speaks first."""
+
+    def forbidden(request: httpx.Request) -> httpx.Response:
+        pytest.fail("an invalid dispatch reached the provider")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(forbidden)) as http:
+        client = BlandClient(KEY, NUMBER, http_client=http)
+        with pytest.raises(BlandError, match=r"bland\.arguments_invalid"):
+            await client.start_call({**call_payload(), **change})
+
+
+async def test_bland_dispatch_leaves_an_approved_voicemail() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "success", "call_id": CALL_ID})
+
+    voicemail = {"action": "leave_message", "message": "Please call back about ticket 12."}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = BlandClient(KEY, NUMBER, http_client=http)
+        await client.start_call({**call_payload(), "voicemail": voicemail})
+    assert json.loads(requests[0].content)["voicemail"] == voicemail
 
 
 @pytest.mark.parametrize("status", [302, 401, 429, 500])

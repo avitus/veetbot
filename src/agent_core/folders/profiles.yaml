@@ -13,3 +13,8 @@ proposals:
   similarity_threshold: 0.2
   # Members a proposal may name.
   max_members: 12
+  # The judgment matcher (ADR-0110) decides which existing folder an unfiled
+  # conversation belongs in. It also needs JUDGMENT_PROVIDER to name a provider.
+  judgment_matching_enabled: false
+  # Probability floor for an accepted match; above one half so only one option can clear it.
+  judgment_match_threshold: 0.8

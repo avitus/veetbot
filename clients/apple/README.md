@@ -106,8 +106,55 @@ or credential. It runs `make test-apple-ui-macos` and then
 family changed. Each UI case sets its launch arguments and environment before
 calling `app.launch()` once. Terminate and relaunch only in a case that tests
 relaunch behavior.
+Every Mac case also launches with `-ApplePersistenceIgnoreState YES`. XCTest
+ends the app without quitting it, so AppKit would otherwise restore the window
+list the previous launch saved; an empty list leaves the app with no window.
+The main window's saved size is the app's own preference and still persists.
+AppKit reads launch arguments as `-key value` pairs, so the pair comes before
+the bare `--ui-testing-*` flags: a flag ahead of it would take the key as its
+value, and AppKit would open the leftover `YES` as a document instead of a
+window. Under the fixture the composer also turns off Writing Tools, whose
+macOS 27 affordance window otherwise floats over the controls the cases click.
 The keyboard-dismissal case holds its fake submission pending until teardown,
 so a slow accessibility query cannot consume the response-delay window.
+The adjacent-folders case measures the two list rows that hold the folders and
+requires them to touch. The space between the labels inside depends on the
+system's row and label heights, which differ between macOS releases: 16 points
+on the hosted macOS 26.6.2 runner and 13.5 on macOS 27, against 26.5 on
+macOS 27 once each folder sits in a section of its own.
+
+The simulator runs pass `-collect-test-diagnostics never`. Under Xcode 27
+xcodebuild ended both hosted simulator runs with `simctl diagnose
+--timeout=600`: the iPad run after one failure, and the iPhone run after none,
+only its standing skipped case. On the hosted image that collection prints
+nothing, times out after its 600 seconds, and yields no diagnostics, while
+CircleCI ends a step after ten minutes without output, so the job died before
+xcodebuild could name the failing case. The result bundle still holds each
+failure, its screenshot, and the element tree.
+
+`make test-apple-ui-ios` boots both simulators to completion, concurrently with
+`xcrun simctl bootstatus -b`, before it starts the two runs. Xcode 27.0's
+xcodebuild installs `com.veetbot.apple.UITests.xctrunner` about four seconds
+into a boot it starts itself, without waiting for SpringBoard. One cold boot has
+SpringBoard up by then. Two at once delayed it to about seven seconds on the
+owner's Mac, so SpringBoard started after the install, logged "Cannot launch
+application scene … while it's application is being updated" for each of its
+launch retries, and xcodebuild exited 65 with `Busy ("Application failed
+preflight checks")` before any case ran. Separate copies of the test products
+failed the same way, so the shared `.xctestproducts` is not the cause, and a
+staggered second start only hides the race. Read the refusal from the
+simulator's own log with `xcrun simctl spawn <udid> log show --predicate
+'process == "SpringBoard"'`. A simulator whose data migration failed ends
+`bootstatus` within a second or two with "Data Migration Failed" and exit 0, so
+for a boot that does not report "Finished" the target waits until `notifyutil -g
+com.apple.springboard.finishedstartup` holds SpringBoard's process id, and says
+so; `xcrun simctl erase <udid>` repairs such a simulator. Simulators the target
+booted are shut down when it ends, as xcodebuild did when it booted them; one
+that was already open stays open.
+The cases tap an overflow-menu item at its centre rather than as an element,
+after requiring it to exist and be hittable. On the iOS 27.0 iPad simulator
+XCUITest's element tap on the menu's first item is swallowed and the menu stays
+open, while a touch anywhere on the item activates it.
 
 The People accessibility audit uses the app's Large text preference on Mac and
 the largest accessibility Dynamic Type category on iPhone and iPad. The Mac

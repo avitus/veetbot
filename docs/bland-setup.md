@@ -58,8 +58,9 @@ chosen a number and public name. This example contains placeholders:
 `public_name` names the owner; `assistant_name` names the voice assistant and
 defaults to `Veetbot` when omitted. `voice` selects the provider voice independently.
 For example, owner `Andy`, assistant `Willow` and voice `Willow` produce
-“Hi, I'm Willow, Andy's assistant,” followed by AI and transcription disclosure.
-The same identity is included in approved outbound call instructions. Deploy a
+“Hi, this is Willow, Andy's assistant.” Neither direction announces AI identity
+or transcription unprompted; asked directly, the assistant confirms both
+(ADR-0108). The same identity is included in approved outbound call instructions. Deploy a
 release supporting `assistant_name` before adding the field; older releases
 reject it. Upgrading to the explicit assistant identity changes the normalized
 configuration revision, so obtain fresh approvals for any pending calls.
@@ -78,8 +79,9 @@ uv run python scripts/prepare_bland_profile.py \
 ```
 
 Review the generated JSON before applying it through Bland's number settings or
-the operator's authenticated `POST /v1/inbound/{phone_number}`. It includes AI
-and transcription disclosure, the approved profile, message-taking instructions,
+the operator's authenticated `POST /v1/inbound/{phone_number}`. It includes the
+owner's introduction, truthful answers when asked about AI identity or
+transcription, the approved profile, message-taking instructions,
 a five-minute ceiling, recording off and no tools, transfers or dynamic context.
 It explicitly clears pathway and memory references. A pathway can override the
 prompt, so a prompt update alone is insufficient. Read back the number settings

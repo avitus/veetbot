@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any, cast
@@ -32,6 +33,16 @@ type CallOperation = Callable[[dict[str, Any]], Awaitable[MCPCallResult]]
 type CallProvider = Callable[[str, str, dict[str, Any]], Awaitable[MCPCallResult]]
 
 RETENTION = timedelta(days=30)
+_HEX = frozenset("0123456789abcdef")
+
+# Neither the proxy nor the listener keeps an access log, so each delivery leaves
+# one fixed, content-free outcome at a level the unconfigured service still emits.
+logger = logging.getLogger(__name__)
+
+
+def _rejected(reason: str) -> bool:
+    logger.warning("calling.callback_rejected reason=%s", reason)
+    return False
 
 
 def pending_content(payload: dict[str, Any]) -> bool:
@@ -199,25 +210,25 @@ class CallService:
         return result({"provider_call_id": provider_id, "status": "accepted"})
 
     async def receive(self, body: bytes, signature: str, secret: str) -> bool:
-        if (
-            not secret
-            or len(body) > MAX_CALLBACK_BYTES
-            or len(signature) != 64
-            or any(ch not in "0123456789abcdef" for ch in signature)
-        ):
-            return False
+        if len(body) > MAX_CALLBACK_BYTES:
+            return _rejected("oversize")
+        if not signature:
+            return _rejected("signature_missing")
+        if len(signature) != 64 or not set(signature) <= _HEX:
+            return _rejected("signature_malformed")
         expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            return False
+        if not secret or not hmac.compare_digest(expected, signature):
+            return _rejected("signature_mismatch")
         try:
             payload = json.loads(body)
             if not isinstance(payload, dict):
-                return False
+                return _rejected("payload_invalid")
             key = call_identifier(payload.get("call_id"))
         except (ValueError, UnicodeError, RecursionError):
-            return False
+            return _rejected("payload_invalid")
         async with self.uow_factory() as uow, uow.calls.lock(self.owner):
             await self._enqueue(uow.calls, key)
+        logger.warning("calling.callback_accepted")
         return True
 
     async def reconcile(self) -> int:

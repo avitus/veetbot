@@ -26,8 +26,11 @@ _DISPATCH_KEYS = frozenset(
         "metadata",
         "voice",
         "webhook",
+        "voicemail",
+        "wait_for_greeting",
     }
 )
+_VOICEMAIL_MESSAGE_CHARACTERS = 1000
 
 
 class BlandError(Exception):
@@ -65,6 +68,20 @@ def _instant(value: object) -> str:
         return parsed.astimezone(UTC).isoformat()
     except ValueError as exc:
         raise BlandError("bland.provider_output_invalid") from exc
+
+
+def _approved_voicemail(value: object) -> bool:
+    """Hang up, or leave the owner-approved message; SMS variants stay deferred."""
+    if value == {"action": "hangup"}:
+        return True
+    if not isinstance(value, dict) or set(value) != {"action", "message"}:
+        return False
+    message = value["message"]
+    return (
+        value["action"] == "leave_message"
+        and isinstance(message, str)
+        and 1 <= len(message) <= _VOICEMAIL_MESSAGE_CHARACTERS
+    )
 
 
 class BlandClient:
@@ -154,6 +171,8 @@ class BlandClient:
             or payload.get("transfer_list") != {}
             or not isinstance(metadata, dict)
             or set(metadata) != {"veetbot_request_id"}
+            or payload.get("wait_for_greeting") is not True
+            or not _approved_voicemail(payload.get("voicemail"))
         ):
             raise BlandError("bland.arguments_invalid")
         identifier(metadata["veetbot_request_id"])

@@ -9,15 +9,21 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestones 16 through 29 are independently authorized parallel
+  # Milestones 16 through 30 are independently authorized parallel
   # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
-  # 0080, 0081, 0082, 0092, 0097, 0100, and 0102; their gates do not advance
-  # the verified ceiling past the sequential work through 15.
+  # 0080, 0081, 0082, 0092, 0097, 0100, 0102, and 0111; their gates do not
+  # advance the verified ceiling past the sequential work through 15.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
   # retention, and conditional native time-zone presentation.
   # ADR-0091 records the owner's non-milestone notification extension:
   # the pinned schedule title and nominal occurrence time may appear in alerts.
+  # ADR-0109 records the owner's non-milestone repair to chat-created schedules:
+  # pause on the second consecutive failure, a USD 5 budget with a synthesis
+  # reserve, and a failure classification on the accounting event.
+  # ADR-0110 amends Milestone 29 on 2026-09-19: the typed-judgment port, the
+  # TypeSafe Jev adapter and judgment folder matching, all default off, plus
+  # an offline non-activating email-importance evaluation under Milestone 26.
   authorized_milestones:
     - 0
     - 1
@@ -49,26 +55,62 @@ project:
     - 27
     - 28
     - 29
+    - 30
 
 
 milestones:
+  '30':
+    title: Advisory approval layer
+    status: in_progress
+    authorized_on: '2026-09-19'
+    design: docs/plan/policy-and-approvals.md
+    adr: docs/adr/0111-advisory-approval-through-the-judgment-port.md
+    gates_registered: 5
+    authorized_scope:
+    - A PolicyAdvisor port and a composite policy engine that can only escalate, consulted on plain allows for web and browser network reads, abstaining on any timeout or error
+    - A judgment-backed advisor over redacted, delimited outbound arguments that never denies; thresholds in code under a hashed advisor version
+    - A deterministic recovery policy in the tool pipeline so the advisor is consulted at most once per invocation; observing by environment flag and enforcing by the profile value (ADR-0111 amendment, 2026-09-20); escalation and disagreement metrics
+    deferred_scope:
+    - General standing approval grants (the rest of roadmap item B8) and any advisor that emits deny
+    - Consultation on file writes, code execution, MCP reads or SMS; a model-gateway advisor; conversation context for the advisor
+    open_items:
+    - Calibrate the advisor's thresholds while observing, then decide whether to enforce
+    - Exact-head hosted CI and explicitly authorized review and production delivery evidence
+    evidence:
+    - check: uv run pytest tests/gates/test_policy_advisory.py tests/contract/test_policy_advisor_contract.py tests/unit/test_advised_policy_engine.py tests/unit/test_judgment_policy_advisor.py tests/unit/test_policy_advisory_composition.py tests/unit/test_tool_pipeline_recovery_policy.py tests/unit/test_policy_loader_advisory_flag.py tests/gates/test_policy_m4.py tests/unit/test_release_evidence_bundle.py
+      outcome: pass
+      detail: The advisor port, the composite engine, the judgment-backed advisor, the pipeline recovery policy, the observe flag and the composition pass, the five gate.policy.advisory_* gates are bound to executable checks, every Milestone 4 policy gate stays green, and the shipped policy version the release evidence binds to is unmoved (local, 2026-09-20). Red first - the ruleset field, the composite, the advisor and the composition cases failed against skeletons, and the composed once-only case failed with three vendor calls where one is required before the recovery policy landed. The layer is off in every deployment and its thresholds are untuned.
+    - check: uv run pytest tests/gates/test_gate_registry.py (ADR-0111 registry authorization red phase)
+      outcome: observed_expected_failure
+      detail: The registry held 543 entries rather than 548, no Milestone 30 entries rather than five, and MAX_MILESTONE was 29 rather than 30, at the behavioral assertions (local, 2026-09-19). The five gate.policy.advisory_* gates are registered pending; registration is not passing evidence.
   '29':
     title: Chat thread folders
     status: in_progress
     authorized_on: '2026-09-16'
     design: docs/plan/thread-folders.md
     adr: docs/adr/0102-chat-thread-folders.md
-    gates_registered: 12
+    gates_registered: 17
     authorized_scope:
     - Flat single-parent principal-scoped folders as server-owned session state with create, rename, delete and move
     - Maintenance-pass folder proposals with owner acceptance, durable decline, a bounded open set and withdrawal
     - Model-assisted grouping with grounding, budgets and a deterministic lexical fallback; scoped routes, flag and native sidebar
+    - The typed-judgment port with the TypeSafe Jev adapter behind it, default off, and an optional judgment matcher for add-to-folder proposals (ADR-0110, authorized 2026-09-19)
     deferred_scope:
     - Nested or shared folders, Email-mode threads, automatic filing without acceptance
     - Embeddings or semantic search over threads, folder text in conversation prompts
+    - Any further typed-judgment consumer, each of which needs its own authorization; model routing through the port
     open_items:
     - Exact-head hosted CI and explicitly authorized review evidence
     evidence:
+    - check: uv run pytest tests/gates/test_gate_registry.py::test_identifier_grammar tests/gates/test_gate_registry.py::test_census_is_derived (ADR-0110 registry authorization red phase)
+      outcome: observed_expected_failure
+      detail: The registry held 538 entries rather than 543 and twelve Milestone 29 entries rather than seventeen, at the behavioral assertions (local, 2026-09-19). The four gate.judgment.* gates and gate.folder.judgment_matching are registered pending; registration is not passing evidence.
+    - check: uv run pytest tests/unit/test_folder_judgment_matching.py tests/unit/test_folder_proposals.py tests/unit/test_judgment_composition.py tests/gates/test_folder_m29.py tests/unit/test_config.py
+      outcome: pass
+      detail: The judgment folder matcher, its two knobs, the eight content-free judgment_* audit fields and the composed wrap pass, and gate.folder.judgment_matching is bound to a composed end-to-end check that accepts a judgment-made proposal through the routes and finds the lexical proposal unchanged after a forced provider failure (local, 2026-09-20). Red first - all seventeen matcher cases failed against a delegating skeleton, the two pass-audit cases failed on the missing fields, the knob cases failed on the missing defaults and the census of 177, and the wrap cases failed at their assertions. The matcher is off in every deployment.
+    - check: uv run pytest tests/contract/test_judgment_provider_contract.py tests/unit/test_judgment_composition.py tests/gates/test_judgment_m29.py tests/unit/test_config.py tests/unit/test_toolchain.py
+      outcome: pass
+      detail: The typed-judgment domain types, the port, the TypeSafe adapter, the scripted fake and the production census pass one contract suite; the default-off selector, the degrade-on-missing-key composition and the templates pass; and each of the four gate.judgment.* gates is bound to an executable check (local, 2026-09-20). Red first - the Choice contract case failed with NotImplementedError against the adapter skeleton, the selector tests failed at their assertions, the composition tests failed on the missing composition attribute and override, and the template test failed on the missing selector line. No live vendor call is part of this evidence.
     - check: uv run pytest tests/unit/test_folder_domain.py tests/unit/test_folder_clustering.py tests/unit/test_folder_grouping.py tests/unit/test_folder_proposals.py tests/contract/test_folder_store_contract.py tests/gates/test_folder_api_boundary_m29.py tests/gates/test_folder_m29.py
       outcome: pass
       detail: Domain, lexical and model-assisted grouping, the pass, the store contract, the nine-route boundary and the composed end-to-end gate on 2026-09-16 (local).
@@ -1324,6 +1366,7 @@ milestones:
       - evaluated attributed semantic email memory shared with Chat and both accounts
       - scoped source erasure, retention and bounded automatic email accounting
       - USD 20 per UTC day and USD 200 per rolling thirty days for aggregate automatic email work
+      - an offline, non-activating importance replay comparing the production assessor with a typed-judgment arm (ADR-0110); it cannot satisfy or waive a Milestone 26 gate
     deferred_scope:
       - unattended monitoring, Gmail push, scheduled digests and interval scheduling
       - autonomous sending, automatic Gmail writes and Gmail draft synchronization
@@ -1337,6 +1380,21 @@ milestones:
       - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
     evidence:
+      - check: uv run pytest tests/unit/test_email_importance_replay.py tests/gates/test_email_privacy_m26.py
+        outcome: pass
+        detail: >-
+          The offline, non-activating importance replay admitted by ADR-0110
+          passes on a synthetic corpus and bundle (local, 2026-09-20): the
+          bundle validator, the production and judgment arms through the
+          unchanged assess(), leakage cutoffs, failure abstention, the expiry
+          variants, the label-only candidate corpus, the paired comparison and
+          the run conventions, with the replay added as a boundary of
+          gate.email.experience_privacy. The module was written before its
+          tests, a deviation from the red-first rule; two deliberate mutations
+          confirmed the tests fail when the leakage cutoff or the identifier
+          stripping is removed, and the CLI and malformed-bundle cases were
+          red first. Synthetic inputs establish nothing about usefulness. The
+          frozen private evaluation remains an open item and has not been run.
       - check: Milestone 26 registry authorization red phase
         outcome: observed_expected_failure
         detail: >-
@@ -1482,8 +1540,7 @@ milestones:
     deferred_scope:
     - private in-call tools, automatic commitments, transfers, SMS and call-derived memory
     open_items:
-    - Read back the applied inbound provider configuration against the reviewed revision
-    - Verify provider-side admission controls and the real signed-byte convention; receipts so far arrived through reconciliation
+    - Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
     - Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
     - Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
     evidence:
@@ -1582,6 +1639,26 @@ milestones:
         tools at the 6,000-token budget with no discovered tools. The first after
         it held 30 at 9,000, including list_calls, get_call and start_call, and
         the owner listed calls from Chat.
+    - check: inbound provider configuration readback against the reviewed revision
+      outcome: pass
+      detail: >-
+        On 2026-09-19 a readback of the live inbound number found three
+        departures from the reviewed payload. The owner had changed the
+        greeting to "Hi, this is Willow, Andy's assistant." and removed the
+        prompt's AI-identity sentence, adding a blank line. A malformed
+        fallback number, "+1", had also appeared. The owner kept both edits,
+        and ADR-0108 records the decision. The regenerated payload then added a
+        truthful answer for a caller who asks about AI identity or
+        transcription. The guarded apply refused to send unless those two
+        fields were the only changes. It kept the owner's greeting and backed
+        up the prior settings on the host first. Bland accepted the update with
+        HTTP 200, and a second readback matched every reviewed field. Pathway,
+        memory, tools, transfers, fallback and dynamic data were all cleared,
+        recording was off, and the duration limit, webhook and voice matched.
+        The comparison used the dev revision's generator (8029c862); the
+        running release carries the earlier template until its next delivery.
+        Account-level memory and persona attachments are outside this readback
+        and remain open.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -1677,5 +1754,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-16T18:54:28Z
+last_updated: 2026-09-20T20:07:42Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

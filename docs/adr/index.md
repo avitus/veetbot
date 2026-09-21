@@ -116,3 +116,7 @@ implementation without one.
 - [ADR-0105 — The tool-definition token cap rises to 9,000 so the item cap binds first (Proposed)](0105-tool-definition-token-cap.md)
 - [ADR-0106 — The authentication ceremony runs a headed browser and never disguises it (Proposed)](0106-headed-authentication-ceremony.md)
 - [ADR-0107 — Hosted verification is automatic on `main` and on request elsewhere (Proposed)](0107-on-demand-hosted-verification.md)
+- [ADR-0108 — The owner's introduction, honest answers, and approved outbound voicemail (Proposed)](0108-owner-introduction-and-outbound-voicemail.md)
+- [ADR-0109 — Conversational schedules tolerate one failure and keep synthesis headroom (Accepted)](0109-conversational-schedule-failure-tolerance-and-headroom.md)
+- [ADR-0110 — A typed-judgment port, with TypeSafe Jev as its first provider (Accepted; amends ADR-0102, Milestone 29)](0110-typed-judgment-port-and-typesafe-jev.md)
+- [ADR-0111 — Restrictive-only advisory approval through the judgment port (Accepted; Milestone 30)](0111-advisory-approval-through-the-judgment-port.md)

@@ -2511,7 +2511,7 @@ Keep late - deliberately deferred. Self-improving skills stay behind the static-
 | Layered approval: hardline + deterministic     | M4           | Lands with policy and approval                   | policy engine          |
 | Programmatic tool orchestration                | M6           | Needs sandbox + tool pipeline; big savings       | sandbox                |
 | Credential scrubbing + fail-closed passthrough | M6           | Env passthrough happens at the sandbox           | sandbox                |
-| LLM-assisted approval (secondary)              | after M6     | Optional signal, not needed for correctness      | model gateway          |
+| LLM-assisted approval (secondary)              | after M6 (M30) | Optional signal, not needed for correctness    | judgment port (ADR-0111) |
 | Self-improving skills                          | after M8 \*  | Gated by eval evidence; carries risk             | skills, sandbox, evals |
 | Memory surface + injection-scan + external     | M9           | The memory milestone                             | memory store           |
 | Additive fan-out usage (activation)            | M13          | Activates with subagents                         | subagents              |
@@ -4142,6 +4142,53 @@ authorized production delivery. The verified sequential ceiling stays at
 Milestone 12. Nested or shared folders, Email-mode conversations, automatic
 filing, embeddings and search remain outside this milestone.
 
+ADR-0110 amended this milestone on 2026-09-19. Implement
+[typed-judgment.md](typed-judgment.md): a provider-neutral port for closed,
+typed questions — the probability that a statement holds, a choice among
+offered options, a position on an ordered scale — with the TypeSafe Jev
+adapter as its first provider over a fixed egress endpoint and a call-time
+credential, off by default, with typed failures and a deterministic fallback
+named by every consumer. Its first consumer is the judgment matcher of
+[thread-folders.md](thread-folders.md), which decides which existing folder an
+unfiled conversation belongs in and only ever proposes. The amendment declares
+five further gates — four `gate.judgment.*` and one `gate.folder.*` — which
+join this milestone's acceptance set. It registers no model profile, so
+roadmap B2's model routing is untouched, it adds no embedding, so B6 is
+unamended, and the policy advisory layer stays in B8 until its own policy ADR.
+The same ADR admits an offline, non-activating email-importance evaluation; it
+cannot satisfy or waive a Milestone 26 gate, and Milestone 26's deferral of
+model routing changes stands.
+
+### Milestone 30: Advisory approval layer
+
+The owner authorized this scope on 2026-09-19 under ADR-0111, the policy ADR
+roadmap item B8 requires for its second half. Implement the advisory layer of
+[policy-and-approvals.md](policy-and-approvals.md): an optional secondary
+signal that can only make a policy decision more restrictive, as Section 9 and
+ADR-0017 require. A `PolicyAdvisor` port receives the proposed action and
+nothing else; a composite policy engine consults it only when the
+deterministic decision is a plain allow, only for a network read aimed at the
+web or browser provider, combines by maximum rank, and returns the
+deterministic decision unchanged on any timeout or error. The first advisor is
+backed by the typed-judgment port of [typed-judgment.md](typed-judgment.md)
+rather than the model gateway; ADR-0111 records that divergence from Section
+21.1's dependency column. It asks narrow questions about redacted, delimited
+outbound arguments, never denies, and is consulted at most once per
+invocation: the tool pipeline holds the deterministic engine as its recovery
+policy for revalidation and resumed invocations. The layer is off by default
+and observes before it enforces: observing is an environment flag that moves
+no policy version, and enforcing is the profile value. The design declares
+five gates.
+
+This admits no standing approval grant; that half of B8 stays on the roadmap.
+It registers no model profile, so B2's model routing is untouched. The
+Milestone 4 gates are unchanged and must stay green.
+
+Acceptance requires all five gates, the unchanged Milestone 4 policy gates,
+and final-head hosted CI/review plus separately authorized production
+delivery. Enabling the layer and moving it from observe to enforce are the
+owner's acts. The verified sequential ceiling stays at Milestone 12.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4159,7 +4206,7 @@ owner's current ranking, not a schedule.
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
 | B6 | Memory residue after Milestone 28: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, general graph inference and arbitrary session-history/artifact retrieval, belief merge and global consolidation. Excludes the bounded People relational temporal graph, one-hop retrieval and person-linked history admitted by Milestone 28 (ADR-0100); the persona surface entered as Milestone 22 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 24 on 2026-08-26 (ADR-0081); presence-based routing and hand-off still wait here on a concrete use case |
-| B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
+| B8 | General standing approval grants. The restrictive-only advisory approval signal entered as Milestone 30 on 2026-09-19 (ADR-0111) | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); other voice input and calendar remain deferred |

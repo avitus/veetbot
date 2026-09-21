@@ -403,7 +403,19 @@ fixture to exercise historical-transcript
 selection, switching, and new-conversation navigation without a live server or
 credential, together with Email mode, editing, learning and compact-trait
 journeys. The simulator test products are built once, then the iPhone and
-iPad destinations run concurrently without rebuilding. Each UI case sets its
+iPad destinations run concurrently without rebuilding, each with
+`-collect-test-diagnostics never`: under Xcode 27 the simulator sysdiagnose
+that ends a run with a failed or skipped case is silent for its whole
+600-second timeout, which is also CircleCI's limit for a step without output.
+Both simulators finish booting, concurrently under `xcrun simctl bootstatus -b`,
+before either run starts. Xcode 27.0's xcodebuild installs the runner about four
+seconds into a boot it starts itself without waiting for SpringBoard; two cold
+boots at once bring SpringBoard up after that install, it holds the runner as
+still being updated, and refuses the launch as Busy, "Application failed
+preflight checks". A boot that does not report Finished, as after a failed data
+migration, waits for SpringBoard's own startup state instead, and the target
+shuts down only the simulators it booted.
+Each UI case sets its
 fixture options before one launch; only cases that exercise a relaunch
 terminate the application. Each platform writes a distinct result bundle, and
 each job packs its bundles into one `apple-test-results-<platform>.tar`

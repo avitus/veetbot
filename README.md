@@ -210,8 +210,8 @@ tree checks match. CI always installs cleanly; locally force a reinstall with
 
 Secrets, addresses, and deployment identity belong in Doppler, from which
 `make env-pull` generates `.env`; reviewed tuning values belong in the YAML
-file owned by the relevant package. Optional web, browser, scheduling,
-notification, email, and trajectory-export features are disabled by default. Their available environment switches are documented in
+file owned by the relevant package. Optional web, browser, typed-judgment,
+scheduling, notification, email, and trajectory-export features are disabled by default. Their available environment switches are documented in
 [`.env.example`](.env.example).
 
 The initial public-web comparison keeps the incumbent provider for half of each

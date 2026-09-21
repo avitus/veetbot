@@ -17,6 +17,7 @@ from agent_core.config import (
     AuthMode,
     ConfigurationError,
     DeploymentMode,
+    JudgmentProviderKind,
     MemoryFormationPolicyPin,
     MemoryProviderExtractionMode,
     PushProviderKind,
@@ -597,6 +598,26 @@ def test_unknown_push_provider_is_refused() -> None:
         load_settings({**base_environment(), "PUSH_PROVIDER": "surprise"})
 
 
+def test_judgment_provider_is_disabled_until_selected() -> None:
+    assert load_settings(base_environment()).judgment_provider is JudgmentProviderKind.DISABLED
+    # A credential alone enables nothing: the selector is the only switch.
+    credentialed = load_settings({**base_environment(), "TYPESAFE_API_KEY": "synthetic-key"})
+    assert credentialed.judgment_provider is JudgmentProviderKind.DISABLED
+    assert "typesafe" in credentialed.credentials
+
+
+def test_judgment_provider_selects_typesafe() -> None:
+    settings = load_settings({**base_environment(), "JUDGMENT_PROVIDER": "typesafe"})
+    assert settings.judgment_provider is JudgmentProviderKind.TYPESAFE
+
+
+def test_unknown_judgment_provider_fails_at_load() -> None:
+    with pytest.raises(
+        ConfigurationError, match="JUDGMENT_PROVIDER must be one of: disabled, typesafe"
+    ):
+        load_settings({**base_environment(), "JUDGMENT_PROVIDER": "jev"})
+
+
 def test_web_provider_selection_is_per_capability() -> None:
     settings = load_settings(
         {
@@ -1130,16 +1151,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_177_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_179_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 177
+    assert len(qualified_paths) == 179
     assert {
         "folders/profiles.yaml:proposals.threshold",
         "folders/profiles.yaml:proposals.max_open",
+        "folders/profiles.yaml:proposals.judgment_matching_enabled",
+        "folders/profiles.yaml:proposals.judgment_match_threshold",
     } <= qualified_paths
     assert {
         "runtime/limits.yaml:email.daily_cost",
