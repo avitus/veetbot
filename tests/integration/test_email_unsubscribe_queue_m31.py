@@ -4,16 +4,16 @@ from dataclasses import replace
 from typing import cast
 from uuid import UUID
 
-from agent_core.adapters.models.fake import FakeModelScript
 from agent_core.bootstrap import build
+from agent_core.domain.messages import FakeModelScript
 from agent_core.domain.runs import RunStatus
 from agent_core.runtime.worker import DurableWorker
 from tests.gates.test_email_m18 import _email_settings
+from tests.gates.test_email_runtime_m26 import _assessment_turn
 from tests.gates.test_email_unsubscribe_m31 import (
     URL,
     Mailbox,
     Transport,
-    _assessment_turn,
     _client,
     _rows,
     _shop,
