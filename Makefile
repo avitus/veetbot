@@ -173,6 +173,7 @@ test-apple-ui-ios:
 			-destination "platform=iOS Simulator,id=$$device_id" \
 			-testProductsPath "$$test_products_path" \
 			-resultBundlePath "$$apple_results_run_dir/$$device_label.xcresult" \
+			-collect-test-diagnostics never \
 			-only-testing:VeetbotUITests; \
 	}; \
 	run_ios_ui_tests iphone "$$iphone_device_id" & \

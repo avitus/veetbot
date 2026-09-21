@@ -4,6 +4,33 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-20 — The hosted Apple lanes pass on the Xcode 27.0.0 image
+
+- The first hosted run on CircleCI's Xcode 27.0.0 image failed both Apple jobs.
+  That image runs macOS 26.6.2, not macOS 27, and carries the iOS 27.0
+  simulators, which the simulator lane now selects as the newest runtime. The
+  2026-09-19 entry's claim that hosted runs and the owner's Mac exercise the
+  same system behavior was wrong.
+- `make test-apple-ui-ios` was ended by CircleCI's ten-minute limit on a step
+  without output. Under Xcode 27, xcodebuild finished both simulator runs with
+  `simctl diagnose --timeout=600`, which printed nothing and then reported
+  "Timed out after 600.0 seconds" with no diagnostics collected. The simulator
+  runs now pass `-collect-test-diagnostics never`; the result bundle still
+  holds each failure, its screenshot and the element tree.
+- The adjacent-folders Mac case bounded the space between two folder labels at
+  12 points. That space is the system's row height less the system's label
+  height: 16 points on the hosted macOS 26.6.2 runner and 13.5 on macOS 27,
+  with the folders correctly sharing one section. The case now requires the two
+  list rows that hold the folders to touch, which fails by the 13-point section
+  gap when each folder sits in a section of its own and holds on both releases.
+- On the iOS 27.0 iPad simulator the Memory browser case failed because
+  XCUITest's element tap on the overflow menu's first item was swallowed and the
+  menu stayed open, three runs of three; the same case passes on the iOS 26.5
+  iPad simulator. Taps at eleven points across that item, its centre and the
+  point over the covered Hide Sidebar button included, all opened the browser,
+  so the item responds to touch. The cases now tap an overflow item at its
+  centre after requiring it to exist and be hittable.
+
 ## 2026-09-20 — An offline email-importance replay compares production with a judgment arm
 
 - `agent eval email-importance` checks a private source bundle, runs the replay,

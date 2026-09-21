@@ -2092,6 +2092,26 @@ def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
         assert "-scheme" not in invocation
 
 
+def test_apple_ui_simulator_runs_collect_no_sysdiagnose() -> None:
+    """A simulator run must not end the job on CircleCI's output timeout.
+
+    Under Xcode 27 xcodebuild ended both hosted runs, one with a failure and one
+    with only a skipped case, with ``simctl diagnose --timeout=600``. It printed
+    nothing for those 600 seconds and collected nothing, so the step was ended
+    at ten minutes without output and the failing case was never named. The
+    result bundle already holds the failure, its screenshot and the element tree.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+
+    invocations = [
+        tail.split(";", 1)[0] for tail in recipe.split("xcodebuild test-without-building")[1:]
+    ]
+    assert invocations
+    for invocation in invocations:
+        assert "-collect-test-diagnostics never" in invocation
+
+
 def _make_recipe(makefile: str, target: str) -> str:
     """Return one Makefile rule, from its target line to the next rule."""
     rule = re.search(rf"^{re.escape(target)}:.*?(?=^[A-Za-z][\w.-]*:)", makefile, re.M | re.S)
@@ -2192,6 +2212,27 @@ def test_apple_ui_mac_cases_launch_without_restoring_saved_windows() -> None:
     assert mac.start() < setup.index('app.launchArguments.append("--ui-testing-'), (
         "a fixture flag precedes the state pair and would consume its key"
     )
+
+
+def test_apple_ui_overflow_destinations_are_tapped_at_a_point() -> None:
+    """The overflow menu's items are tapped at their centre, not as elements.
+
+    On the iOS 27.0 iPad simulator XCUITest's element tap on the menu's first
+    item, Memory, is swallowed and the menu stays open, three runs of three,
+    while a tap at any of eleven points across that item, its centre included,
+    opens the browser. The item must still exist and be hittable first.
+    """
+    source = (
+        ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+    helper = _swift_functions(source)["openSidebarDestination"]
+
+    assert "XCTAssertTrue(destination.waitForExistence(timeout: 5))" in helper
+    assert "XCTAssertTrue(destination.isHittable)" in helper
+    assert (
+        "destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()" in helper
+    )
+    assert "destination.tap()" not in helper
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
