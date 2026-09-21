@@ -122,3 +122,4 @@ implementation without one.
 - [ADR-0111 — Restrictive-only advisory approval through the judgment port (Accepted; Milestone 30)](0111-advisory-approval-through-the-judgment-port.md)
 - [ADR-0112 — Email unsubscribe assistance and its public-HTTPS egress transport (Accepted; Milestone 31)](0112-milestone-31-email-unsubscribe.md)
 - [ADR-0113 — Scheduled conversations are grouped by schedule, not filed in folders (Accepted)](0113-scheduled-conversations-grouped-by-schedule.md)
+- [ADR-0114 — `main` does not reverify a source tree that already passed (Proposed)](0114-main-skips-verified-trees.md)

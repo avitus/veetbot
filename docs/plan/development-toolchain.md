@@ -513,7 +513,14 @@ Three workflow-level facts complete the definition:
     runs only on trusted `dev`, and only in a requested pipeline; it does not
     receive publication credentials.
     Production delivery begins only after all seven required verification jobs
-    pass. On
+    pass. On `main`, each verification job except `public-site` halts
+    successfully right after checkout when it finds its own record for the
+    commit's source tree, and otherwise runs in full (ADR-0114). A job writes
+    that CircleCI cache record, keyed by job and tree hash, only after its last
+    step has passed, so a merge commit that reproduces the verified head of its
+    pull request is not tested a second time, while any tree nothing verified
+    is. `static` checks the reading-lane floor before it looks for the record,
+    and no branch other than `main` ever skips. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
     live-model pipelines. The

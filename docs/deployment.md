@@ -652,8 +652,11 @@ itself; such a branch is verified on the sidecar and, before it is proposed for
 verification jobs are required status checks, so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
 an admin override. A requested `dev` pipeline also
-runs the non-publishing Apple signing smoke described above. On `main`, after
-all seven required verification jobs pass:
+runs the non-publishing Apple signing smoke described above. On `main`, a
+verification job other than `public-site` whose source tree already passed it,
+normally in that requested run, reports success without rerunning; a merge
+commit whose tree nothing verified is verified in full (ADR-0114). After all
+seven required verification jobs pass:
 
 - `public-site` installs the locked Node dependencies, builds, tests, and lints
   the static export, and exposes only that output to downstream packaging;
