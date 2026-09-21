@@ -448,7 +448,9 @@ class PythonPlaywrightRuntime:
             # Only the fact of entry is kept, never the text itself.
             if await self._sign_in_challenge_visible(page):
                 self._sign_in_entered = True
-            await page.keyboard.insert_text(event.text)
+            # The user typed each character, so each arrives as a key press;
+            # a field filled with no keyboard events is scored as automated.
+            await page.keyboard.type(event.text)
         else:
             assert event.key is not None
             await page.keyboard.press(event.key)
