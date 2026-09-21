@@ -172,8 +172,9 @@ The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
 versions predate SwiftData, so iOS 15–16 and macOS 12–13 use an atomic
 Application Support file behind the same store protocol. Both contain only
-`session_id`, title, agent identity, timestamps, the last known run ID, and the
-server-assigned folder identifier. The
+`session_id`, title, agent identity, timestamps, the last known run ID, the
+server-assigned folder identifier, and a scheduled session's schedule
+identifier. The
 client follows pagination until the server returns no next cursor, rejects a
 repeated cursor as an invalid response, and reconciles that complete index after
 connecting, whenever it returns to the foreground, and every 30 seconds while
@@ -220,6 +221,16 @@ conversation. Against a server whose index lacks the key, or that answers 404
 or 405 on the folder list, the client makes no further folder request, keeps
 every control hidden, and renders exactly the flat history; that unavailability
 is contained in reconciliation and never surfaces as an error.
+
+Scheduled sessions never enter a folder (ADR-0113, `scheduling.md`). The
+index's `schedule_id` metadata is cached with each row, the server's value
+winning, and a schedule with two or more cached sessions renders as one
+collapsible row in a Scheduled section between the folders and the unfiled
+history, labelled with its newest session's title and holding its sessions in
+activity order. A lone scheduled session stays in the history. Groups start
+collapsed; the owner's toggles are remembered on the device. Scheduled rows
+carry no move menu, and the groups render whether or not the server offers
+folders.
 
 In compact iPhone and iPad layouts, sidebar rows push an activating chat
 destination before selecting a historical session or resetting to a new

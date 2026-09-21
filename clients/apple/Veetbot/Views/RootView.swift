@@ -415,6 +415,7 @@ private struct SessionSidebar: View {
     @StateObject private var scheduleViewModel = ScheduleViewModel()
     @State private var showingScheduleBrowser = false
     @EnvironmentObject private var folderSidebar: FolderSidebarPreferences
+    @StateObject private var scheduleGroups = ScheduleGroupSidebarPreferences()
     @State private var folderEditor: FolderEditorRequest?
     @State private var folderDeletionCandidate: FolderView?
 
@@ -641,10 +642,11 @@ private struct SessionSidebar: View {
 
     /// One builder for both list variants, so folder sections cannot drift
     /// between the direct-activation and the compact-navigation sidebars.
-    /// Order: suggested folders, the folders, then the unfiled history; with
-    /// folders unavailable this renders exactly the flat history of before.
-    /// The folders share one section, each header followed by its conversations
-    /// while it is expanded, so no per-folder section gap separates them.
+    /// Order: suggested folders, the folders, the scheduled groups, then the
+    /// unfiled history; with folders unavailable no folder section or control
+    /// renders, while schedule groups still do (ADR-0113). Folders and groups
+    /// each share one section, each header followed by its conversations while
+    /// it is expanded, so no per-folder section gap separates them.
     @ViewBuilder
     private func historySections<Row: View>(
         @ViewBuilder row: @escaping (SessionHistoryEntry) -> Row
@@ -684,6 +686,24 @@ private struct SessionSidebar: View {
                 }
             }
         }
+        if !grouped.schedules.isEmpty {
+            Section("Scheduled") {
+                ForEach(grouped.schedules) { group in
+                    let expanded = scheduleGroups.isExpanded(group.id)
+                    ScheduleGroupHeaderRow(
+                        group: group,
+                        isExpanded: expanded,
+                        onToggle: { setScheduleGroup(group.id, expanded: !expanded) }
+                    )
+                    if expanded {
+                        ForEach(group.entries) { entry in
+                            row(entry)
+                                .padding(.leading, 24)
+                        }
+                    }
+                }
+            }
+        }
         Section("History") {
             ForEach(grouped.uncategorized) { entry in
                 row(entry)
@@ -708,9 +728,18 @@ private struct SessionSidebar: View {
         }
     }
 
+    /// Only the owner's own toggle changes which schedule groups are open.
+    private func setScheduleGroup(_ scheduleID: UUID, expanded: Bool) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            scheduleGroups.setExpanded(expanded, schedule: scheduleID)
+        }
+    }
+
+    /// A scheduled session is never a chat conversation, and the move route
+    /// refuses it, so it offers no move menu.
     @ViewBuilder
     private func moveMenu(for entry: SessionHistoryEntry) -> some View {
-        if model.foldersAvailable {
+        if model.foldersAvailable, entry.scheduleID == nil {
             Menu {
                 ForEach(model.folders) { folder in
                     Button {

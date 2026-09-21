@@ -10,6 +10,8 @@ public struct SessionHistoryEntry: Codable, Identifiable, Hashable, Sendable {
     public var lastRunID: UUID?
     /// The server-assigned folder; the server's value wins on every reconcile.
     public var folderID: UUID?
+    /// The `schedule_id` metadata of a scheduled session; the server's value wins.
+    public var scheduleID: UUID?
 
     public var id: UUID { sessionID }
 
@@ -20,7 +22,8 @@ public struct SessionHistoryEntry: Codable, Identifiable, Hashable, Sendable {
         createdAt: Date,
         updatedAt: Date,
         lastRunID: UUID?,
-        folderID: UUID? = nil
+        folderID: UUID? = nil,
+        scheduleID: UUID? = nil
     ) {
         self.sessionID = sessionID
         self.title = title
@@ -29,6 +32,7 @@ public struct SessionHistoryEntry: Codable, Identifiable, Hashable, Sendable {
         self.updatedAt = updatedAt
         self.lastRunID = lastRunID
         self.folderID = folderID
+        self.scheduleID = scheduleID
     }
 }
 

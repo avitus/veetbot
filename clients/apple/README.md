@@ -178,9 +178,10 @@ Before macOS 15, which ignores a sheet's ideal size, they open at their 560- and
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
 same `SessionHistoryStore` contract backed by an atomic Application Support JSON
-file. Both carry the optional server-assigned folder identifier; the SwiftData
-column is an optional attribute added by automatic lightweight migration, and a
-failed migration falls back to the file store as before. Neither store is
+file. Both carry the optional server-assigned folder and schedule identifiers;
+the SwiftData columns are optional attributes added by automatic lightweight
+migration, and a failed migration falls back to the file store as before.
+Neither store is
 authoritative server state. The app reconciles both from
 the paginated server session index on connect, foreground entry, and a periodic
 poll. The row action is `Delete Everywhere`: it deletes the authoritative

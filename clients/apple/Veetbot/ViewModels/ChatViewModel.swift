@@ -1585,7 +1585,8 @@ public final class ChatViewModel: ObservableObject {
             updatedAt: touchedAt ?? existing?.updatedAt ?? session.updatedAt,
             lastRunID: lastRunID ?? session.lastRunID ?? existing?.lastRunID,
             // The server index is the authority: its value wins, nil included.
-            folderID: session.folderID
+            folderID: session.folderID,
+            scheduleID: session.scheduleID
         )
     }
 
