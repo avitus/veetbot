@@ -154,7 +154,13 @@ that was already open stays open.
 The cases tap an overflow-menu item at its centre rather than as an element,
 after requiring it to exist and be hittable. On the iOS 27.0 iPad simulator
 XCUITest's element tap on the menu's first item is swallowed and the menu stays
-open, while a touch anywhere on the item activates it.
+open, while a touch anywhere on the item activates it. A touch that lands while
+the menu is still opening is dropped as well, so the helper waits for the item's
+frame to stop changing, and taps again, up to three times, until the menu closes.
+The email cases allow twenty seconds for a Gmail archive outcome: the fixture
+holds the operation pending for four thread reads and the client polls once a
+second, so the outcome takes three seconds on an idle host and more beside a
+second simulator.
 
 The People accessibility audit uses the app's Large text preference on Mac and
 the largest accessibility Dynamic Type category on iPhone and iPad. The Mac
