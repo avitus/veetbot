@@ -137,9 +137,19 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingAFolderThroughItsMenuUpdatesTheSection \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAcceptingASuggestedFolderFilesTheConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testDecliningASuggestedFolderRemovesIt \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testOpeningAFolderInSoloModeClosesTheOpenOne \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testANewProposalLeavesFolderExpansionAlone \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testASuggestedFolderListsEachConversationItWouldFile \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingASuggestedFolderBeforeAcceptingIt \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderNameSheetIsSizedForItsContentOnMac \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAdjacentFoldersSitOneRowApartOnMac \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 
+# Xcode 27.0 installs the UI-test runner about four seconds into a boot it
+# starts itself. Two cold boots at once bring SpringBoard up after that, it
+# holds the runner as still being updated, and the launch is refused as Busy.
+# Both devices therefore finish booting before either run starts.
 test-apple-ui-ios:
 	@$(APPLE_FULL_XCODE); \
 	$(APPLE_RESULTS_RUN_DIR); \
@@ -152,7 +162,15 @@ test-apple-ui-ios:
 		exit 1; \
 	fi; \
 	apple_ui_tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/veetbot-apple-ui.XXXXXX"); \
-	trap 'rm -rf -- "$$apple_ui_tmp"' EXIT; \
+	simulators_booted_here=""; \
+	finish_apple_ui() { \
+		for device_id in $$simulators_booted_here; do \
+			DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl shutdown "$$device_id" >/dev/null 2>&1 & \
+		done; \
+		wait; \
+		rm -rf -- "$$apple_ui_tmp"; \
+	}; \
+	trap finish_apple_ui EXIT; \
 	test_products_path="$$apple_ui_tmp/VeetbotUITests.xctestproducts"; \
 	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild build-for-testing -quiet \
 		-project clients/apple/Veetbot.xcodeproj \
@@ -160,6 +178,44 @@ test-apple-ui-ios:
 		-destination "platform=iOS Simulator,id=$$iphone_device_id" \
 		-testProductsPath "$$test_products_path" \
 		-only-testing:VeetbotUITests || exit $$?; \
+	boot_ios_simulator() { \
+		boot_report=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl bootstatus "$$1" -b 2>&1) || { \
+			printf '%s\n' "$$boot_report" >&2; \
+			return 1; \
+		}; \
+		if printf '%s\n' "$$boot_report" | grep -q '^[[:space:]]*Finished$$'; then \
+			return 0; \
+		fi; \
+		echo "Simulator $$1 did not report a finished boot; waiting for SpringBoard instead. Erasing the simulator repairs a failed data migration." >&2; \
+		attempt=0; \
+		while test "$$attempt" -lt 120; do \
+			springboard_pid=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl spawn "$$1" \
+				notifyutil -g com.apple.springboard.finishedstartup 2>/dev/null | awk '{print $$NF}'); \
+			case "$$springboard_pid" in \
+				''|0|*[!0-9]*) ;; \
+				*) return 0 ;; \
+			esac; \
+			attempt=$$((attempt + 1)); \
+			sleep 0.5; \
+		done; \
+		echo "SpringBoard on simulator $$1 did not finish starting." >&2; \
+		return 1; \
+	}; \
+	for device_id in "$$iphone_device_id" "$$ipad_device_id"; do \
+		if ! DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices booted | grep -q "$$device_id"; then \
+			simulators_booted_here="$$simulators_booted_here $$device_id"; \
+		fi; \
+	done; \
+	boot_ios_simulator "$$iphone_device_id" & \
+	iphone_boot_pid=$$!; \
+	boot_ios_simulator "$$ipad_device_id" & \
+	ipad_boot_pid=$$!; \
+	wait "$$iphone_boot_pid"; iphone_boot_status=$$?; \
+	wait "$$ipad_boot_pid"; ipad_boot_status=$$?; \
+	if test "$$iphone_boot_status" -ne 0 -o "$$ipad_boot_status" -ne 0; then \
+		echo "Apple simulators failed to boot (iPhone=$$iphone_boot_status, iPad=$$ipad_boot_status)." >&2; \
+		exit 1; \
+	fi; \
 	run_ios_ui_tests() { \
 		device_label="$$1"; \
 		device_id="$$2"; \
@@ -167,6 +223,7 @@ test-apple-ui-ios:
 			-destination "platform=iOS Simulator,id=$$device_id" \
 			-testProductsPath "$$test_products_path" \
 			-resultBundlePath "$$apple_results_run_dir/$$device_label.xcresult" \
+			-collect-test-diagnostics never \
 			-only-testing:VeetbotUITests; \
 	}; \
 	run_ios_ui_tests iphone "$$iphone_device_id" & \

@@ -75,15 +75,15 @@ validates the floor, and no trailer means lane A.
 | Integrated episodes, high-recall formation, evidence-based forgetting | `adaptive-memory-distillation.md` |
 | Persona surface, nominations, curated promotion | `persona-surface.md` |
 | Memory read API and native memory browser | `memory-read-api-and-browser.md` |
-| Gmail MCP servers, email tools, the bootstrap ceremony | `email-integration.md` |
+| Gmail MCP servers, email tools, bootstrap ceremony | `email-integration.md` |
 | Client modes, foreground email, priority/style learning, drafts, mail memories | `email-experience.md` |
-| Devices, surfaces, the Section 29 seam | `multi-device-and-surfaces.md` |
+| Devices, surfaces, Section 29 seam | `multi-device-and-surfaces.md` |
 | Device channel and SMS via the owner's iPhone | `device-channel-and-sms.md` |
 | WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Bland calling and public reception | `bland-calling.md` |
 | People, relationships, interaction history | `people-and-relationships.md` |
-| Chat thread folders and grouping proposals | `thread-folders.md` |
-| Email unsubscribe and the bulk-sender census | `email-unsubscribe.md` |
+| Thread folders, proposals; typed judgment | `thread-folders.md`, `typed-judgment.md` |
+| Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
@@ -97,10 +97,10 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
-  18 through 30 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0112). Milestone 21 is limited to adaptive
+  18 through 31 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0111, 0112). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
-  the owner's iPhone, 25 to the WhatsApp business surface, 26 to client modes and the email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders, and 30 to email unsubscribe assistance. Model routing and the plan's remaining roadmap items
-  are not authorized. Each in-progress milestone's open items are in `docs/status/milestones.md`.
+  the owner's iPhone, 25 to the WhatsApp business surface, 26 to client modes and the email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders and typed judgment, 30 to advisory approval, and 31 to email unsubscribe. Model routing and the plan's remaining roadmap items
+  are not authorized. Open items: `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

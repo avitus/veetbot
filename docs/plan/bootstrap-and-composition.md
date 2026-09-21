@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **178 configuration knobs** across the specifications;
+The corpus now declares **180 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -306,7 +306,8 @@ Milestone 24's three device knobs: the invocation timeout, the per-device
 daily ingest cap, and the poll-back interval, plus ADR-0089's terminal schedule
 retention days, purge cadence, and purge batch; ADR-0093 adds memory model selection;
 Milestone 26 adds the two aggregate automatic-email cost allowances, Milestone 29
-adds the seven thread-folder knobs, and Milestone 31 adds the unsubscribe grace
+adds the seven thread-folder knobs and, under ADR-0110, the judgment matcher's
+switch and probability floor, and Milestone 31 adds the unsubscribe grace
 period. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
@@ -332,13 +333,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-178 falls out.
+180 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-178 tuning knobs in YAML.
+180 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -346,7 +347,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 178 knobs live, at the values the
+    module that owns it. This is where all 180 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -411,7 +412,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 178. Schema versions, profile names, rule identifiers,
+and asserts the total is 180. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -423,8 +424,8 @@ or invariants rather than knobs and are not counted.
 | `tools/limits.yaml` | 20 |
 | `runtime/limits.yaml` | 58 |
 | `memory/profiles.yaml` | 38 |
-| `folders/profiles.yaml` | 7 |
-| **Total** | **178** |
+| `folders/profiles.yaml` | 9 |
+| **Total** | **180** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -1270,7 +1271,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 178 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 180 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1292,7 +1293,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 178 declared knobs into files and leaves ten fields in
+   sorts all 180 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,
@@ -1444,6 +1445,36 @@ providers with the lexical grouper as its fallback, and registers the proposal
 pass as a maintenance sweep on its own timer. Its seven knobs join the
 executable inventory when the implementation lands. The detailed contract is
 [thread-folders.md](thread-folders.md).
+
+ADR-0110 adds one selector and one optional wrap. `JUDGMENT_PROVIDER` accepts
+`disabled` and `typesafe` and defaults to `disabled`; only `typesafe` makes the
+composition root construct the TypeSafe judgment provider over the credential
+resolver and the injected clock, and close it on shutdown. `TYPESAFE_API_KEY`
+enters the credential broker as the reference `typesafe`. A selector with no
+credential logs one warning that names variables only and never refuses
+startup; the provider then fails each call without dialing. When a provider is
+composed and `proposals.judgment_matching_enabled` is true, the root wraps the
+grouper above in the judgment matcher; otherwise the grouper is composed
+exactly as before, and the knob with no provider logs one
+`folder_judgment_matching_unavailable` warning. The two judgment knobs are in
+the executable inventory and the knob table. The detailed contracts are
+[typed-judgment.md](typed-judgment.md) and
+[thread-folders.md](thread-folders.md).
+
+## Milestone 30 advisory approval composition
+
+The composition root always builds the deterministic policy engine. Only when
+the loaded profile has `advisory.enabled` true, which enforces, or
+`AGENT_POLICY_ADVISORY_OBSERVE_ENABLED` is set, which only observes, and a
+judgment provider is composed, does it wrap that engine in the advised engine
+over a judgment-backed advisor; with the layer on and no provider it logs one
+`policy_advisory_unavailable` warning and uses the deterministic engine, and
+never refuses startup. The tool pipeline receives the advised engine as its
+policy and the deterministic engine as its recovery policy, and the standing
+authorizer keeps the deterministic engine. The observe flag is an environment
+value because it changes no effective rule; enforcing stays in the hashed
+profile. No knob is added: the shipped profile is unchanged. The detailed
+contract is [policy-and-approvals.md](policy-and-approvals.md).
 
 ## Milestone 31 email unsubscribe composition
 

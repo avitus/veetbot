@@ -352,7 +352,14 @@ def observe(
         and seen.offered != "none"
         and (
             evidence is None
-            or (seen.received_at, seen.message_id) > (evidence.received_at, evidence.message_id)
+            # A total order, so a tie on time and message cannot depend on arrival order.
+            or (seen.received_at, seen.message_id, seen.offered, seen.provider_thread_id)
+            > (
+                evidence.received_at,
+                evidence.message_id,
+                evidence.offered,
+                evidence.provider_thread_id,
+            )
         )
     ):
         update["evidence"] = EmailUnsubscribeEvidence(

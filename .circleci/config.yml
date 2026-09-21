@@ -176,7 +176,7 @@ jobs:
 
   apple:
     macos:
-      xcode: "26.6.0"
+      xcode: "27.0.0"
     resource_class: m4pro.medium
     steps:
       - checkout
@@ -191,7 +191,7 @@ jobs:
 
   apple-ios:
     macos:
-      xcode: "26.6.0"
+      xcode: "27.0.0"
     resource_class: m4pro.medium
     steps:
       - checkout
@@ -203,7 +203,7 @@ jobs:
 
   apple-testflight:
     macos:
-      xcode: "26.6.0"
+      xcode: "27.0.0"
       code_signing:
         - veetbot-app-store
     resource_class: m4pro.medium
@@ -271,7 +271,7 @@ jobs:
 
   apple-signing-smoke:
     macos:
-      xcode: "26.6.0"
+      xcode: "27.0.0"
       code_signing:
         - veetbot-app-store
     resource_class: m4pro.medium

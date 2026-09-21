@@ -20,6 +20,26 @@ from agent_core.ports.persistence import ScheduleUnitOfWork, ScheduleUnitOfWorkF
 
 WriteProbe = Callable[[str], None]
 
+# Sanitized provider diagnostics a run failure may carry. Its message and any
+# other detail stay with the run, which session deletion erases.
+_FAILURE_DETAIL_KEYS = ("provider", "provider_code", "http_status", "provider_parameter")
+
+
+def _failure_classification(run: Run) -> dict[str, object] | None:
+    """Keep why a scheduled run failed after its conversation is deleted."""
+
+    if run.status is not RunStatus.FAILED or run.failure is None:
+        return None
+    classification: dict[str, object] = {
+        "reason": run.failure.reason.value,
+        "error_class": run.failure.error_class,
+    }
+    for key in _FAILURE_DETAIL_KEYS:
+        value = run.failure.details.get(key)
+        if isinstance(value, str | int) and not isinstance(value, bool):
+            classification[key] = value
+    return classification
+
 
 class _NotificationProducer(Protocol):
     async def for_schedule_run_accounted(
@@ -112,6 +132,7 @@ class ScheduleOutcomeAccountant:
                         "occurrence_id": str(occurrence.id),
                         "run_id": str(run.id),
                         "run_status": run.status.value,
+                        "failure": _failure_classification(run),
                         "consecutive_failures": failures,
                         "event_time": self._clock.now().isoformat(),
                     },

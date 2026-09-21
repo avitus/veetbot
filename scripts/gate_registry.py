@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona|whatsapp|call|people|folder)"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona|whatsapp|call|people|folder|judgment)"
     r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
@@ -30,9 +30,11 @@ MAP_ROW = re.compile(
 # 2026-08-26 (ADR-0081 and ADR-0082). The census reports a zero row for each
 # authorized milestone whose specification has not yet declared gates.
 # Milestone 26 was authorized on 2026-09-11 under ADR-0092, Milestone 28 on
-# 2026-09-15 under ADR-0100, Milestone 29 on 2026-09-16 under ADR-0102, and
-# Milestone 31 on 2026-09-19 under ADR-0112.
-MAX_MILESTONE = 30
+# 2026-09-15 under ADR-0100, and Milestone 29 on 2026-09-16 under ADR-0102.
+# ADR-0110 amended Milestone 29 on 2026-09-19 to admit the typed-judgment port
+# and its `gate.judgment.*` area. Milestone 30 was authorized on 2026-09-19
+# under ADR-0111, and Milestone 31 on 2026-09-19 under ADR-0112.
+MAX_MILESTONE = 31
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -41,7 +43,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "tool-system.md": (16, 1),
     "builtin-tools.md": (15, 0),
     "model-gateway.md": (12, 0),
-    "policy-and-approvals.md": (13, 0),
+    "policy-and-approvals.md": (18, 0),
     "event-log-and-persistence.md": (14, 0),
     "context-engine.md": (6, 0),
     "memory-formation-and-consolidation.md": (20, 0),
@@ -67,7 +69,8 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "email-unsubscribe.md": (20, 0),
     "bland-calling.md": (14, 0),
     "people-and-relationships.md": (36, 0),
-    "thread-folders.md": (12, 0),
+    "thread-folders.md": (13, 0),
+    "typed-judgment.md": (4, 0),
     "device-channel-and-sms.md": (12, 0),
     "whatsapp-surface.md": (12, 0),
     "milestone-map.md": (7, 0),

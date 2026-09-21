@@ -74,6 +74,15 @@ class PolicyDecisionRank(IntEnum):
     DENY = 3
 
 
+# Restrictiveness is a total ordering; combination is `max` by rank.
+POLICY_DECISION_RANK: dict[PolicyDecisionType, PolicyDecisionRank] = {
+    PolicyDecisionType.ALLOW: PolicyDecisionRank.ALLOW,
+    PolicyDecisionType.ALLOW_WITH_MODIFICATIONS: PolicyDecisionRank.ALLOW_WITH_MODIFICATIONS,
+    PolicyDecisionType.REQUIRE_APPROVAL: PolicyDecisionRank.REQUIRE_APPROVAL,
+    PolicyDecisionType.DENY: PolicyDecisionRank.DENY,
+}
+
+
 class PolicyCondition(StrEnum):
     PATH_INSIDE_WORKSPACE = "path_inside_workspace"
     HOST_ON_ALLOWLIST = "host_on_allowlist"
@@ -123,6 +132,24 @@ class PolicyDecision(BaseModel):
     explanation: str
     modified_arguments: dict[str, Any] | None = None
     policy_version: str
+
+
+class AdvisoryVerdictType(StrEnum):
+    """What an advisor may say. There is no allow: an advisor can only escalate."""
+
+    ABSTAIN = "abstain"
+    REQUIRE_APPROVAL = "require_approval"
+    DENY = "deny"
+
+
+class AdvisoryVerdict(BaseModel):
+    """A verdict with the identifiers of the signals that fired; it carries no content."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: AdvisoryVerdictType
+    signals: tuple[str, ...] = ()
+    advisor_version: str = Field(min_length=1, max_length=128)
 
 
 class StandingAuthorization(BaseModel):
@@ -203,6 +230,9 @@ class LoadedRuleset(BaseModel):
     unknown_tool_decision: PolicyDecisionType
     external_untrusted_requires_approval: bool = True
     self_approval_enabled: bool = True
+    # The advisory layer enforces only when the profile says so; the value is
+    # part of the hashed document, so enforcing is visible in `policy_version`.
+    advisory_enabled: bool = False
     approval_expiry_seconds: tuple[tuple[RiskLevel, int], ...]
 
 

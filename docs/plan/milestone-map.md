@@ -327,9 +327,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 33 subject specifications declare 552 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 561
-declarations, 558 registry entries once the 3 aliases are subtracted.
+The 34 subject specifications declare 562 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 571
+declarations, 568 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -529,14 +529,15 @@ the precondition recorded. Without the field the choice is a forbidden
 skip or a gate that fails on every machine without vendor keys, and
 both are worse than naming the exception once.
 
-### Policy and approvals, thirteen gates
+### Policy and approvals, eighteen gates
 
-All thirteen are Milestone 4, which the section states and the build
+The first thirteen are Milestone 4, which the section states and the build
 sequence confirms — steps 1 through 11 are Milestone 4 and step 12 is
-sequenced separately and is not a dependency. The last three arrived
+sequenced separately and is not a dependency. The last three of those arrived
 with the scope vocabulary, which that section owns because the check
 runs at this milestone and the API document that enumerated the first
-nine strings is Milestone 5.
+nine strings is Milestone 5. Gates 14 through 18 are step 12, the advisory
+layer, authorized as Milestone 30 by ADR-0111.
 
 ```text
 #   id                              kind         M
@@ -554,6 +555,11 @@ nine strings is Milestone 5.
 11  gate.policy.scope_grammar       structural   4
 12  gate.policy.scope_match         case         4
 13  gate.policy.scope_stamped       case         4
+14  gate.policy.advisory_monotonic  property     30
+15  gate.policy.advisory_allow_path_once  case   30
+16  gate.policy.advisory_abstains   case         30
+17  gate.policy.advisory_blind_redacted  structural  30
+18  gate.policy.advisory_default_off  case       30
 ```
 
 ### Event log and persistence, fourteen gates
@@ -1622,7 +1628,8 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 
 ### Chat thread folders
 
-[thread-folders.md](thread-folders.md) declares twelve Milestone 29 gates.
+[thread-folders.md](thread-folders.md) declares thirteen Milestone 29 gates.
+The thirteenth arrived with ADR-0110's judgment matcher.
 
 ```text
 1 gate.folder.schema_additive case 29
@@ -1637,6 +1644,19 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 10 gate.folder.routes_exact_scope structural 29
 11 gate.folder.content_free case 29
 12 gate.folder.native_degradation case 29
+13 gate.folder.judgment_matching property 29
+```
+
+### Typed judgment
+
+[typed-judgment.md](typed-judgment.md) declares four Milestone 29 gates,
+admitted with the port by ADR-0110.
+
+```text
+1 gate.judgment.fixed_egress case 29
+2 gate.judgment.default_off case 29
+3 gate.judgment.typed_failure case 29
+4 gate.judgment.priced_contract property 29
 ```
 
 ### Email unsubscribe assistance
@@ -1645,26 +1665,26 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 gates in the existing email area.
 
 ```text
-1 gate.email.unsubscribe_read_contract case 30
-2 gate.email.unsubscribe_eligibility property 30
-3 gate.email.unsubscribe_server_derived_destination structural 30
-4 gate.email.unsubscribe_fixed_request case 30
-5 gate.email.unsubscribe_public_https_egress case 30
-6 gate.email.unsubscribe_approval_floor case 30
-7 gate.email.unsubscribe_gesture_consent case 30
-8 gate.email.unsubscribe_batch_approval case 30
-9 gate.email.unsubscribe_idempotent_recovery case 30
-10 gate.email.unsubscribe_mailto_closed case 30
-11 gate.email.unsubscribe_label_actions case 30
-12 gate.email.unsubscribe_census_projection property 30
-13 gate.email.unsubscribe_durable_decisions case 30
-14 gate.email.unsubscribe_outcome_honesty case 30
-15 gate.email.unsubscribe_routes_scope_and_flag structural 30
-16 gate.email.unsubscribe_chat_tools case 30
-17 gate.email.unsubscribe_privacy case 30
-18 gate.email.unsubscribe_persistence_parity case 30
-19 gate.email.unsubscribe_native_experience case 30
-20 gate.email.unsubscribe_release_evidence case 30
+1 gate.email.unsubscribe_read_contract case 31
+2 gate.email.unsubscribe_eligibility property 31
+3 gate.email.unsubscribe_server_derived_destination structural 31
+4 gate.email.unsubscribe_fixed_request case 31
+5 gate.email.unsubscribe_public_https_egress case 31
+6 gate.email.unsubscribe_approval_floor case 31
+7 gate.email.unsubscribe_gesture_consent case 31
+8 gate.email.unsubscribe_batch_approval case 31
+9 gate.email.unsubscribe_idempotent_recovery case 31
+10 gate.email.unsubscribe_mailto_closed case 31
+11 gate.email.unsubscribe_label_actions case 31
+12 gate.email.unsubscribe_census_projection property 31
+13 gate.email.unsubscribe_durable_decisions case 31
+14 gate.email.unsubscribe_outcome_honesty case 31
+15 gate.email.unsubscribe_routes_scope_and_flag structural 31
+16 gate.email.unsubscribe_chat_tools case 31
+17 gate.email.unsubscribe_privacy case 31
+18 gate.email.unsubscribe_persistence_parity case 31
+19 gate.email.unsubscribe_native_experience case 31
+20 gate.email.unsubscribe_release_evidence case 31
 ```
 
 ## The census
@@ -1762,8 +1782,10 @@ milestone  new gates  cumulative  the earliest of them
                                   shared semantic memory and lifecycle
 27                14         490  Bland calling and public correspondence intake
 28                36         526  People identity, temporal relationships, history and governed recall
-29                12         538  chat thread folders, owner-resolved grouping proposals, grounded grouping
-30                20         558  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent
+29                17         543  chat thread folders, owner-resolved grouping proposals, grounded grouping,
+                                  the typed-judgment port and judgment folder matching
+30                 5         548  restrictive-only advisory approval through the judgment port
+31                20         568  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1784,14 +1806,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of five hundred and fifty-eight gates are green before
+2.  **Forty-one of five hundred and sixty-eight gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches five hundred and fifty-eight, which is every
+The cumulative column reaches five hundred and sixty-eight, which is every
 registry entry, at Milestone 31. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
@@ -1808,8 +1830,9 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
 area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
 entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
-and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29's twelve
-are `gate.folder.*` in an area of their own, and Milestone 31 adds twenty
+and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thirteen
+`gate.folder.*` entries and four `gate.judgment.*` entries, and Milestone 30
+returns to the `gate.policy.*` area with five. Milestone 31 adds twenty
 `gate.email.unsubscribe_*` entries to the email area. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and

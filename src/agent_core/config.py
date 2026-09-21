@@ -61,6 +61,11 @@ class WebProviderKind(StrEnum):
     KEENABLE = "keenable"
 
 
+class JudgmentProviderKind(StrEnum):
+    DISABLED = "disabled"
+    TYPESAFE = "typesafe"
+
+
 @dataclass(frozen=True, slots=True)
 class WebProviderAllocation:
     provider: WebProviderKind
@@ -115,6 +120,9 @@ class Settings:
     trajectory_export_enabled: bool = False
     skill_authoring_enabled: bool = False
     skill_background_review_enabled: bool = False
+    # Observe-only: the advisor is consulted and recorded and no decision changes,
+    # so this is not a policy value and does not move `policy_version`.
+    policy_advisory_observe_enabled: bool = False
     memory_provider_extraction_mode: MemoryProviderExtractionMode = (
         MemoryProviderExtractionMode.AUTO
     )
@@ -169,6 +177,7 @@ class Settings:
     web_search_providers: tuple[WebProviderAllocation, ...] = ()
     web_fetch_providers: tuple[WebProviderAllocation, ...] = ()
     browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
+    judgment_provider: JudgmentProviderKind = JudgmentProviderKind.DISABLED
     browser_allowed_origins: tuple[str, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
@@ -223,7 +232,7 @@ SHIPPED_CONFIGS = (
     "memory/profiles.yaml",
     "folders/profiles.yaml",
 )
-# The design corpus declares 168 operator-reviewable knobs. Metadata such as
+# The design corpus declares 179 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -419,6 +428,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "proposals.model_policy",
             "proposals.similarity_threshold",
             "proposals.max_members",
+            "proposals.judgment_matching_enabled",
+            "proposals.judgment_match_threshold",
         ),
     }
 )
@@ -1528,6 +1539,7 @@ def _load_settings(
     trajectory_export_enabled = _parse_flag(values, "AGENT_TRAJECTORY_EXPORT_ENABLED")
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
+    policy_advisory_observe_enabled = _parse_flag(values, "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED")
     raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
     legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip()
     if raw_memory_mode and legacy_memory_enablement:
@@ -1750,6 +1762,12 @@ def _load_settings(
         values.get("BROWSER_PROVIDER", "disabled").strip(),
         "BROWSER_PROVIDER",
     )
+    # The selector is the only switch: TYPESAFE_API_KEY alone enables nothing.
+    judgment_provider = _parse_enum(
+        JudgmentProviderKind,
+        values.get("JUDGMENT_PROVIDER", "disabled").strip(),
+        "JUDGMENT_PROVIDER",
+    )
     raw_browser_origins = tuple(
         value.strip()
         for value in values.get("BROWSER_ALLOWED_ORIGINS", "").split(",")
@@ -1807,6 +1825,7 @@ def _load_settings(
         trajectory_export_enabled=trajectory_export_enabled,
         skill_authoring_enabled=skill_authoring_enabled,
         skill_background_review_enabled=skill_background_review_enabled,
+        policy_advisory_observe_enabled=policy_advisory_observe_enabled,
         memory_provider_extraction_mode=memory_provider_extraction_mode,
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         memory_formation_policy_pin=memory_formation_policy_pin,
@@ -1859,6 +1878,7 @@ def _load_settings(
         web_search_providers=web_search_providers,
         web_fetch_providers=web_fetch_providers,
         browser_provider=browser_provider,
+        judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
         browser_profile_service_url=browser_profile_service_url,
         browser_profile_id=browser_profile_id,

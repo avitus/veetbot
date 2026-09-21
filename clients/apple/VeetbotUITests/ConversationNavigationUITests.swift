@@ -10,6 +10,15 @@ final class ConversationNavigationUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
+        #if os(macOS)
+        // XCTest ends the app without quitting it, so AppKit would restore the
+        // window list the previous launch saved. Once that list is empty, the
+        // app restores no window and never opens one. Launch arguments are read
+        // as -key value pairs: keep this pair ahead of the bare fixture flags,
+        // or a flag takes the key as its value and AppKit opens YES as a
+        // document instead of a window.
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        #endif
         app.launchArguments.append("--ui-testing-conversation-navigation")
         // Each case adds its fixture options and then launches once; launching
         // here would make those cases pay for a second launch.
@@ -62,9 +71,10 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(summary.label.contains("6 Failed"))
         XCTAssertEqual(summary.value as? String, "Collapsed")
         XCTAssertLessThan(summary.frame.height, 80)
-        let answer = app.staticTexts["Your answer is visible below the tool summary."]
+        // SwiftUI nests a second copy of the text, so resolve one match for frames.
+        let answer = app.staticTexts["Your answer is visible below the tool summary."].firstMatch
         XCTAssertTrue(answer.waitForExistence(timeout: 5))
-        XCTAssertTrue(answer.isHittable)
+        checkAnswerStaysVisible(answer, below: summary)
         #if os(macOS)
         summary.click()
         #else
@@ -85,8 +95,29 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         XCTAssertEqual(summary.value as? String, "Collapsed")
         XCTAssertFalse(app.staticTexts["Example result 1"].exists)
-        XCTAssertTrue(answer.isHittable)
+        checkAnswerStaysVisible(answer, below: summary)
     }
+
+    /// Keeps the answer on screen under the summary row.
+    ///
+    /// macOS 27 reports SwiftUI's message text as disabled in the accessibility
+    /// tree, so hittability no longer follows from visibility there.
+    private func checkAnswerStaysVisible(_ answer: XCUIElement, below summary: XCUIElement) {
+        #if os(macOS)
+        XCTAssertTrue(
+            app.windows.firstMatch.frame.contains(answer.frame),
+            app.debugDescription
+        )
+        XCTAssertGreaterThan(answer.frame.minY, summary.frame.maxY)
+        #else
+        XCTAssertTrue(answer.isHittable)
+        #endif
+    }
+
+    /// The fixture holds a Gmail operation pending for four thread reads and the
+    /// client polls once a second, so an outcome takes three seconds on an idle
+    /// host and longer beside a second simulator. Five seconds was too near that.
+    private static let archiveOutcomeTimeout: TimeInterval = 20
 
     /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
     private func checkHandledActionInDetail() {
@@ -113,7 +144,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         let handled = NSPredicate(format: "label == %@ AND enabled == true", "Move to Inbox")
         expectation(for: handled, evaluatedWith: action)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: Self.archiveOutcomeTimeout)
         #if os(macOS)
         action.click()
         #else
@@ -121,7 +152,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         let unhandled = NSPredicate(format: "label == %@ AND enabled == true", "Archive in Gmail")
         expectation(for: unhandled, evaluatedWith: action)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: Self.archiveOutcomeTimeout)
     }
 
     /// The detail checkbox replaces the archived message with the next conversation's actual content.
@@ -217,7 +248,7 @@ final class ConversationNavigationUITests: XCTestCase {
         let other = app.buttons["Other mail"]
         other.tap()
         #endif
-        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        XCTAssertTrue(check.waitForExistence(timeout: Self.archiveOutcomeTimeout))
         XCTAssertEqual(check.label, "Move to Inbox")
     }
 
@@ -247,7 +278,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         expectation(for: NSPredicate(format: "label CONTAINS %@", "could not complete"), evaluatedWith: status)
         #endif
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: Self.archiveOutcomeTimeout)
         XCTAssertTrue(action.exists)
         XCTAssertTrue(action.isEnabled)
         XCTAssertEqual(action.label, "Archive in Gmail")
@@ -326,15 +357,39 @@ final class ConversationNavigationUITests: XCTestCase {
 
     private static let folderID = "00000000-0000-0000-0000-000000000F01"
     private static let proposedFolderID = "00000000-0000-0000-0000-000000000F02"
+    private static let workFolderID = "00000000-0000-0000-0000-000000000F03"
     private static let proposalID = "00000000-0000-0000-0000-000000000E01"
+    private static let followUpProposalID = "00000000-0000-0000-0000-000000000E02"
+    private static let firstSessionID = "00000000-0000-0000-0000-000000000123"
+    private static let secondSessionID = "00000000-0000-0000-0000-000000000456"
+    private static let planningSessionID = "00000000-0000-0000-0000-0000000004A1"
+    private static let proposedTitles = [
+        "Historical chat",
+        "Flights to Lisbon in October",
+        "Alfama hotel shortlist",
+        "Day trip to Sintra and Cascais",
+    ]
 
-    /// Every folder journey adds the fixture argument and launches once.
+    /// Every folder journey adds the fixture argument and launches once. The
+    /// folder fixture's sidebar is taller than the default Mac window.
     private func addFolderFixture() {
         app.launchArguments.append("--ui-testing-folders")
+        #if os(macOS)
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #endif
     }
 
     private func element(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    private func folderHeader(_ id: String) -> XCUIElement {
+        element("sidebar.folder.\(id)")
+    }
+
+    private func sessionRow(_ id: String) -> XCUIElement {
+        element("sidebar.session.\(id)")
     }
 
     private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval = 5) {
@@ -342,17 +397,64 @@ final class ConversationNavigationUITests: XCTestCase {
         wait(for: [gone], timeout: timeout)
     }
 
+    /// Waits until a folder header reports the expected name and state.
+    private func waitForFolder(
+        _ header: XCUIElement, label: String? = nil, expanded: Bool, timeout: TimeInterval = 5
+    ) -> Bool {
+        var format = "exists == true AND value == %@"
+        var arguments: [Any] = [expanded ? "Expanded" : "Collapsed"]
+        if let label {
+            format += " AND label == %@"
+            arguments.append(label)
+        }
+        let predicate = NSPredicate(format: format, argumentArray: arguments)
+        return XCTWaiter().wait(
+            for: [XCTNSPredicateExpectation(predicate: predicate, object: header)], timeout: timeout
+        ) == .completed
+    }
+
+    /// Scrolls the sidebar until `target` is on screen: on iPhone the folder
+    /// fixture's sidebar is taller than the display.
+    @discardableResult
+    private func reveal(_ target: XCUIElement) -> Bool {
+        if target.waitForExistence(timeout: 2), target.isHittable { return true }
+        #if os(iOS)
+        let list = app.collectionViews.firstMatch
+        for direction in [true, false] {
+            for _ in 0..<6 {
+                if direction { list.swipeUp() } else { list.swipeDown() }
+                if target.exists, target.isHittable { return true }
+            }
+        }
+        #endif
+        return target.exists
+    }
+
     private func typeIntoFolderNameField(_ text: String) {
         let field = element("folder.name")
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        activate(field)
         #if os(macOS)
+        activate(field)
         field.typeKey("a", modifierFlags: .command)
+        #else
+        // Tap the trailing edge so the caret follows any text already there.
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        if let current = field.value as? String, !current.isEmpty, current != field.placeholderValue {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        }
         #endif
         field.typeText(text)
         // iOS exposes a toolbar item's identifier on both the item container and
         // its button, so an untyped query finds two elements; ask for the button.
         activate(app.buttons["folder.save"])
+    }
+
+    /// Retains a folder rendering for visual review even when the test passes.
+    private func attachFolderScreenshot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     /// The default fixture is an older server whose index has no `folder_id`
@@ -366,43 +468,148 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(element("sidebar.proposal.\(Self.proposalID)").exists)
     }
 
-    /// A folder section groups its conversations under a collapsible header
-    /// beside the suggested folders and the new-folder control.
+    /// Folders group their conversations beside the suggested folders and the
+    /// new-folder control. In solo mode, the default, a folder starts collapsed
+    /// and opening it shows its conversations.
     func testFolderSectionsGroupConversations() {
         addFolderFixture()
         app.launch()
-        XCTAssertTrue(element("sidebar.folder.\(Self.folderID)").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Travel"].exists)
-        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000456").waitForExistence(timeout: 5))
-        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000123").exists)
-        XCTAssertTrue(element("sidebar.new-folder").exists)
+        let travel = folderHeader(Self.folderID)
+        XCTAssertTrue(travel.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFolder(travel, label: "Travel", expanded: false))
+        XCTAssertTrue(waitForFolder(folderHeader(Self.workFolderID), label: "Work", expanded: false))
+        XCTAssertFalse(sessionRow(Self.secondSessionID).exists)
         XCTAssertTrue(element("sidebar.proposal.\(Self.proposalID)").exists)
+        activate(travel)
+        XCTAssertTrue(waitForFolder(travel, expanded: true))
+        XCTAssertTrue(sessionRow(Self.secondSessionID).waitForExistence(timeout: 5))
+        attachFolderScreenshot("Folders with Travel open")
+        XCTAssertTrue(reveal(sessionRow(Self.firstSessionID)))
+        XCTAssertTrue(reveal(element("sidebar.new-folder")))
+    }
+
+    /// Solo mode keeps one folder open: opening Work closes Travel.
+    func testOpeningAFolderInSoloModeClosesTheOpenOne() {
+        addFolderFixture()
+        app.launch()
+        let travel = folderHeader(Self.folderID)
+        let work = folderHeader(Self.workFolderID)
+        XCTAssertTrue(travel.waitForExistence(timeout: 10))
+        activate(travel)
+        XCTAssertTrue(sessionRow(Self.secondSessionID).waitForExistence(timeout: 5))
+        activate(work)
+        XCTAssertTrue(waitForFolder(work, expanded: true))
+        XCTAssertTrue(waitForFolder(travel, expanded: false))
+        XCTAssertTrue(sessionRow(Self.planningSessionID).waitForExistence(timeout: 5))
+        waitForDisappearance(of: sessionRow(Self.secondSessionID))
+        activate(work)
+        XCTAssertTrue(waitForFolder(work, expanded: false))
+        waitForDisappearance(of: sessionRow(Self.planningSessionID))
+    }
+
+    /// A newly proposed folder leaves every folder as the owner left it.
+    func testANewProposalLeavesFolderExpansionAlone() {
+        addFolderFixture()
+        app.launch()
+        let travel = folderHeader(Self.folderID)
+        let work = folderHeader(Self.workFolderID)
+        XCTAssertTrue(travel.waitForExistence(timeout: 10))
+        activate(travel)
+        XCTAssertTrue(waitForFolder(travel, expanded: true))
+        // Declining refreshes the index, and the next pass has a new proposal.
+        activate(element("sidebar.proposal.decline.\(Self.proposalID)"))
+        XCTAssertTrue(element("sidebar.proposal.\(Self.followUpProposalID)").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Add to “Travel”"].exists)
+        XCTAssertTrue(waitForFolder(travel, expanded: true))
+        XCTAssertTrue(waitForFolder(work, expanded: false))
+        XCTAssertTrue(sessionRow(Self.secondSessionID).exists)
+        XCTAssertFalse(sessionRow(Self.planningSessionID).exists)
     }
 
     func testNewFolderSheetCreatesAFolder() {
         addFolderFixture()
         app.launch()
         let newFolder = element("sidebar.new-folder")
-        XCTAssertTrue(newFolder.waitForExistence(timeout: 10))
+        XCTAssertTrue(folderHeader(Self.folderID).waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(newFolder))
         activate(newFolder)
         typeIntoFolderNameField("Errands")
-        XCTAssertTrue(element("sidebar.folder.\(Self.proposedFolderID)").waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Errands"].exists)
+        let created = folderHeader(Self.proposedFolderID)
+        XCTAssertTrue(reveal(created))
+        XCTAssertTrue(waitForFolder(created, label: "Errands", expanded: false))
     }
 
     #if os(macOS)
     func testRenamingAFolderThroughItsMenuUpdatesTheSection() {
         addFolderFixture()
         app.launch()
-        let header = element("sidebar.folder.\(Self.folderID)")
+        let header = folderHeader(Self.folderID)
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         header.rightClick()
         let rename = app.menuItems["Rename…"]
         XCTAssertTrue(rename.waitForExistence(timeout: 5))
         rename.click()
         typeIntoFolderNameField("Trips")
-        XCTAssertTrue(app.staticTexts["Trips"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Travel"].exists)
+        XCTAssertTrue(waitForFolder(header, label: "Trips", expanded: false))
+    }
+
+    /// The name sheet is a compact Mac dialog sized for its field and buttons,
+    /// not a navigation split squeezed into a minimum-size sheet.
+    func testFolderNameSheetIsSizedForItsContentOnMac() {
+        addFolderFixture()
+        app.launch()
+        let header = folderHeader(Self.folderID)
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        header.rightClick()
+        let rename = app.menuItems["Rename…"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        rename.click()
+        let field = element("folder.name")
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.exists)
+        attachFolderScreenshot("Rename folder sheet")
+        XCTAssertEqual(field.value as? String, "Travel")
+        XCTAssertGreaterThanOrEqual(sheet.frame.width, 380)
+        XCTAssertLessThanOrEqual(sheet.frame.height, 240)
+        XCTAssertGreaterThanOrEqual(field.frame.width, sheet.frame.width * 0.8)
+        let save = app.buttons["folder.save"]
+        let cancel = app.buttons["folder.cancel"]
+        XCTAssertTrue(save.isHittable)
+        XCTAssertTrue(cancel.isHittable)
+        XCTAssertGreaterThan(save.frame.minY, field.frame.maxY)
+        activate(cancel)
+        waitForDisappearance(of: field)
+    }
+
+    /// Adjacent folders sit one row apart in a shared section, rather than
+    /// each in a section of its own with a section gap between them. The list
+    /// rows holding them are measured, not the labels inside: the system sets
+    /// the row height and the label height, and both differ between macOS
+    /// releases, while rows of one section always touch.
+    func testAdjacentFoldersSitOneRowApartOnMac() {
+        addFolderFixture()
+        app.launch()
+        XCTAssertTrue(folderHeader(Self.folderID).waitForExistence(timeout: 10))
+        let travel = folderListRow(Self.folderID)
+        let work = folderListRow(Self.workFolderID)
+        XCTAssertTrue(travel.exists)
+        XCTAssertTrue(work.exists)
+        attachFolderScreenshot("Folder rows")
+        let geometry = "travel row \(travel.frame) work row \(work.frame)"
+        let measured = XCTAttachment(string: geometry)
+        measured.name = "Folder row geometry"
+        measured.lifetime = .keepAlways
+        add(measured)
+        XCTAssertGreaterThan(travel.frame.height, 0, geometry)
+        XCTAssertEqual(work.frame.minY, travel.frame.maxY, accuracy: 1, geometry)
+    }
+
+    /// The sidebar list row that holds a folder's header.
+    private func folderListRow(_ id: String) -> XCUIElement {
+        app.outlineRows
+            .containing(NSPredicate(format: "identifier == %@", "sidebar.folder.\(id)"))
+            .firstMatch
     }
     #endif
 
@@ -413,9 +620,55 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(proposal.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["New folder “Lisbon Trip”"].exists)
         activate(element("sidebar.proposal.accept.\(Self.proposalID)"))
-        XCTAssertTrue(element("sidebar.folder.\(Self.proposedFolderID)").waitForExistence(timeout: 10))
+        let created = folderHeader(Self.proposedFolderID)
+        XCTAssertTrue(created.waitForExistence(timeout: 10))
         waitForDisappearance(of: proposal)
-        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000123").exists)
+        XCTAssertTrue(waitForFolder(created, label: "Lisbon Trip", expanded: false))
+        activate(created)
+        XCTAssertTrue(reveal(sessionRow(Self.firstSessionID)))
+        XCTAssertTrue(waitForFolder(created, expanded: true))
+    }
+
+    /// Every conversation a proposal would file is listed on a line of its own.
+    func testASuggestedFolderListsEachConversationItWouldFile() {
+        addFolderFixture()
+        app.launch()
+        let proposal = element("sidebar.proposal.\(Self.proposalID)")
+        XCTAssertTrue(proposal.waitForExistence(timeout: 10))
+        attachFolderScreenshot("Suggested folder")
+        var previous: CGRect?
+        for title in Self.proposedTitles {
+            let line = proposal.staticTexts[title]
+            XCTAssertTrue(line.exists, "missing \(title)")
+            XCTAssertTrue(line.isHittable, "\(title) is not on screen")
+            if let previous {
+                XCTAssertGreaterThan(line.frame.minY, previous.minY, "\(title) shares a line")
+            }
+            previous = line.frame
+        }
+    }
+
+    /// The owner can change a suggested folder's name while accepting it; a
+    /// taken name is shown in the sheet, which stays open for another.
+    func testRenamingASuggestedFolderBeforeAcceptingIt() {
+        addFolderFixture()
+        app.launch()
+        let proposal = element("sidebar.proposal.\(Self.proposalID)")
+        XCTAssertTrue(proposal.waitForExistence(timeout: 10))
+        activate(element("sidebar.proposal.rename.\(Self.proposalID)"))
+        let field = element("folder.name")
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Lisbon Trip")
+        attachFolderScreenshot("Accept suggested folder sheet")
+        typeIntoFolderNameField("travel")
+        XCTAssertTrue(element("folder.error").waitForExistence(timeout: 5))
+        XCTAssertTrue(field.exists)
+        typeIntoFolderNameField("Portugal")
+        waitForDisappearance(of: field)
+        let created = folderHeader(Self.proposedFolderID)
+        XCTAssertTrue(created.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFolder(created, label: "Portugal", expanded: false))
+        waitForDisappearance(of: proposal)
     }
 
     func testDecliningASuggestedFolderRemovesIt() {
@@ -426,7 +679,7 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(element("sidebar.proposal.decline.\(Self.proposalID)"))
         waitForDisappearance(of: proposal)
         XCTAssertFalse(element("sidebar.folder.\(Self.proposedFolderID)").exists)
-        XCTAssertTrue(element("sidebar.session.00000000-0000-0000-0000-000000000123").exists)
+        XCTAssertTrue(reveal(sessionRow(Self.firstSessionID)))
     }
 
     private func activate(_ element: XCUIElement) {
@@ -687,7 +940,11 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(macOS)
         let scrolls = app.sheets.firstMatch.scrollViews
         let detailScroll = scrolls.element(boundBy: scrolls.count - 1)
-        for _ in 0..<6 where !repair.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        // SwiftUI may report an offscreen scroll child as hittable. Bring its
+        // complete frame into the viewport before exercising the action.
+        for _ in 0..<6 where !repair.isHittable || !detailScroll.frame.contains(repair.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
         #else
         scrollUntilVisible(repair)
         #endif
@@ -706,14 +963,18 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(apply)
         let saved = app.staticTexts["Identity change saved."]
         #if os(macOS)
-        for _ in 0..<6 where !saved.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        for _ in 0..<6 where !saved.isHittable || !detailScroll.frame.contains(saved.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
         #else
         scrollUntilVisible(saved)
         #endif
         XCTAssertTrue(saved.waitForExistence(timeout: 5))
         let undo = app.buttons["Preview undo"]
         #if os(macOS)
-        for _ in 0..<6 where !undo.isHittable { detailScroll.scroll(byDeltaX: 0, deltaY: -250) }
+        for _ in 0..<6 where !undo.isHittable || !detailScroll.frame.contains(undo.frame) {
+            detailScroll.scroll(byDeltaX: 0, deltaY: -250)
+        }
         #else
         scrollUntilVisible(undo)
         #endif
@@ -1110,9 +1371,11 @@ final class ConversationNavigationUITests: XCTestCase {
         let divider = app.splitters.firstMatch
         XCTAssertTrue(divider.waitForExistence(timeout: 5))
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
+        // macOS 27 ignores the touch-style press-drag on a divider; the mouse
+        // click-drag still moves it.
+        start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
         XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
-                      "Dragging the divider must widen the email list")
+                      "Dragging the divider must widen the email list\n\(app.debugDescription)")
         let resizedWidth = search.frame.width
         XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
         app.buttons["mode.chat"].click()
@@ -1269,7 +1532,27 @@ final class ConversationNavigationUITests: XCTestCase {
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
         XCTAssertTrue(destination.isHittable)
-        destination.tap()
+        // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
+        // menu's first item and leaves the menu open; a touch at the item's
+        // centre, like any other point on it, activates it. It also drops a
+        // touch that lands while the menu is still opening, so the item must
+        // stop moving first, and the menu must close for the tap to count.
+        for _ in 0..<3 {
+            waitForSettledFrame(of: destination)
+            destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            if destination.waitForNonExistence(timeout: 2) { return }
+        }
+        XCTFail("The menu stayed open after three taps on \(identifier)")
+    }
+
+    private func waitForSettledFrame(of element: XCUIElement) {
+        var frame = element.frame
+        for _ in 0..<20 {
+            Thread.sleep(forTimeInterval: 0.1)
+            let next = element.frame
+            if next == frame { return }
+            frame = next
+        }
     }
 
     private func revealSidebarIfNeeded(for row: XCUIElement) {

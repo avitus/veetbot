@@ -236,6 +236,8 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "WEB_FETCH_PROVIDER=disabled" in environment
     assert "WEB_SEARCH_PROVIDERS=" in environment
     assert "WEB_FETCH_PROVIDERS=" in environment
+    assert "JUDGMENT_PROVIDER=disabled" in environment
+    assert "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED=0" in environment
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
@@ -254,6 +256,7 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "TAVILY_API_KEY=" in template_lines
     assert "FIRECRAWL_API_KEY=" in template_lines
     assert "KEENABLE_API_KEY=" in template_lines
+    assert "TYPESAFE_API_KEY=" in template_lines
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
         for line in environment.splitlines()
@@ -475,6 +478,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "TAVILY_API_KEY",
         "FIRECRAWL_API_KEY",
         "KEENABLE_API_KEY",
+        "TYPESAFE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
         "GMAIL_READ_CREDENTIAL_FILE",
         "GMAIL_WRITE_CREDENTIAL_FILE",
@@ -502,6 +506,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "TAVILY_API_KEY",
         "FIRECRAWL_API_KEY",
         "KEENABLE_API_KEY",
+        "TYPESAFE_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
         "SANDBOX_MECHANISM",
         "AGENT_EXECUTION_SERVICE_SOCKET",
@@ -820,9 +825,9 @@ def test_ci_has_the_required_partitions() -> None:
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
         if name in {"apple", "apple-ios", "apple-signing-smoke", "apple-testflight"}:
-            assert job["macos"]["xcode"] == "26.6.0"
+            assert job["macos"]["xcode"] == "27.0.0"
             if name in {"apple", "apple-ios"}:
-                assert job["macos"] == {"xcode": "26.6.0"}
+                assert job["macos"] == {"xcode": "27.0.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = {
@@ -1236,7 +1241,7 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
     smoke_job = jobs["apple-signing-smoke"]
 
     assert smoke_job["macos"] == {
-        "xcode": "26.6.0",
+        "xcode": "27.0.0",
         "code_signing": ["veetbot-app-store"],
     }
     assert smoke_job["resource_class"] == "m4pro.medium"
@@ -1838,13 +1843,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 30 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 31 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(31)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(32)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1867,7 +1872,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 31):
+    for milestone in range(12, 32):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
@@ -2087,6 +2092,187 @@ def test_apple_ui_test_products_run_without_project_or_scheme_options() -> None:
         assert "-scheme" not in invocation
 
 
+def test_apple_ui_simulator_runs_collect_no_sysdiagnose() -> None:
+    """A simulator run must not end the job on CircleCI's output timeout.
+
+    Under Xcode 27 xcodebuild ended both hosted runs, one with a failure and one
+    with only a skipped case, with ``simctl diagnose --timeout=600``. It printed
+    nothing for those 600 seconds and collected nothing, so the step was ended
+    at ten minutes without output and the failing case was never named. The
+    result bundle already holds the failure, its screenshot and the element tree.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+
+    invocations = [
+        tail.split(";", 1)[0] for tail in recipe.split("xcodebuild test-without-building")[1:]
+    ]
+    assert invocations
+    for invocation in invocations:
+        assert "-collect-test-diagnostics never" in invocation
+
+
+def test_apple_ui_simulators_finish_booting_before_the_concurrent_runs() -> None:
+    """Both simulators finish booting before either run installs its runner.
+
+    Under Xcode 27.0 xcodebuild installs the UI-test runner about four seconds
+    into a boot it starts itself, without waiting for SpringBoard. One cold boot
+    has SpringBoard up by then; two at once delay it to about seven seconds, so
+    it starts after the install, holds the runner as still being updated, and
+    refuses the launch as Busy, "Application failed preflight checks". Separate
+    copies of the test products fail the same way, so the shared bundle is not
+    the cause. A simulator whose data migration failed ends ``bootstatus`` in
+    about a second, so that boot waits for SpringBoard's own startup state.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+
+    assert "boot_ios_simulator() {" in recipe
+    boot = recipe.split("boot_ios_simulator() {", 1)[1].split("run_ios_ui_tests() {", 1)[0]
+    assert 'xcrun simctl bootstatus "$$1" -b' in boot
+    assert "Finished" in boot
+    assert "notifyutil -g com.apple.springboard.finishedstartup" in boot
+
+    build = recipe.index("xcodebuild build-for-testing")
+    first_run = recipe.index('run_ios_ui_tests iphone "$$iphone_device_id" &')
+    for step in (
+        'boot_ios_simulator "$$iphone_device_id" &',
+        'boot_ios_simulator "$$ipad_device_id" &',
+        'wait "$$iphone_boot_pid"',
+        'wait "$$ipad_boot_pid"',
+    ):
+        assert build < recipe.index(step) < first_run, step
+
+
+@pytest.mark.parametrize(
+    ("boot_report", "startup_states", "expected_exit", "expected_polls"),
+    [
+        ("Finished", [], 0, 0),
+        ("Data Migration Failed", ["no-answer", "0", "4242"], 0, 3),
+        ("Data Migration Failed", ["0"], 1, 120),
+    ],
+    ids=["finished-boot", "springboard-starts-late", "springboard-never-starts"],
+)
+def test_apple_ui_boot_waits_until_springboard_has_started(
+    tmp_path: Path,
+    boot_report: str,
+    startup_states: list[str],
+    expected_exit: int,
+    expected_polls: int,
+) -> None:
+    """A boot that does not report Finished returns only once SpringBoard is up.
+
+    ``finishedstartup`` answers nothing or 0 until SpringBoard has started and
+    its process id afterwards. Returning on the first answer would start the
+    runs early and restore the refused launch, so the helper is run here
+    against a stand-in ``xcrun`` instead of being matched as text.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+    helper = re.search(r"^\tboot_ios_simulator\(\) \{.*?^\t\}; \\\n", recipe, re.M | re.S)
+    assert helper, "boot_ios_simulator is missing"
+    states = tmp_path / "states"
+    states.write_text("".join(f"{state}\n" for state in startup_states), encoding="utf-8")
+
+    result = _run_recipe_shell(
+        tmp_path,
+        f"{helper.group(0)}\tboot_ios_simulator DEVICE-1\n",
+        xcrun=(
+            'case "$2" in\n'
+            f"bootstatus) echo '{boot_report}' ;;\n"
+            "spawn)\n"
+            f'  polls=$(($(cat "{tmp_path}/polls" 2>/dev/null || echo 0) + 1))\n'
+            f'  echo "$polls" > "{tmp_path}/polls"\n'
+            f'  state=$(sed -n "${{polls}}p" "{states}")\n'
+            f'  test -n "$state" || state=$(tail -n 1 "{states}")\n'
+            '  test "$state" = no-answer ||\n'
+            '    echo "com.apple.springboard.finishedstartup $state" ;;\n'
+            "esac\n"
+        ),
+    )
+
+    assert result.returncode == expected_exit, result.stderr
+    polls = tmp_path / "polls"
+    assert (int(polls.read_text()) if polls.exists() else 0) == expected_polls
+
+
+def test_apple_ui_shuts_down_only_the_simulators_it_booted() -> None:
+    """xcodebuild shuts down a simulator it booted but not one it found booted.
+
+    Booting ahead of the runs would otherwise leave both simulators running
+    after the target, while a simulator the developer already had open must
+    stay open.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+
+    first_boot = recipe.index('boot_ios_simulator "$$iphone_device_id" &')
+    assert recipe.index("xcrun simctl list devices booted") < first_boot
+    finish = recipe.split("finish_apple_ui() {", 1)[1].split("};", 1)[0]
+    assert "for device_id in $$simulators_booted_here" in finish
+    assert 'xcrun simctl shutdown "$$device_id"' in finish
+    assert 'rm -rf -- "$$apple_ui_tmp"' in finish
+    assert "trap finish_apple_ui EXIT" in recipe
+
+
+@pytest.mark.parametrize(
+    ("already_booted", "expected"),
+    [
+        ([], ["IPHONE-1", "IPAD-1"]),
+        (["IPAD-1"], ["IPHONE-1"]),
+        (["IPHONE-1", "IPAD-1"], []),
+    ],
+    ids=["none-booted", "ipad-booted", "both-booted"],
+)
+def test_apple_ui_records_only_the_simulators_that_were_not_booted(
+    tmp_path: Path, already_booted: list[str], expected: list[str]
+) -> None:
+    """A simulator found booted is left out of the list the target shuts down."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+    record = re.search(
+        r'^\tfor device_id in "\$\$iphone_device_id" "\$\$ipad_device_id"; do \\\n.*?^\tdone; \\\n',
+        recipe,
+        re.M | re.S,
+    )
+    assert record, "the booted-simulator check is missing"
+    assert record.start() < recipe.index('boot_ios_simulator "$$iphone_device_id" &')
+    booted = "".join(f"    Simulator ({device_id}) (Booted)\n" for device_id in already_booted)
+
+    result = _run_recipe_shell(
+        tmp_path,
+        'iphone_device_id=IPHONE-1; ipad_device_id=IPAD-1; simulators_booted_here=""; \\\n'
+        f'{record.group(0)}\techo "$$simulators_booted_here"\n',
+        xcrun=f"test \"$*\" = 'simctl list devices booted' || exit 64\nprintf '%s' '{booted}'\n",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == expected
+
+
+def _run_recipe_shell(
+    tmp_path: Path, fragment: str, *, xcrun: str
+) -> subprocess.CompletedProcess[str]:
+    """Run part of a Makefile recipe as make would, with a stand-in ``xcrun``.
+
+    ``sleep`` is replaced as well, so a wait loop costs no wall-clock time.
+    """
+    stand_ins = tmp_path / "bin"
+    stand_ins.mkdir()
+    for name, body in (("xcrun", xcrun), ("sleep", "")):
+        (stand_ins / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+        (stand_ins / name).chmod(0o755)
+    script = f"apple_developer_dir=/unused; \\\n{fragment}".replace("$$", "$")
+    return subprocess.run(
+        ["/bin/sh", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env={"PATH": f"{stand_ins}:/usr/bin:/bin"},
+    )
+
+
 def _make_recipe(makefile: str, target: str) -> str:
     """Return one Makefile rule, from its target line to the next rule."""
     rule = re.search(rf"^{re.escape(target)}:.*?(?=^[A-Za-z][\w.-]*:)", makefile, re.M | re.S)
@@ -2162,6 +2348,52 @@ def test_apple_ui_cases_configure_the_fixture_before_one_launch() -> None:
                 r"app\.launch\(\)|launchFullEmailInbox\(\)|submitSlowChatMessage\(", body
             )
             assert launches, f"{name} never launches the app"
+
+
+def test_apple_ui_mac_cases_launch_without_restoring_saved_windows() -> None:
+    """Each Mac case opens a new main window instead of restoring saved ones.
+
+    XCTest ends the app without quitting it, so AppKit kept whatever window list
+    the previous launch saved. After the macOS 27 upgrade SwiftUI could not
+    restore the saved window, the launch saved an empty list, and every later
+    launch restored that empty list and opened no window.
+
+    The pair must come before the bare fixture flags. Launch arguments are read
+    as ``-key value`` pairs, so a flag ahead of it takes the key as its value and
+    leaves ``YES`` for AppKit to open as a document, which also opens no window.
+    """
+    source = (
+        ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+    setup = _swift_functions(source)["setUp"]
+
+    mac = re.search(r"#if os\(macOS\)\n(.*?)#endif", setup, re.S)
+    assert mac, "setUp has no macOS launch configuration"
+    assert 'app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]' in mac.group(1)
+    assert mac.start() < setup.index('app.launchArguments.append("--ui-testing-'), (
+        "a fixture flag precedes the state pair and would consume its key"
+    )
+
+
+def test_apple_ui_overflow_destinations_are_tapped_at_a_point() -> None:
+    """The overflow menu's items are tapped at their centre, not as elements.
+
+    On the iOS 27.0 iPad simulator XCUITest's element tap on the menu's first
+    item, Memory, is swallowed and the menu stays open, three runs of three,
+    while a tap at any of eleven points across that item, its centre included,
+    opens the browser. The item must still exist and be hittable first.
+    """
+    source = (
+        ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+    helper = _swift_functions(source)["openSidebarDestination"]
+
+    assert "XCTAssertTrue(destination.waitForExistence(timeout: 5))" in helper
+    assert "XCTAssertTrue(destination.isHittable)" in helper
+    assert (
+        "destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()" in helper
+    )
+    assert "destination.tap()" not in helper
 
 
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:

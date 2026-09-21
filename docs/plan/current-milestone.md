@@ -74,6 +74,19 @@ title: Current Milestone
   deterministic fallback, scoped routes behind a default-off flag, and the
   native sidebar. All twelve gates are bound to executable checks; hosted
   CI, review and delivery evidence remain open and the milestone is in progress.
+  ADR-0110 amended it on 2026-09-19 to admit the
+  [typed-judgment port](typed-judgment.md), the TypeSafe Jev adapter behind it
+  and an optional judgment matcher for add-to-folder proposals, all default
+  off. The port, the adapter and the matcher are implemented and all seventeen
+  gates are bound to executable checks; the matcher is off in every deployment.
+- **Milestone 30 — Advisory approval layer:** authorized on 2026-09-19 as a new
+  independent parallel workstream under ADR-0111, the restrictive-only half of
+  roadmap item B8; [policy-and-approvals.md](policy-and-approvals.md) declares
+  five further gates for an advisor port, a composite engine that can only
+  escalate an allowed web or browser network read, a judgment-backed advisor
+  that never denies, a deterministic recovery policy in the tool pipeline, and
+  observe before enforce. All five gates are bound to executable checks; the
+  layer is off in every deployment and the milestone is in progress.
 - **Milestone 31 — Email unsubscribe assistance:** requested by the owner and
   shaped on 2026-09-19 as a new independent parallel workstream under ADR-0112;
   [email-unsubscribe.md](email-unsubscribe.md) declares twenty gates for a
@@ -373,6 +386,7 @@ plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 
 - [Milestone 26 — Client modes and adaptive email experience](engineering-plan.md#milestone-26-client-modes-and-adaptive-email-experience)
 - [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
+- [Milestone 30 — Advisory approval layer](engineering-plan.md#milestone-30-advisory-approval-layer)
 - [Milestone 31 — Email unsubscribe assistance](engineering-plan.md#milestone-31-email-unsubscribe-assistance)
 
 ## Completion rule
@@ -489,6 +503,41 @@ model-assisted grouping with a deterministic lexical fallback; nine routes on
 the session scopes behind a default-off flag; and native sidebar folder
 sections with proposal review. The implementation landed on 2026-09-16 with
 every gate bound to an executable check; exact-head hosted CI, review and
+delivery evidence remain open. This independent workstream is in progress;
+the verified ceiling remains 12.
+
+ADR-0110 amended the milestone on 2026-09-19. [Typed judgment](typed-judgment.md)
+specifies a provider-neutral port for closed, typed questions with the TypeSafe
+Jev adapter as its first provider and declares four `gate.judgment.*` gates;
+[Chat thread folders](thread-folders.md) gains a thirteenth gate for an
+optional judgment matcher that decides which existing folder an unfiled
+conversation belongs in. Both are default off, the matcher only ever proposes,
+and any failure returns the existing grouping unchanged. The same ADR admits
+an offline, non-activating email-importance evaluation under Milestone 26. The
+port, the adapter, the fake and the selector landed on 2026-09-20 with the
+four `gate.judgment.*` gates bound to executable checks, and the judgment
+matcher landed the same day with `gate.folder.judgment_matching` bound to a
+composed end-to-end check. No judgment request is made in any deployment until
+the owner sets the selector, the key, and the matcher's knob.
+
+## Milestone 30: Advisory approval layer
+
+The owner authorized implementation on 2026-09-19 under ADR-0111, the policy
+ADR roadmap item B8 requires for its second half.
+[Policy and approvals](policy-and-approvals.md) specifies five further gates:
+the composite engine cannot lower a rank; the advisor runs on allow paths only
+and once per invocation; an unavailable advisor abstains; the advisor is blind
+to the rules and sees only redacted, delimited arguments; and the layer off or
+observing changes no decision. The first advisor uses the
+[typed-judgment port](typed-judgment.md) rather than the model gateway, a
+divergence ADR-0111 records, and the tool pipeline gains a deterministic
+recovery policy. General standing approval grants stay on the roadmap. The
+implementation landed on 2026-09-20 with every gate bound to an executable
+check. Observing is the environment flag
+`AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`, which moves no policy version;
+enforcing is the profile value `advisory.enabled`, which does and therefore
+unbinds the memory-formation release evidence until it is regenerated
+(ADR-0111, amended 2026-09-20). Threshold calibration, hosted CI, review and
 delivery evidence remain open. This independent workstream is in progress;
 the verified ceiling remains 12.
 

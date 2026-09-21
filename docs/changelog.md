@@ -4,6 +4,255 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-21 — Two simulator UI cases no longer depend on timing
+
+- On the hosted iOS 27.0 simulators `testEmailThreadFeedbackEditingAndExplicitSend`
+  and `testMemoryBrowserListsAndOpensDetail` each failed once and passed on a
+  rerun; the second failure, on the merge commit of #127, held back its
+  deployment until the rerun.
+- The email cases waited five seconds for a Gmail archive outcome that the
+  fixture and the client's one-second poll make take at least three. They now
+  allow twenty.
+- The sidebar menu helper tapped an item while the menu was still opening, and
+  the simulator dropped the touch. It now waits for the item to stop moving and
+  requires the menu to close, tapping again up to three times.
+
+## 2026-09-20 — The simulator UI lane boots both simulators before its runs
+
+- `make test-apple-ui-ios` could end before any case ran, with the UI-test
+  runner's launch refused as Busy. Xcode 27.0's xcodebuild installs the runner
+  early in a boot it starts itself, and two cold boots at once bring SpringBoard
+  up after that install.
+- The target now boots both simulators to completion, concurrently with
+  `xcrun simctl bootstatus -b`, before it starts the two concurrent runs, and
+  shuts down only the simulators it booted, as xcodebuild did. A boot that does
+  not report "Finished" waits until `com.apple.springboard.finishedstartup`
+  holds SpringBoard's process id.
+- Six of six pre-booted concurrent runs passed on the owner's Mac. The
+  diagnosis is in `clients/apple/README.md`.
+
+## 2026-09-20 — The hosted Apple lanes pass on the Xcode 27.0.0 image
+
+- The first hosted run on CircleCI's Xcode 27.0.0 image failed both Apple jobs.
+  That image runs macOS 26.6.2, not macOS 27, and carries the iOS 27.0
+  simulators, which the simulator lane now selects as the newest runtime. The
+  2026-09-19 entry's claim that hosted runs and the owner's Mac exercise the
+  same system behavior was wrong.
+- `make test-apple-ui-ios` was ended by CircleCI's ten-minute limit on a step
+  without output. Under Xcode 27, xcodebuild finished both simulator runs with
+  `simctl diagnose --timeout=600`, which printed nothing and then reported
+  "Timed out after 600.0 seconds" with no diagnostics collected. The simulator
+  runs now pass `-collect-test-diagnostics never`; the result bundle still
+  holds each failure, its screenshot and the element tree.
+- The adjacent-folders Mac case bounded the space between two folder labels at
+  12 points. That space is the system's row height less the system's label
+  height: 16 points on the hosted macOS 26.6.2 runner and 13.5 on macOS 27,
+  with the folders correctly sharing one section. The case now requires the two
+  list rows that hold the folders to touch, which fails by the 13-point section
+  gap when each folder sits in a section of its own and holds on both releases.
+- On the iOS 27.0 iPad simulator the Memory browser case failed because
+  XCUITest's element tap on the overflow menu's first item was swallowed and the
+  menu stayed open, three runs of three; the same case passes on the iOS 26.5
+  iPad simulator. Taps at eleven points across that item, its centre and the
+  point over the covered Hide Sidebar button included, all opened the browser,
+  so the item responds to touch. The cases now tap an overflow item at its
+  centre after requiring it to exist and be hittable.
+
+## 2026-09-20 — An offline email-importance replay compares production with a judgment arm
+
+- `agent eval email-importance` checks a private source bundle, runs the replay,
+  or compares two results. It is the ranking producer Milestone 26's quality
+  gate lacked, with the production assessor as one arm and the typed-judgment
+  port as the other. It is non-activating and can satisfy or waive no gate.
+- Each frozen snapshot is replayed in a fresh composition at its observation
+  time, with profile evidence cut at its declared date and no later message
+  imported. Both arms run the production `assess()`; the judgment arm replaces
+  only the model call.
+- Four arms separate what a judgment provider cannot represent, a future
+  expiry, from what it can. The report states its limits in its header, and
+  the decision rule is declared before any provider call.
+- Artifacts are label-only. A malformed bundle is refused without quoting it,
+  and the replay is a boundary of the email privacy gate.
+- The real run waits on the owner's frozen labelled corpus and source bundle.
+
+## 2026-09-20 — The advisory approval layer lands, off, observing before enforcing
+
+- `PolicyAdvisor` is a port that receives only the proposed action, and
+  `AdvisedPolicyEngine` consults it only on a plain allow for a web search, a
+  page fetch or a browser navigation. It can only escalate to an approval, never
+  denies as shipped, and abstains on a timeout, an error or a missing provider.
+- The first advisor asks the typed-judgment port three narrow questions about
+  redacted, escaped and delimited outbound arguments; any one signal escalates.
+  Its thresholds are untuned initial values.
+- The tool pipeline holds the deterministic engine as its recovery policy, so a
+  resumed or re-approved invocation never asks the advisor twice and an
+  escalation recorded before a crash survives it.
+- ADR-0111 is amended: observing is the environment flag
+  `AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`, which moves no policy version;
+  enforcing is the profile value `advisory.enabled`, which does, and so unbinds
+  the memory-formation release evidence until it is regenerated. The shipped
+  profile is byte-identical.
+- The five `gate.policy.advisory_*` gates are bound to executable checks.
+
+## 2026-09-20 — The judgment matcher proposes add-to-folder matches, default off
+
+- An optional matcher wraps the chat-folder grouper and asks the typed-judgment
+  port one closed question per unfiled conversation: which existing folder it
+  belongs in, or none. A match is accepted only above
+  `proposals.judgment_match_threshold` (0.8), and it only ever becomes an
+  add-to-folder proposal the owner accepts or declines.
+- A conversation with a hazardous title is not judged, hazardous snippets and
+  sample titles are omitted, option keys are opaque, and no identifier leaves
+  the process. Any provider error, deadline, or budget breach discards every
+  judgment and leaves the existing grouping unchanged; the first request runs
+  alone so an outage costs one call.
+- `folder.proposal.pass` always carries eight content-free `judgment_*` fields.
+- It needs `JUDGMENT_PROVIDER`, the key, and
+  `proposals.judgment_matching_enabled`, which ships false. The knob census is
+  179.
+
+## 2026-09-20 — The typed-judgment port and the TypeSafe adapter land, default off
+
+- `agent_core.ports.judgment.JudgmentProvider` answers closed, typed questions
+  over frozen domain types: the probability that a statement holds, a choice
+  among offered options, and a position on ordered levels.
+- The TypeSafe adapter speaks raw HTTP to one fixed endpoint, follows no
+  redirect, resolves its credential on every call, bounds request and response
+  size, retries only transient failures on the injected clock, and raises one
+  typed error whose message is a reason code. No failure carries a response
+  body, request state, or the key. Cost is computed locally at the pinned,
+  dated price.
+- `JUDGMENT_PROVIDER` selects it and defaults to `disabled`; a key alone
+  enables nothing, and a selector without a key warns once and never refuses
+  startup. No consumer exists yet, so no judgment request is made anywhere.
+- The four `gate.judgment.*` gates are bound to executable checks.
+
+## 2026-09-19 — ADR-0111 authorizes Milestone 30, the advisory approval layer
+
+- The owner authorized the restrictive-only half of roadmap item B8: an
+  optional advisor that can only turn an allowed action into an approval
+  request. ADR-0017 accepted the idea in July and the policy specification
+  designed it; nothing had been built. General standing approval grants stay
+  on the roadmap.
+- The advisor is a port, and its first implementation uses the typed-judgment
+  port rather than the model gateway, a divergence from the plan's sequencing
+  table that ADR-0111 records. It is consulted only on allowed web searches,
+  page fetches and browser navigations, where private data can leave inside a
+  query or a URL; it never denies, abstains on any failure, and observes
+  before it enforces.
+- The specification's claim that the layer needs no caller change is
+  corrected: the tool pipeline gains a deterministic recovery policy so a
+  resumed or re-approved action never asks the advisor twice.
+- Five `gate.policy.advisory_*` gates are registered pending at Milestone 30.
+  Nothing is implemented.
+
+## 2026-09-19 — ADR-0110 admits a typed-judgment port under Milestone 29
+
+- The owner authorized a provider-neutral port for closed, typed questions —
+  the probability that a statement holds, a choice among offered options, a
+  position on an ordered scale — with TypeSafe's Jev as its first provider.
+  [typed-judgment.md](plan/typed-judgment.md) is its design. It is not a
+  model-gateway provider, registers no model profile, and is off by default
+  behind `JUDGMENT_PROVIDER`.
+- Its first consumer is an optional judgment matcher for chat thread folders:
+  one closed choice per unfiled conversation over the existing folders and an
+  explicit no-match option. It only ever proposes, and any failure leaves the
+  existing grouping unchanged.
+- The same ADR admits an offline, non-activating email-importance evaluation
+  under Milestone 26 and records the owner's acceptance of the vendor's
+  published data terms, which state no deletion period.
+- Five gates are registered pending, four `gate.judgment.*` and
+  `gate.folder.judgment_matching`. Nothing is implemented.
+
+## 2026-09-19 — The Mac UI lane runs again on macOS 27
+
+- Every `make test-apple-ui-macos` case failed after the macOS 27 upgrade: the
+  application under test opened no main window, so every query timed out.
+  XCTest ends the application without quitting it, so AppKit kept the window
+  list each launch had saved. The first launch after the upgrade could not
+  restore the window saved before it, saved an empty list in its place, and
+  every later launch restored that empty list and opened nothing. Mac cases now
+  launch with `-ApplePersistenceIgnoreState YES`.
+- That pair comes before the `--ui-testing-*` flags. AppKit reads launch
+  arguments as `-key value` pairs, so a flag ahead of it takes the key as its
+  value and AppKit opens the leftover `YES` as a document, which also opens no
+  window. The same pairing left the application windowless on 2026-09-15.
+- macOS 27 floats a Writing Tools affordance beside the focused composer, over
+  controls the cases click and hit-test. The composer turns Writing Tools off
+  under the UI-testing fixture only.
+- macOS 27 also reports SwiftUI message text as disabled, and reports a scroll
+  child clipped out of view as hittable. The mixed-tool summary and People
+  identity cases check frames instead of hittability.
+- macOS ignores the touch-style press-and-drag on a divider; the mouse
+  click-and-drag still moves it. The email sidebar case uses the mouse gesture.
+- CircleCI's four Apple jobs move from Xcode 26.6.0 to 27.0.0, so hosted runs
+  and the owner's Mac exercise the same system behavior.
+
+## 2026-09-19 — Every call-result webhook leaves a trace
+
+- Nothing recorded whether Bland's post-call webhook ever arrived or passed its
+  signature check. The proxy route deliberately keeps no access log, the
+  listener runs without one, and a rejection returned 401 silently. Every
+  result so far arrived through the worker's polling, so the gap was invisible.
+- Each delivery now writes one content-free warning: `calling.callback_accepted`,
+  or `calling.callback_rejected` with a fixed reason. A missing or malformed
+  signature, a mismatch, an invalid payload, an oversize body, a timeout and a
+  full queue each have their own reason. No body, signature or call identifier
+  is logged.
+
+## 2026-09-19 — Chat-created schedules no longer pause on their first failure
+
+- The two recurring briefings failed six times between 2026-09-01 and
+  2026-09-17, for unrelated reasons that were each repaired, and every failure
+  paused its schedule until it was resumed by hand, up to seven days later.
+  `schedule.create` had pinned the one-time-reminder value of one allowed
+  failure onto recurring schedules. A schedule created in chat now tolerates
+  one failed occurrence and pauses on the second consecutive failure.
+- Chat-created schedules had also pinned a USD 1 budget with no final-synthesis
+  reserve, the configuration that failed the 2026-09-01 briefing. They now get
+  USD 5 with a reserve of 2 steps, 2 model calls, and USD 1, so a research run
+  near its budget writes its answer instead of failing.
+- The cause of three failures was lost when their conversations were deleted.
+  `schedule.run_accounted` now keeps the failed run's reason, error class, and
+  sanitized provider code, without any run content.
+- Existing schedules keep their pinned values until an API client revises
+  them (ADR-0109). Both briefings were revised to these values through the API
+  on 2026-09-19. Each still carries one failure from its last pause, which its
+  next completed run clears.
+
+## 2026-09-19 — Chat folders stay as the owner leaves them, one open at a time
+
+- Folders no longer spring open when Veetbot proposes a new one. Which folders
+  are open is remembered on each device and changes only when the owner opens
+  or closes one; a proposal, a refresh, or a new folder leaves it alone.
+- Solo mode, on by default, keeps one folder open at a time: opening a folder
+  closes the one that was open. A right-click on a folder on the Mac, or a long
+  press on iPhone and iPad, turns it off. Clicking a folder's row opens or
+  closes it.
+- A suggested folder lists each conversation it would file on a line of its
+  own, so the proposal can be read on an iPhone, and a new-folder suggestion
+  has a Rename… button that accepts it under the owner's name. A name that is
+  already taken is shown in the sheet and the suggestion stays open; accepting
+  without renaming now reports a taken name instead of doing nothing.
+- On the Mac, the folder name sheet is a compact dialog rather than a split
+  view with a cramped field, and folders are spaced like conversations rather
+  than each sitting in a section of its own.
+
+## 2026-09-19 — Willow uses the owner's introduction and can leave a voicemail
+
+- Calls open the way the owner chose: "Hi, this is Willow, Andy's assistant."
+  Neither direction announces AI identity or transcription unprompted. Asked
+  directly, Willow says truthfully that she is an AI assistant and that the call
+  is transcribed for Andy. The profile generator reproduces the owner's live
+  inbound prompt, so the configuration readback can match again (ADR-0108).
+- An approved outbound call can leave a voicemail. `start_call` takes an
+  optional `voicemail_message` that the owner approves word for word with the
+  brief. Without one, the call hangs up at voicemail, as before, but now by
+  explicit instruction. The SMS variants stay refused.
+- Outbound calls wait for the other side to speak first, so Willow no longer
+  talks over a greeting or iPhone call screening. The first no-answer test was
+  cut off that way.
+
 ## 2026-09-18 — One malformed model response no longer fails an Email refresh
 
 - A refresh at 22:48 UTC on 2026-09-17 failed as an internal error after one

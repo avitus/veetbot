@@ -201,13 +201,20 @@ into the cached row on every reconciliation and the server's value wins, nil
 included, so a move made on another device lands on the next poll. A server
 whose index carries the `folder_id` key is asked for its folders and open
 proposals with the history; both are held in memory only. The sidebar then
-renders suggested folders with accept and decline, one collapsible section per
-folder whose context menu (a right-click on Mac, a long press on iPhone and
-iPad) renames or deletes it, the unfiled history, and a new-folder control,
-and every row gains a move menu listing the folders. Create and
-rename use a sheet whose refused or duplicate name is shown inline, never in
-the global error banner; deleting a folder uses the same confirmation idiom as
-deleting a conversation and says that the conversations return to history.
+renders suggested folders, each listing the conversations it would file one
+per line, with accept, decline, and for a new folder a rename that accepts it
+under the owner's name; then the folders in one section, each a row that
+expands to its conversations and whose context menu (a right-click on Mac, a
+long press on iPhone and iPad) renames or deletes it or switches solo mode;
+then the unfiled history and a new-folder control; and every row gains a move
+menu listing the folders. Which folders are expanded is remembered on the
+device and changed only by the owner's own toggles, never by a proposal or a
+refresh. In solo mode, the default, at most one folder is open and opening one
+closes the other; without it every folder starts open. Create, rename, and
+accepting under a new name use a sheet whose refused or duplicate name is
+shown inline, never in the global error banner; deleting a folder uses the
+same confirmation idiom as deleting a conversation and says that the
+conversations return to history.
 Unfiling sends an explicit null, so an omitted field can never unfile a
 conversation. Against a server whose index lacks the key, or that answers 404
 or 405 on the folder list, the client makes no further folder request, keeps

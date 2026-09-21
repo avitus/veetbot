@@ -5,6 +5,7 @@ from __future__ import annotations
 from agent_core.domain.agents import Principal
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.policies import (
+    POLICY_DECISION_RANK,
     ActionKind,
     IdempotencyClass,
     LoadedRuleset,
@@ -33,12 +34,7 @@ AUTHORIZING_ORIGINS = frozenset(
     }
 )
 
-_RANK = {
-    PolicyDecisionType.ALLOW: PolicyDecisionRank.ALLOW,
-    PolicyDecisionType.ALLOW_WITH_MODIFICATIONS: PolicyDecisionRank.ALLOW_WITH_MODIFICATIONS,
-    PolicyDecisionType.REQUIRE_APPROVAL: PolicyDecisionRank.REQUIRE_APPROVAL,
-    PolicyDecisionType.DENY: PolicyDecisionRank.DENY,
-}
+_RANK = POLICY_DECISION_RANK
 
 
 def combine_decision_types(

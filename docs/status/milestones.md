@@ -222,8 +222,7 @@ Chat and announced to every device. Reaching that point took two fixes: ADR-0105
 tool-definition budget and the missing `call_finished` lock-screen alert. Call
 results so far arrived through reconciliation, not a proven signed webhook.
 
-- [ ] Read back the applied inbound provider configuration against the reviewed revision
-- [ ] Verify provider-side admission controls and the real signed-byte convention; receipts so far arrived through reconciliation
+- [ ] Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
 - [ ] Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
 - [ ] Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
 
@@ -243,15 +242,33 @@ functionality or release. Production delivery still follows exact-head CI/review
 
 ### Milestone 29 — Chat thread folders
 
-Twelve gates; independent workstream under ADR-0102. Flat, single-parent
-folders over chat conversations as server-owned state; a maintenance pass
-proposes groupings the owner accepts or declines; nothing files a conversation
-without the owner's acceptance. The schema, both store adapters, the manual
-operations, the proposal lifecycle, the grounded grouping with its lexical
-fallback, the routes behind the flag and the native sidebar are implemented
-with every gate bound to an executable check.
+Seventeen gates; independent workstream under ADR-0102, amended by ADR-0110.
+Flat, single-parent folders over chat conversations as server-owned state; a
+maintenance pass proposes groupings the owner accepts or declines; nothing
+files a conversation without the owner's acceptance. The schema, both store
+adapters, the manual operations, the proposal lifecycle, the grounded grouping
+with its lexical fallback, the routes behind the flag and the native sidebar
+are implemented with their twelve gates bound to executable checks. ADR-0110
+admitted the typed-judgment port and an optional judgment matcher on
+2026-09-19. The port, the TypeSafe adapter, the fake, the default-off selector
+and the judgment matcher with its two knobs are implemented, and all seventeen
+gates are bound to executable checks. The matcher is off in every deployment.
 
 - [ ] Exact-head hosted CI and explicitly authorized review evidence
+
+### Milestone 30 — Advisory approval layer
+
+Five gates; independent workstream under ADR-0111, the restrictive-only half
+of roadmap item B8. An optional advisor behind a port can only escalate an
+allowed web search, page fetch or browser navigation to an approval; it never
+denies, abstains on any failure, and is consulted once per invocation. The
+port, the composite engine, the judgment-backed advisor and the pipeline's
+recovery policy are implemented with all five gates bound to executable
+checks. Observing is an environment flag that moves no policy version;
+enforcing is the profile value and does. The layer is off in every deployment.
+
+- [ ] Calibrate the advisor's thresholds while observing, then decide whether to enforce
+- [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
 ### Milestone 31 — Email unsubscribe assistance
 

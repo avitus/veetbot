@@ -302,6 +302,39 @@ positive integer percentages summing to 100. The legacy singular selectors
 remain valid for one-provider deployments, and both capabilities stay disabled
 when neither form enables them.
 
+To enable the typed-judgment provider (ADR-0110), add its selector and key to
+that same root-owned file:
+
+```text
+JUDGMENT_PROVIDER=typesafe
+TYPESAFE_API_KEY=<production TypeSafe key>
+```
+
+The selector is the only switch: the key alone enables nothing, and the
+selector alone enables no consumer. Each consumer has its own default-off knob
+in its checked-in profile, such as `proposals.judgment_matching_enabled` in
+`folders/profiles.yaml`. With the selector set and the key missing, the
+services still start, log one `judgment_credential_missing` warning that names
+the two variables, and every judgment call fails without dialing so each
+consumer takes its deterministic fallback. Keep both variables out of
+`/etc/veetbot/veetbot-schedule.env` and `/etc/veetbot/veetbot-notify.env`: those
+workers refuse to start when their environment holds a provider key. The
+adapter dials one fixed endpoint, `api.typesafe.ai` on port 443, and needs no
+egress-policy entry.
+
+The policy advisory layer (ADR-0111) has two switches, and they are not
+equivalent. `AGENT_POLICY_ADVISORY_OBSERVE_ENABLED=1` in that same file consults
+the advisor on allowed web searches, page fetches and browser navigations and
+records what it would have escalated; no decision changes and `policy_version`
+does not move. Enforcing is the policy-profile value `advisory.enabled: true`,
+set in an operator overlay at `policy/default.yaml` under `AGENT_CONFIG_DIR`.
+That changes `policy_version`: a pending approval whose re-evaluation is not an
+allow is voided, and the bundled memory-formation, People and email-People
+release evidence no longer matches the running composition, so
+provider-assisted formation falls back to deterministic until the evidence is
+regenerated on the new version. Observe first, read the
+`agent.policy.advisory.*` metrics, and enforce only when no approval is pending.
+
 Run `docker compose ls` before the first automated release. If an existing
 Veetbot PostgreSQL container was created under a Compose project name other than
 `veetbot`, set `COMPOSE_PROJECT_NAME` to that exact existing name. Changing it

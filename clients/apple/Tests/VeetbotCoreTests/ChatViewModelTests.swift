@@ -1917,6 +1917,124 @@ import UserNotifications
     }
 
     @Test
+    func testAcceptingUnderANewNameSendsItAndFilesTheConversations() async throws {
+        let recorder = WebsiteLoginRequestRecorder()
+        let state = FolderProposalFixtureState()
+        let model = try configuredModel { request in
+            recorder.record(request)
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                let loose = sessionJSON(
+                    Self.looseSessionFixtureID, title: "Loose",
+                    folderID: state.accepted ? Self.otherFolderFixtureID : nil
+                )
+                let filed = sessionJSON(Self.filedSessionFixtureID, title: "Filed", folderID: Self.folderFixtureID)
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(filed),\(loose)],\"next_cursor\":null}")
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                let items = state.resolved ? "" : proposalJSON(state: "proposed")
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(items)],\"next_cursor\":null}")
+            case ("POST", "/v1/folders/proposals/\(Self.proposalFixtureID)/accept"):
+                state.accepted = true
+                state.resolved = true
+                return try response(
+                    for: request, statusCode: 200,
+                    body: proposalJSON(state: "accepted", resultingFolderID: Self.otherFolderFixtureID)
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let proposalID = try #require(UUID(uuidString: Self.proposalFixtureID))
+        #expect(model.suggestedFolders.first?.proposedName == "Lisbon Trip")
+        let accepted = await model.acceptFolderProposal(proposalID, name: "  Portugal 2027 ")
+        #expect(accepted)
+        let sent = recorder.matching(method: "POST", path: "/v1/folders/proposals/\(Self.proposalFixtureID)/accept")
+        #expect(sent.count == 1)
+        let body = try #require(sent.first?.body)
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(object["name"] as? String == "Portugal 2027")
+        #expect(model.folderProposals.isEmpty)
+        let looseID = try #require(UUID(uuidString: Self.looseSessionFixtureID))
+        #expect(model.history.first { $0.sessionID == looseID }?.folderID?.uuidString == Self.otherFolderFixtureID.uppercased())
+        #expect(model.folderEditorError == nil)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testATakenNameKeepsTheProposalOpenWithTheInlineError() async throws {
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(proposalJSON(state: "proposed"))],\"next_cursor\":null}")
+            case ("POST", "/v1/folders/proposals/\(Self.proposalFixtureID)/accept"):
+                return try response(
+                    for: request, statusCode: 409,
+                    body: #"{"error":{"code":"conflict","message":"folder name 'Work' is taken","details":{"reason":"folder_name_taken"},"request_id":"r"}}"#
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let proposalID = try #require(UUID(uuidString: Self.proposalFixtureID))
+        let accepted = await model.acceptFolderProposal(proposalID, name: "Work")
+        #expect(!accepted)
+        #expect(model.folderEditorError == "folder name 'Work' is taken")
+        #expect(model.suggestedFolders.map(\.id) == [proposalID])
+        #expect(model.pendingFolderProposalIDs.isEmpty)
+        #expect(model.errorMessage == nil)
+
+        // Without a typed name there is no sheet to hold the error, so a
+        // taken name is reported rather than mistaken for a resolved proposal.
+        model.clearFolderEditorError()
+        await model.acceptFolderProposal(proposalID)
+        #expect(model.errorMessage == "folder name 'Work' is taken")
+        #expect(model.folderEditorError == nil)
+        #expect(model.suggestedFolders.map(\.id) == [proposalID])
+    }
+
+    @Test
+    func testAProposalResolvedElsewhereClosesTheNameSheet() async throws {
+        let state = FolderProposalFixtureState()
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                let items = state.resolved ? "" : proposalJSON(state: "proposed")
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(items)],\"next_cursor\":null}")
+            case ("POST", "/v1/folders/proposals/\(Self.proposalFixtureID)/accept"):
+                state.resolved = true
+                return try response(
+                    for: request, statusCode: 409,
+                    body: #"{"error":{"code":"conflict","message":"proposal is resolved","details":{"reason":"proposal_resolved"},"request_id":"r"}}"#
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let proposalID = try #require(UUID(uuidString: Self.proposalFixtureID))
+        let finished = await model.acceptFolderProposal(proposalID, name: "Portugal")
+        #expect(finished)
+        #expect(model.folderProposals.isEmpty)
+        #expect(model.folderEditorError == nil)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
     func testForgettingCredentialsClearsFolderState() async throws {
         let model = try configuredModel { request in
             switch request.url?.path {

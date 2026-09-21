@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from decimal import Decimal
 from uuid import UUID
 
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.judgment import FakeJudgmentProvider
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.config import ConfigurationError, load_config_document
 from agent_core.domain.events import NewEvent, ProcessEvent
@@ -19,8 +21,17 @@ from agent_core.domain.folders import (
     FolderWithdrawalReason,
     ThreadFolder,
 )
+from agent_core.domain.judgment import (
+    ChoiceAnswer,
+    ChoiceQuestion,
+    JudgmentAnswer,
+    JudgmentRequest,
+    JudgmentResult,
+)
+from agent_core.domain.messages import ModelUsage
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.folders.clustering import LexicalGrouper
+from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles, FolderProposalProfile
 from agent_core.folders.proposals import FolderProposalPass
 from tests.contract.support import (
@@ -127,11 +138,22 @@ def test_shipped_document_matches_the_defaults() -> None:
     assert FolderProfiles.from_document(document) == FolderProfiles()
     assert FolderProfiles().proposals.threshold == 4
     assert FolderProfiles().proposals.max_open == 3
+    # The judgment matcher ships off, with a floor no two options can both clear.
+    assert FolderProfiles().proposals.judgment_matching_enabled is False
+    assert FolderProfiles().proposals.judgment_match_threshold == 0.8
+    shipped = document["proposals"]
+    assert shipped["judgment_matching_enabled"] is False
+    assert shipped["judgment_match_threshold"] == 0.8
 
 
 def test_invalid_document_names_the_file() -> None:
     with pytest.raises(ConfigurationError, match=re.escape("folders/profiles.yaml")):
         FolderProfiles.from_document({"schema_version": 1, "proposals": {"threshold": 1}})
+    for floor in (0.5, 1.01):
+        with pytest.raises(ConfigurationError, match="judgment_match_threshold"):
+            FolderProfiles.from_document(
+                {"schema_version": 1, "proposals": {"judgment_match_threshold": floor}}
+            )
     with pytest.raises(ConfigurationError, match="max_members"):
         FolderProfiles.from_document(
             {"schema_version": 1, "proposals": {"threshold": 6, "max_members": 5}}
@@ -294,3 +316,95 @@ async def test_a_disabled_profile_runs_nothing() -> None:
         await _session(factory, number, title)
     assert await _pass(clock, factory, enabled=False).run_once() == 0
     assert await _events(factory) == []
+
+
+_JUDGMENT_DEFAULTS = {
+    "judgment_provider": "none",
+    "judgment_model": "none",
+    "judgment_requests": 0,
+    "judgment_matched": 0,
+    "judgment_input_tokens": 0,
+    "judgment_cost": "0",
+    "judgment_fallback_used": False,
+    "judgment_error_class": None,
+}
+
+
+def _judgment_fields(event: ProcessEvent) -> dict[str, object]:
+    return {key: value for key, value in event.payload.items() if key.startswith("judgment_")}
+
+
+async def test_the_pass_audit_always_carries_the_judgment_fields() -> None:
+    clock, factory = await _stack()
+    for number, title in enumerate(LISBON_TITLES[:4]):
+        await _session(factory, number, title)
+    assert await _pass(clock, factory).run_once() == 1
+
+    pass_event = [e for e in await _events(factory) if e.event_type == "folder.proposal.pass"][-1]
+    assert _judgment_fields(pass_event) == _JUDGMENT_DEFAULTS
+
+
+async def test_a_judgment_match_is_proposed_and_audited_without_content() -> None:
+    clock, factory = await _stack()
+    filed = await _session(factory, 0, "Rebuilding the front forks")
+    carburetor = await _session(factory, 1, "Fixing the carburetor")
+    garage = ThreadFolder(
+        id=UUID(int=7002),
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        name="Motorcycle restoration",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    async with factory() as uow:
+        await uow.folders.create_folder(garage)
+        await uow.folders.set_membership(filed, principal(), folder_id=garage.id, added_at=NOW)
+
+    def respond(request: JudgmentRequest) -> JudgmentResult:
+        answers: dict[str, JudgmentAnswer] = {}
+        for key, question in request.questions.items():
+            assert isinstance(question, ChoiceQuestion)
+            keys = [option.key for option in question.options]
+            answers[key] = ChoiceAnswer(
+                choice="f0",
+                probabilities={k: 0.94 if k == "f0" else 0.06 / (len(keys) - 1) for k in keys},
+                confidence=0.9,
+            )
+        return JudgmentResult(
+            answers=answers,
+            usage=ModelUsage(
+                input_tokens=350, cost=Decimal("0.0000147"), provider="fake", model="scripted"
+            ),
+        )
+
+    judge = FakeJudgmentProvider(respond)
+    pass_ = FolderProposalPass(
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(),
+        principal=principal(),
+        profile=FolderProposalProfile(),
+        grouper=JudgmentFolderMatcher(judge=judge, inner=LexicalGrouper(), match_threshold=0.8),
+    )
+
+    assert await pass_.run_once() == 1
+    (proposal,) = await _open(factory)
+    assert proposal.kind is FolderProposalKind.ADD_TO_FOLDER
+    assert proposal.target_folder_id == garage.id
+    assert proposal.member_session_ids == (carburetor,)
+    assert proposal.derivation.value == "model"
+    events = await _events(factory)
+    for event in events:
+        assert "carburetor" not in repr(event.payload).lower()
+        assert "motorcycle" not in repr(event.payload).lower()
+    pass_event = [e for e in events if e.event_type == "folder.proposal.pass"][-1]
+    assert _judgment_fields(pass_event) == {
+        "judgment_provider": "fake",
+        "judgment_model": "scripted",
+        "judgment_requests": 1,
+        "judgment_matched": 1,
+        "judgment_input_tokens": 350,
+        "judgment_cost": "0.0000147",
+        "judgment_fallback_used": False,
+        "judgment_error_class": None,
+    }
