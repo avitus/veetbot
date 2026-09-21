@@ -511,6 +511,13 @@ costs one extra request per poll and nothing else. Native behavior is
 verified by the Swift testing lanes under ADR-0049, the same way the persona
 editor's is.
 
+Scheduled sessions are not chat conversations, so they never enter a folder
+and their rows carry no move menu. The sidebar groups them by schedule in a
+Scheduled section between the folders and the unfiled history, a scheduler
+presentation designed in [scheduling.md](scheduling.md) (ADR-0113). "Flat
+history" above means no folder sections or controls; schedule groups derive
+from session metadata alone and do not depend on the folder flag.
+
 ## Events, telemetry, and privacy
 
 - `folder.created`, `folder.renamed`, `folder.deleted`,

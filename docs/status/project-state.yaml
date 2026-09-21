@@ -21,6 +21,8 @@ project:
   # ADR-0109 records the owner's non-milestone repair to chat-created schedules:
   # pause on the second consecutive failure, a USD 5 budget with a synthesis
   # reserve, and a failure classification on the accounting event.
+  # ADR-0113 records the owner's non-milestone native extension on 2026-09-21:
+  # the sidebar groups scheduled sessions by schedule; folders stay chat-only.
   # ADR-0110 amends Milestone 29 on 2026-09-19: the typed-judgment port, the
   # TypeSafe Jev adapter and judgment folder matching, all default off, plus
   # an offline non-activating email-importance evaluation under Milestone 26.

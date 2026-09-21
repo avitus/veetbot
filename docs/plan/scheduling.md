@@ -588,6 +588,41 @@ and in-process iOS navigation tests are the acceptance evidence under
 ADR-0049's native verification contract. The current/history extension adds no
 route or scope and does not alter the historical milestone gate counts.
 
+## Scheduled conversations in the native sidebar
+
+Every occurrence runs in a session of its own, so a recurring schedule adds a
+conversation to the sidebar on each firing. Folders never hold these sessions
+(thread-folders.md keeps folders to chat conversations), so the native sidebar
+groups them by schedule instead, as a presentation of data the session index
+already carries (ADR-0113).
+
+The history cache records each session's `schedule_id` metadata beside its
+title; the server's value wins on every reconciliation, and a value that is
+not a UUID string is treated as absent. A schedule with two or more cached
+sessions renders as one collapsible group in a Scheduled section, which
+follows the folders and precedes the unfiled history. A schedule with a
+single cached session stays in the history, where it would have been. The
+group's label is the title of its most recent session, since the materializer
+titles each session with the pinned revision's title; its count is the number
+of cached sessions; and its rows keep the history's activity order, so the
+age line distinguishes one firing from the next. Groups order by their most
+recent session's activity, newest first, with the schedule identifier as the
+tie-break.
+
+Groups are collapsed until the owner expands one. Which groups are expanded
+is device state, remembered across launches and never sent to the server, and
+a new firing never reopens a closed group. Grouping depends on no folder
+route or flag: it appears whether or not the server offers folders, and a
+server without scheduling simply sends no `schedule_id`. A session that
+carries `schedule_id` offers no move-to-folder control anywhere in the
+sidebar, because the move route refuses it with `session_not_chat`.
+
+The grouping adds no route, scope, event, or server state; the schedule
+record is not fetched to label a group, so a removed or inaccessible schedule
+still groups its remaining sessions. Swift model and view-model tests are the
+acceptance evidence under ADR-0049's native verification contract, and the
+extension does not alter the historical milestone gate counts.
+
 ## Events and audit
 
 Schedule lifecycle events are process events because a schedule exists outside
