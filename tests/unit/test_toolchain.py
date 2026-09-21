@@ -1089,14 +1089,12 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
     skip_steps = commands["skip_verified_tree"]["steps"]
     record_steps = commands["record_verified_tree"]["steps"]
     assert "git rev-parse 'HEAD^{tree}'" in skip_steps[0]["run"]["command"]
-    key = "verified-v1-<< parameters.job >>-{{ checksum \"/tmp/veetbot-verified/tree\" }}"
+    key = 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
     assert skip_steps[1] == {"restore_cache": {"keys": [key]}}
     skip_command = skip_steps[2]["run"]["command"]
     assert '"<< pipeline.git.branch >>" == main' in skip_command
     assert "circleci-agent step halt" in skip_command
-    assert record_steps[-1] == {
-        "save_cache": {"key": key, "paths": ["/tmp/veetbot-verified"]}
-    }
+    assert record_steps[-1] == {"save_cache": {"key": key, "paths": ["/tmp/veetbot-verified"]}}
 
     # Every verification partition consults the record before its tests and
     # writes it only after its last test passed. The public site still builds
@@ -1115,9 +1113,7 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
         assert names.index("checkout") < skip_index
         run_indexes = [index for index, step in enumerate(names) if step == "run"]
         test_indexes = [
-            index
-            for index in run_indexes
-            if "make test-" in job["steps"][index]["run"]["command"]
+            index for index in run_indexes if "make test-" in job["steps"][index]["run"]["command"]
         ]
         assert test_indexes and skip_index < min(test_indexes)
         assert record_index > max(run_indexes)
