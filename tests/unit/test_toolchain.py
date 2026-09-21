@@ -2112,6 +2112,57 @@ def test_apple_ui_simulator_runs_collect_no_sysdiagnose() -> None:
         assert "-collect-test-diagnostics never" in invocation
 
 
+def test_apple_ui_simulators_finish_booting_before_the_concurrent_runs() -> None:
+    """Both simulators finish booting before either run installs its runner.
+
+    Under Xcode 27.0 xcodebuild installs the UI-test runner about four seconds
+    into a boot it starts itself, without waiting for SpringBoard. One cold boot
+    has SpringBoard up by then; two at once delay it to about seven seconds, so
+    it starts after the install, holds the runner as still being updated, and
+    refuses the launch as Busy, "Application failed preflight checks". Separate
+    copies of the test products fail the same way, so the shared bundle is not
+    the cause. A simulator whose data migration failed ends ``bootstatus`` in
+    about a second, so that boot waits for SpringBoard's own startup state.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+
+    assert "boot_ios_simulator() {" in recipe
+    boot = recipe.split("boot_ios_simulator() {", 1)[1].split("run_ios_ui_tests() {", 1)[0]
+    assert 'xcrun simctl bootstatus "$$1" -b' in boot
+    assert "Finished" in boot
+    assert "notifyutil -g com.apple.springboard.finishedstartup" in boot
+
+    build = recipe.index("xcodebuild build-for-testing")
+    first_run = recipe.index('run_ios_ui_tests iphone "$$iphone_device_id" &')
+    for step in (
+        'boot_ios_simulator "$$iphone_device_id" &',
+        'boot_ios_simulator "$$ipad_device_id" &',
+        'wait "$$iphone_boot_pid"',
+        'wait "$$ipad_boot_pid"',
+    ):
+        assert build < recipe.index(step) < first_run, step
+
+
+def test_apple_ui_shuts_down_only_the_simulators_it_booted() -> None:
+    """xcodebuild shuts down a simulator it booted but not one it found booted.
+
+    Booting ahead of the runs would otherwise leave both simulators running
+    after the target, while a simulator the developer already had open must
+    stay open.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+
+    first_boot = recipe.index('boot_ios_simulator "$$iphone_device_id" &')
+    assert recipe.index("xcrun simctl list devices booted") < first_boot
+    finish = recipe.split("finish_apple_ui() {", 1)[1].split("};", 1)[0]
+    assert "for device_id in $$simulators_booted_here" in finish
+    assert 'xcrun simctl shutdown "$$device_id"' in finish
+    assert 'rm -rf -- "$$apple_ui_tmp"' in finish
+    assert "trap finish_apple_ui EXIT" in recipe
+
+
 def _make_recipe(makefile: str, target: str) -> str:
     """Return one Makefile rule, from its target line to the next rule."""
     rule = re.search(rf"^{re.escape(target)}:.*?(?=^[A-Za-z][\w.-]*:)", makefile, re.M | re.S)

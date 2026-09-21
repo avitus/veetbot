@@ -131,6 +131,26 @@ nothing, times out after its 600 seconds, and yields no diagnostics, while
 CircleCI ends a step after ten minutes without output, so the job died before
 xcodebuild could name the failing case. The result bundle still holds each
 failure, its screenshot, and the element tree.
+
+`make test-apple-ui-ios` boots both simulators to completion, concurrently with
+`xcrun simctl bootstatus -b`, before it starts the two runs. Xcode 27.0's
+xcodebuild installs `com.veetbot.apple.UITests.xctrunner` about four seconds
+into a boot it starts itself, without waiting for SpringBoard. One cold boot has
+SpringBoard up by then. Two at once delayed it to about seven seconds on the
+owner's Mac, so SpringBoard started after the install, logged "Cannot launch
+application scene … while it's application is being updated" for each of its
+launch retries, and xcodebuild exited 65 with `Busy ("Application failed
+preflight checks")` before any case ran. Separate copies of the test products
+failed the same way, so the shared `.xctestproducts` is not the cause, and a
+staggered second start only hides the race. Read the refusal from the
+simulator's own log with `xcrun simctl spawn <udid> log show --predicate
+'process == "SpringBoard"'`. A simulator whose data migration failed ends
+`bootstatus` within a second or two with "Data Migration Failed" and exit 0, so
+for a boot that does not report "Finished" the target waits until `notifyutil -g
+com.apple.springboard.finishedstartup` holds SpringBoard's process id, and says
+so; `xcrun simctl erase <udid>` repairs such a simulator. Simulators the target
+booted are shut down when it ends, as xcodebuild did when it booted them; one
+that was already open stays open.
 The cases tap an overflow-menu item at its centre rather than as an element,
 after requiring it to exist and be hittable. On the iOS 27.0 iPad simulator
 XCUITest's element tap on the menu's first item is swallowed and the menu stays
