@@ -558,7 +558,9 @@ class FakeCeremonyPage:
         self.password_visible = False
         self.challenge_text_visible = False
         self.challenge_text_hidden = False
-        self.keyboard = SimpleNamespace(insert_text=AsyncMock(), press=AsyncMock())
+        self.keyboard = SimpleNamespace(
+            insert_text=AsyncMock(), type=AsyncMock(), press=AsyncMock()
+        )
         self.mouse = SimpleNamespace(click=AsyncMock())
 
     def locator(self, selector: str) -> Mock:
@@ -647,7 +649,23 @@ async def test_text_sent_while_no_challenge_is_visible_is_not_sign_in_evidence()
     status = await runtime.authentication_status()
 
     assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
-    page.keyboard.insert_text.assert_awaited_once_with("synthetic-entry")
+    page.keyboard.type.assert_awaited_once_with("synthetic-entry")
+
+
+async def test_sent_text_reaches_the_page_as_key_presses_not_a_paste() -> None:
+    """Websites score a login whose fields fill with no keyboard events as automated.
+
+    The user typed every character on the direct surface, so the runtime replays
+    each one as a key press rather than inserting the whole string at once.
+    """
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    page.password_visible = True
+
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+
+    page.keyboard.type.assert_awaited_once_with("synthetic-entry")
+    page.keyboard.insert_text.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

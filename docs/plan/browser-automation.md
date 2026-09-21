@@ -447,7 +447,9 @@ native display. A display that cannot start fails the launch as
 The browser reports its real user agent and automation state: the runtime
 overrides no user agent and masks no automation indicator, so a website that
 still refuses the browser is unsupported rather than evaded. Run-attempt leases
-remain headless.
+remain headless. Text the user sends from the direct surface reaches the page
+as one key press per character, as the user typed it, with no added timing; a
+field that fills with no keyboard events is scored as automated and refused.
 
 The trusted client presents the returned launch URL behind a user-initiated
 continue action and treats a rejected platform handoff as a failed setup. It
