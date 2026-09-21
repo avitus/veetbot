@@ -27,6 +27,7 @@ MAXIMUM_TEXT_CHARACTERS = 2_000
 class JudgmentFailure(StrEnum):
     AUTH_FAILED = "judgment.auth_failed"
     REQUEST_REJECTED = "judgment.request_rejected"
+    PAYMENT_REQUIRED = "judgment.payment_required"
     RATE_LIMITED = "judgment.rate_limited"
     PROVIDER_UNAVAILABLE = "judgment.provider_unavailable"
     OUTPUT_INVALID = "judgment.output_invalid"
