@@ -11,7 +11,7 @@ project:
   # (ADR-0061); each begins with its detailed-design document and ADR.
   # Milestones 16 through 30 are independently authorized parallel
   # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
-  # 0080, 0081, 0082, 0092, 0097, 0100, 0102, and 0108; their gates do not
+  # 0080, 0081, 0082, 0092, 0097, 0100, 0102, and 0112; their gates do not
   # advance the verified ceiling past the sequential work through 15.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
@@ -58,7 +58,7 @@ milestones:
     status: in_progress
     authorized_on: '2026-09-19'
     design: docs/plan/email-unsubscribe.md
-    adr: docs/adr/0108-milestone-30-email-unsubscribe.md
+    adr: docs/adr/0112-milestone-31-email-unsubscribe.md
     gates_registered: 20
     authorized_scope:
     - Header-derived census of bulk senders per account inside the foreground refresh and the ninety-day window, with no model call
@@ -76,46 +76,46 @@ milestones:
     - Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
     - Exact-head hosted CI and explicitly authorized review and production delivery evidence
     evidence:
-    - check: Milestone 30 registry authorization red phase
+    - check: Milestone 31 registry authorization red phase
       outcome: observed_expected_failure
       detail: >-
         The focused registry-bound and documentation-bound tests failed at their
         behavioral assertions on 2026-09-19: the registry held 538 entries rather
-        than 558, the census had no Milestone 30 row, MAX_MILESTONE was 29 rather
-        than 30, and the plan check did not require a Milestone 30 section. An
+        than 558, the census had no Milestone 31 row, MAX_MILESTONE was 29 rather
+        than 30, and the plan check did not require a Milestone 31 section. An
         earlier attempt that failed on a missing pytest in a fresh worktree was
         discarded as an environment error.
-    - check: Milestone 30 backend gates (local, 2026-09-20)
+    - check: Milestone 31 backend gates (local, 2026-09-20)
       outcome: passed_locally
       detail: >-
         Eighteen of the twenty gates bind executable checks and pass: the closed
         Google-only read contract and the authenticated-eligibility property in
-        tests/gates/test_email_unsubscribe_gmail_m30.py (46 cases); the fixed
+        tests/gates/test_email_unsubscribe_gmail_m31.py (46 cases); the fixed
         request and public-HTTPS egress gates in
-        tests/gates/test_email_unsubscribe_transport_m30.py with the port contract;
+        tests/gates/test_email_unsubscribe_transport_m31.py with the port contract;
         and the server-derived destination, approval floor, exact gesture consent,
         by-value Chat approval, idempotent recovery, closed mailto path, fixed
         label actions, census projection property, durable decisions, honest
         outcomes, flagged and scoped routes, confined Chat tools, privacy under
         adversarial mail with source exclusion, and persistence parity gates in
-        tests/gates/test_email_unsubscribe_m30.py. Valid regressions first
+        tests/gates/test_email_unsubscribe_m31.py. Valid regressions first
         observed a replayed command refused before its idempotency lookup, a
         consent fenced before its task was confirmed, an evidence digest projected
         for a sender with no mechanism, a sender stranded in pending behind a dead
         run, and a get_unsubscribe tool-event copy surviving source exclusion; the
         last was confirmed by removing the fix and watching the gate fail. The
         integrated release evidence gate remains pending.
-    - check: Milestone 30 native experience (local, 2026-09-20)
+    - check: Milestone 31 native experience (local, 2026-09-20)
       outcome: passed_locally
       detail: >-
         make test-apple passes 387 Swift package tests in 37 suites, including
-        the three Milestone 30 suites for wire decoding against older servers,
+        the three Milestone 31 suites for wire decoding against older servers,
         request shapes, the twenty-five sender selection cap, Select all skipping
         protected and ineligible rows, optimistic rows settling from the durable
         operation, restore-on-failure for failed and uncertain outcomes, Keep,
         spam and Not spam, mailto wording naming the recipient, and the surface
         being hidden without server support. The Python bridge
-        tests/native/test_email_unsubscribe_native_m30.py runs those suites and requires
+        tests/native/test_email_unsubscribe_native_m31.py runs those suites and requires
         each named case to report passing. Unsigned macOS and iOS Simulator app
         builds compile the new views. One unrelated Email polling test failed once
         under a cold parallel build and passed in three isolated reruns and the

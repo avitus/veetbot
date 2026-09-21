@@ -4142,10 +4142,10 @@ authorized production delivery. The verified sequential ceiling stays at
 Milestone 12. Nested or shared folders, Email-mode conversations, automatic
 filing, embeddings and search remain outside this milestone.
 
-### Milestone 30: Email unsubscribe assistance
+### Milestone 31: Email unsubscribe assistance
 
 The owner requested this scope and decided its surfaces, consent model, egress
-and fallbacks on 2026-09-19 under ADR-0108. Implement
+and fallbacks on 2026-09-19 under ADR-0112. Implement
 [email-unsubscribe.md](email-unsubscribe.md): a census of bulk senders per
 account, derived from header metadata inside the existing foreground refresh
 and the ninety-day window with no model call; the RFC 8058 one-click request,
@@ -4166,7 +4166,7 @@ standing authorization satisfies one, so roadmap B8 is untouched; the census
 advances only in foreground slices, so Milestone 26's exclusion of unattended
 monitoring holds; and no new Google permission is requested. The server-side
 request is the platform's first direct dial to a host selected by mail
-content, which the owner approved explicitly in ADR-0108 decision 5.
+content, which the owner approved explicitly in ADR-0112 decision 5.
 
 Acceptance requires all twenty gates, both repository adapters, the Apple
 package and simulator lanes, an owner-authorized real-mailbox smoke on both

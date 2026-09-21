@@ -253,9 +253,9 @@ with every gate bound to an executable check.
 
 - [ ] Exact-head hosted CI and explicitly authorized review evidence
 
-### Milestone 30 — Email unsubscribe assistance
+### Milestone 31 — Email unsubscribe assistance
 
-Twenty gates; independent workstream under ADR-0108. A header-derived census
+Twenty gates; independent workstream under ADR-0112. A header-derived census
 of bulk senders, the authenticated one-click unsubscribe request to a
 server-derived destination through a dedicated public-HTTPS transport, and
 Report spam, `mailto:` and sender-cleanup fallbacks, each behind the owner's

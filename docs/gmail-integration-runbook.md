@@ -700,13 +700,13 @@ The closing commit is a full-contract change and must carry a
 path; do not treat credential installation or a local smoke alone as milestone
 completion.
 
-## Milestone 30 — Activate and smoke unsubscribe assistance
+## Milestone 31 — Activate and smoke unsubscribe assistance
 
 Unsubscribe assistance is off until `AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1`. It
 needs both existing email flags, no new Google permission, and no credential.
 It sends a request to a sender only on the owner's tap or approval. The
 contract is [Email unsubscribe assistance](plan/email-unsubscribe.md); the
-egress decision is ADR-0108 decision 5.
+egress decision is ADR-0112 decision 5.
 
 ### Activate
 

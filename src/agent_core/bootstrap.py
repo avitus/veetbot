@@ -4524,7 +4524,7 @@ async def build(
             provider_adapters[name] = override
         if effective_settings.email_unsubscribe_enabled:
             # The public-HTTPS transport is constructed for one tool and handed to
-            # nothing else; the operator's egress policy cannot select it (ADR-0108).
+            # nothing else; the operator's egress policy cannot select it (ADR-0112).
             if one_click_transport_override is not None:
                 one_click_transport = one_click_transport_override
             else:

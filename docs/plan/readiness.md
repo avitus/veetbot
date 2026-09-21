@@ -1912,11 +1912,11 @@ touches no roadmap item: it adds no embedding, no retrieval arm and no memory
 read. Every gate is bound to an executable check as of 2026-09-16; hosted CI,
 review and delivery evidence remain open and the verified ceiling remains 12.
 
-## Milestone 30: Email unsubscribe assistance
+## Milestone 31: Email unsubscribe assistance
 
 The owner requested [email-unsubscribe.md](email-unsubscribe.md) and decided
 its surfaces, consent model, egress and fallbacks on 2026-09-19 under
-ADR-0108. Twenty gates are registered as `gate.email.unsubscribe_*` in the
+ADR-0112. Twenty gates are registered as `gate.email.unsubscribe_*` in the
 existing email area for the closed read contract, authenticated eligibility,
 the server-derived destination, the fixed request, public-HTTPS egress, the
 approval floor, exact gesture consent, by-value batch approval, idempotent
@@ -1926,6 +1926,6 @@ confined Chat tools, privacy under adversarial mail, persistence parity, the
 native experience, and integrated release evidence. The design touches no
 roadmap item: every action keeps its approval, nothing runs unattended, and
 no new Google permission is requested. Its one posture change, a dedicated
-public-HTTPS egress transport for a single tool, is owned by ADR-0108
+public-HTTPS egress transport for a single tool, is owned by ADR-0112
 decision 5. Nineteen gates bind executable checks as of 2026-09-20; integrated
 release evidence remains pending, and the verified ceiling remains 12.

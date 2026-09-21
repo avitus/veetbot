@@ -165,7 +165,7 @@ def evaluate_deterministic(
         )
         or action.name == UNSUBSCRIBE_TOOL_NAME
     ) and _RANK[decision] < PolicyDecisionRank.REQUIRE_APPROVAL:
-        # ADRs 0071, 0097 and 0108 forbid policy profiles from turning mailbox mutations,
+        # ADRs 0071, 0097 and 0112 forbid policy profiles from turning mailbox mutations,
         # sends, telephone calls, or unsubscribe requests into standing allows. A
         # standing-grant design must own any relaxation rather than hiding it in a profile.
         decision = PolicyDecisionType.REQUIRE_APPROVAL

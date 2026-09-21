@@ -1641,7 +1641,7 @@ Milestone 18 requirements and the verified Milestone 12 ceiling.
 
 ### Email unsubscribe assistance
 
-[email-unsubscribe.md](email-unsubscribe.md) declares twenty Milestone 30
+[email-unsubscribe.md](email-unsubscribe.md) declares twenty Milestone 31
 gates in the existing email area.
 
 ```text
@@ -1792,7 +1792,7 @@ leaving for someone to notice.
     than as test doubles.
 
 The cumulative column reaches five hundred and fifty-eight, which is every
-registry entry, at Milestone 30. Six of Milestone 10's gates are
+registry entry, at Milestone 31. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1809,7 +1809,7 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
 entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
 and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29's twelve
-are `gate.folder.*` in an area of their own, and Milestone 30 adds twenty
+are `gate.folder.*` in an area of their own, and Milestone 31 adds twenty
 `gate.email.unsubscribe_*` entries to the email area. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and

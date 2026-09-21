@@ -31,7 +31,7 @@ MAP_ROW = re.compile(
 # authorized milestone whose specification has not yet declared gates.
 # Milestone 26 was authorized on 2026-09-11 under ADR-0092, Milestone 28 on
 # 2026-09-15 under ADR-0100, Milestone 29 on 2026-09-16 under ADR-0102, and
-# Milestone 30 on 2026-09-19 under ADR-0108.
+# Milestone 31 on 2026-09-19 under ADR-0112.
 MAX_MILESTONE = 30
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 

@@ -30,7 +30,7 @@ import Testing
         #expect(encoded["operation"] as? [String: Any] == nil)
     }
 
-    /// An account and a thread from a server without Milestone 30 advertise nothing.
+    /// An account and a thread from a server without Milestone 31 advertise nothing.
     @Test func testOlderServerOmitsSupportAndTheThreadBlock() throws {
         let account = try decode(EmailAccountView.self, payload: [
             "id": "personal", "label": "Personal", "status": "ready",

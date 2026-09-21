@@ -79,7 +79,7 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
 - `search_threads(query, max_results, page_token?)` — Gmail query syntax,
   one through twenty-five results, opaque page token. Returns thread id,
   senders, subject, date, snippet, and label ids per thread, plus the closed
-  Milestone 30 `bulk` block: the newest received message's id, sender, and
+  Milestone 31 `bulk` block: the newest received message's id, sender, and
   date, its normalized list identifier, and the unauthenticated unsubscribe
   offer. No unsubscribe address appears in a search result.
 - `get_thread(thread_id)` — every message in one thread: headers, plain-text
@@ -566,9 +566,9 @@ no new OAuth scope is authorized for automatic alias discovery. Only explicitly
 verified existing aliases may be used. Milestone 18's gates and owner-smoke
 completion requirements remain independently binding.
 
-## Milestone 30 unsubscribe extension
+## Milestone 31 unsubscribe extension
 
-[ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md) authorizes
+[ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) authorizes
 [email unsubscribe assistance](email-unsubscribe.md) as a new parallel
 milestone. It widens the read server's closed header projection by one bounded
 `bulk` block on thread summaries and adds one application-only read tool,

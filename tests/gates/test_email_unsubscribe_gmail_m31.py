@@ -1,4 +1,4 @@
-"""Milestone 30 Gmail read contract: the bulk block and closed unsubscribe evidence."""
+"""Milestone 31 Gmail read contract: the bulk block and closed unsubscribe evidence."""
 
 from __future__ import annotations
 
@@ -671,7 +671,7 @@ def test_unsubscribe_eligibility_is_deterministic_and_authenticated(
     assert "lists.example.test" not in rendered
 
 
-async def test_m30_folded_headers_are_unfolded_before_parsing() -> None:
+async def test_m31_folded_headers_are_unfolded_before_parsing() -> None:
     folded = _message(
         unsubscribe=(
             "<https://unsubscribe.example.test/u/\r\n recipient-token?list=7>,\r\n\t"
@@ -689,14 +689,14 @@ async def test_m30_folded_headers_are_unfolded_before_parsing() -> None:
 
 
 @pytest.mark.parametrize("https_first", [True, False])
-async def test_m30_uri_order_changes_neither_mechanism(https_first: bool) -> None:
+async def test_m31_uri_order_changes_neither_mechanism(https_first: bool) -> None:
     uris = [f"<{HTTPS}>", f"<{MAILTO}>"]
     if not https_first:
         uris.reverse()
     assert await _evidence(_message(unsubscribe=", ".join(uris))) == _block()
 
 
-async def test_m30_only_the_first_uri_of_each_scheme_is_read() -> None:
+async def test_m31_only_the_first_uri_of_each_scheme_is_read() -> None:
     later_https = "https://unsubscribe.example.test/u/second"
     open_first = "mailto:unsub@lists.example.test?cc=victim@example.test"
     block = await _evidence(
@@ -706,7 +706,7 @@ async def test_m30_only_the_first_uri_of_each_scheme_is_read() -> None:
     assert block == _block(mailto=None)
 
 
-async def test_m30_schemes_match_without_regard_to_case() -> None:
+async def test_m31_schemes_match_without_regard_to_case() -> None:
     https = "HTTPS://unsubscribe.example.test/u/recipient-token"
     block = await _evidence(
         _message(unsubscribe=f"<MAILTO:unsub@lists.example.test?Subject=unsubscribe>, <{https}>")
@@ -714,7 +714,7 @@ async def test_m30_schemes_match_without_regard_to_case() -> None:
     assert block == _block(https_uri=https)
 
 
-async def test_m30_an_overlong_https_uri_is_absent_rather_than_truncated() -> None:
+async def test_m31_an_overlong_https_uri_is_absent_rather_than_truncated() -> None:
     longest = "https://unsubscribe.example.test/" + "a" * (2048 - 33)
     assert len(longest) == 2048
     assert await _evidence(_message(unsubscribe=f"<{longest}>")) == _block(
@@ -747,13 +747,13 @@ async def test_m30_an_overlong_https_uri_is_absent_rather_than_truncated() -> No
         "mailto:?subject=unsubscribe",
     ],
 )
-async def test_m30_an_open_mailto_normalizes_to_no_mailto_at_all(uri: str) -> None:
+async def test_m31_an_open_mailto_normalizes_to_no_mailto_at_all(uri: str) -> None:
     block = await _evidence(_message(unsubscribe=f"<{uri}>", post=None))
     # The header still offers one; nothing authenticated remains of it.
     assert block == _block(offered="mailto", mechanism="none", https_uri="", mailto=None)
 
 
-async def test_m30_a_covered_mailto_is_the_fallback_when_post_is_not_covered() -> None:
+async def test_m31_a_covered_mailto_is_the_fallback_when_post_is_not_covered() -> None:
     block = await _evidence(_message(signatures=(_signature(SENDER, LU),)))
     assert block == _block(mechanism="mailto", covered_headers=[LU])
     uncovered = await _evidence(_message(signatures=(_signature(SENDER, LUP),)))
@@ -771,7 +771,7 @@ async def test_m30_a_covered_mailto_is_the_fallback_when_post_is_not_covered() -
         ("notexample.com", "example.com", False),
     ],
 )
-async def test_m30_an_auid_subdomain_of_the_signing_domain_counts(
+async def test_m31_an_auid_subdomain_of_the_signing_domain_counts(
     passing: str, signing: str, authenticated: bool
 ) -> None:
     block = await _evidence(
@@ -785,7 +785,7 @@ async def test_m30_an_auid_subdomain_of_the_signing_domain_counts(
     assert block == expected
 
 
-async def test_m30_a_passing_signature_for_another_domain_covers_nothing() -> None:
+async def test_m31_a_passing_signature_for_another_domain_covers_nothing() -> None:
     block = await _evidence(
         _message(
             verdicts=(_verdict(_dkim(UNRELATED), _dkim(SENDER, "fail")),),
@@ -795,7 +795,7 @@ async def test_m30_a_passing_signature_for_another_domain_covers_nothing() -> No
     assert block == _block(mechanism="none", authenticated=False, covered_headers=[])
 
 
-async def test_m30_another_services_verdict_above_gmails_is_skipped() -> None:
+async def test_m31_another_services_verdict_above_gmails_is_skipped() -> None:
     block = await _evidence(
         _message(
             verdicts=(
@@ -813,7 +813,7 @@ async def test_m30_another_services_verdict_above_gmails_is_skipped() -> None:
     [_verdict(), _verdict(_dkim(SENDER, "fail"))],
     ids=["no_dkim_result", "dkim_fail"],
 )
-async def test_m30_gmails_first_verdict_is_final_even_without_a_pass(gmail: str) -> None:
+async def test_m31_gmails_first_verdict_is_final_even_without_a_pass(gmail: str) -> None:
     block = await _evidence(_message(verdicts=(gmail, _verdict(_dkim(SENDER)))))
     assert block == _block(mechanism="none", authenticated=False, covered_headers=[])
 
@@ -828,25 +828,25 @@ async def test_m30_gmails_first_verdict_is_final_even_without_a_pass(gmail: str)
     ],
     ids=["comment", "quoted_string", "failed_result_comment", "arc_comment"],
 )
-async def test_m30_sender_text_inside_gmails_verdict_cannot_forge_a_pass(smuggled: str) -> None:
+async def test_m31_sender_text_inside_gmails_verdict_cannot_forge_a_pass(smuggled: str) -> None:
     block = await _evidence(_message(verdicts=(_verdict(smuggled),)))
     assert block == _block(mechanism="none", authenticated=False, covered_headers=[])
 
 
-async def test_m30_the_last_list_unsubscribe_is_the_one_a_signature_covers() -> None:
+async def test_m31_the_last_list_unsubscribe_is_the_one_a_signature_covers() -> None:
     # DKIM signs upward from the bottom, so a header prepended in transit is never the covered one.
     headers = _message()
     headers.insert(1, ("List-Unsubscribe", "<https://attacker.example.test/collect>"))
     assert await _evidence(headers) == _block()
 
 
-async def test_m30_evidence_values_are_bounded() -> None:
+async def test_m31_evidence_values_are_bounded() -> None:
     block = await _evidence(_message(sender="S" * 9000, list_id="L" * 300))
     assert block == _block(**{"from": "S" * 8192, "list_id": "l" * 255})
     assert len(json.dumps(block).encode()) < OUTPUT_MAXIMUM_BYTES
 
 
-async def test_m30_a_message_without_list_headers_offers_nothing() -> None:
+async def test_m31_a_message_without_list_headers_offers_nothing() -> None:
     block = await _evidence([("From", "Friend <friend@example.test>"), ("Date", DATE)])
     assert block == _block(
         **{"from": "Friend <friend@example.test>"},
@@ -869,7 +869,7 @@ async def test_m30_a_message_without_list_headers_offers_nothing() -> None:
         (503, "gmail.provider_unavailable"),
     ],
 )
-async def test_m30_failures_keep_the_read_servers_stable_codes(status: int, code: str) -> None:
+async def test_m31_failures_keep_the_read_servers_stable_codes(status: int, code: str) -> None:
     mailbox = Mailbox()
     mailbox.add("thread-1", "message-1", _message())
     mailbox.statuses["message-1"] = status
@@ -883,7 +883,7 @@ async def test_m30_failures_keep_the_read_servers_stable_codes(status: int, code
 @pytest.mark.parametrize(
     "override", [{"id": "another-message"}, {"threadId": None}, {"historyId": "not-a-revision"}]
 )
-async def test_m30_malformed_provider_identity_is_invalid_output(override: dict[str, Any]) -> None:
+async def test_m31_malformed_provider_identity_is_invalid_output(override: dict[str, Any]) -> None:
     mailbox = Mailbox()
     mailbox.add("thread-1", "message-1", _message())
     mailbox.overrides["message-1"] = override
@@ -893,7 +893,7 @@ async def test_m30_malformed_provider_identity_is_invalid_output(override: dict[
 
 
 @pytest.mark.parametrize("message_id", ["", "   ", "m" * 1025, "message\x00id"])
-async def test_m30_arguments_fail_before_network(message_id: str) -> None:
+async def test_m31_arguments_fail_before_network(message_id: str) -> None:
     mailbox = Mailbox()
     result = await _invoke(mailbox, "get_unsubscribe", {"message_id": message_id})
     assert result.is_error is True

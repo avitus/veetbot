@@ -10,7 +10,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.runs import Run
 from agent_core.ports.email import EmailSubscriptionRuntime
 from tests.gates.test_email_m18 import _run
-from tests.gates.test_email_unsubscribe_m30 import (
+from tests.gates.test_email_unsubscribe_m31 import (
     Mailbox,
     Transport,
     _app,

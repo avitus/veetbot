@@ -1,4 +1,4 @@
-"""Bulk-sender census, owner consent, and unsubscribe outcomes (Milestone 30).
+"""Bulk-sender census, owner consent, and unsubscribe outcomes (Milestone 31).
 
 The census is a projection of header metadata the refresh task already reads.
 Every external effect stays behind ``REQUIRE_APPROVAL``: an owner gesture is an

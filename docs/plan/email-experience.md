@@ -1130,9 +1130,9 @@ inferred beliefs from shared recall traces and invalidates terminal checkpoints
 that carried them. Any active dependent run must settle before these retained
 copies are purged; independently confirmed owner beliefs remain.
 
-## Milestone 30 unsubscribe extension
+## Milestone 31 unsubscribe extension
 
-[ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md) authorizes
+[ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) authorizes
 [email unsubscribe assistance](email-unsubscribe.md) as a separate parallel
 milestone that builds on this one. Its census rides the foreground refresh
 slices defined here and adds no query, model call or automatic-email dollar

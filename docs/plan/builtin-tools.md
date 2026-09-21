@@ -1846,7 +1846,7 @@ cannot grant permission to send a message or change an email recipient.
 The governed `memory.remember` surface adds explicit person references only
 while People is enabled; old pinned catalogs retain their prior contract.
 
-## Milestone 30 Chat access to the subscription census
+## Milestone 31 Chat access to the subscription census
 
 Two further conditional `email` tools are owned by
 [email-unsubscribe.md](email-unsubscribe.md#the-chat-tools). The composition

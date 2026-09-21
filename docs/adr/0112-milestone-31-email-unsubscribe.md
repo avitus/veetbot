@@ -1,4 +1,4 @@
-# ADR-0108: Milestone 30 email unsubscribe assistance
+# ADR-0112: Milestone 31 email unsubscribe assistance
 
 - Status: Accepted — the owner requested the capability, decided its surfaces, consent model, server-side egress, and fallbacks, and directed implementation on 2026-09-19
 - Date: 2026-09-19
@@ -37,7 +37,7 @@ fallbacks, with browser-driven web forms deferred.
 
 ## Decisions
 
-1. **Milestone 30 is a parallel workstream with twenty gates in the `email`
+1. **Milestone 31 is a parallel workstream with twenty gates in the `email`
    area.** It proceeds on the terms every parallel workstream has: its gates
    may turn green independently and the verified ceiling still advances only
    in numerical order. It builds on Milestone 18's servers and Milestone 26's

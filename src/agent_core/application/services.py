@@ -591,7 +591,7 @@ class FolderService(Protocol):
 
 
 class EmailSubscriptionService(Protocol):
-    """The bulk-sender census and its three owner gestures (Milestone 30)."""
+    """The bulk-sender census and its three owner gestures (Milestone 31)."""
 
     async def browse(
         self,

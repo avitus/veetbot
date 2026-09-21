@@ -306,7 +306,7 @@ Milestone 24's three device knobs: the invocation timeout, the per-device
 daily ingest cap, and the poll-back interval, plus ADR-0089's terminal schedule
 retention days, purge cadence, and purge batch; ADR-0093 adds memory model selection;
 Milestone 26 adds the two aggregate automatic-email cost allowances, Milestone 29
-adds the seven thread-folder knobs, and Milestone 30 adds the unsubscribe grace
+adds the seven thread-folder knobs, and Milestone 31 adds the unsubscribe grace
 period. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
@@ -1445,7 +1445,7 @@ pass as a maintenance sweep on its own timer. Its seven knobs join the
 executable inventory when the implementation lands. The detailed contract is
 [thread-folders.md](thread-folders.md).
 
-## Milestone 30 email unsubscribe composition
+## Milestone 31 email unsubscribe composition
 
 `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` defaults to off and requires both
 `AGENT_EMAIL_ENABLED` and `AGENT_EMAIL_MODE_ENABLED`; set without them it is a

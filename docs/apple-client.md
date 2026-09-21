@@ -429,7 +429,7 @@ by pytest and remains an unpassed active gate in the gate report.
 
 ## Subscriptions
 
-Unsubscribe assistance (Milestone 30, `plan/email-unsubscribe.md`) adds a
+Unsubscribe assistance (Milestone 31, `plan/email-unsubscribe.md`) adds a
 Subscriptions surface to Email mode, in its own `EmailSubscriptionsViewModel`.
 The entry appears in the Email toolbar — the shared Mac window toolbar, and the
 iPhone and iPad navigation bar — only while an account's projection reports
@@ -465,7 +465,7 @@ projection carries a `subscription` block shows the same Unsubscribe action
 beside its sender and opens the same confirmation with one row; each surface
 presents only the confirmation it opened.
 
-Run `uv run pytest tests/native/test_email_unsubscribe_native_m30.py -q` for the
+Run `uv run pytest tests/native/test_email_unsubscribe_native_m31.py -q` for the
 executable native unsubscribe gate check. This integration-marked bridge runs
 the real `EmailSubscriptionModelTests`, `EmailSubscriptionsViewModelTests` and
 `EmailSubscriptionViewStructureTests` Swift suites and verifies each case

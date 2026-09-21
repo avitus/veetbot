@@ -1,4 +1,4 @@
-"""Milestone 30 transport gates: one fixed request over a public-HTTPS-only transport."""
+"""Milestone 31 transport gates: one fixed request over a public-HTTPS-only transport."""
 
 from __future__ import annotations
 

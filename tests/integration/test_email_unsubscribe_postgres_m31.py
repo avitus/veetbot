@@ -1,4 +1,4 @@
-"""PostgreSQL parity for the Milestone 30 subscription records."""
+"""PostgreSQL parity for the Milestone 31 subscription records."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from agent_core.adapters.persistence.database import create_engine, create_session_factory
 from agent_core.adapters.persistence.email import PostgresEmailStore
 from tests.contract.support import principal
-from tests.gates.test_email_unsubscribe_m30 import subscription_records_contract
+from tests.gates.test_email_unsubscribe_m31 import subscription_records_contract
 from tests.integration.m2_support import database_settings
 
 

@@ -2115,7 +2115,7 @@ returns it. All folder responses carry `Cache-Control: private, no-store`,
 and a foreign or unknown folder, proposal or session is an indistinguishable
 404.
 
-## Milestone 30 email unsubscribe routes
+## Milestone 31 email unsubscribe routes
 
 [email-unsubscribe.md](email-unsubscribe.md#the-routes) owns four routes and
 their request and response contracts: `GET /v1/email/subscriptions`,

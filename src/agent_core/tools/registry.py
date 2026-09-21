@@ -162,7 +162,7 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
             or spec.allow_parallel
         )
     ):
-        # The public-HTTPS unsubscribe transport is granted to one tool by name (ADR-0108).
+        # The public-HTTPS unsubscribe transport is granted to one tool by name (ADR-0112).
         raise ToolValidationError("unsubscribe endpoint target classification is invalid")
     if spec.source in {ToolSource.MCP, ToolSource.DEVICE, ToolSource.SANDBOX} or (
         spec.target_kind == "sandbox"

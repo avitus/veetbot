@@ -293,7 +293,7 @@ def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> No
 
 
 def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> None:
-    """Milestone 30 is authorized; the registry admits it and stops there."""
+    """Milestone 31 is authorized; the registry admits it and stops there."""
     import scripts.gate_registry as gate_registry
 
     assert getattr(gate_registry, "MAX_MILESTONE", None) == 30

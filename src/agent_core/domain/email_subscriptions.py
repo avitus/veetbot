@@ -1,4 +1,4 @@
-"""Owner-scoped bulk-sender subscriptions and unsubscribe consent (Milestone 30)."""
+"""Owner-scoped bulk-sender subscriptions and unsubscribe consent (Milestone 31)."""
 
 from __future__ import annotations
 

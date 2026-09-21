@@ -2096,7 +2096,7 @@ a model task, nor bypasses the normal approval path. Feedback remains a scoped,
 replay-safe write to the same owner ledger used by the Email APIs.
 
 
-Milestone 30 adds `email.subscriptions` and `email.unsubscribe` to the builtin
+Milestone 31 adds `email.subscriptions` and `email.unsubscribe` to the builtin
 `email` domain, conditional on `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` and classified
 in [builtin-tools.md](builtin-tools.md). `email.unsubscribe` constructs the
 `unsubscribe_endpoint` target, the third network-enabled builtin target after
@@ -2104,4 +2104,4 @@ in [builtin-tools.md](builtin-tools.md). `email.unsubscribe` constructs the
 target is valid only for the builtin named `email.unsubscribe` with
 `EXTERNAL_WRITE`, `MEDIUM`, `IDEMPOTENT` and no parallelism, and that name is
 valid only with that target, so no other tool can claim the public-HTTPS
-unsubscribe transport ([ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md)).
+unsubscribe transport ([ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md)).

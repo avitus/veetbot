@@ -97,7 +97,7 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
-  18 through 30 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0108). Milestone 21 is limited to adaptive
+  18 through 30 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0112). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
   the owner's iPhone, 25 to the WhatsApp business surface, 26 to client modes and the email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders, and 30 to email unsubscribe assistance. Model routing and the plan's remaining roadmap items
   are not authorized. Each in-progress milestone's open items are in `docs/status/milestones.md`.

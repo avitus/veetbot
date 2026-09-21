@@ -6,14 +6,14 @@ canonical: true
 
 # Email unsubscribe assistance
 
-This document specifies Milestone 30. The engineering plan states the
+This document specifies Milestone 31. The engineering plan states the
 requirement; this document states the mechanism. It is subordinate to
 [engineering-plan.md](engineering-plan.md) and it extends rather than replaces
 [email-integration.md](email-integration.md) and
 [email-experience.md](email-experience.md): the account-isolated Gmail MCP
 servers, the typed email tasks, the owner-gesture consent that Archive
 introduced, the approval floor, and the egress proxy all stay exactly as they
-are. [ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md) records the
+are. [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) records the
 architectural decisions, the owner's four shaping choices of 2026-09-19, and
 the one security-posture change this milestone makes.
 
@@ -24,14 +24,14 @@ mechanical, and the mail itself already says how to do it: a bulk message
 carries a `List-Unsubscribe` header, and since February 2024 Gmail has
 required every large sender to make that header work with one fixed,
 credential-free HTTPS request
-([RFC 8058](https://www.rfc-editor.org/rfc/rfc8058.html)). Milestone 30 builds
+([RFC 8058](https://www.rfc-editor.org/rfc/rfc8058.html)). Milestone 31 builds
 the assistant around that fact: a **census** of bulk senders read from headers
 alone, a **one-click request** the platform sends only with the owner's
 consent and only to a destination the server derived itself, and the
 **fallbacks** for senders that offer something weaker or deserve something
 harsher.
 
-Milestone 30 is authorized as a parallel workstream. Its gates may become
+Milestone 31 is authorized as a parallel workstream. Its gates may become
 green independently, but the verified gate ceiling advances only in numerical
 order.
 
@@ -50,7 +50,7 @@ implementation may trade away.
 
 ## Scope
 
-Milestone 30 delivers the census, the three actions, the consent that
+Milestone 31 delivers the census, the three actions, the consent that
 authorizes them, and the surfaces that operate them.
 
 - **The census.** One record per bulk sender per account, derived from header
@@ -423,7 +423,7 @@ it to the state it was in. No code carries provider or sender text.
 
 ## The egress transport
 
-This is the milestone's security-posture change, recorded in ADR-0108
+This is the milestone's security-posture change, recorded in ADR-0112
 decision 5 with the owner's explicit approval.
 
 The request leaves the worker through a process-local egress proxy running
@@ -707,7 +707,7 @@ concurrency, and authority limits.
    application-only `get_unsubscribe` block, passes the shared contract suite
    against the fake provider, never advertises `get_unsubscribe` to a model,
    and still dials only its two fixed endpoints. Registered as
-   `gate.email.unsubscribe_read_contract`, case. **M30.**
+   `gate.email.unsubscribe_read_contract`, case. **M31.**
 2. **Eligibility is deterministic and authenticated.** Over generated header
    sets, `one_click` is offered only for an HTTPS address, the exact
    `List-Unsubscribe=One-Click` marker, and a Gmail-verified passing DKIM
@@ -715,20 +715,20 @@ concurrency, and authority limits.
    `List-Unsubscribe` and the closed single-recipient fields; a forged lower
    verdict header, a missing clause, or any extra `mailto` field yields
    `none`. Registered as `gate.email.unsubscribe_eligibility`, property.
-   **M30.**
+   **M31.**
 3. **The destination is server-derived.** `email.unsubscribe` accepts only
    subscription ids and evidence digests under a closed schema; the dialled
    address equals the stored verified value; a digest mismatch, a foreign
    subscription, or an address failing the public-HTTPS rule refuses that
    target before any network activity; and tool registration rejects any
    other tool claiming the `unsubscribe_endpoint` target. Registered as
-   `gate.email.unsubscribe_server_derived_destination`, structural. **M30.**
+   `gate.email.unsubscribe_server_derived_destination`, structural. **M31.**
 4. **The request is fixed.** Every request is a `POST` of exactly
    `List-Unsubscribe=One-Click` with the form content type and the fixed user
    agent, carries no cookie, authorization, referrer, or origin, never
    follows a redirect, verifies TLS without override, reads at most 64 KiB
    and keeps only the status class, and meets its ten-second deadline.
-   Registered as `gate.email.unsubscribe_fixed_request`, case. **M30.**
+   Registered as `gate.email.unsubscribe_fixed_request`, case. **M31.**
 5. **Egress is public HTTPS only.** Every dial crosses the process-local
    proxy under the public-HTTPS rule: private, loopback, link-local,
    metadata, carrier-grade NAT, unique-local, and IPv4-mapped destinations,
@@ -737,12 +737,12 @@ concurrency, and authority limits.
    address is the one dialled; and the operator allowlist, the sandbox
    proxy, and the browser transport are unchanged and cannot select this
    transport. Registered as `gate.email.unsubscribe_public_https_egress`,
-   case. **M30.**
+   case. **M31.**
 6. **The approval floor holds.** `email.unsubscribe` resolves to
    `REQUIRE_APPROVAL` under the default ruleset and under every profile, the
    `mailto` send and both label actions keep their Milestone 18 floors, and
    no standing authorization satisfies any of them. Registered as
-   `gate.email.unsubscribe_approval_floor`, case. **M30.**
+   `gate.email.unsubscribe_approval_floor`, case. **M31.**
 7. **Gesture consent is exact.** A consent is immutable, expires after 120
    seconds, and resolves a pending approval only when tool, normalized
    arguments, owner, authority, revisions, and expiry all match, after
@@ -750,30 +750,30 @@ concurrency, and authority limits.
    any mismatch, expiry, or revocation produces no network request and no
    mailbox write; and refresh, model work, and mail content cannot create a
    consent. Registered as `gate.email.unsubscribe_gesture_consent`, case.
-   **M30.**
+   **M31.**
 8. **Chat approval is by value.** One invocation carries one to twenty-five
    unique targets; its approval view names each sender, address, account,
    mechanism, and destination host and never the path or query; withheld
    values stay verifiable by digest; and changed arguments or evidence void
    the approval. Registered as `gate.email.unsubscribe_batch_approval`, case.
-   **M30.**
+   **M31.**
 9. **Recovery is idempotent.** A lost response, a timeout, or a crash after
    the effect watermark re-executes the same fixed request, never dials an
    already accepted target again, persists each target's outcome once, and
    replays an identical command's durable result. Registered as
-   `gate.email.unsubscribe_idempotent_recovery`, case. **M30.**
+   `gate.email.unsubscribe_idempotent_recovery`, case. **M31.**
 10. **The `mailto` path is closed.** The message is exactly the verified
     single recipient, subject, and body within their bounds, dispatched by
     value through the originating account's send server; an outcome lost
     after dispatch is `uncertain` and is never sent again automatically.
-    Registered as `gate.email.unsubscribe_mailto_closed`, case. **M30.**
+    Registered as `gate.email.unsubscribe_mailto_closed`, case. **M31.**
 11. **Label actions are fixed deltas over server-selected threads.** Report
     spam adds `SPAM` and removes `INBOX`, Not spam restores exactly the
     recorded threads, and cleanup removes `INBOX`; thread sets come only from
     the run's own governed search, post-filtered by identity, at most 25 per
     call and 100 per gesture; callers supply neither threads nor labels; and
     a crafted identity cannot widen the set. Registered as
-    `gate.email.unsubscribe_label_actions`, case. **M30.**
+    `gate.email.unsubscribe_label_actions`, case. **M31.**
 12. **The census is a deterministic projection.** Over generated duplicate,
     reordered, and resynchronized observations the same records result;
     identity is the account-qualified list identifier or sender address;
@@ -781,58 +781,58 @@ concurrency, and authority limits.
     and owner-sent mail never form a record; and the census makes no model
     call, reserves no automatic-email dollars, and issues no query of its
     own. Registered as `gate.email.unsubscribe_census_projection`, property.
-    **M30.**
+    **M31.**
 13. **Owner decisions are durable.** Keep, an accepted unsubscribe, and a
     spam report survive new mail, re-import, and resynchronization without
     re-suggestion; reversing Keep restores the row; and protected senders
     sort last, are skipped by Select all, and remain individually
     actionable. Registered as `gate.email.unsubscribe_durable_decisions`,
-    case. **M30.**
+    case. **M31.**
 14. **Outcomes and follow-up are honest.** Only a 2xx response records
     `unsubscribed`; every other observation records `failed` with a closed
     content-free code; mail dated after the grace period marks
     `still_sending` and mail inside it changes nothing; and the follow-up
     dispatches nothing. Registered as `gate.email.unsubscribe_outcome_honesty`,
-    case. **M30.**
+    case. **M31.**
 15. **Routes are flagged, scoped, and bounded.** The four routes are absent
     without the flag; each requires its exact email scope and current
     account authority for what its mechanism calls; every command has
     validation, authorization, conflict, failure, and retry coverage; and
     responses are private, never include the address, and hide foreign
     subscriptions as 404. Registered as
-    `gate.email.unsubscribe_routes_scope_and_flag`, structural. **M30.**
+    `gate.email.unsubscribe_routes_scope_and_flag`, structural. **M31.**
 16. **The Chat tools are confined.** `email.subscriptions` is read-only with
     `EXTERNAL_UNTRUSTED` output and never returns the address;
     `email.unsubscribe` registers with exactly its declared tuple; and with
     the flag unset neither tool is registered or advertised. Registered as
-    `gate.email.unsubscribe_chat_tools`, case. **M30.**
+    `gate.email.unsubscribe_chat_tools`, case. **M31.**
 17. **Privacy holds under adversarial mail.** The address and its token
     reach no model context, approval view, response, notification, log, or
     metric; sender identity reaches no log, metric, or notification; body
     instructions and forged headers can neither trigger nor redirect a
     request; and source exclusion and principal erasure remove evidence,
     tool-event copies, and every record this milestone adds. Registered as
-    `gate.email.unsubscribe_privacy`, case. **M30.**
+    `gate.email.unsubscribe_privacy`, case. **M31.**
 18. **Persistence agrees on both adapters.** Subscription, consent, and
     operation records pass one contract suite on the in-memory and
     PostgreSQL stores with tenant and principal predicates and forced
     row-level security, and identical identities in different accounts never
     collide. Registered as `gate.email.unsubscribe_persistence_parity`, case.
-    **M30.**
+    **M31.**
 19. **The native experience is complete and honest.** iPhone, compact and
     regular iPad, and Mac present the Subscriptions view, the thread action,
     and the confirmation naming each mechanism; rows settle from the durable
     operation and restore with an actionable error; selection stops at
     twenty-five and skips protected rows; and a server or account without
     support shows nothing in its place. Registered as
-    `gate.email.unsubscribe_native_experience`, case. **M30.**
+    `gate.email.unsubscribe_native_experience`, case. **M31.**
 20. **Integrated release evidence.** Every gate above, the local,
     PostgreSQL, and native lanes, and an owner-authorized real-mailbox smoke
     on both accounts — one accepted one-click request, one `mailto`
     unsubscribe, one spam report reversed by Not spam, and one cleanup —
     pass, with final-head hosted review and merged-revision production
     evidence. Registered as `gate.email.unsubscribe_release_evidence`, case.
-    **M30.**
+    **M31.**
 
 These twenty registry-backed gates are the milestone's blocking delivery
 contract. They do not advance the verified gate ceiling, which still moves
@@ -856,7 +856,7 @@ in for the real-mailbox smoke.
 
 ## Build sequence
 
-1. This document, ADR-0108, and the twenty registry entries, checks pending.
+1. This document, ADR-0112, and the twenty registry entries, checks pending.
 2. The read contract: the `bulk` block and `get_unsubscribe` against the
    fake provider, with the eligibility property. Gates 1 and 2.
 3. The domain values, the store kinds on both adapters, and the census

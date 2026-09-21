@@ -1348,9 +1348,9 @@ Current authority, source revision, expiry, worker fencing, and distinct-resolve
 policy remain enforced. An uncertain write is not automatically repeated.
 
 
-## Milestone 30 unsubscribe approval floor
+## Milestone 31 unsubscribe approval floor
 
-[ADR-0108](../adr/0108-milestone-30-email-unsubscribe.md) adds one tool-name
+[ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
 matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:597);

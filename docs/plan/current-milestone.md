@@ -74,8 +74,8 @@ title: Current Milestone
   deterministic fallback, scoped routes behind a default-off flag, and the
   native sidebar. All twelve gates are bound to executable checks; hosted
   CI, review and delivery evidence remain open and the milestone is in progress.
-- **Milestone 30 — Email unsubscribe assistance:** requested by the owner and
-  shaped on 2026-09-19 as a new independent parallel workstream under ADR-0108;
+- **Milestone 31 — Email unsubscribe assistance:** requested by the owner and
+  shaped on 2026-09-19 as a new independent parallel workstream under ADR-0112;
   [email-unsubscribe.md](email-unsubscribe.md) declares twenty gates for a
   header-derived census of bulk senders, the authenticated RFC 8058 one-click
   request sent through a dedicated public-HTTPS egress transport to a
@@ -373,7 +373,7 @@ plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 
 - [Milestone 26 — Client modes and adaptive email experience](engineering-plan.md#milestone-26-client-modes-and-adaptive-email-experience)
 - [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
-- [Milestone 30 — Email unsubscribe assistance](engineering-plan.md#milestone-30-email-unsubscribe-assistance)
+- [Milestone 31 — Email unsubscribe assistance](engineering-plan.md#milestone-31-email-unsubscribe-assistance)
 
 ## Completion rule
 
@@ -492,10 +492,10 @@ every gate bound to an executable check; exact-head hosted CI, review and
 delivery evidence remain open. This independent workstream is in progress;
 the verified ceiling remains 12.
 
-## Milestone 30: Email unsubscribe assistance
+## Milestone 31: Email unsubscribe assistance
 
 The owner requested this capability on 2026-09-19 and decided its surfaces,
-consent model, egress and fallbacks under ADR-0108.
+consent model, egress and fallbacks under ADR-0112.
 [Email unsubscribe assistance](email-unsubscribe.md) specifies twenty gates: a
 deterministic census of bulk senders read from header metadata inside the
 existing foreground refresh; the RFC 8058 one-click request, offered only for

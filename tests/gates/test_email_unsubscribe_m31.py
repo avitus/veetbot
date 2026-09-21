@@ -1,4 +1,4 @@
-"""Milestone 30: the bulk-sender census and owner-consented unsubscribe.
+"""Milestone 31: the bulk-sender census and owner-consented unsubscribe.
 
 Every effect here crosses the real approval and tool lifecycle against a scripted
 first-party Gmail boundary and a recording one-click transport; no model runs.
