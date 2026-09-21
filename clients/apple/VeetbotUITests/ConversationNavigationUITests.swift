@@ -578,22 +578,33 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Adjacent folders sit one row apart in a shared section, rather than
-    /// each in a section of its own with a section gap between them.
+    /// each in a section of its own with a section gap between them. The list
+    /// rows holding them are measured, not the labels inside: the system sets
+    /// the row height and the label height, and both differ between macOS
+    /// releases, while rows of one section always touch.
     func testAdjacentFoldersSitOneRowApartOnMac() {
         addFolderFixture()
         app.launch()
-        let travel = folderHeader(Self.folderID)
-        let work = folderHeader(Self.workFolderID)
-        XCTAssertTrue(travel.waitForExistence(timeout: 10))
+        XCTAssertTrue(folderHeader(Self.folderID).waitForExistence(timeout: 10))
+        let travel = folderListRow(Self.folderID)
+        let work = folderListRow(Self.workFolderID)
+        XCTAssertTrue(travel.exists)
         XCTAssertTrue(work.exists)
         attachFolderScreenshot("Folder rows")
-        let gap = work.frame.minY - travel.frame.maxY
-        let measured = XCTAttachment(string: "travel \(travel.frame) work \(work.frame) gap \(gap)")
+        let geometry = "travel row \(travel.frame) work row \(work.frame)"
+        let measured = XCTAttachment(string: geometry)
         measured.name = "Folder row geometry"
         measured.lifetime = .keepAlways
         add(measured)
-        XCTAssertGreaterThanOrEqual(gap, 0)
-        XCTAssertLessThanOrEqual(gap, 12)
+        XCTAssertGreaterThan(travel.frame.height, 0, geometry)
+        XCTAssertEqual(work.frame.minY, travel.frame.maxY, accuracy: 1, geometry)
+    }
+
+    /// The sidebar list row that holds a folder's header.
+    private func folderListRow(_ id: String) -> XCUIElement {
+        app.outlineRows
+            .containing(NSPredicate(format: "identifier == %@", "sidebar.folder.\(id)"))
+            .firstMatch
     }
     #endif
 
@@ -1516,7 +1527,10 @@ final class ConversationNavigationUITests: XCTestCase {
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
         XCTAssertTrue(destination.isHittable)
-        destination.tap()
+        // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
+        // menu's first item and leaves the menu open; a touch at the item's
+        // centre, like any other point on it, activates it.
+        destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     private func revealSidebarIfNeeded(for row: XCUIElement) {

@@ -117,6 +117,24 @@ window. Under the fixture the composer also turns off Writing Tools, whose
 macOS 27 affordance window otherwise floats over the controls the cases click.
 The keyboard-dismissal case holds its fake submission pending until teardown,
 so a slow accessibility query cannot consume the response-delay window.
+The adjacent-folders case measures the two list rows that hold the folders and
+requires them to touch. The space between the labels inside depends on the
+system's row and label heights, which differ between macOS releases: 16 points
+on the hosted macOS 26.6.2 runner and 13.5 on macOS 27, against 26.5 on
+macOS 27 once each folder sits in a section of its own.
+
+The simulator runs pass `-collect-test-diagnostics never`. Under Xcode 27
+xcodebuild ended both hosted simulator runs with `simctl diagnose
+--timeout=600`: the iPad run after one failure, and the iPhone run after none,
+only its standing skipped case. On the hosted image that collection prints
+nothing, times out after its 600 seconds, and yields no diagnostics, while
+CircleCI ends a step after ten minutes without output, so the job died before
+xcodebuild could name the failing case. The result bundle still holds each
+failure, its screenshot, and the element tree.
+The cases tap an overflow-menu item at its centre rather than as an element,
+after requiring it to exist and be hittable. On the iOS 27.0 iPad simulator
+XCUITest's element tap on the menu's first item is swallowed and the menu stays
+open, while a touch anywhere on the item activates it.
 
 The People accessibility audit uses the app's Large text preference on Mac and
 the largest accessibility Dynamic Type category on iPhone and iPad. The Mac
