@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Any, Literal, Protocol
@@ -87,10 +87,75 @@ class EmailStore(Protocol):
         ...
 
 
+class EmailSubscriptionRuntime(Protocol):
+    """Census and consent boundary used by the refresh and subscription tasks.
+
+    Every method is a no-op or a refusal when unsubscribe assistance is disabled.
+    Writes made under a worker lease are fenced by it.
+    """
+
+    async def observe(
+        self,
+        principal: Principal,
+        account_id: str,
+        summaries: Iterable[dict[str, Any]],
+        *,
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> int: ...
+
+    async def sweep(
+        self,
+        principal: Principal,
+        account_id: str,
+        *,
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> None: ...
+
+    async def unverified(self, principal: Principal, account_id: str) -> list[tuple[str, str]]: ...
+
+    async def apply_verification(
+        self,
+        principal: Principal,
+        subscription_id: str,
+        block: dict[str, Any],
+        *,
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> None: ...
+
+    async def validate(
+        self, principal: Principal, run: Run, lease: WorkerLease | None
+    ) -> EmailTask: ...
+
+    async def approve(
+        self, principal: Principal, run: Run, lease: WorkerLease | None, approval_id: UUID
+    ) -> None: ...
+
+    async def settle(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        subscription_id: str,
+        *,
+        action: Literal["unsubscribe", "report_spam", "not_spam"],
+        status: Literal["completed", "failed", "uncertain"],
+        code: str,
+        thread_ids: list[str] | None = None,
+    ) -> None: ...
+
+    async def finish(self, principal: Principal, run: Run, lease: WorkerLease | None) -> None: ...
+
+
 class EmailRuntimeServices(Protocol):
     """Scoped projection and personalization boundary used by governed tasks."""
 
     account_servers: dict[str, dict[str, str]]
+
+    @property
+    def subscriptions(self) -> EmailSubscriptionRuntime: ...
 
     async def get_task(self, principal: Principal, run_id: UUID) -> EmailTask | None: ...
 

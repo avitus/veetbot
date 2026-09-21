@@ -52,7 +52,7 @@ validates the floor, and no trailer means lane A.
 | Makefile targets, compose, CI, local development | `development-toolchain.md` |
 | The run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
 | Tool registration, validation, execution, MCP | `tool-system.md` |
-| The builtin tools and their classification | `builtin-tools.md` |
+| Builtin tools and their classification | `builtin-tools.md` |
 | Provider adapters, streaming, usage, cost | `model-gateway.md` |
 | Policy decisions, hardline rules, approvals | `policy-and-approvals.md` |
 | Events, projections, persistence, the queue | `event-log-and-persistence.md` |
@@ -71,18 +71,19 @@ validates the floor, and no trailer means lane A.
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
 | Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
 | Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
-| Memory evaluation, the benchmark, and lifecycle maintenance | `memory-evaluation-and-lifecycle.md` |
-| Integrated episodes, high-recall formation, and evidence-based forgetting | `adaptive-memory-distillation.md` |
-| The persona surface, nominations, and curated promotion | `persona-surface.md` |
-| The memory read API and the native memory browser | `memory-read-api-and-browser.md` |
-| The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
-| Client modes, foreground email, priority/style learning, drafts and semantic mail memories | `email-experience.md` |
-| Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
-| The device channel and SMS through the owner's iPhone | `device-channel-and-sms.md` |
-| The WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
+| Memory evaluation, the benchmark, lifecycle maintenance | `memory-evaluation-and-lifecycle.md` |
+| Integrated episodes, high-recall formation, evidence-based forgetting | `adaptive-memory-distillation.md` |
+| Persona surface, nominations, curated promotion | `persona-surface.md` |
+| Memory read API and native memory browser | `memory-read-api-and-browser.md` |
+| Gmail MCP servers, email tools, bootstrap ceremony | `email-integration.md` |
+| Client modes, foreground email, priority/style learning, drafts, mail memories | `email-experience.md` |
+| Devices, surfaces, Section 29 seam | `multi-device-and-surfaces.md` |
+| Device channel and SMS via the owner's iPhone | `device-channel-and-sms.md` |
+| WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Bland calling and public reception | `bland-calling.md` |
-| People, relationships, and interaction history | `people-and-relationships.md` |
-| Chat thread folders, proposals; typed judgment | `thread-folders.md`, `typed-judgment.md` |
+| People, relationships, interaction history | `people-and-relationships.md` |
+| Thread folders, proposals; typed judgment | `thread-folders.md`, `typed-judgment.md` |
+| Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
@@ -96,9 +97,9 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
-  18 through 30 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0111). Milestone 21 is limited to adaptive
+  18 through 31 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0111, 0112). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
-  the owner's iPhone, 25 to the WhatsApp business surface, 26 to the approved client modes and adaptive email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders and typed judgment, and 30 to advisory approval. Model routing and the plan's remaining roadmap items
+  the owner's iPhone, 25 to the WhatsApp business surface, 26 to client modes and the email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders and typed judgment, 30 to advisory approval, and 31 to email unsubscribe. Model routing and the plan's remaining roadmap items
   are not authorized. Open items: `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
@@ -108,8 +109,7 @@ validates the floor, and no trailer means lane A.
 
 Run `make check` once on the final inputs, on the sidecar with `chunk validate`; it includes `docs-check` and the
 website checks. Do not separately rerun passed checks unless their inputs change.
-Use `make docs-check` for standalone documentation verification, and
-`make citations-fix` to repair moved citations before the final verification.
+Use `make docs-check` for standalone documentation verification, and `make citations-fix` to repair moved citations before the final verification.
 Measure each verification stage and report durations, total wall-clock time, overlap, and the slowest checks before each commit; label estimates explicitly.
 
 The specifications cite each other by line number through the citation ledger.

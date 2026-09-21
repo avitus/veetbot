@@ -32,7 +32,24 @@ def test_email_aggregate_defaults_are_versioned_configuration() -> None:
     """Keep the approved default allowances in versioned configuration."""
     settings = load_settings(base_environment())
     document = load_config_document(settings, "runtime/limits.yaml")
-    assert document.get("email") == {"daily_cost": 20, "monthly_cost": 200}
+    assert document.get("email") == {
+        "daily_cost": 20,
+        "monthly_cost": 200,
+        "unsubscribe_grace_days": 10,
+    }
+
+
+@pytest.mark.parametrize(("days", "accepted"), [(1, False), (2, True), (60, True), (61, False)])
+def test_unsubscribe_grace_period_is_bounded_from_two_through_sixty_days(
+    days: int, accepted: bool
+) -> None:
+    """A knob on the follow-up cannot shrink a sender's grace to nothing or stretch it forever."""
+    values = {"daily_cost": "20", "monthly_cost": "200", "unsubscribe_grace_days": days}
+    if accepted:
+        assert EmailBudgetLimits.model_validate(values).unsubscribe_grace_days == days
+    else:
+        with pytest.raises(ValidationError):
+            EmailBudgetLimits.model_validate(values)
 
 
 @pytest.mark.parametrize("key", ["daily_cost", "monthly_cost"])

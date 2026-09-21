@@ -23,6 +23,7 @@ from gmail_mcp.constants import (
 )
 from gmail_mcp.errors import GmailError, GmailResourceNotFoundError
 from gmail_mcp.sync import GmailSync
+from gmail_mcp.unsubscribe import BULK_HEADERS, bulk
 
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"[ \t\r\f\v]+")
@@ -405,7 +406,7 @@ class GmailClient:
                     f"/threads/{quote(thread_id, safe='')}",
                     params={
                         "format": "metadata",
-                        "metadataHeaders": ["From", "Subject", "Date"],
+                        "metadataHeaders": ["From", "Subject", "Date", *BULK_HEADERS],
                     },
                 )
 
@@ -441,6 +442,9 @@ class GmailClient:
                     if isinstance(latest, dict)
                     else "",
                     "label_ids": normalized["label_ids"],
+                    # Which results are bulk mail, read from the newest received
+                    # message; never where an unsubscribe address points.
+                    "bulk": bulk(messages),
                 }
             )
         result: dict[str, Any] = {"threads": threads}
@@ -518,6 +522,9 @@ class GmailClient:
             max_bytes,
             expected_history_id,
         )
+
+    async def get_unsubscribe(self, message_id: str) -> dict[str, Any]:
+        return await GmailSync(self).get_unsubscribe(message_id)
 
     @classmethod
     def _raw_message(

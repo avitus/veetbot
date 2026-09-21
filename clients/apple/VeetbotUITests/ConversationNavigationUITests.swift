@@ -114,6 +114,11 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    /// The fixture holds a Gmail operation pending for four thread reads and the
+    /// client polls once a second, so an outcome takes three seconds on an idle
+    /// host and longer beside a second simulator. Five seconds was too near that.
+    private static let archiveOutcomeTimeout: TimeInterval = 20
+
     /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
@@ -139,7 +144,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         let handled = NSPredicate(format: "label == %@ AND enabled == true", "Move to Inbox")
         expectation(for: handled, evaluatedWith: action)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: Self.archiveOutcomeTimeout)
         #if os(macOS)
         action.click()
         #else
@@ -147,7 +152,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         let unhandled = NSPredicate(format: "label == %@ AND enabled == true", "Archive in Gmail")
         expectation(for: unhandled, evaluatedWith: action)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: Self.archiveOutcomeTimeout)
     }
 
     /// The detail checkbox replaces the archived message with the next conversation's actual content.
@@ -243,7 +248,7 @@ final class ConversationNavigationUITests: XCTestCase {
         let other = app.buttons["Other mail"]
         other.tap()
         #endif
-        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        XCTAssertTrue(check.waitForExistence(timeout: Self.archiveOutcomeTimeout))
         XCTAssertEqual(check.label, "Move to Inbox")
     }
 
@@ -273,7 +278,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         expectation(for: NSPredicate(format: "label CONTAINS %@", "could not complete"), evaluatedWith: status)
         #endif
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: Self.archiveOutcomeTimeout)
         XCTAssertTrue(action.exists)
         XCTAssertTrue(action.isEnabled)
         XCTAssertEqual(action.label, "Archive in Gmail")
@@ -1529,8 +1534,25 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(destination.isHittable)
         // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
         // menu's first item and leaves the menu open; a touch at the item's
-        // centre, like any other point on it, activates it.
-        destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        // centre, like any other point on it, activates it. It also drops a
+        // touch that lands while the menu is still opening, so the item must
+        // stop moving first, and the menu must close for the tap to count.
+        for _ in 0..<3 {
+            waitForSettledFrame(of: destination)
+            destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            if destination.waitForNonExistence(timeout: 2) { return }
+        }
+        XCTFail("The menu stayed open after three taps on \(identifier)")
+    }
+
+    private func waitForSettledFrame(of element: XCUIElement) {
+        var frame = element.frame
+        for _ in 0..<20 {
+            Thread.sleep(forTimeInterval: 0.1)
+            let next = element.frame
+            if next == frame { return }
+            frame = next
+        }
     }
 
     private func revealSidebarIfNeeded(for row: XCUIElement) {

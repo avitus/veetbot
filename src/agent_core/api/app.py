@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from agent_core.api.auth import Authenticator
 from agent_core.api.calls import call_router
 from agent_core.api.email import email_router
+from agent_core.api.email_subscriptions import email_subscriptions_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
 from agent_core.api.people import people_router
@@ -1868,6 +1869,8 @@ def create_app(
 
     if settings.email_mode_enabled:
         app.include_router(email_router(services.email, secured))
+    if settings.email_mode_enabled and settings.email_unsubscribe_enabled:
+        app.include_router(email_subscriptions_router(services.email.subscriptions, secured))
     if settings.call_enabled and services.calls is not None:
         app.include_router(call_router(services.calls, secured))
 

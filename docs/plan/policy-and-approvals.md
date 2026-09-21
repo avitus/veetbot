@@ -1517,3 +1517,16 @@ the application records `approval.requested`, uses ordinary `APPROVE_ONCE`
 resolution, and resumes the same frozen invocation with normal revalidation.
 Current authority, source revision, expiry, worker fencing, and distinct-resolver
 policy remain enforced. An uncertain write is not automatically repeated.
+
+
+## Milestone 31 unsubscribe approval floor
+
+[ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
+arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
+and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:597);
+the arm holds that decision under every profile, so no profile can turn an
+unsubscribe request into a standing allow. It can only tighten. An owner
+gesture in Email mode satisfies the approval through the exact-match consent
+consumer ADR-0095 introduced, never through a standing authorization, and a
+Chat proposal parks in the ordinary queue.

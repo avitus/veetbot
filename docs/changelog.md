@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-21 — Two simulator UI cases no longer depend on timing
+
+- On the hosted iOS 27.0 simulators `testEmailThreadFeedbackEditingAndExplicitSend`
+  and `testMemoryBrowserListsAndOpensDetail` each failed once and passed on a
+  rerun; the second failure, on the merge commit of #127, held back its
+  deployment until the rerun.
+- The email cases waited five seconds for a Gmail archive outcome that the
+  fixture and the client's one-second poll make take at least three. They now
+  allow twenty.
+- The sidebar menu helper tapped an item while the menu was still opening, and
+  the simulator dropped the touch. It now waits for the item to stop moving and
+  requires the menu to close, tapping again up to three times.
+
 ## 2026-09-20 — The simulator UI lane boots both simulators before its runs
 
 - `make test-apple-ui-ios` could end before any case ran, with the UI-test

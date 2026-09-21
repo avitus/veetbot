@@ -511,6 +511,13 @@ costs one extra request per poll and nothing else. Native behavior is
 verified by the Swift testing lanes under ADR-0049, the same way the persona
 editor's is.
 
+Scheduled sessions are not chat conversations, so they never enter a folder
+and their rows carry no move menu. The sidebar groups them by schedule in a
+Scheduled section between the folders and the unfiled history, a scheduler
+presentation designed in [scheduling.md](scheduling.md) (ADR-0113). "Flat
+history" above means no folder sections or controls; schedule groups derive
+from session metadata alone and do not depend on the folder flag.
+
 ## Events, telemetry, and privacy
 
 - `folder.created`, `folder.renamed`, `folder.deleted`,
@@ -542,7 +549,7 @@ moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none
 of them differs between two deployments of the same revision
-(bootstrap-and-composition.md:337-339). `folders/profiles.yaml` ships:
+(bootstrap-and-composition.md:338-340). `folders/profiles.yaml` ships:
 
 ```yaml
 schema_version: 1
@@ -564,7 +571,7 @@ the two judgment knobs ship with the matcher. `judgment_match_threshold` is
 above 0.5 and at most 1, so at most one option of a question can clear it.
 One environment key, `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and
 the pass together, defaults off, and appears in `.env.example` in the same
-change (bootstrap-and-composition.md:511-516). The matcher additionally needs
+change (bootstrap-and-composition.md:512-517). The matcher additionally needs
 the `JUDGMENT_PROVIDER` selector [typed-judgment.md](typed-judgment.md)
 defines; with the knob on and no provider composed, the pass uses the inner
 grouper alone and says so once in the log.

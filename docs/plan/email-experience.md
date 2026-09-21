@@ -1180,3 +1180,15 @@ facts in one source remain distinct. Source erasure also removes selected
 inferred beliefs from shared recall traces and invalidates terminal checkpoints
 that carried them. Any active dependent run must settle before these retained
 copies are purged; independently confirmed owner beliefs remain.
+
+## Milestone 31 unsubscribe extension
+
+[ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) authorizes
+[email unsubscribe assistance](email-unsubscribe.md) as a separate parallel
+milestone that builds on this one. Its census rides the foreground refresh
+slices defined here and adds no query, model call or automatic-email dollar
+reservation; its typed tasks follow the Archive task's interactive class,
+server preparation and owner-gesture consent; and its records are new kinds in
+`email_records` under this document's retention, source-erasure and privacy
+rules. Nothing in it monitors a mailbox or writes to Gmail without an owner
+act, so this milestone's exclusions and thirty-two gates are unchanged.

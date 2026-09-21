@@ -24,6 +24,7 @@ ROSTERS: Final = {
         "sync_changes",
         "get_thread_page",
         "get_message_body",
+        "get_unsubscribe",
     ),
     "write": ("create_draft", "modify_labels", "trash_thread", "untrash_thread"),
     "send": ("send_message",),

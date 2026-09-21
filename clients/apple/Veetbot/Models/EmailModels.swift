@@ -22,6 +22,8 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     /// Absent support on an older server never authorizes a Gmail mutation.
     public let archiveSupported: Bool?
     public let writeServerID: String?
+    /// Absent support on an older server shows no Subscriptions surface at all.
+    public let unsubscribeSupported: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, label, status, error
@@ -33,6 +35,7 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
         case sendServerID = "send_server_id"
         case archiveSupported = "archive_supported"
         case writeServerID = "write_server_id"
+        case unsubscribeSupported = "unsubscribe_supported"
     }
 
     /// Distinguishes a failed attempt from an account still waiting for its initial synchronization.
@@ -89,6 +92,8 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     /// Missing Inbox state is unknown, rather than evidence of an archived conversation.
     public var inInbox: Bool?
     public var archiveOperation: EmailArchiveOperation?
+    /// Present only when this conversation's newest received message belongs to a bulk sender.
+    public let subscription: EmailThreadSubscription?
     public let summary: String
     public let reason: String
     public let needsReply: Bool
@@ -115,6 +120,7 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, subject, senders, topics, revision, summary, reason, priority, complete, messages, draft
+        case subscription
         case accountID = "account_id"
         case updatedAt = "updated_at"
         case needsReply = "needs_reply"

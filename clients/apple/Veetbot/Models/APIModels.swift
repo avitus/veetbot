@@ -209,6 +209,12 @@ public struct SessionView: Codable, Identifiable, Sendable {
     }
 
     /// People audit anchors and import workers are sessions, not conversations.
+    /// The schedule that materialized this session, when its metadata names one.
+    /// A value that is not a UUID string is treated as absent.
+    public var scheduleID: UUID? {
+        metadata["schedule_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+    }
+
     var isPeopleOperational: Bool {
         guard let purpose = metadata["purpose"]?.stringValue else { return false }
         return purpose == "people-management" || purpose == "people-import"

@@ -72,6 +72,8 @@ public final class EmailViewModel: ObservableObject {
     @Published private var archiveUnavailableThreads: Set<UUID> = []
 
     public var authenticationFailure: ((Error) -> Void)?
+    /// The census is its own surface and its own state; Email mode only opens it.
+    public let subscriptions: EmailSubscriptionsViewModel
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let refreshNanoseconds: UInt64
     private let now: () -> Date
@@ -122,6 +124,16 @@ public final class EmailViewModel: ObservableObject {
         self.refreshNanoseconds = refreshNanoseconds
         self.now = now
         self.statusBackoff = statusBackoff
+        subscriptions = EmailSubscriptionsViewModel(
+            makeAPIClient: makeAPIClient, statusBackoff: statusBackoff)
+    }
+
+    /// A surface the owner can reach only when an account advertises support for it.
+    public var unsubscribeAvailable: Bool { accounts.contains { $0.unsubscribeSupported == true } }
+
+    /// A thread action needs its own account's support, never another account's.
+    public func unsubscribeSupported(for accountID: String) -> Bool {
+        accounts.first { $0.id == accountID }?.unsubscribeSupported == true
     }
 
     deinit {
@@ -197,6 +209,7 @@ public final class EmailViewModel: ObservableObject {
         archiveReadErrors = []
         archiveVersions = [:]
         archiveStates = [:]
+        subscriptions.resetConnection()
         active = false
         accounts = []
         inboxItems = []

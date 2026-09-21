@@ -41,6 +41,9 @@ test("privacy page discloses Gmail access, processing, retention, and control", 
   assert.match(html, /does not create cross-user aggregate or anonymized Gmail datasets/i);
   assert.match(html, /data brokers/i);
   assert.match(html, /cold email/i);
+  assert.match(html, /unsubscribe request.*only when you ask/i);
+  assert.match(html, /sender can see the address of your Veetbot server/i);
+  assert.match(html, /never follows an unsubscribe link in a message body/i);
   assert.match(html, /Gmail content.*untrusted/i);
   assert.match(html, /cannot authorize an action/i);
   assert.match(html, /encrypted at rest/i);

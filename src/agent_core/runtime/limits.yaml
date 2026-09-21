@@ -27,6 +27,7 @@ run_defaults:
 email:
   daily_cost: 20.0
   monthly_cost: 200.0
+  unsubscribe_grace_days: 10
 scheduling:
   scan_batch: 100
   fallback_poll_seconds: 30

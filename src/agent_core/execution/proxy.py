@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     from agent_core.domain.execution import EgressPolicy
 
 _MAX_HEADER_BYTES = 64 * 1024
+# Transports that carry public HTTPS resources under one rule, each separately audited.
+_PUBLIC_HTTPS_TRANSPORTS = {
+    "browser_https": "browser_destination_denied",
+    "unsubscribe_https": "unsubscribe_destination_denied",
+}
 
 
 @dataclass(slots=True)
@@ -55,6 +60,11 @@ async def start_browser_egress_proxy(
     for destination in policy.destinations:
         validate_host_and_ports(destination.host, destination.ports)
     return await _start_proxy(("browser_https", ()), tenant_id=tenant_id)
+
+
+async def start_unsubscribe_egress_proxy(*, tenant_id: str) -> WorkerEgressProxy:
+    """Transport one fixed RFC 8058 request; no operator policy selects this transport."""
+    return await _start_proxy(("unsubscribe_https", ()), tenant_id=tenant_id)
 
 
 async def _start_proxy(
@@ -102,7 +112,7 @@ def _policy() -> tuple[str, tuple[tuple[str, frozenset[int]], ...]]:
     return mode, parsed
 
 
-def _browser_hostname(host: str) -> bool:
+def _public_hostname(host: str) -> bool:
     """Reject non-public hostname forms before DNS lookup, without URL diagnostics."""
     try:
         validate_host_and_ports(host, frozenset({443}))
@@ -232,10 +242,11 @@ async def _handle(
             upstream_header = b" ".join((method.encode(), path.encode(), version.encode()))
             upstream_header += b"\r\n" + b"".join(line + b"\r\n" for line in header_lines)
             upstream_header += b"\r\n"
-        if policy[0] == "browser_https":
-            if method.upper() != "CONNECT" or port != 443 or not _browser_hostname(host):
+        denied_reason = _PUBLIC_HTTPS_TRANSPORTS.get(policy[0])
+        if denied_reason is not None:
+            if method.upper() != "CONNECT" or port != 443 or not _public_hostname(host):
                 addresses: tuple[str, ...] = ()
-                allowed, reason = False, "browser_destination_denied"
+                allowed, reason = False, denied_reason
             else:
                 addresses = await _resolved(host, port)
                 allowed, reason = evaluate_core(

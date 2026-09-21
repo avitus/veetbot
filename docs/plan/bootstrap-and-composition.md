@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **179 configuration knobs** across the specifications;
+The corpus now declares **180 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -305,9 +305,10 @@ pass moved out of the ranker's literals into `memory/profiles.yaml`, plus
 Milestone 24's three device knobs: the invocation timeout, the per-device
 daily ingest cap, and the poll-back interval, plus ADR-0089's terminal schedule
 retention days, purge cadence, and purge batch; ADR-0093 adds memory model selection;
-Milestone 26 adds the two aggregate automatic-email cost allowances, and Milestone 29
+Milestone 26 adds the two aggregate automatic-email cost allowances, Milestone 29
 adds the seven thread-folder knobs and, under ADR-0110, the judgment matcher's
-switch and probability floor. The plan names **three
+switch and probability floor, and Milestone 31 adds the unsubscribe grace
+period. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -332,13 +333,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-179 falls out.
+180 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-179 tuning knobs in YAML.
+180 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -346,7 +347,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 179 knobs live, at the values the
+    module that owns it. This is where all 180 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -411,7 +412,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 179. Schema versions, profile names, rule identifiers,
+and asserts the total is 180. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -421,10 +422,10 @@ or invariants rather than knobs and are not counted.
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 28 |
 | `tools/limits.yaml` | 20 |
-| `runtime/limits.yaml` | 57 |
+| `runtime/limits.yaml` | 58 |
 | `memory/profiles.yaml` | 38 |
 | `folders/profiles.yaml` | 9 |
-| **Total** | **179** |
+| **Total** | **180** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -1270,7 +1271,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 179 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 180 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1292,7 +1293,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 179 declared knobs into files and leaves ten fields in
+   sorts all 180 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,
@@ -1474,3 +1475,20 @@ authorizer keeps the deterministic engine. The observe flag is an environment
 value because it changes no effective rule; enforcing stays in the hashed
 profile. No knob is added: the shipped profile is unchanged. The detailed
 contract is [policy-and-approvals.md](policy-and-approvals.md).
+
+## Milestone 31 email unsubscribe composition
+
+`AGENT_EMAIL_UNSUBSCRIBE_ENABLED` defaults to off and requires both
+`AGENT_EMAIL_ENABLED` and `AGENT_EMAIL_MODE_ENABLED`; set without them it is a
+configuration error at composition. When set, the composition root mounts the
+subscription routes, registers the `email.subscriptions` and
+`email.unsubscribe` builtin tools, lets the refresh task build the census, and
+constructs the process-local public-HTTPS unsubscribe transport, handing its
+address to `email.unsubscribe` and to nothing else. The operator's egress
+policy is not consulted for that transport and cannot select it. Unset, none
+of these exists. The `email.unsubscribe_grace_days` limit, default 10 and
+bounded from 2 through 60, is the one versioned knob this milestone adds to the
+executable inventory; the flag is an environment variable like the other
+feature flags. The proxy and the transport are owned by the composition and
+closed with it. The detailed contract is
+[email-unsubscribe.md](email-unsubscribe.md).

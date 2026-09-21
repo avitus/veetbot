@@ -27,6 +27,8 @@ from tests.contract.support import NOW
 from tests.gates.test_email_m18 import _credential, _thread
 
 NEW_READ_TOOLS = {"get_profile", "sync_changes", "get_thread_page", "get_message_body"}
+# Milestone 31's evidence read joined the same application-only marker.
+APPLICATION_ONLY_READ_TOOLS = NEW_READ_TOOLS | {"get_unsubscribe"}
 
 
 class Mailbox:
@@ -454,7 +456,7 @@ async def test_m26_sync_tools_are_application_only_without_changing_policy() -> 
     tools = await server.list_tools()
     for tool in tools:
         assert ((tool.meta or {}).get("veetbot/application-only") is True) == (
-            tool.name in NEW_READ_TOOLS
+            tool.name in APPLICATION_ONLY_READ_TOOLS
         )
     declared = tuple(
         MCPRemoteTool.model_validate(
@@ -472,7 +474,7 @@ async def test_m26_sync_tools_are_application_only_without_changing_policy() -> 
     assert len(report.accepted) == len(tools)
     for mapped in report.accepted:
         assert mapped.spec.model_dump().get("model_visible") == (
-            mapped.remote_name not in NEW_READ_TOOLS
+            mapped.remote_name not in APPLICATION_ONLY_READ_TOOLS
         )
         assert mapped.spec.side_effect == config.side_effect
         assert mapped.spec.required_scopes == set(config.required_scopes)

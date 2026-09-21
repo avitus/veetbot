@@ -12,6 +12,7 @@ public struct EmailModeView: View {
     let discussInChat: () async -> Void
     @Environment(\.activeClientMode) private var activeMode
     @State private var showingLearning = false
+    @State private var showingSubscriptions = false
     @State private var navigationPath: [UUID] = []
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
@@ -72,6 +73,13 @@ public struct EmailModeView: View {
             EmailSendReview(model: model)
         }
         .sheet(isPresented: $showingLearning) { EmailLearningScreen(model: model) }
+        .sheet(isPresented: $showingSubscriptions) {
+            EmailSubscriptionsScreen(model: model.subscriptions, accounts: model.accounts)
+        }
+        // A server that stops advertising support must not leave the surface open.
+        .onChange(of: model.unsubscribeAvailable) { available in
+            if !available { showingSubscriptions = false }
+        }
         .onAppear {
             if let id = model.selectedThreadID, navigationPath.last != id { navigationPath = [id] }
         }
@@ -84,7 +92,8 @@ public struct EmailModeView: View {
     }
 
     private var detail: some View {
-        EmailThreadScreen(model: model, discussInChat: discussInChat).id(model.selectedThreadID)
+        EmailThreadScreen(model: model, subscriptions: model.subscriptions, discussInChat: discussInChat)
+            .id(model.selectedThreadID)
     }
 
     #if os(macOS)
@@ -237,6 +246,17 @@ public struct EmailModeView: View {
             // Remove inactive items themselves so the other mode inherits no empty toolbar slots.
             ToolbarItemGroup {
                 if activeMode == .email {
+                    // An account that advertises no unsubscribe support offers no
+                    // entry, and nothing else is offered in its place.
+                    if model.unsubscribeAvailable {
+                        Button {
+                            showingSubscriptions = true
+                        } label: {
+                            Image(systemName: "tray.full")
+                        }
+                        .accessibilityLabel("Subscriptions").help("Subscriptions")
+                        .accessibilityIdentifier("email.subscriptions.open")
+                    }
                     Button {
                         showingLearning = true
                     } label: {
@@ -414,6 +434,7 @@ private struct EmailArchiveButton: View {
 private struct EmailThreadScreen: View {
     private enum Field: Hashable { case to, cc, bcc, subject, body, feedback, refinement }
     @ObservedObject var model: EmailViewModel
+    @ObservedObject var subscriptions: EmailSubscriptionsViewModel
     let discussInChat: () async -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var target: EmailFeedbackTarget = .thread
@@ -499,6 +520,13 @@ private struct EmailThreadScreen: View {
             )
         }
         .sheet(isPresented: $showingRevisions) { EmailRevisionsScreen(model: model) }
+        // One confirmation state serves both surfaces, so each presents only its own.
+        .sheet(isPresented: Binding(
+            get: { subscriptions.confirmation?.source == .thread },
+            set: { if !$0 { subscriptions.cancelConfirmation() } })
+        ) {
+            EmailUnsubscribeConfirmationSheet(model: subscriptions)
+        }
         #if os(iOS)
         .fullScreenCover(item: $peopleLookup) { lookup in PeopleLookupSheet(lookup: lookup) }
         #else
@@ -534,6 +562,19 @@ private struct EmailThreadScreen: View {
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             Label(accountDescription(thread.accountID), systemImage: "envelope")
                 .appFont(.caption).foregroundColor(.secondary)
+            // Bulk mail only, on an account that advertises the action, with
+            // verified evidence. Everything else offers nothing here.
+            if let block = thread.subscription, block.canUnsubscribe,
+               model.unsubscribeSupported(for: thread.accountID) {
+                HStack(spacing: 8) {
+                    Text(thread.senders.first ?? block.destination)
+                        .appFont(.caption).foregroundColor(.secondary).lineLimit(1)
+                    Button("Unsubscribe") { subscriptions.beginUnsubscribe(thread: thread) }
+                        .buttonStyle(.bordered).appFont(.caption)
+                        .accessibilityLabel("Unsubscribe from \(thread.senders.first ?? block.destination)")
+                        .accessibilityIdentifier("email.unsubscribe.thread")
+                }
+            }
         }
     }
 
@@ -837,7 +878,7 @@ private struct EmailThreadScreen: View {
     }
 }
 
-private enum EmailSurface {
+enum EmailSurface {
     static let accent: Color = {
         #if os(macOS)
             Color(
@@ -874,12 +915,12 @@ private enum EmailSurface {
 
 extension View {
     /// Hides separators for inbox notices only on platforms that support the list modifier.
-    @ViewBuilder fileprivate func emailHideSeparator() -> some View {
+    @ViewBuilder func emailHideSeparator() -> some View {
         if #available(iOS 15, macOS 13, *) { listRowSeparator(.hidden) } else { self }
     }
 
     /// Gives reading sections an adaptive surface and optionally highlights the reply composer.
-    fileprivate func emailCard(accent: Bool = false) -> some View {
+    func emailCard(accent: Bool = false) -> some View {
         background(EmailSurface.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
@@ -933,7 +974,7 @@ private struct EmailThreadStatus: View {
     }
 }
 
-private struct EmailEmptyState: View {
+struct EmailEmptyState: View {
     let symbol: String
     let title: String
     let message: String

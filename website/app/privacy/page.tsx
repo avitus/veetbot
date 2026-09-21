@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
             This policy explains how Veetbot handles information on its public
             website and in its optional Gmail integration.
           </p>
-          <p className="effective-date">Effective September 11, 2026</p>
+          <p className="effective-date">Effective September 21, 2026</p>
         </header>
 
         <div className="legal-layout">
@@ -128,6 +128,18 @@ export default function PrivacyPolicy() {
                 Chat and your other connected account within the same assistant,
                 never with other users. Suggested replies remain internal drafts
                 until you approve the exact message for sending.
+              </p>
+              <p>
+                When enabled, Veetbot reads the list headers of bulk mail to
+                show you who sends it. It sends an unsubscribe request only when
+                you ask for that sender, by your tap or your approval. The
+                request is the one the sender published in its own message
+                header, returned to that sender with no other Google data, no
+                cookie, and no credential. It is sent from your Veetbot server,
+                so the sender can see the address of your Veetbot server and
+                learn that the mailbox is active. Veetbot never follows an
+                unsubscribe link in a message body, and it offers no automated
+                unsubscribe for mail that Google did not authenticate.
               </p>
               <p>
                 Veetbot does not sell Google user data, use it for advertising,

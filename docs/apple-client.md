@@ -172,8 +172,9 @@ The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
 versions predate SwiftData, so iOS 15–16 and macOS 12–13 use an atomic
 Application Support file behind the same store protocol. Both contain only
-`session_id`, title, agent identity, timestamps, the last known run ID, and the
-server-assigned folder identifier. The
+`session_id`, title, agent identity, timestamps, the last known run ID, the
+server-assigned folder identifier, and a scheduled session's schedule
+identifier. The
 client follows pagination until the server returns no next cursor, rejects a
 repeated cursor as an invalid response, and reconciles that complete index after
 connecting, whenever it returns to the foreground, and every 30 seconds while
@@ -220,6 +221,16 @@ conversation. Against a server whose index lacks the key, or that answers 404
 or 405 on the folder list, the client makes no further folder request, keeps
 every control hidden, and renders exactly the flat history; that unavailability
 is contained in reconciliation and never surfaces as an error.
+
+Scheduled sessions never enter a folder (ADR-0113, `scheduling.md`). The
+index's `schedule_id` metadata is cached with each row, the server's value
+winning, and a schedule with two or more cached sessions renders as one
+collapsible row in a Scheduled section between the folders and the unfiled
+history, labelled with its newest session's title and holding its sessions in
+activity order. A lone scheduled session stays in the history. Groups start
+collapsed; the owner's toggles are remembered on the device. Scheduled rows
+carry no move menu, and the groups render whether or not the server offers
+folders.
 
 In compact iPhone and iPad layouts, sidebar rows push an activating chat
 destination before selecting a historical session or resetting to a new
@@ -433,3 +444,49 @@ foreground checks also execute the backend's shared-profile/context and bounded
 refresh-admission regressions. These checks need full Xcode and both simulator
 families, but no database or live mailbox. An unavailable Apple lane is skipped
 by pytest and remains an unpassed active gate in the gate report.
+
+## Subscriptions
+
+Unsubscribe assistance (Milestone 31, `plan/email-unsubscribe.md`) adds a
+Subscriptions surface to Email mode, in its own `EmailSubscriptionsViewModel`.
+The entry appears in the Email toolbar — the shared Mac window toolbar, and the
+iPhone and iPad navigation bar — only while an account's projection reports
+`unsubscribe_supported`. A server or account that advertises nothing shows no
+entry and no thread action, and the client never substitutes another command
+for the missing one. Rows come from `GET /v1/email/subscriptions` in the order
+the server returns them, filtered by account and state and paged by cursor;
+each row shows the sender, how many conversations arrived in the window, when
+the last one did, what the sender offers in plain words, and its state.
+Compact iPhone layouts push the detail, while Mac and regular-width iPad show
+it beside the list.
+
+Selecting is explicit and bounded. Selection stops at twenty-five, and Select
+all additionally skips protected senders and any row that is not eligible —
+unverified, offering no mechanism, or already decided. An unverified row reads
+*Checking…* and cannot be selected, while Keep and Report spam stay available
+on it. Unsubscribe on one row, or *Unsubscribe N*, opens one confirmation that
+names every sender with its mechanism — *One-click request to example.com* or
+*Sends an email to unsub@…* — states that an unsubscribe cannot be undone, and
+offers *Also archive existing mail from these senders*, off by default.
+Confirming is the consent and sends exactly one command. The unsubscribe
+address is never part of a client projection: a target carries a subscription
+identifier, its evidence digest and its expected revision, and nothing else.
+
+Rows then read *Unsubscribing…* and settle from the durable operation, polling
+`GET /v1/email/operations/{id}` with the bounded backoff archive rows use
+before reading the census back. Success is quiet. A failed run, an unreadable
+status, a `failed` row and an `uncertain` outcome all restore the row with an
+actionable error and offer what remains: try again, Report spam, or Keep. A
+`still_sending` row says so and offers Report spam; a `reported_spam` row
+offers Not spam; Keep is reversible. A bulk conversation whose thread
+projection carries a `subscription` block shows the same Unsubscribe action
+beside its sender and opens the same confirmation with one row; each surface
+presents only the confirmation it opened.
+
+Run `uv run pytest tests/native/test_email_unsubscribe_native_m31.py -q` for the
+executable native unsubscribe gate check. This integration-marked bridge runs
+the real `EmailSubscriptionModelTests`, `EmailSubscriptionsViewModelTests` and
+`EmailSubscriptionViewStructureTests` Swift suites and verifies each case
+reported passing. It needs full Xcode but no simulator, database or live
+mailbox, and an unavailable Apple lane is skipped by pytest and remains an
+unpassed active gate in the gate report.

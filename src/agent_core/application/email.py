@@ -20,6 +20,7 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.email_subscriptions import EmailSubscriptions, SubscriptionRequest
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
@@ -210,6 +211,8 @@ class EmailExperienceService:
         | None = None,
         archive_self_approval_enabled: bool = True,
         current_archive_principal: Callable[[], Principal] | None = None,
+        unsubscribe_enabled: bool = False,
+        unsubscribe_grace_days: int = 10,
     ) -> None:
         """Wire ordinary run policy, account bindings, and finite email allowances."""
         self.uow_factory = uow_factory
@@ -237,6 +240,9 @@ class EmailExperienceService:
             }
             for index, account_id in enumerate(account_ids)
         }
+        self.subscriptions = EmailSubscriptions(
+            self, enabled=unsubscribe_enabled, grace=timedelta(days=unsubscribe_grace_days)
+        )
 
     async def accounts(self, principal: Principal) -> dict[str, object]:
         require_scope(principal, "email.read")
@@ -259,6 +265,9 @@ class EmailExperienceService:
                         "send_server_id": self.account_servers[account_id]["send"],
                         "write_server_id": self.account_servers[account_id].get("write"),
                         "archive_supported": self._archive_supported(principal, account_id),
+                        "unsubscribe_supported": self.subscriptions.supported(
+                            principal, account_id
+                        ),
                     }
                 )
         return {"items": items, "next_cursor": None}
@@ -383,6 +392,9 @@ class EmailExperienceService:
                 else await self._retained_draft(uow.email, principal, thread.draft_id)
             )
             result["draft"] = None if draft is None else draft.model_dump(mode="json")
+            result["subscription"] = await self.subscriptions.thread_block(
+                uow.email, principal, thread
+            )
             return result
 
     async def feedback(
@@ -963,15 +975,18 @@ class EmailExperienceService:
         self,
         principal: Principal,
         *,
-        kind: Literal["refresh", "draft", "send", "archive"],
+        kind: Literal["refresh", "draft", "send", "archive", "subscription"],
         thread_id: UUID | None = None,
         draft_id: UUID | None = None,
         expected_revision: int | None = None,
         instruction: str | None = None,
         idempotency_key: str | None = None,
         archived: bool | None = None,
+        subscription: SubscriptionRequest | None = None,
     ) -> EmailOperation:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
+        # Typed owner gestures: no model, no catalog, no automatic-email dollars.
+        gesture = kind in {"archive", "subscription"}
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
         now = self.clock.now()
@@ -981,7 +996,7 @@ class EmailExperienceService:
                 session_thread_id = (await self._draft(uow.email, principal, draft_id)).thread_id
         async with (
             self._prepared_session(
-                principal, None if kind in {"refresh", "archive"} else session_thread_id
+                principal, None if kind == "refresh" or gesture else session_thread_id
             ) as prepared,
             self.uow_factory() as uow,
             uow.email.lock(principal),
@@ -993,8 +1008,23 @@ class EmailExperienceService:
             if draft is not None:
                 thread = await self._thread(uow.email, principal, draft.thread_id)
                 thread_id = thread.id
+            if subscription is not None and idempotency_key is not None:
+                # A retried gesture replays its durable result. Eligibility is not
+                # re-judged first: the original may already have settled the sender.
+                early = await self._replayed_in(
+                    uow,
+                    principal,
+                    hashlib.sha256(idempotency_key.encode()).hexdigest(),
+                    hashlib.sha256(
+                        json.dumps([kind, "None", "None", None, None, subscription.digest]).encode()
+                    ).hexdigest(),
+                )
+                if early is not None:
+                    return early
             accounts = (
-                [
+                await self.subscriptions.accounts_in(uow, principal, subscription)
+                if subscription is not None
+                else [
                     account
                     for account in self.account_ids
                     if account in self.account_servers
@@ -1014,6 +1044,8 @@ class EmailExperienceService:
             intent = [kind, str(thread_id), str(draft_id), expected_revision, instruction]
             if kind == "archive":
                 intent.append(archived)
+            if subscription is not None:
+                intent.append(subscription.digest)
             digest = hashlib.sha256(json.dumps(intent).encode()).hexdigest()
             replay_key = (
                 None
@@ -1026,20 +1058,9 @@ class EmailExperienceService:
                 else await uow.email.get(principal, "task_replay", replay_key)
             )
             if replay is not None:
-                if replay.payload["request_digest"] != digest:
-                    raise ConflictError("idempotency key was used for a different email operation")
-                old = await read_value(
-                    uow.email, principal, "task", str(replay.payload["run_id"]), EmailTask
-                )
-                if old is None:
-                    raise ConflictError("email operation has been erased")
-                run = await uow.runs.get(old.run_id, principal)
-                return EmailOperation(
-                    operation_id=old.id,
-                    run_id=old.run_id,
-                    status=run.status.value,
-                    replayed=True,
-                )
+                replayed = await self._replayed_in(uow, principal, replay_key or "", digest)
+                assert replayed is not None
+                return replayed
             if kind == "archive":
                 if (
                     thread is None
@@ -1078,8 +1099,15 @@ class EmailExperienceService:
                 if run.status in TERMINAL_RUN_STATUSES:
                     await self._settle_task_in(uow, principal, old, run)
                     continue
-                if old.kind != kind or (
-                    kind != "refresh" and (old.thread_id != thread_id or old.draft_id != draft_id)
+                # Subscription batches never coalesce: a sender already in flight
+                # conflicts on its own pending state instead.
+                if (
+                    kind == "subscription"
+                    or old.kind != kind
+                    or (
+                        kind != "refresh"
+                        and (old.thread_id != thread_id or old.draft_id != draft_id)
+                    )
                 ):
                     continue
                 if kind == "send" and old.expected_revision != expected_revision:
@@ -1111,26 +1139,23 @@ class EmailExperienceService:
                     raise ConflictError("this draft cannot be sent in its current state")
             reservation = (
                 Decimal("0")
-                if kind in {"send", "archive"}
+                if kind == "send" or gesture
                 else min(
                     EMAIL_SLICE_RESERVATION,
                     self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION,
                 )
             )
-            if kind != "archive":
+            if not gesture:
                 await self._check_budget(uow.email, principal, reservation)
-            session = await self._session_in(
-                uow, principal, None if kind == "archive" else thread, prepared
-            )
+            session = await self._session_in(uow, principal, None if gesture else thread, prepared)
             if await uow.runs.active_for_session(session.id, principal) is not None:
                 raise ConflictError("the thread conversation has an active run")
+            # A batch may send mail and page a sender's Inbox after its one-click request.
+            slice_seconds = timedelta(seconds=300 if kind == "subscription" else 120)
             deadline = (
                 self.agent.limits.deadline_at
                 if kind == "send"
-                else min(
-                    now + timedelta(seconds=120),
-                    self.agent.limits.deadline_at or now + timedelta(seconds=120),
-                )
+                else min(now + slice_seconds, self.agent.limits.deadline_at or now + slice_seconds)
             )
             limits = self.agent.limits.model_copy(
                 deep=True,
@@ -1148,9 +1173,9 @@ class EmailExperienceService:
                 agent_version=session.agent_version,
                 status=RunStatus.QUEUED,
                 limits=limits,
-                # The owner waits on an archive gesture; it must not queue behind
+                # The owner waits on a gesture; it must not queue behind
                 # minutes-long refreshes in the asynchronous lane.
-                priority=0 if kind == "archive" else 10,
+                priority=0 if gesture else 10,
                 scheduled_for=now,
                 deadline_at=deadline,
                 created_at=now,
@@ -1188,6 +1213,14 @@ class EmailExperienceService:
                     else None
                 ),
             )
+            if subscription is not None:
+                task = task.model_copy(
+                    update={
+                        "subscription_consent": await self.subscriptions.consent_in(
+                            uow, principal, subscription, task.id, run.id, now
+                        )
+                    }
+                )
             await save_value(uow.email, principal, "task", str(run.id), task, now)
             if task.archive_consent is not None and thread is not None:
                 await save_value(
@@ -1267,6 +1300,18 @@ class EmailExperienceService:
                         derivation_key=f"email-archive:{task.id}",
                     )
                 )
+            if task.subscription_consent is not None:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session.id,
+                        run_id=run.id,
+                        event_type="email.subscription.requested",
+                        actor_type="principal",
+                        actor_id=principal.principal_id,
+                        payload=self.subscriptions.gesture_payload(task),
+                        derivation_key=f"email-subscription:{task.id}",
+                    )
+                )
             await uow.events.append(
                 NewEvent(
                     session_id=session.id,
@@ -1279,7 +1324,7 @@ class EmailExperienceService:
             await self.seed_checkpoint(uow, run, event.sequence, None, principal)
         if self.activate_session is not None:
             await self.activate_session(session.id)
-        if kind in {"refresh", "archive"}:
+        if kind == "refresh" or gesture:
             # Admission has pinned the ordinary catalog. The worker opens its
             # own transports; keeping the API's copies leaks a process roster
             # for every foreground poll.
@@ -1288,6 +1333,25 @@ class EmailExperienceService:
         async with self.uow_factory() as uow:
             final_run = await uow.runs.get(run.id, principal)
         return EmailOperation(operation_id=task.id, run_id=run.id, status=final_run.status.value)
+
+    async def _replayed_in(
+        self, uow: RepositoryUnitOfWork, principal: Principal, replay_key: str, digest: str
+    ) -> EmailOperation | None:
+        """The durable result an idempotency key already names, if any."""
+        replay = await uow.email.get(principal, "task_replay", replay_key)
+        if replay is None:
+            return None
+        if replay.payload["request_digest"] != digest:
+            raise ConflictError("idempotency key was used for a different email operation")
+        old = await read_value(
+            uow.email, principal, "task", str(replay.payload["run_id"]), EmailTask
+        )
+        if old is None:
+            raise ConflictError("email operation has been erased")
+        run = await uow.runs.get(old.run_id, principal)
+        return EmailOperation(
+            operation_id=old.id, run_id=old.run_id, status=run.status.value, replayed=True
+        )
 
     async def operation(self, principal: Principal, operation_id: UUID) -> EmailOperation:
         require_scope(principal, "email.read")
@@ -1635,7 +1699,7 @@ class EmailExperienceService:
     async def settle(self, principal: Principal, run_id: UUID) -> None:
         """Release terminal refresh resources and settle only provable usage."""
         task = await self.get_task(principal, run_id)
-        if task is not None and task.kind in {"refresh", "archive"}:
+        if task is not None and task.kind in {"refresh", "archive", "subscription"}:
             async with self.uow_factory() as uow:
                 run = await uow.runs.get(run_id, principal)
             if run.status in TERMINAL_RUN_STATUSES:
@@ -2783,6 +2847,9 @@ class EmailExperienceService:
                     await uow.email.delete(
                         principal, "draft_edit_replay", row.key, expected_revision=row.revision
                     )
+            await self.subscriptions.forget_thread_in(
+                uow.email, principal, account_id, provider_id, message_ids
+            )
             for kind, key in (("thread", str(thread_id)), ("thread_source", source_key)):
                 current_record = await uow.email.get(principal, kind, key)
                 if current_record is not None:

@@ -87,6 +87,17 @@ title: Current Milestone
   that never denies, a deterministic recovery policy in the tool pipeline, and
   observe before enforce. All five gates are bound to executable checks; the
   layer is off in every deployment and the milestone is in progress.
+- **Milestone 31 — Email unsubscribe assistance:** requested by the owner and
+  shaped on 2026-09-19 as a new independent parallel workstream under ADR-0112;
+  [email-unsubscribe.md](email-unsubscribe.md) declares twenty gates for a
+  header-derived census of bulk senders, the authenticated RFC 8058 one-click
+  request sent through a dedicated public-HTTPS egress transport to a
+  server-derived destination, `mailto:` unsubscribe, Report spam and sender
+  cleanup as fixed label actions, owner-gesture consent for a bounded batch,
+  scoped routes behind a default-off flag, two Chat tools, and the native
+  Subscriptions view. It is implemented default-off with nineteen gates bound
+  to passing checks; simulator UI journeys and the owner's real-mailbox release
+  evidence remain open.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -376,6 +387,7 @@ plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 - [Milestone 26 — Client modes and adaptive email experience](engineering-plan.md#milestone-26-client-modes-and-adaptive-email-experience)
 - [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
 - [Milestone 30 — Advisory approval layer](engineering-plan.md#milestone-30-advisory-approval-layer)
+- [Milestone 31 — Email unsubscribe assistance](engineering-plan.md#milestone-31-email-unsubscribe-assistance)
 
 ## Completion rule
 
@@ -528,3 +540,21 @@ unbinds the memory-formation release evidence until it is regenerated
 (ADR-0111, amended 2026-09-20). Threshold calibration, hosted CI, review and
 delivery evidence remain open. This independent workstream is in progress;
 the verified ceiling remains 12.
+
+## Milestone 31: Email unsubscribe assistance
+
+The owner requested this capability on 2026-09-19 and decided its surfaces,
+consent model, egress and fallbacks under ADR-0112.
+[Email unsubscribe assistance](email-unsubscribe.md) specifies twenty gates: a
+deterministic census of bulk senders read from header metadata inside the
+existing foreground refresh; the RFC 8058 one-click request, offered only for
+mail Gmail authenticated and sent by one builtin tool whose destination is
+server-derived and never an argument; a dedicated public-HTTPS egress
+transport for that tool alone; the header's `mailto:` message through the
+account's send server; Report spam, Not spam and sender cleanup as fixed label
+deltas; owner-gesture consent for a batch of at most twenty-five senders and
+one by-value approval per batch in Chat; four routes behind a default-off
+flag; and the native Subscriptions view and thread action. The owner directed
+implementation on 2026-09-19. Nineteen gates bind passing checks; simulator UI
+journeys and integrated release evidence remain open. This independent
+workstream is in progress; the verified ceiling remains 12.
