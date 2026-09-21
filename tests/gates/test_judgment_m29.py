@@ -32,7 +32,7 @@ async def test_default_off(caplog: pytest.LogCaptureFixture) -> None:
 
 
 async def test_typed_failure() -> None:
-    """Six reason codes and nothing else; bounded retries; no body, state, or key in a failure."""
+    """Seven reason codes and nothing else; bounded retries; no body, state, or key in a failure."""
 
     for status, reason, retryable, calls in provider_contract.STATUS_CASES:
         await provider_contract.test_typesafe_classifies_failure_by_status_alone(

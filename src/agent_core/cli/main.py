@@ -651,7 +651,7 @@ def call_worker_command() -> None:
     """Reconcile retained calls; this role cannot start a call."""
 
     async def run() -> None:
-        async with build_call_worker() as composition:
+        async with build_call_worker(service_logging=True) as composition:
             assert composition.worker is not None
             await _run_worker_service(composition.worker)
 
@@ -667,7 +667,7 @@ def call_ingress_command() -> None:
     """Receive signed Bland callbacks on a dedicated loopback listener."""
 
     async def run() -> None:
-        async with build_call_worker(ingress=True) as composition:
+        async with build_call_worker(ingress=True, service_logging=True) as composition:
             assert composition.webhook_app is not None
             server = uvicorn.Server(
                 uvicorn.Config(
@@ -689,15 +689,15 @@ def call_ingress_command() -> None:
 
 async def _serve_worker(role: WorkerRole) -> None:
     if role is WorkerRole.NOTIFY:
-        async with build_notification_worker() as notification_service:
+        async with build_notification_worker(service_logging=True) as notification_service:
             await _run_worker_service(notification_service)
         return
     if role is WorkerRole.SCHEDULE:
-        async with build_schedule_worker() as schedule_service:
+        async with build_schedule_worker(service_logging=True) as schedule_service:
             await _run_worker_service(schedule_service)
         return
     if role is WorkerRole.SURFACE:
-        async with build_surface_worker() as surface:
+        async with build_surface_worker(service_logging=True) as surface:
             server = (
                 None
                 if surface.webhook_app is None
@@ -734,7 +734,7 @@ async def _serve_worker(role: WorkerRole) -> None:
             finally:
                 stop_surface()
         return
-    async with build(storage="postgres") as composition:
+    async with build(storage="postgres", service_logging=True) as composition:
         worker_id = f"{socket.gethostname()}:{os.getpid()}"
         service: WorkerService
         if role in {WorkerRole.WORKER, WorkerRole.INTERACTIVE}:
@@ -790,7 +790,7 @@ def worker_command(
 
 
 async def _serve_api() -> None:
-    async with build(storage="postgres") as composition:
+    async with build(storage="postgres", service_logging=True) as composition:
         api = create_app(
             composition.services,
             composition.settings,

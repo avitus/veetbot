@@ -38,11 +38,18 @@ class AdvisoryMetrics:
         }
         self._consulted.add(1, attributes)
         self._latency.record(seconds, {"tool": tool})
-        if verdict != "abstain":
-            logger.info(
-                "policy_advisory_escalation",
-                extra={"tool": tool, "verdict": verdict, "enforced": enforced, "signals": signals},
-            )
+        # One line per consultation, abstentions included: a host with no metrics
+        # exporter still has to answer whether the advisor is running.
+        logger.info(
+            "policy_advisory_consulted",
+            extra={
+                "tool": tool,
+                "verdict": verdict,
+                "enforced": enforced,
+                "signals": signals,
+                "seconds": round(seconds, 3),
+            },
+        )
 
     def abstained(self, *, tool: str, cause: str) -> None:
         self._abstained.add(1, {"tool": tool, "cause": cause})

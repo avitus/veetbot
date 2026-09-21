@@ -192,6 +192,10 @@ class TypeSafeJudgmentProvider:
                 status = response.status_code
                 if status in _AUTH_FAILURE_STATUSES:
                     raise _failure(JudgmentFailure.AUTH_FAILED) from None
+                if status == 402:
+                    # Billing, not a malformed request: its remedy is the owner's
+                    # account, so it has a code of its own and is never retried.
+                    raise _failure(JudgmentFailure.PAYMENT_REQUIRED) from None
                 if status == 429:
                     raise _failure(JudgmentFailure.RATE_LIMITED, retryable=True) from None
                 if status in _UNAVAILABLE_STATUSES or status >= 500:

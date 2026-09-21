@@ -10,6 +10,7 @@ never load-bearing for safety or for availability.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Protocol
 
 from agent_core.domain.agents import Principal
@@ -43,6 +44,20 @@ class AdvisoryObserver(Protocol):
     ) -> None: ...
 
     def abstained(self, *, tool: str, cause: str) -> None: ...
+
+
+# A reason code is a short dotted identifier. Anything else an error carries
+# under that name could be content, so its class name stands in.
+_REASON_CODE = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")
+
+
+def _failure_cause(error: Exception) -> str:
+    """The provider's reason code when the error carries one, else its class name."""
+
+    reason_code = getattr(error, "reason_code", None)
+    if isinstance(reason_code, str) and _REASON_CODE.fullmatch(reason_code):
+        return reason_code
+    return type(error).__name__
 
 
 def advisable(action: ProposedAction) -> bool:
@@ -92,7 +107,7 @@ class AdvisedPolicyEngine:
         except Exception as exc:
             # Failing open is correct here and only here: the advisor can only
             # escalate, so without it the system is exactly as safe as the gate.
-            self._abstained(action, type(exc).__name__)
+            self._abstained(action, _failure_cause(exc))
             return decision
         if self._observer is not None:
             self._observer.consulted(

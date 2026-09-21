@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import timedelta
 from decimal import Decimal
@@ -342,6 +343,29 @@ async def test_the_pass_audit_always_carries_the_judgment_fields() -> None:
 
     pass_event = [e for e in await _events(factory) if e.event_type == "folder.proposal.pass"][-1]
     assert _judgment_fields(pass_event) == _JUDGMENT_DEFAULTS
+
+
+async def test_the_pass_writes_one_log_line_with_the_audit_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock, factory = await _stack()
+    for number, title in enumerate(LISBON_TITLES[:4]):
+        await _session(factory, number, title)
+    with caplog.at_level(logging.INFO, logger="agent_core.folders.proposals"):
+        assert await _pass(clock, factory).run_once() == 1
+
+    (record,) = [r for r in caplog.records if r.getMessage() == "folder_proposal_pass"]
+    pass_event = [e for e in await _events(factory) if e.event_type == "folder.proposal.pass"][-1]
+    # The line carries the pass's own facts, not the event envelope's owner
+    # identifiers; `created` is reserved on a log record, hence `proposals_created`.
+    facts = {k: v for k, v in pass_event.payload.items() if k not in {"tenant_id", "principal_id"}}
+    logged = {
+        key: getattr(record, "proposals_created" if key == "created" else key) for key in facts
+    }
+    assert logged == facts
+    assert not hasattr(record, "tenant_id")
+    assert not hasattr(record, "principal_id")
+    assert "Lisbon" not in repr(record.__dict__)
 
 
 async def test_a_judgment_match_is_proposed_and_audited_without_content() -> None:
