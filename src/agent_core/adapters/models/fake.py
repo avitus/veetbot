@@ -18,6 +18,7 @@ from agent_core.domain.messages import (
     ModelTurn,
     ModelUsage,
     ProviderMetadata,
+    ProviderReasoningItem,
     ReasoningDeltaEvent,
     ResolvedModel,
     ScriptedToolCall,
@@ -155,6 +156,17 @@ class FakeModelProvider:
             metadata=ProviderMetadata(
                 provider_api="chat_completions",
                 resolved_model=resolved.model,
+            ),
+            reasoning_items=(
+                [
+                    ProviderReasoningItem(
+                        item_index=0,
+                        provider=self.name,
+                        provider_payload=dict(turn.provider_reasoning_payload),
+                    )
+                ]
+                if turn.provider_reasoning_payload is not None
+                else None
             ),
         )
         yield ModelCompletedEvent(
