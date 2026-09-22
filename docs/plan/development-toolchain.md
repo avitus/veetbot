@@ -165,6 +165,38 @@ The processor is covered by a security test: Section 20.4 already lists
 "Secret redaction" as a required security test, and this is the code it
 tests.
 
+### What actually runs through the chain
+
+Two things kept the design above from being true until 2026-09-21, and the
+repair records them so they do not recur.
+
+**Standard-library loggers are the platform's loggers.** Every module logs
+through `logging.getLogger(__name__)` with its fields in `extra`, and none
+binds a `structlog` logger. The bootstrap therefore installs one root handler
+whose formatter runs the same processor chain over a standard-library record
+— its `extra` fields included — so a record and a native `structlog` event
+render identically, carry `timestamp` and `level`, inherit the context
+variables, and pass the redaction processor. A traceback is rendered to text
+ahead of that processor, so an exception message that quotes a provider key is
+redacted like any other string. A handler that prints only the message would
+drop every field and skip redaction; that is what ran before.
+
+**A long-running service configures logging at phase 1; a one-shot command
+does not.** Each composition root takes `service_logging`, and the service
+entry points — the API, every worker role, the call worker and the call
+ingress — pass it. Phase 1 then calls the bootstrap before anything else
+logs. A one-shot command's standard output is its result, and the test suite
+builds compositions by the hundred, so neither opts in and both keep Python's
+default: warnings and errors on standard error, as bare messages. The
+bootstrap removes only the handler it installed, so a second call, or a test
+harness's own capture handler, is left intact.
+
+**First-party lines are recorded from `INFO`; everything else from
+`WARNING`.** The root logger stays at `WARNING` and the `agent_core` namespace
+is set to `INFO`. HTTP client libraries log each request line at `INFO`, and
+at least one integration carries its credential in the URL path; the split
+keeps those lines out of the service log without a per-library list.
+
 ## The Makefile
 
 Section 21 requires eight targets. Six of them are one command each;
@@ -513,7 +545,14 @@ Three workflow-level facts complete the definition:
     runs only on trusted `dev`, and only in a requested pipeline; it does not
     receive publication credentials.
     Production delivery begins only after all seven required verification jobs
-    pass. On
+    pass. On `main`, each verification job except `public-site` halts
+    successfully right after checkout when it finds its own record for the
+    commit's source tree, and otherwise runs in full (ADR-0114). A job writes
+    that CircleCI cache record, keyed by job and tree hash, only after its last
+    step has passed, so a merge commit that reproduces the verified head of its
+    pull request is not tested a second time, while any tree nothing verified
+    is. `static` checks the reading-lane floor before it looks for the record,
+    and no branch other than `main` ever skips. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
     live-model pipelines. The

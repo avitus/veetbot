@@ -403,7 +403,12 @@ event always carries eight further fields for the matcher —
 `judgment_fallback_used`, and `judgment_error_class` — which read `none`, zero,
 or false when the matcher did not run, and which are likewise content-free. The
 error class is the judgment provider's reason code, or the error's class name
-for a deadline or a budget breach.
+for a deadline or a budget breach. The pass also writes one
+`folder_proposal_pass` log line with the pass's own content-free fields — the
+event's tenant and principal identifiers are left out — so an operator can
+read a pass from the service log without a database query. The line names the
+created count `proposals_created`, because `created` is reserved on a log
+record.
 
 ## The maintenance pass
 
@@ -510,6 +515,13 @@ in the reconciliation and never surfaces as an error, so an older server
 costs one extra request per poll and nothing else. Native behavior is
 verified by the Swift testing lanes under ADR-0049, the same way the persona
 editor's is.
+
+Scheduled sessions are not chat conversations, so they never enter a folder
+and their rows carry no move menu. The sidebar groups them by schedule in a
+Scheduled section between the folders and the unfiled history, a scheduler
+presentation designed in [scheduling.md](scheduling.md) (ADR-0113). "Flat
+history" above means no folder sections or controls; schedule groups derive
+from session metadata alone and do not depend on the folder flag.
 
 ## Events, telemetry, and privacy
 

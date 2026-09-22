@@ -605,7 +605,15 @@ li strong {color:var(--ink)}
   border-bottom:1px solid var(--line)
 }
 .viewport-head span {font-size:.82rem;color:var(--muted)}
-.frame-wrap {min-height:330px;background:#eef2f7;display:grid;place-items:center}
+.frame-wrap {
+  position:relative;min-height:330px;background:#eef2f7;display:grid;place-items:center;
+  outline:3px solid transparent;outline-offset:-3px
+}
+.frame-wrap[data-typing] {outline-color:var(--turquoise)}
+.capture {
+  position:absolute;left:0;top:0;width:1px;height:1px;padding:0;border:0;opacity:0;
+  resize:none;font-size:16px
+}
 img {
   display:block;width:100%;height:auto;max-height:68vh;object-fit:contain;
   cursor:crosshair;color:#263244
@@ -613,10 +621,6 @@ img {
 .controls {padding:16px;border-top:1px solid var(--line)}
 label {display:block;font-size:.88rem;font-weight:700;margin-bottom:.45rem}
 .send-row {display:flex;gap:8px}
-input {
-  min-width:0;flex:1;border:1px solid #4c5d73;border-radius:9px;background:#0d1726;
-  color:var(--ink);padding:12px;font:inherit
-}
 button {
   border:1px solid #52647b;border-radius:9px;background:#26364b;color:var(--ink);
   font:inherit;font-weight:700;padding:10px 13px;cursor:pointer
@@ -627,7 +631,6 @@ button:disabled {cursor:not-allowed;opacity:.45}
 .hint {color:var(--muted);font-size:.8rem;margin:.7rem 0 0}
 @media(max-width:820px) {
   .grid {grid-template-columns:1fr}.frame-wrap {min-height:240px}
-  .send-row {align-items:stretch;flex-direction:column}
 }
 </style></head>
 <body><main><div class="eyebrow">Veetbot · isolated browser</div>
@@ -637,10 +640,10 @@ receive only the finished browser profile—not the username, password, passkey,
 value you send directly to this isolated browser.</p>
 <div class="grid"><aside class="card"><h2>How to sign in</h2><ol>
 <li><strong>Click the website field in the remote browser</strong> on the right.</li>
-<li>Type the matching username, password, or MFA value in the secure field below it,
-then choose <strong>Send securely</strong>.</li>
-<li>Use Tab, Enter, and Backspace as needed. Repeat until the website confirms you are
-signed in.</li>
+<li><strong>Type</strong> your username, password, or MFA code. Each key goes straight to
+that field as you press it, and pasting from a password manager works too.</li>
+<li>Press Enter or click the website's sign-in button. Repeat until the website confirms
+you are signed in.</li>
 <li><strong>Return to Veetbot</strong> and choose <strong>Check login status</strong>.</li></ol>
 <p class="privacy">Keep this tab open. This link works once and expires after five
 minutes. If it was closed, copied, or reloaded, return to Veetbot and choose
@@ -649,26 +652,29 @@ minutes. If it was closed, copied, or reloaded, return to Veetbot and choose
 Connecting to the isolated browser…</p></aside>
 <section class="card viewport" aria-label="Interactive remote browser">
 <div class="viewport-head"><h2>Remote browser</h2>
-<span>Click a field in the image first</span></div>
-<div class="frame-wrap"><img id="frame"
-alt="Remote browser view. Click a website field to focus it."></div>
-<div class="controls"><label for="text">Send text to the focused website field</label>
-<div class="send-row"><input id="text" type="password" autocomplete="off"
-autocapitalize="off" spellcheck="false" placeholder="Username, password, or MFA value">
-<button id="send" class="primary" type="button" disabled>Send securely</button></div>
-<div class="keys"><button type="button" data-key="Tab" disabled>Tab</button>
+<span>Click a field, then type</span></div>
+<div class="frame-wrap" id="frame-wrap"><img id="frame"
+alt="Remote browser view. Click a website field to focus it, then type.">
+<textarea id="capture" class="capture" aria-label="Typing goes to the focused website field"
+autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+disabled></textarea></div>
+<div class="controls"><div class="keys"><button type="button" data-key="Tab" disabled>Tab</button>
 <button type="button" data-key="Enter" disabled>Enter</button>
 <button type="button" data-key="Backspace" disabled>Backspace</button></div>
-<p class="hint">Text is cleared from this page immediately after it is sent.</p>
+<p class="hint">Nothing you type is kept on this page. Each key goes straight to the
+isolated browser.</p>
 </div></section></div></main>
 <script src="/authentication-surface.js"></script></body></html>"""
 
 _AUTHENTICATION_SCRIPT = """(()=>{'use strict';const p=new URLSearchParams(location.hash.slice(1));
 const capability=p.get('capability');const root=location.pathname;
 const frame=document.getElementById('frame');const status=document.getElementById('status');
-const input=document.getElementById('text');const send=document.getElementById('send');
-const controls=[send,...document.querySelectorAll('[data-key]')];
-let refreshTimer=null;let connected=false;
+const capture=document.getElementById('capture');const wrap=document.getElementById('frame-wrap');
+const controls=[capture,...document.querySelectorAll('[data-key]')];
+const namedKeys=new Set(['Enter','Escape','Tab','Backspace','ArrowUp','ArrowDown',
+'ArrowLeft','ArrowRight']);
+let refreshTimer=null;let connected=false;let queue=Promise.resolve();let pending=0;
+let lost=false;
 function setStatus(message,state){status.textContent=message;status.dataset.state=state;}
 function disable(message){connected=false;controls.forEach(control=>control.disabled=true);
 setStatus(message,'error');
@@ -682,32 +688,39 @@ async function event(value){const r=await fetch(root+'/events',
 if(r.status===401){disable('This secure login has expired. Return to Veetbot and '
 +'choose Start over.');throw new Error('expired');}
 if(!r.ok)throw new Error('interaction rejected');}
+function relay(value){if(!connected)return;pending++;
+queue=queue.then(()=>lost?undefined:event(value)).catch(()=>{lost=true;
+if(connected)setStatus('A key could not be sent. Clear the website field and type it '
++'again.','error');}).finally(()=>{pending--;if(pending===0)refresh();});}
 async function refresh(){try{const r=await fetch(root+'/frame',{headers});
 if(r.status===401){disable('This secure login has expired. Return to Veetbot and '
 +'choose Start over.');return;}
 if(!r.ok)throw new Error('session unavailable');const blob=await r.blob();const old=frame.src;
-frame.src=URL.createObjectURL(blob);if(old)URL.revokeObjectURL(old);connected=true;
+frame.src=URL.createObjectURL(blob);if(old)URL.revokeObjectURL(old);
+if(!connected||status.dataset.state==='connecting'){connected=true;
 controls.forEach(control=>control.disabled=false);
-setStatus('Connected — click a website field in the remote browser.','connected');}
+setStatus('Connected — click a website field in the remote browser, then type.',
+'connected');}}
 catch(e){if(refreshTimer!==null){setStatus(
 'The isolated browser is temporarily unavailable. Retrying…','connecting');}}}
-frame.addEventListener('click',async e=>{
+frame.addEventListener('click',e=>{
 if(!connected||!frame.naturalWidth)return;const box=frame.getBoundingClientRect();
-try{await event({kind:'click',x:Math.round((e.clientX-box.left)*frame.naturalWidth/box.width),
-y:Math.round((e.clientY-box.top)*frame.naturalHeight/box.height)});await refresh();input.focus();}
-catch(e){if(connected)setStatus('The click could not be sent. Try again.','error');}});
-async function sendText(){if(!connected)return;const text=input.value;input.value='';
-if(!text)return;controls.forEach(control=>control.disabled=true);
-try{await event({kind:'text',text});await refresh();}
-catch(e){if(connected){setStatus(
-'The text could not be sent. Refocus the website field and try again.','error');}}
-finally{if(connected)controls.forEach(control=>control.disabled=false);input.focus();}}
-send.addEventListener('click',sendText);
-input.addEventListener('keydown',e=>{
-if(e.key==='Enter'){e.preventDefault();sendText();}});
-document.querySelectorAll('[data-key]').forEach(button=>button.addEventListener('click',async()=>{
-if(!connected)return;try{await event({kind:'key',key:button.dataset.key});await refresh();}
-catch(e){if(connected)setStatus('The key could not be sent. Try again.','error');}}));
+capture.focus({preventScroll:true});lost=false;
+setStatus('Typing goes to the remote browser, one key at a time.','connected');
+relay({kind:'click',x:Math.round((e.clientX-box.left)*frame.naturalWidth/box.width),
+y:Math.round((e.clientY-box.top)*frame.naturalHeight/box.height)});});
+function flush(){const text=capture.value;capture.value='';
+for(let i=0;i<text.length;i+=1024)relay({kind:'text',text:text.slice(i,i+1024)});}
+capture.addEventListener('input',e=>{if(!e.isComposing)flush();});
+capture.addEventListener('compositionend',flush);
+capture.addEventListener('keydown',e=>{
+if(e.isComposing||e.ctrlKey||e.metaKey||e.altKey||!namedKeys.has(e.key))return;e.preventDefault();
+relay({kind:'key',key:e.key});});
+capture.addEventListener('focus',()=>{wrap.dataset.typing='';if(connected)setStatus(
+'Typing goes to the remote browser, one key at a time.','connected');});
+capture.addEventListener('blur',()=>{delete wrap.dataset.typing;});
+document.querySelectorAll('[data-key]').forEach(button=>button.addEventListener('click',()=>{
+relay({kind:'key',key:button.dataset.key});capture.focus({preventScroll:true});}));
 refresh();refreshTimer=setInterval(refresh,1000);})();"""
 
 

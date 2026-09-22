@@ -237,4 +237,6 @@ nav:
       - ADR-0110 Typed-judgment port and TypeSafe Jev: adr/0110-typed-judgment-port-and-typesafe-jev.md
       - ADR-0111 Advisory approval through the judgment port: adr/0111-advisory-approval-through-the-judgment-port.md
       - ADR-0112 Email unsubscribe assistance: adr/0112-milestone-31-email-unsubscribe.md
+      - ADR-0113 Scheduled conversations grouped by schedule: adr/0113-scheduled-conversations-grouped-by-schedule.md
+      - ADR-0114 Main skips verified trees: adr/0114-main-skips-verified-trees.md
   - Changelog: changelog.md

@@ -15,7 +15,7 @@
   milestone: 29
   kind: case
   spec: docs/plan/typed-judgment.md#hard-gates
-  statement: "**Failures are typed, bounded, and content-free.** Every adapter failure is a `JudgmentProviderError` carrying one of six reason codes and nothing else; an oversize request fails without dialing; an oversize, non-JSON, or schema-invalid response, an unknown choice, and an out-of-range probability are `judgment.output_invalid`; retries are bounded in count and total time and limited to transient failures; and no exception, log line, or event carries request state, a response body, or the credential."
+  statement: "**Failures are typed, bounded, and content-free.** Every adapter failure is a `JudgmentProviderError` carrying one of seven reason codes and nothing else; an oversize request fails without dialing; an oversize, non-JSON, or schema-invalid response, an unknown choice, and an out-of-range probability are `judgment.output_invalid`; retries are bounded in count and total time and limited to transient failures; and no exception, log line, or event carries request state, a response body, or the credential."
   check: tests/gates/test_judgment_m29.py::test_typed_failure
 - id: gate.judgment.priced_contract
   milestone: 29

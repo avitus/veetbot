@@ -13,18 +13,40 @@ public struct ConversationFolderSection: Identifiable, Equatable, Sendable {
     }
 }
 
+/// One schedule's group in the sidebar's Scheduled section (ADR-0113).
+public struct ScheduledConversationGroup: Identifiable, Equatable, Sendable {
+    public let scheduleID: UUID
+    public let title: String
+    public let entries: [SessionHistoryEntry]
+
+    public var id: UUID { scheduleID }
+
+    public init(scheduleID: UUID, title: String, entries: [SessionHistoryEntry]) {
+        self.scheduleID = scheduleID
+        self.title = title
+        self.entries = entries
+    }
+}
+
 /// The sidebar's grouping of the cached history, derived on every render so it
 /// can never drift from the history it is computed from. Folders sort by their
 /// name, case-insensitively; entries keep the history's activity order; an
 /// entry whose folder the server no longer lists renders as unfiled until the
-/// next reconciliation; and an unavailable folder surface flattens everything.
+/// next reconciliation; and an unavailable folder surface flattens every
+/// folder. Scheduled sessions group by schedule either way (ADR-0113).
 public struct GroupedConversationHistory: Equatable, Sendable {
     public let uncategorized: [SessionHistoryEntry]
     public let folders: [ConversationFolderSection]
+    public let schedules: [ScheduledConversationGroup]
 
-    public init(uncategorized: [SessionHistoryEntry], folders: [ConversationFolderSection]) {
+    public init(
+        uncategorized: [SessionHistoryEntry],
+        folders: [ConversationFolderSection],
+        schedules: [ScheduledConversationGroup] = []
+    ) {
         self.uncategorized = uncategorized
         self.folders = folders
+        self.schedules = schedules
     }
 
     public static func make(
@@ -32,23 +54,55 @@ public struct GroupedConversationHistory: Equatable, Sendable {
         folders: [FolderView],
         available: Bool
     ) -> GroupedConversationHistory {
-        guard available else {
-            return GroupedConversationHistory(uncategorized: history, folders: [])
-        }
-        let known = Set(folders.map(\.id))
+        let known = available ? Set(folders.map(\.id)) : []
         var filed: [UUID: [SessionHistoryEntry]] = [:]
-        var uncategorized: [SessionHistoryEntry] = []
+        var loose: [SessionHistoryEntry] = []
         for entry in history {
             if let folderID = entry.folderID, known.contains(folderID) {
                 filed[folderID, default: []].append(entry)
             } else {
-                uncategorized.append(entry)
+                loose.append(entry)
             }
         }
-        let sections = folders.sorted(by: folderOrder).map { folder in
-            ConversationFolderSection(folder: folder, entries: filed[folder.id] ?? [])
+        let (schedules, uncategorized) = groupSchedules(loose)
+        let sections = available
+            ? folders.sorted(by: folderOrder).map { folder in
+                ConversationFolderSection(folder: folder, entries: filed[folder.id] ?? [])
+            }
+            : []
+        return GroupedConversationHistory(
+            uncategorized: uncategorized, folders: sections, schedules: schedules
+        )
+    }
+
+    /// A schedule with two or more sessions becomes a group labelled with its
+    /// most recent session's title; a lone session stays in the history.
+    /// Groups order by their most recent activity, then schedule identifier.
+    private static func groupSchedules(
+        _ entries: [SessionHistoryEntry]
+    ) -> (schedules: [ScheduledConversationGroup], rest: [SessionHistoryEntry]) {
+        var bySchedule: [UUID: [SessionHistoryEntry]] = [:]
+        for entry in entries {
+            if let scheduleID = entry.scheduleID {
+                bySchedule[scheduleID, default: []].append(entry)
+            }
         }
-        return GroupedConversationHistory(uncategorized: uncategorized, folders: sections)
+        let grouped = bySchedule.filter { $0.value.count >= 2 }
+        let groups = grouped.map { scheduleID, members in
+            ScheduledConversationGroup(
+                scheduleID: scheduleID, title: members[0].title, entries: members
+            )
+        }
+        .sorted { left, right in
+            let leftLatest = left.entries[0].updatedAt
+            let rightLatest = right.entries[0].updatedAt
+            if leftLatest != rightLatest { return leftLatest > rightLatest }
+            return left.scheduleID.uuidString < right.scheduleID.uuidString
+        }
+        let rest = entries.filter { entry in
+            entry.scheduleID.map { grouped[$0] == nil } ?? true
+        }
+        return (groups, rest)
     }
 
     /// Case-insensitive name order with the identifier as the tie-break.
@@ -209,5 +263,44 @@ public final class FolderSidebarPreferences: ObservableObject {
         expansion = defaults.data(forKey: Self.expansionKey)
             .flatMap { try? JSONDecoder().decode(FolderExpansionState.self, from: $0) }
             ?? FolderExpansionState()
+    }
+}
+
+/// Which schedule groups this device shows expanded: collapsed until the
+/// owner opens one, remembered on this device, and never sent to the server.
+/// A new firing never changes it. An unreadable stored value reads as
+/// everything collapsed.
+@MainActor
+public final class ScheduleGroupSidebarPreferences: ObservableObject {
+    static let expansionKey = "veetbot.schedules.expanded"
+
+    @Published public private(set) var expanded: Set<UUID> {
+        didSet {
+            guard expanded != oldValue,
+                let data = try? JSONEncoder().encode(expanded)
+            else { return }
+            defaults.set(data, forKey: Self.expansionKey)
+        }
+    }
+
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        expanded = defaults.data(forKey: Self.expansionKey)
+            .flatMap { try? JSONDecoder().decode(Set<UUID>.self, from: $0) }
+            ?? []
+    }
+
+    public func isExpanded(_ scheduleID: UUID) -> Bool {
+        expanded.contains(scheduleID)
+    }
+
+    public func setExpanded(_ isExpanded: Bool, schedule scheduleID: UUID) {
+        if isExpanded {
+            expanded.insert(scheduleID)
+        } else {
+            expanded.remove(scheduleID)
+        }
     }
 }

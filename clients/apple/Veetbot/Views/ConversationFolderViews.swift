@@ -70,6 +70,38 @@ struct FolderHeaderRow: View {
     }
 }
 
+/// A schedule's row in the sidebar's Scheduled section: its most recent
+/// session's title, a count, and a chevron. It toggles like a folder row but
+/// has no context menu; the group is the scheduler's, not the owner's.
+struct ScheduleGroupHeaderRow: View {
+    let group: ScheduledConversationGroup
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 8) {
+                Label(group.title, systemImage: "calendar.badge.clock")
+                    .lineLimit(1)
+                Spacer()
+                Text("\(group.entries.count)")
+                    .appFont(.caption)
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .appFont(.caption, weight: .semibold)
+                    .foregroundColor(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(group.title), \(group.entries.count) scheduled conversations")
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(isExpanded ? "Collapses the schedule" : "Expands the schedule")
+        .accessibilityIdentifier("sidebar.schedule.\(group.scheduleID.uuidString)")
+    }
+}
+
 /// One open grouping proposal: the folder it proposes, every conversation it
 /// would file on a line of its own, and accept, rename, and decline controls.
 struct SuggestedFolderRow: View {
