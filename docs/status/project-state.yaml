@@ -135,6 +135,16 @@ milestones:
         builds compile the new views. One unrelated Email polling test failed once
         under a cold parallel build and passed in three isolated reruns and the
         full rerun. No XCUITest simulator journey exists yet for this surface.
+    - check: Queued unsubscribe gesture through PostgreSQL and a separate worker (production regression, 2026-09-21)
+      outcome: passed_locally
+      detail: >-
+        The owner's first production one-click gestures ended unsubscribe.not_attempted
+        with no tool invocation. tests/integration/test_email_unsubscribe_queue_m31.py
+        reproduced it: the gesture event's consent digest hashed a non-canonical JSON
+        dump, and a consent read back from JSONB has its keys reordered, so the worker
+        found no matching authenticated gesture. The digest is now canonical, and an
+        aborted subscription run logs its platform-authored reason. The in-memory
+        gates could not observe this; the regression runs in the PostgreSQL lane.
     - check: PostgreSQL subscription record parity
       outcome: passed_locally
       detail: >-

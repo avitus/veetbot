@@ -27,6 +27,12 @@ public struct ChatView: View {
     @State private var artifactSelection: ArtifactSelection?
     @State private var showingPeople = false
 
+    #if os(macOS)
+    private static let transcriptHorizontalPadding: CGFloat = 36
+    #else
+    private static let transcriptHorizontalPadding: CGFloat = 24
+    #endif
+
     public init(model: ChatViewModel) {
         self.model = model
         self.state = model.runState
@@ -109,7 +115,8 @@ public struct ChatView: View {
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchorID)
                     }
-                    .padding()
+                    .padding(.vertical)
+                    .padding(.horizontal, Self.transcriptHorizontalPadding)
                     .frame(maxWidth: .infinity)
                 }
                 .onChange(of: scrollChangeToken) { _ in
@@ -129,7 +136,7 @@ public struct ChatView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, Self.transcriptHorizontalPadding)
                 .padding(.vertical, 8)
                 .accessibilityIdentifier("chat.activity")
             }
