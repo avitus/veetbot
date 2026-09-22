@@ -23,6 +23,12 @@ project:
   # reserve, and a failure classification on the accounting event.
   # ADR-0113 records the owner's non-milestone native extension on 2026-09-21:
   # the sidebar groups scheduled sessions by schedule; folders stay chat-only.
+  # ADR-0114 records a non-milestone CI change on 2026-09-21: main skips a
+  # verification job whose exact source tree already passed it.
+  # ADR-0115 records the owner's non-milestone runtime repair on 2026-09-21:
+  # a tool batch is fitted to the remaining budget, an exhausted tool-call
+  # budget owes one synthesis-only turn, and the interactive defaults carry
+  # model-call and tool-call reserves (amends ADR-0078).
   # ADR-0110 amends Milestone 29 on 2026-09-19: the typed-judgment port, the
   # TypeSafe Jev adapter and judgment folder matching, all default off, plus
   # an offline non-activating email-importance evaluation under Milestone 26.
@@ -129,6 +135,16 @@ milestones:
         builds compile the new views. One unrelated Email polling test failed once
         under a cold parallel build and passed in three isolated reruns and the
         full rerun. No XCUITest simulator journey exists yet for this surface.
+    - check: Queued unsubscribe gesture through PostgreSQL and a separate worker (production regression, 2026-09-21)
+      outcome: passed_locally
+      detail: >-
+        The owner's first production one-click gestures ended unsubscribe.not_attempted
+        with no tool invocation. tests/integration/test_email_unsubscribe_queue_m31.py
+        reproduced it: the gesture event's consent digest hashed a non-canonical JSON
+        dump, and a consent read back from JSONB has its keys reordered, so the worker
+        found no matching authenticated gesture. The digest is now canonical, and an
+        aborted subscription run logs its platform-authored reason. The in-memory
+        gates could not observe this; the regression runs in the PostgreSQL lane.
     - check: PostgreSQL subscription record parity
       outcome: passed_locally
       detail: >-

@@ -33,11 +33,12 @@ def _check_before_operation(run: Run, scope: BudgetScope, clock: Clock) -> None:
         raise BudgetExceededError("deadline_exceeded", "the run deadline elapsed")
     if run.limits.max_cost is not None and run.usage.cost >= run.limits.max_cost:
         raise BudgetExceededError("budget_exceeded", "the run cost limit was reached")
-    if scope is BudgetScope.STEP:
-        if run.step_count >= run.limits.max_steps:
-            raise BudgetExceededError("max_steps_exceeded", "the run step limit was reached")
-        if run.tool_call_count >= run.limits.max_tool_calls:
-            raise BudgetExceededError("budget_exceeded", "the run tool-call limit was reached")
+    if scope is BudgetScope.STEP and run.step_count >= run.limits.max_steps:
+        raise BudgetExceededError("max_steps_exceeded", "the run step limit was reached")
+    # An exhausted tool-call budget does not fail a step: the model loop fits
+    # each batch to the remaining budget and owes a tool-free final answer.
+    if scope is BudgetScope.TOOL_CALL and run.tool_call_count >= run.limits.max_tool_calls:
+        raise BudgetExceededError("budget_exceeded", "the run tool-call limit was reached")
     if scope is BudgetScope.ATTEMPT:
         if run.model_call_count >= run.limits.max_model_calls:
             raise BudgetExceededError("budget_exceeded", "the run model-call limit was reached")

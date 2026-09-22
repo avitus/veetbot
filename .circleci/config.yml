@@ -30,6 +30,46 @@ commands:
           paths:
             - ~/.cache/uv
 
+  skip_verified_tree:
+    # On main, halt a verification job whose exact source tree already passed
+    # it, normally in the requested pipeline for the pull request's head
+    # (ADR-0114). The record is keyed by tree, so a merge that produces any
+    # tree nothing verified runs the full job.
+    parameters:
+      job:
+        type: string
+    steps:
+      - run:
+          name: Identify the source tree
+          command: |
+            mkdir -p /tmp/veetbot-verified
+            git rev-parse 'HEAD^{tree}' > /tmp/veetbot-verified/tree
+      - restore_cache:
+          keys:
+            - 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
+      - run:
+          name: Skip a tree this job already verified
+          command: |
+            tree="$(cat /tmp/veetbot-verified/tree)"
+            if [[ "<< pipeline.git.branch >>" == main \
+                  && -f "/tmp/veetbot-verified/<< parameters.job >>-$tree" ]]; then
+              echo "<< parameters.job >> already passed on tree $tree; skipping."
+              circleci-agent step halt
+            fi
+
+  record_verified_tree:
+    parameters:
+      job:
+        type: string
+    steps:
+      - run:
+          name: Record the verified source tree
+          command: touch "/tmp/veetbot-verified/<< parameters.job >>-$(cat /tmp/veetbot-verified/tree)"
+      - save_cache:
+          key: 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
+          paths:
+            - /tmp/veetbot-verified
+
   store_apple_test_results:
     parameters:
       platform:
@@ -83,6 +123,8 @@ jobs:
           command: |
             READING_LANE_BASE="<< pipeline.git.base_revision >>" \
               uv run python -m scripts.check_reading_lane
+      - skip_verified_tree:
+          job: static
       - run:
           name: Install Pandoc
           command: sudo apt-get update && sudo apt-get install -y pandoc
@@ -109,6 +151,8 @@ jobs:
       - run:
           name: Build downloadable client
           command: make client-build
+      - record_verified_tree:
+          job: static
       - store_artifacts:
           path: build/veetbot-client.pyz
           destination: veetbot-client.pyz
@@ -119,6 +163,8 @@ jobs:
     resource_class: small
     steps:
       - checkout
+      - skip_verified_tree:
+          job: contract
       - install_uv
       - run:
           name: Contract tests
@@ -126,6 +172,8 @@ jobs:
             mkdir -p test-results/contract
             PYTEST_ADDOPTS="--junitxml=test-results/contract/results.xml" \
               make test-contract
+      - record_verified_tree:
+          job: contract
       - store_test_results:
           path: test-results/contract
 
@@ -142,6 +190,8 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent
     steps:
       - checkout
+      - skip_verified_tree:
+          job: integration
       - install_uv
       - run:
           name: Wait for PostgreSQL
@@ -155,6 +205,8 @@ jobs:
             mkdir -p test-results/integration
             PYTEST_ADDOPTS="--junitxml=test-results/integration/results.xml" \
               make test-integration
+      - record_verified_tree:
+          job: integration
       - store_test_results:
           path: test-results/integration
 
@@ -164,6 +216,8 @@ jobs:
     resource_class: medium
     steps:
       - checkout
+      - skip_verified_tree:
+          job: sandbox
       - install_uv
       - run:
           name: Real-runtime sandbox security gates
@@ -171,6 +225,8 @@ jobs:
             mkdir -p test-results/sandbox
             PYTEST_ADDOPTS="--junitxml=test-results/sandbox/results.xml" \
               make test-sandbox
+      - record_verified_tree:
+          job: sandbox
       - store_test_results:
           path: test-results/sandbox
 
@@ -180,12 +236,16 @@ jobs:
     resource_class: m4pro.medium
     steps:
       - checkout
+      - skip_verified_tree:
+          job: apple
       - run:
           name: Native Apple client tests
           command: make test-apple
       - run:
           name: Apple client macOS UI tests
           command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui-macos
+      - record_verified_tree:
+          job: apple
       - store_apple_test_results:
           platform: macos
 
@@ -195,9 +255,13 @@ jobs:
     resource_class: m4pro.medium
     steps:
       - checkout
+      - skip_verified_tree:
+          job: apple-ios
       - run:
           name: Apple client iPhone and iPad UI tests
           command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui-ios
+      - record_verified_tree:
+          job: apple-ios
       - store_apple_test_results:
           platform: ios
 

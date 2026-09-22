@@ -213,6 +213,7 @@ class _TaskIO:
         c = self.context
         c.token.raise_if_cancelled()
         c.budgets.check(c.run, BudgetScope.STEP)
+        c.budgets.check(c.run, BudgetScope.TOOL_CALL)
         c.run.step_count += 1
         c.run.updated_at = c.clock.now()
         async with c.uow_factory() as uow:

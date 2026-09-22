@@ -235,7 +235,7 @@ specification, and recorded as
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
     `engineering-plan.md:1757` says *"Create Alembic migrations for at
-    least these tables"* and `development-toolchain.md:183` supplies
+    least these tables"* and `development-toolchain.md:215` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
     schema migrations, and no design for how the composition root
@@ -480,7 +480,7 @@ detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:1206-1207` and the resolve at
 `policy-and-approvals.md:1233`, and one reference in
-`runtime-loop.md:1192` to `POST /runs/{id}/input` that routed to an
+`runtime-loop.md:1215` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -986,7 +986,7 @@ That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1812`, and the sibling join
-at `runtime-loop.md:1150` reads it. Restricted context is
+at `runtime-loop.md:1173` reads it. Restricted context is
 `context-engine.md:359`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
@@ -995,7 +995,7 @@ gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:986`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
-`runtime-loop.md:1157`: *"the parent's `deadline_at` is copied onto
+`runtime-loop.md:1180`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:982`. Two are partial: the explicit objective has a

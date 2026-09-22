@@ -43,6 +43,9 @@ class BudgetScope(StrEnum):
     ADMISSION = "admission"
     STEP = "step"
     ATTEMPT = "attempt"
+    # Checked immediately before a single tool call is dispatched by a flow that
+    # cannot trim a batch (email tasks). The model loop fits the batch instead.
+    TOOL_CALL = "tool_call"
 
 
 TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED})
@@ -58,6 +61,7 @@ class RunLimits(BaseModel):
     deadline_at: datetime | None = None
     synthesis_reserve_steps: int = Field(default=0, ge=0)
     synthesis_reserve_model_calls: int = Field(default=0, ge=0)
+    synthesis_reserve_tool_calls: int = Field(default=0, ge=0)
     synthesis_reserve_cost: Decimal = Field(default=Decimal("0"), ge=0)
 
     @model_validator(mode="after")
@@ -71,6 +75,11 @@ class RunLimits(BaseModel):
             and self.synthesis_reserve_model_calls >= self.max_model_calls
         ):
             raise ValueError("the synthesis model-call reserve must be below max_model_calls")
+        if (
+            self.synthesis_reserve_tool_calls > 0
+            and self.synthesis_reserve_tool_calls >= self.max_tool_calls
+        ):
+            raise ValueError("the synthesis tool-call reserve must be below max_tool_calls")
         if self.max_cost is None:
             if self.synthesis_reserve_cost != 0:
                 raise ValueError("a synthesis cost reserve requires max_cost")

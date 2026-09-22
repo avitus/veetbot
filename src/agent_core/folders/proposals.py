@@ -9,6 +9,7 @@ Every event it records carries identifiers and counts only.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import replace
 from uuid import UUID
@@ -42,6 +43,8 @@ from agent_core.folders.clustering import (
 from agent_core.folders.profiles import FolderProposalProfile
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+
+logger = logging.getLogger(__name__)
 
 FOLDER_PROPOSAL_MAX_CANDIDATES = 200
 FOLDER_PROPOSAL_SNIPPET_CHARS = 400
@@ -380,37 +383,47 @@ class FolderProposalPass:
     ) -> None:
         usage = outcome.usage if outcome is not None else None
         judgment = (outcome.judgment if outcome is not None else None) or JudgmentAudit()
+        payload: dict[str, object] = {
+            "attempt_id": str(attempt_id),
+            "candidates": candidates,
+            "created": created,
+            "withdrawn": withdrawn,
+            "provider": outcome.provider if outcome is not None else "none",
+            "model": outcome.model if outcome is not None else "none",
+            "fallback_used": outcome.fallback_used if outcome is not None else False,
+            "error_class": outcome.error_class if outcome is not None else None,
+            "input_tokens": usage.input_tokens if usage is not None else 0,
+            "output_tokens": usage.output_tokens if usage is not None else 0,
+            "cost": str(usage.cost) if usage is not None else "0",
+            # Always present and content-free; they read none, zero, or false
+            # when the judgment matcher did not run.
+            "judgment_provider": judgment.provider,
+            "judgment_model": judgment.model,
+            "judgment_requests": judgment.requests,
+            "judgment_matched": judgment.matched,
+            "judgment_input_tokens": judgment.input_tokens,
+            "judgment_cost": str(judgment.cost),
+            "judgment_fallback_used": judgment.fallback_used,
+            "judgment_error_class": judgment.error_class,
+        }
         await record_folder_event(
             uow,
             event_type="folder.proposal.pass",
             principal=self._principal,
-            payload={
-                "attempt_id": str(attempt_id),
-                "candidates": candidates,
-                "created": created,
-                "withdrawn": withdrawn,
-                "provider": outcome.provider if outcome is not None else "none",
-                "model": outcome.model if outcome is not None else "none",
-                "fallback_used": outcome.fallback_used if outcome is not None else False,
-                "error_class": outcome.error_class if outcome is not None else None,
-                "input_tokens": usage.input_tokens if usage is not None else 0,
-                "output_tokens": usage.output_tokens if usage is not None else 0,
-                "cost": str(usage.cost) if usage is not None else "0",
-                # Always present and content-free; they read none, zero, or false
-                # when the judgment matcher did not run.
-                "judgment_provider": judgment.provider,
-                "judgment_model": judgment.model,
-                "judgment_requests": judgment.requests,
-                "judgment_matched": judgment.matched,
-                "judgment_input_tokens": judgment.input_tokens,
-                "judgment_cost": str(judgment.cost),
-                "judgment_fallback_used": judgment.fallback_used,
-                "judgment_error_class": judgment.error_class,
-            },
+            payload=payload,
             key=str(attempt_id),
             clock=self._clock,
             ids=self._ids,
             actor_type="system",
+        )
+        # The same content-free facts on the service log, so a pass can be read
+        # without a database query. `created` is reserved on a log record.
+        logger.info(
+            "folder_proposal_pass",
+            extra={
+                ("proposals_created" if key == "created" else key): value
+                for key, value in payload.items()
+            },
         )
 
 
