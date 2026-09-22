@@ -89,11 +89,22 @@ def _admitted_source(source: FormationSource, email: EmailSemanticSource | None)
 
 
 def _source_cased(text: str, label: str) -> str | None:
-    """Return `label` as the source span spells it, or None when the span lacks it."""
-    index = text.casefold().find(label.casefold())
+    """Return `label` as the source span spells it, or None when the span lacks it.
+
+    Case folding can change a string's length ("İ" folds to two code points,
+    "ß" to "ss"), so folded positions are mapped back to source characters
+    before the source is sliced.
+    """
+    folded_parts = [character.casefold() for character in text]
+    folded_label = label.casefold()
+    index = "".join(folded_parts).find(folded_label)
     if index < 0:
         return None
-    return text[index : index + len(label)]
+    offsets = [
+        source_index for source_index, part in enumerate(folded_parts) for _ in range(len(part))
+    ]
+    end = index + len(folded_label)
+    return text[offsets[index] : offsets[end - 1] + 1]
 
 
 def validate_commitment_state(state: str, text: str) -> None:

@@ -377,6 +377,17 @@ async def test_lowercased_name_label_persists_the_source_casing() -> None:
     assert [r.value for r in identifiers if isinstance(r, PersonIdentifier)] == ["Cheryl"]
 
 
+def test_source_casing_survives_case_folding_that_changes_length() -> None:
+    from agent_core.memory.people_formation import _source_cased
+
+    # "İ" folds to two code points, so a folded index is not a source index.
+    assert _source_cased("İCheryl and Riv", "cheryl") == "Cheryl"
+    assert _source_cased("Meet Straße Cheryl", "STRASSE") == "Straße"
+    assert _source_cased("My mom, Cheryl", "CHERYL") == "Cheryl"
+    assert _source_cased("My mom, Cheryl", "Cheryl") == "Cheryl"
+    assert _source_cased("My brother", "User's brother") is None
+
+
 async def test_invented_name_label_keeps_the_atomic_belief_unlinked() -> None:
     """A name label the source does not support drops the link, never the belief."""
 
