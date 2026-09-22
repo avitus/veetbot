@@ -30,7 +30,7 @@ public struct ChatView: View {
     #if os(macOS)
     private static let transcriptHorizontalPadding: CGFloat = 36
     #else
-    private static let transcriptHorizontalPadding: CGFloat = 24
+    private static let transcriptHorizontalPadding: CGFloat = 16
     #endif
 
     public init(model: ChatViewModel) {
