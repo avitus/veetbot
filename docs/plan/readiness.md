@@ -235,7 +235,7 @@ specification, and recorded as
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
     `engineering-plan.md:1757` says *"Create Alembic migrations for at
-    least these tables"* and `development-toolchain.md:183` supplies
+    least these tables"* and `development-toolchain.md:215` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
     schema migrations, and no design for how the composition root

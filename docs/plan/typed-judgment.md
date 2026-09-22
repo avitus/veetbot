@@ -105,6 +105,7 @@ Its message is the reason code and nothing else.
 | --- | --- | --- |
 | `judgment.auth_failed` | The credential is missing, or the vendor refused it | no |
 | `judgment.request_rejected` | The vendor refused the request as malformed | no |
+| `judgment.payment_required` | The vendor refused the request for billing: no credits, or no active plan | no |
 | `judgment.rate_limited` | The vendor's rate limit held through every attempt | yes |
 | `judgment.provider_unavailable` | Timeout, transport failure, or a server error through every attempt | yes |
 | `judgment.output_invalid` | Oversize, non-JSON, or schema-invalid response, an unknown choice, or an out-of-range probability | no |
@@ -139,8 +140,11 @@ already follow.
   retried, after fixed delays of 0.25 and 0.5 seconds taken from the injected
   clock. There is no jitter: ambient randomness is not available to adapters.
 - **Sanitization.** A non-success response is classified by status alone and
-  its body is never read. Every failure is raised without an exception chain,
-  because validation errors quote their input. The model name returned by the
+  its body is never read. Status 402 is `judgment.payment_required`, apart
+  from the malformed-request code, because its remedy is the owner's billing
+  page and not a code change, and it is not retried. Every failure is raised
+  without an exception chain, because validation errors quote their input.
+  The model name returned by the
   vendor is kept only when it matches `^[A-Za-z0-9._-]{1,64}$`; otherwise the
   requested alias stands in, because that string reaches audits. Nothing logs
   state, criteria, a body, or a header.
@@ -224,7 +228,7 @@ steered answer costs a bad proposal or an unnecessary escalation.
    `judgment.auth_failed` without dialing. Registered as
    `gate.judgment.default_off`, case. **M29.**
 3. **Failures are typed, bounded, and content-free.** Every adapter failure
-   is a `JudgmentProviderError` carrying one of six reason codes and nothing
+   is a `JudgmentProviderError` carrying one of seven reason codes and nothing
    else; an oversize request fails without dialing; an oversize, non-JSON, or
    schema-invalid response, an unknown choice, and an out-of-range
    probability are `judgment.output_invalid`; retries are bounded in count
@@ -294,6 +298,17 @@ consumer exists yet, so no judgment request is made in any deployment. A live
 round trip against the vendor is an opt-in test and is not gate evidence.
 Registration and local checks are not release evidence: exact-head hosted CI,
 review, and production delivery remain open items in project state.
+
+## Implementation checkpoint: 2026-09-21
+
+The first production day showed a rejected call could not be told from a
+malformed one: a key whose account had no credits returned status 402, which
+read `judgment.request_rejected`. It now reads `judgment.payment_required`,
+the seventh reason code, bound by the status table of
+`tests/contract/test_judgment_provider_contract.py`. Each consumer already
+records the reason code of a failed call — the folder pass in
+`judgment_error_class`, and the advisory composite as its abstention cause,
+which previously held only the error's class name.
 
 ## Open questions
 

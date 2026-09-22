@@ -91,6 +91,13 @@ recorded here rather than absorbed silently.
    layer in particular is roadmap item B8 and enters only through its own
    policy ADR.
 
+### Amendment, 2026-09-21: a seventh reason code
+
+Decision 5 counted six reason codes. The first production day added
+`judgment.payment_required` for status 402, because an account without credits
+read as a malformed request and its remedy is the owner's billing page. The
+rule is unchanged: status alone classifies a failure and no body is read.
+
 ## Data the vendor may receive
 
 Admitted:

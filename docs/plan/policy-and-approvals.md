@@ -1351,7 +1351,15 @@ Extending Section 19's `approval_requests_total`:
   mode as well as enforce. The disagreement rate is the share of
   owner-resolved approvals with `policy_reason = policy.advisory.escalated`
   that were approved: the owner disagreeing with the advisor. Abstentions are
-  counted by cause, with consulted-call latency and input tokens.
+  counted by cause, with consulted-call latency and input tokens. The cause
+  is `timeout`, the provider's reason code when the error carries one, or the
+  error's class name. A host with no metrics exporter still has to answer
+  "is the advisor running": every consultation writes one
+  `policy_advisory_consulted` line carrying the tool name, the verdict,
+  whether it was enforced, the signal identifiers, and the latency, and every
+  abstention writes one `policy_advisory_abstained` line carrying the tool
+  name and the cause. Neither line carries an argument, a probability, or an
+  identifier.
 - Revalidation void rate by cause.
 
 ## Build sequence

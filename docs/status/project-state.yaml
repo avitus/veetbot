@@ -23,6 +23,8 @@ project:
   # reserve, and a failure classification on the accounting event.
   # ADR-0113 records the owner's non-milestone native extension on 2026-09-21:
   # the sidebar groups scheduled sessions by schedule; folders stay chat-only.
+  # ADR-0114 records a non-milestone CI change on 2026-09-21: main skips a
+  # verification job whose exact source tree already passed it.
   # ADR-0115 records the owner's non-milestone runtime repair on 2026-09-21:
   # a tool batch is fitted to the remaining budget, an exhausted tool-call
   # budget owes one synthesis-only turn, and the interactive defaults carry

@@ -226,6 +226,37 @@ def test_web_and_browser_network_reads_are_the_consulted_class(name: str, target
     assert advisable(web_action(name=name, target=target)) is True
 
 
+class _CodedError(RuntimeError):
+    """Stands in for a provider error: the composite knows no provider type."""
+
+    def __init__(self, reason_code: object) -> None:
+        super().__init__("synthetic")
+        self.reason_code = reason_code
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "cause"),
+    [
+        ("judgment.payment_required", "judgment.payment_required"),
+        # Anything that is not a short code could carry content, so the class name stands in.
+        ("the owner's query was: synthetic private text", "_CodedError"),
+        (402, "_CodedError"),
+    ],
+    ids=["code", "prose", "not-a-string"],
+)
+async def test_an_abstention_is_counted_under_the_failure_reason_code(
+    reason_code: object, cause: str
+) -> None:
+    observer = RecordingObserver()
+    await engine(
+        PolicyDecisionType.ALLOW,
+        ScriptedAdvisor(failure=_CodedError(reason_code)),
+        observer=observer,
+    ).evaluate(web_action(), principal(), run())
+
+    assert observer.abstentions == [{"tool": "web.search", "cause": cause}]
+
+
 @pytest.mark.parametrize(
     ("advisor", "cause"),
     [

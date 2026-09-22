@@ -1078,6 +1078,56 @@ def test_hosted_verification_is_automatic_only_on_main() -> None:
     }
 
 
+def test_main_skips_verification_a_tree_already_passed() -> None:
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    commands = config["commands"]
+    jobs = config["jobs"]
+
+    # The record is keyed by the source tree, not the commit, so the merge
+    # commit that reproduces a verified pull-request head finds it, and a merge
+    # whose tree nothing verified does not (ADR-0114).
+    skip_steps = commands["skip_verified_tree"]["steps"]
+    record_steps = commands["record_verified_tree"]["steps"]
+    assert "git rev-parse 'HEAD^{tree}'" in skip_steps[0]["run"]["command"]
+    key = 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
+    assert skip_steps[1] == {"restore_cache": {"keys": [key]}}
+    skip_command = skip_steps[2]["run"]["command"]
+    assert '"<< pipeline.git.branch >>" == main' in skip_command
+    assert "circleci-agent step halt" in skip_command
+    assert record_steps[-1] == {"save_cache": {"key": key, "paths": ["/tmp/veetbot-verified"]}}
+
+    # Every verification partition consults the record before its tests and
+    # writes it only after its last test passed. The public site still builds
+    # on main because packaging consumes its output, and delivery never skips.
+    partitions = {"static", "contract", "integration", "sandbox", "apple", "apple-ios"}
+    for name, job in jobs.items():
+        names = [next(iter(step)) if isinstance(step, dict) else step for step in job["steps"]]
+        if name not in partitions:
+            assert "skip_verified_tree" not in names
+            assert "record_verified_tree" not in names
+            continue
+        skip_index = names.index("skip_verified_tree")
+        record_index = names.index("record_verified_tree")
+        assert job["steps"][skip_index]["skip_verified_tree"] == {"job": name}
+        assert job["steps"][record_index]["record_verified_tree"] == {"job": name}
+        assert names.index("checkout") < skip_index
+        run_indexes = [index for index, step in enumerate(names) if step == "run"]
+        test_indexes = [
+            index for index in run_indexes if "make test-" in job["steps"][index]["run"]["command"]
+        ]
+        assert test_indexes and skip_index < min(test_indexes)
+        assert record_index > max(run_indexes)
+    # The reading-lane floor judges commits, not the tree, so it always runs.
+    static_names = [
+        step["run"]["name"] if isinstance(step, dict) and "run" in step else None
+        for step in jobs["static"]["steps"]
+    ]
+    static_skip = [
+        next(iter(step)) if isinstance(step, dict) else step for step in jobs["static"]["steps"]
+    ].index("skip_verified_tree")
+    assert static_names.index("Reading lane floor") < static_skip
+
+
 def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
     jobs = config["jobs"]
