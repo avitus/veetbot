@@ -2,6 +2,7 @@
 /site/
 /dist/
 /build/
+/test-results/
 
 # Python
 __pycache__/

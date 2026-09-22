@@ -1,6 +1,8 @@
 # ADR-0078: Run-limit synthesis reserves
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by ADR-0115 (a tool-call reserve dimension,
+  interactive defaults, and an exhausted tool-call budget owing one
+  synthesis-only turn)
 - **Date:** 2026-09-01
 - **Related:** Sections 6.5 and 12 of the engineering plan; ADR-0023,
   ADR-0059, ADR-0063

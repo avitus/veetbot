@@ -7,6 +7,7 @@ nothing here chooses a destination, a message, a thread, or a label.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Literal
@@ -29,6 +30,8 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.runs import RunOutcome, Step
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent_core.runtime.email_tasks import _TaskIO
@@ -280,9 +283,10 @@ async def run_subscription(io: _TaskIO) -> RunOutcome:
                 await _cleanup(io, consent, done)
         else:
             await _report(io, consent)
-    except (EmailToolError, ConflictError, AuthorizationError, BudgetExceededError):
+    except (EmailToolError, ConflictError, AuthorizationError, BudgetExceededError) as exc:
         # Whatever was not attempted returns to where it was; nothing is retried here.
-        pass
+        # Platform-authored text only: no sender, address or destination reaches a log.
+        logger.warning("email_subscription_aborted: %s: %s", type(exc).__name__, exc)
     await subscriptions.finish(c.principal, c.run, c.lease)
     c.checkpoint.pending_tool_calls = []
     c.checkpoint.pending_approval_ids = []

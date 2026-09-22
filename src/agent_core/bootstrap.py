@@ -481,6 +481,7 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
 from agent_core.policy.advised import AdvisedPolicyEngine
@@ -681,6 +682,23 @@ def _session_tool_filter(
         return [tool for tool in tools if tool.name not in _BROWSER_TOOL_NAMES]
 
     return filter_tools
+
+
+def _run_limits_from_defaults(run_defaults: Mapping[str, Any]) -> RunLimits:
+    return RunLimits(
+        max_steps=int(run_defaults["max_steps"]),
+        max_model_calls=int(run_defaults["max_model_calls"]),
+        max_tool_calls=int(run_defaults["max_tool_calls"]),
+        synthesis_reserve_model_calls=int(run_defaults.get("synthesis_reserve_model_calls", 0)),
+        synthesis_reserve_tool_calls=int(run_defaults.get("synthesis_reserve_tool_calls", 0)),
+    )
+
+
+def default_run_limits(settings: Settings) -> RunLimits:
+    """The interactive run limits the composition root gives the default agent."""
+
+    runtime_config = load_config_document(settings, "runtime/limits.yaml")
+    return _run_limits_from_defaults(runtime_config["run_defaults"])
 
 
 def _content_addressed_agent_version(agent: AgentSpec) -> str:
@@ -1342,16 +1360,28 @@ async def serve_execution_service(socket_path: Path) -> None:
             await environment.close()
 
 
+def _configure_service_logging(settings: Settings, *, enabled: bool) -> None:
+    """Phase 1 of a long-running service: nothing before this point may log.
+
+    A one-shot command's standard output is its result, so it does not opt in.
+    """
+
+    if enabled:
+        configure_logging(settings.deployment_mode)
+
+
 @asynccontextmanager
 async def build_schedule_worker(
     *,
     settings: Settings | None = None,
     clock: Clock | None = None,
     ids: IdFactory | None = None,
+    service_logging: bool = False,
 ) -> AsyncIterator[ScheduleWorker]:
     """Build only the resources needed to materialize scheduled runs."""
 
     effective_settings = settings or load_schedule_worker_settings()
+    _configure_service_logging(effective_settings, enabled=service_logging)
     principal = _validate_schedule_role(effective_settings)
     runtime = load_config_document(effective_settings, "runtime/limits.yaml")
     queue = runtime["queue"]
@@ -1417,10 +1447,12 @@ async def build_notification_worker(
     clock: Clock | None = None,
     ids: IdFactory | None = None,
     transport: PushTransport | None = None,
+    service_logging: bool = False,
 ) -> AsyncIterator[NotificationWorker]:
     """Build only the resources needed to dispatch durable notifications."""
 
     effective_settings = settings or load_notification_worker_settings()
+    _configure_service_logging(effective_settings, enabled=service_logging)
     principal = _validate_notification_role(effective_settings)
     runtime = load_config_document(effective_settings, "runtime/limits.yaml")
     notification_limits = runtime["notifications"]
@@ -1525,9 +1557,11 @@ async def build_call_worker(
     settings: Settings | None = None,
     ingress: bool = False,
     clock: Clock | None = None,
+    service_logging: bool = False,
 ) -> AsyncIterator[CallWorkerComposition]:
     """Compose either signed ingress or reconciliation without model credentials."""
     selected = settings or load_call_worker_settings(ingress=ingress)
+    _configure_service_logging(selected, enabled=service_logging)
     validate_settings(
         selected,
         require_auth_token=False,
@@ -1638,10 +1672,12 @@ async def build_surface_worker(
     settings: Settings | None = None,
     clock: Clock | None = None,
     ids: IdFactory | None = None,
+    service_logging: bool = False,
 ) -> AsyncIterator[SurfaceWorkerComposition]:
     """Build the credential-minimized Telegram and optional WhatsApp surface role."""
 
     effective_settings = settings or load_surface_worker_settings()
+    _configure_service_logging(effective_settings, enabled=service_logging)
     principal = _validate_surface_role(effective_settings)
     telegram_token = effective_settings.surface_telegram_token
     assert telegram_token is not None
@@ -4096,11 +4132,13 @@ async def build(
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
     memory_people_evaluation_mode: bool = False,
+    service_logging: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
 
     # Phase 1: refusal. Loading Settings enforces production sandbox and auth rules.
     effective_settings = settings or load_settings()
+    _configure_service_logging(effective_settings, enabled=service_logging)
     validate_settings(effective_settings)
     if (
         (
@@ -4398,12 +4436,7 @@ async def build(
         enabled_tools=enabled_tools if enabled_tools is not None else default_enabled_tools,
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
-        limits=limits
-        or RunLimits(
-            max_steps=int(run_defaults["max_steps"]),
-            max_model_calls=int(run_defaults["max_model_calls"]),
-            max_tool_calls=int(run_defaults["max_tool_calls"]),
-        ),
+        limits=limits or _run_limits_from_defaults(run_defaults),
     )
     if storage == "postgres":
         agent = agent.model_copy(

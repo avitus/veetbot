@@ -335,6 +335,28 @@ provider-assisted formation falls back to deterministic until the evidence is
 regenerated on the new version. Observe first, read the
 `agent.policy.advisory.*` metrics, and enforce only when no approval is pending.
 
+The host exports no metrics, so the service log answers whether these consumers
+are running. Every long-running service writes JSON lines, one object per
+event, with first-party events from `INFO` and every other logger from
+`WARNING`:
+
+```bash
+sudo journalctl -u veetbot-api -u veetbot-worker -u veetbot-async-worker \
+  --since '-1 hour' -o cat | grep policy_advisory
+sudo journalctl -u veetbot-maintenance --since '-1 hour' -o cat | grep folder_proposal_pass
+```
+
+`policy_advisory_consulted` appears once per consultation with `tool`,
+`verdict`, `enforced`, `signals` and `seconds`; a `verdict` other than
+`abstain` is what enforcing would have sent for approval.
+`policy_advisory_abstained` carries the `cause`: `timeout`, or a provider
+reason code such as `judgment.auth_failed` or `judgment.payment_required`, the
+latter meaning the vendor account has no credits. `folder_proposal_pass`
+appears once per pass: `judgment_requests` above zero with
+`judgment_fallback_used` false and `judgment_error_class` null is a working
+matcher, and `judgment_matched` counts the conversations it proposed to file.
+None of these lines carries a query, a URL, a title, or a probability.
+
 Run `docker compose ls` before the first automated release. If an existing
 Veetbot PostgreSQL container was created under a Compose project name other than
 `veetbot`, set `COMPOSE_PROJECT_NAME` to that exact existing name. Changing it
@@ -652,8 +674,11 @@ itself; such a branch is verified on the sidecar and, before it is proposed for
 verification jobs are required status checks, so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
 an admin override. A requested `dev` pipeline also
-runs the non-publishing Apple signing smoke described above. On `main`, after
-all seven required verification jobs pass:
+runs the non-publishing Apple signing smoke described above. On `main`, a
+verification job other than `public-site` whose source tree already passed it,
+normally in that requested run, reports success without rerunning; a merge
+commit whose tree nothing verified is verified in full (ADR-0114). After all
+seven required verification jobs pass:
 
 - `public-site` installs the locked Node dependencies, builds, tests, and lints
   the static export, and exposes only that output to downstream packaging;

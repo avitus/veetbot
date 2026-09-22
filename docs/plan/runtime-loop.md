@@ -709,17 +709,30 @@ A batch that is partly executed when cancellation arrives finishes the calls
 whose effects are in flight and marks the rest `cancelled`. The model is
 never asked to respond to a cancelled batch; the run ends.
 
-## Budget: three scopes, one ledger, and "after" means "record"
+## Budget: four scopes, one ledger, and "after" means "record"
 
 Three documents place the budget check in three different places and all
 three are right about their own concern.
 
 ```text
-# scope      checked            enforces
-ADMISSION    once, at claim     deadline, max_cost already exceeded
-STEP         phase 1            max_steps, max_tool_calls, cost, deadline
-ATTEMPT      phase 6, per try   max_model_calls, max_*_tokens, cost
+# scope      checked                 enforces
+ADMISSION    once, at claim          deadline, max_cost already exceeded
+STEP         phase 1                 max_steps, cost, deadline
+ATTEMPT      phase 6, per try        max_model_calls, max_*_tokens, cost
+TOOL_CALL    before a single call    max_tool_calls (flows outside the loop)
 ```
+
+`max_tool_calls` is deliberately absent from `STEP` (ADR-0115). A run whose
+tool-call count equals its limit still owes an answer, so the check that
+would fail it before the model's turn is wrong for the model loop. The loop
+enforces the limit by construction instead: before dispatch it fits the batch
+to the remaining budget, runs only the calls that fit, and answers each
+refused call with a platform-trusted `tool.budget_exhausted` result. A refused
+call never reaches the tool executor, so nothing runs unaccounted for, and the
+refusals join the conversation before the `tool_pending` checkpoint so a
+resumed step re-dispatches only the fitted calls. `BudgetScope.TOOL_CALL`
+carries the pre-call rule for flows that dispatch one call at a time outside
+the model loop — the email tasks — and cannot fit a batch.
 
 `BudgetScope.ATTEMPT` is what reconciles ADR-0002's *"budget is checked
 before an attempt, and failed attempts count against budget"* with Section
@@ -736,9 +749,10 @@ are one operation because separating them creates a window in which the
 totals are over budget and nothing has noticed.
 
 ```text
-# operation           before          after
-model attempt         check(ATTEMPT)  record_model_usage
-tool call batch       check(STEP)     record_tool_usage
+# operation           before              after
+model attempt         check(ATTEMPT)      record_model_usage
+tool call batch       fit to remaining    record_tool_usage
+single tool call      check(TOOL_CALL)    record_tool_usage
 ```
 
 `BudgetExceeded` raised anywhere in the loop produces
@@ -756,15 +770,24 @@ state, which means a parent can fail on budget while suspended and is one of
 the two cases where a waiting run transitions to `FAILED` without ever
 becoming `RUNNING` again.
 
-`RunLimits.synthesis_reserve_steps`, `synthesis_reserve_model_calls`, and
-`synthesis_reserve_cost` apply to every run kind when positive (ADR-0078). At
-the first reached dimension, the loop adds a volatile platform instruction to
-the next request requiring final synthesis from evidence already in context.
-The instruction is not checkpointed. A tool call returned while that control is
-active fails closed with `SynthesisReserveViolation`; all-zero reserve fields
-preserve the ordinary loop. This is separate from hard-limit accounting: the
-reserve protects a pre-call opportunity to synthesize, while `record_*` remains
-the authoritative post-call budget check.
+`RunLimits.synthesis_reserve_steps`, `synthesis_reserve_model_calls`,
+`synthesis_reserve_tool_calls`, and `synthesis_reserve_cost` apply to every run
+kind when positive (ADR-0078, ADR-0115). At the first reached dimension, the
+loop adds a volatile platform instruction to the next request requiring final
+synthesis from evidence already in context. The instruction is not
+checkpointed. A tool call returned while that control is active fails closed
+with `SynthesisReserveViolation` naming the dimension; all-zero reserve fields
+preserve the ordinary loop with one exception: an *exhausted* tool-call budget
+always puts the next request into synthesis-only mode, because the alternative
+is a run that can neither call a tool nor be allowed to answer. This is
+separate from hard-limit accounting: the reserve protects a pre-call
+opportunity to synthesize, while `record_*` remains the authoritative post-call
+budget check.
+
+The interactive defaults in `runtime/limits.yaml` are 32 steps, 24 model
+calls, 64 tool calls, a model-call reserve of 2 and a tool-call reserve of 4.
+The composition root copies the reserves onto the default agent's limits;
+schedule revisions and delegated children carry their own.
 
 ## The heartbeat is a supervisor, not a statement in the loop
 
@@ -1557,7 +1580,7 @@ whether it was seen.
 # conflict                        resolution
 1  cancellation cadence           one token, six points, effect rule
 2  cancellation milestone         split M1 / M4 / M5
-3  budget check placement         three scopes; "after" is record
+3  budget check placement         four scopes; "after" is record
 4  retry ownership                three loops, three owners, named
 5  checkpoint API name/shape      CheckpointRepository canonical
 6  checkpoint content model       stored vs materialized types
@@ -1687,10 +1710,12 @@ registry with identifiers, like every other gate.
 8. **One `CancellationToken` per run serves the loop, the tool executor, and
    the sandbox.** Six observation points, and a cancellation observed after
    an effect watermark is set does not abandon the call.
-9. **Budget has three scopes and "after" means "record".** Recording usage
+9. **Budget has four scopes and "after" means "record".** Recording usage
    and evaluating the limit are one operation, in one transaction, because
    separating them creates a window in which the run is over budget and
-   nothing knows.
+   nothing knows. The tool-call limit is fitted before a batch, not checked
+   before a step, so reaching it ends research and not the answer
+   (ADR-0115).
 10. **The heartbeat is a supervisor task that also watches the deadline and
     polls for cancellation.** One timer, one query, three concerns that are
     all "has the outside world changed its mind".

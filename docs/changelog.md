@@ -4,6 +4,57 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-21 — Paraphrased People labels no longer erase a family memory
+
+- "My mom, Cheryl, lives in … Marbella … My brother lives in Redwood City"
+  formed only the request itself. The extractor proposed every fact correctly,
+  but labelled Cheryl's mention with the context "User's mother" and the
+  brother's with the display name "User's brother"; the People linker required
+  both to be exact source substrings and formation discarded each whole belief.
+- The linker now drops an unstated context label, displays a paraphrased role
+  mention by its own span, and formation keeps a belief whose People evidence
+  is refused, unlinked, counting `people_unlinked`. An erased source or
+  identity still rejects the claim.
+
+## 2026-09-21 — The tool-call budget ends research, never the answer
+
+- An interactive research run with 29 of 32 tool calls used asked for five
+  more; the runtime ran all five, recorded 34 and failed the run, discarding
+  every result. The loop now fits a batch to the remaining budget before
+  dispatch and answers each refused call with a `tool.budget_exhausted`
+  result, so nothing runs unaccounted for.
+- Reaching `max_tool_calls` no longer fails a run before its final turn: the
+  next request is synthesis-only, and a tool call returned in that mode fails
+  closed as the other reserve dimensions do. `BudgetScope.TOOL_CALL` carries
+  the pre-call rule for single-call flows (email tasks).
+- `RunLimits` gains `synthesis_reserve_tool_calls`. The interactive defaults
+  become 24 model calls and 64 tool calls with reserves of 2 and 4, so the
+  model is told to write up before the wall (ADR-0115, amending ADR-0078).
+
+## 2026-09-21 — Services write structured logs, and the judgment consumers can be read from them
+
+- No entry point had ever called the logging bootstrap, so a service ran on
+  Python's defaults: nothing below `WARNING` was written, and a warning printed
+  as its bare event name with every field dropped and no redaction. Each
+  long-running service — the API, every worker role, the call worker and the
+  call ingress — now configures logging at phase 1 of its composition root.
+  Standard-library records run through the same processor chain as native
+  events, so their `extra` fields, the context variables, the timestamp, the
+  level and the redaction processor all apply. First-party lines are recorded
+  from `INFO` and every other logger from `WARNING`, which keeps HTTP client
+  request lines, one of which carries a credential in its path, out of the log.
+  One-shot commands are unchanged: their standard output is their result.
+- The advisory layer writes one `policy_advisory_consulted` line per
+  consultation, abstentions included, and an abstention's cause is the
+  provider's reason code when the error carries one. The folder proposal pass
+  writes one `folder_proposal_pass` line with the audit event's content-free
+  fields.
+- The judgment port gains a seventh reason code, `judgment.payment_required`,
+  for status 402: an account without credits no longer reads as a malformed
+  request.
+- A static test refuses a log call whose `extra` names a field the log record
+  reserves, which raises only once its level is enabled.
+
 ## 2026-09-21 — Two simulator UI cases no longer depend on timing
 
 - On the hosted iOS 27.0 simulators `testEmailThreadFeedbackEditingAndExplicitSend`

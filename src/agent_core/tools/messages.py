@@ -97,6 +97,10 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.device_send_failed": "The device reported that the message was not sent.",
     "tool.unavailable": "The tool is unavailable in this deployment.",
     "tool.run_cancelled": "Not performed. The run was cancelled.",
+    "tool.budget_exhausted": (
+        "Not performed. The run's tool-call budget is exhausted; "
+        "answer from the evidence already gathered."
+    ),
 }
 
 

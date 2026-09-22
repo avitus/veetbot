@@ -447,7 +447,10 @@ native display. A display that cannot start fails the launch as
 The browser reports its real user agent and automation state: the runtime
 overrides no user agent and masks no automation indicator, so a website that
 still refuses the browser is unsupported rather than evaded. Run-attempt leases
-remain headless.
+remain headless. The direct surface relays each key as the user presses it,
+and the runtime delivers text as one key press per character with no added
+timing; a field that fills with no keyboard events is scored as automated and
+refused.
 
 The trusted client presents the returned launch URL behind a user-initiated
 continue action and treats a rejected platform handoff as a failed setup. It
@@ -462,9 +465,14 @@ rejected, and it never blocks the connection change; the client forgets the
 ceremony either way. The direct surface explains the screenshot and
 focused-field interaction, disables its credential controls until the runtime
 connects, and tells the user to return to the client and start over when the
-non-persisted fragment capability is missing or expired. Submitted text is
-cleared immediately and is never placed in diagnostics or durable client
-state.
+non-persisted fragment capability is missing or expired. After the user clicks
+a website field in the screenshot, a capture field on the surface takes focus:
+each character, paste, or completed composition is relayed as a text event and
+each navigation key as a key event, in order, as it happens, with no separate
+send step. The capture field is cleared as each event is taken, and typed text
+is never placed in diagnostics or durable client state. When an event fails,
+the surface drops the rest of the queue and tells the user to clear the field
+and type again, so a password is never submitted with a character missing.
 
 Only the isolated runtime determines completion. It may report `ready`,
 `needs_user`, `authentication_required`, `expired`, or `cancelled`; a caller

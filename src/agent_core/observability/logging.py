@@ -6,6 +6,7 @@ import logging
 import re
 import sys
 from collections.abc import Iterable, Mapping
+from typing import TextIO
 
 import structlog
 from opentelemetry import trace
@@ -98,13 +99,26 @@ def _redaction_processor(prefixes: tuple[str, ...]) -> Processor:
     return processor
 
 
+FIRST_PARTY_LOGGER = "agent_core"
+
+
+class _ServiceLogHandler(logging.StreamHandler[TextIO]):
+    """The one handler this module installs, so a second call replaces only it."""
+
+
 def configure_logging(
     deployment_mode: DeploymentMode,
     *,
     level: int = logging.INFO,
     provider_key_prefixes: Iterable[str] = DEFAULT_PROVIDER_PREFIXES,
 ) -> None:
-    """Configure structlog for console development or JSON production output."""
+    """Render every log record as console development or JSON production output.
+
+    The platform's modules log through the standard library with their fields in
+    ``extra``, so the root handler runs the processor chain over those records
+    as well as over native structlog events: fields, context variables and
+    redaction apply to both.
+    """
 
     renderer: Processor
     if deployment_mode is DeploymentMode.PRODUCTION:
@@ -112,17 +126,37 @@ def configure_logging(
     else:
         renderer = structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty())
 
-    logging.basicConfig(format="%(message)s", level=level, stream=sys.stdout, force=True)
-    processors: list[Processor] = [
+    shared: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.ExtraAdder(),
         structlog.processors.TimeStamper(fmt="iso", utc=True, key="timestamp"),
         add_trace_context,
+        # Before redaction, so a traceback is text the redaction processor reads.
+        structlog.processors.format_exc_info,
         _redaction_processor(tuple(provider_key_prefixes)),
-        renderer,
     ]
+    handler = _ServiceLogHandler(sys.stdout)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=shared,
+            processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, renderer],
+        )
+    )
+    root = logging.getLogger()
+    # Only this module's own handler is replaced: a capture handler a test
+    # harness attached, or one an embedding process owns, stays where it is.
+    root.handlers[:] = [
+        existing for existing in root.handlers if not isinstance(existing, _ServiceLogHandler)
+    ]
+    root.addHandler(handler)
+    # Third-party libraries stay at WARNING: HTTP clients log each request line
+    # at INFO, and one integration carries its credential in the URL path.
+    root.setLevel(max(level, logging.WARNING))
+    logging.getLogger(FIRST_PARTY_LOGGER).setLevel(level)
     structlog.configure(
-        processors=processors,
+        processors=[*shared, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
         wrapper_class=structlog.stdlib.BoundLogger,
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,

@@ -3230,9 +3230,10 @@ class GovernedMemoryService:
                     ):
                         from agent_core.memory.people_formation import prepare_people
 
+                        proposed_people = candidate.people
                         if (
                             people_mentions
-                            + (len(candidate.people.mentions) + len(candidate.people.organizations))
+                            + (len(proposed_people.mentions) + len(proposed_people.organizations))
                             > 64
                         ):
                             rejected += 1
@@ -3246,22 +3247,30 @@ class GovernedMemoryService:
                                 admitted_sources,
                                 self._clock.now(),
                             )
-                        except (ValueError, ToolValidationError, ConflictError):
+                        except ConflictError:
                             rejected += 1
                             decisions["rejected_people_evidence"] += 1
                             continue
-                        people_mentions += len(candidate.people.mentions) + len(
-                            candidate.people.organizations
-                        )
-                        candidate = candidate.model_copy(
-                            update={
-                                "subject": prepared_people.subject,
-                                "sensitivity_guess": max(
-                                    (candidate.sensitivity_guess, Sensitivity.SENSITIVE),
-                                    key=SENSITIVITY_ORDER.__getitem__,
-                                ),
-                            }
-                        )
+                        except (ValueError, ToolValidationError):
+                            # Refused People evidence drops the link, never the
+                            # atomic belief: the claim already passed its own
+                            # provenance, portability, and hazard checks.
+                            decisions["rejected_people_evidence"] += 1
+                            decisions["people_unlinked"] += 1
+                            candidate = candidate.model_copy(update={"people": None})
+                        else:
+                            people_mentions += len(proposed_people.mentions) + len(
+                                proposed_people.organizations
+                            )
+                            candidate = candidate.model_copy(
+                                update={
+                                    "subject": prepared_people.subject,
+                                    "sensitivity_guess": max(
+                                        (candidate.sensitivity_guess, Sensitivity.SENSITIVE),
+                                        key=SENSITIVITY_ORDER.__getitem__,
+                                    ),
+                                }
+                            )
                     # A candidate commits under its own key, except an
                     # automatic retraction, which commits under the key of
                     # every live belief it negates: a correction may update

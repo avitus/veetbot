@@ -326,6 +326,7 @@ STATUS_CASES: tuple[tuple[int, JudgmentFailure, bool, int], ...] = (
     (403, JudgmentFailure.AUTH_FAILED, False, 1),
     (422, JudgmentFailure.REQUEST_REJECTED, False, 1),
     (404, JudgmentFailure.REQUEST_REJECTED, False, 1),
+    (402, JudgmentFailure.PAYMENT_REQUIRED, False, 1),
     (429, JudgmentFailure.RATE_LIMITED, True, 3),
     (408, JudgmentFailure.PROVIDER_UNAVAILABLE, True, 3),
     (500, JudgmentFailure.PROVIDER_UNAVAILABLE, True, 3),

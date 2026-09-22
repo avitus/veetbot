@@ -186,6 +186,248 @@ async def test_owner_formation_creates_grounded_people_and_directional_link() ->
         assert len(await uow.people.query(query)) == 2
 
 
+def _owner_kin_candidate(
+    text: str,
+    *,
+    sequence: int,
+    span: str,
+    display_name: str,
+    identifier_kind: str,
+    identifier_value: str,
+    context: str,
+    predicate: str,
+    qualifier: str,
+) -> MemoryCandidate:
+    return MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP,
+        subject=display_name,
+        statement=text,
+        source_event_ids=[sequence],
+        model_confidence=0.9,
+        proposed_scope="user",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+        claim_kind=MemoryClaimKind.RELATIONSHIP,
+        people=PeopleClaim(
+            organizations=[],
+            mentions=[
+                PersonEvidence(
+                    key="kin",
+                    source_event_id=sequence,
+                    start=text.index(span),
+                    end=text.index(span) + len(span),
+                    text=span,
+                    display_name=display_name,
+                    identifier_kind=identifier_kind,  # type: ignore[arg-type]
+                    identifier_value=identifier_value,
+                    namespace="owner",
+                    context=context,
+                    role="subject",
+                    referent_key=None,
+                )
+            ],
+            relationship=RelationshipProposal(
+                subject_key="kin",
+                object_key="owner",
+                predicate=predicate,  # type: ignore[arg-type]
+                qualifier=qualifier,
+                valid_from=None,
+                valid_to=None,
+                precision="unknown",
+                source_timezone=None,
+            ),
+            commitment=None,
+        ),
+    )
+
+
+async def test_paraphrased_mention_context_does_not_lose_a_named_parent() -> None:
+    """A "My mom, Cheryl" mention with context "User's mother" still forms and links Cheryl."""
+
+    clock, factory = await memory_uow_factory()
+    text = "My mom, Cheryl, lives in an independent living facility in Redwood City."
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="Cheryl",
+        display_name="Cheryl",
+        identifier_kind="name",
+        identifier_value="Cheryl",
+        context="User's mother",
+        predicate="parent",
+        qualifier="mother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    assert result.run.decision_counts.get("rejected_people_evidence", 0) == 0
+    query = PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(query) if isinstance(r, Person)]
+        assert [person.display_name for person in people] == ["Cheryl"]
+        relationships = await uow.people.query(query.model_copy(update={"kinds": ["relationship"]}))
+        assert len(relationships) == 1
+        relation = relationships[0]
+        assert isinstance(relation, RelationshipAssertion)
+        assert relation.subject.id == people[0].id and relation.object.kind == "owner"
+        assert relation.predicate == "parent" and relation.belief_id == result.beliefs[0].id
+        links = await uow.people.query(query.model_copy(update={"kinds": ["memory_link"]}))
+        assert [link.person_id for link in links if isinstance(link, PersonMemoryLink)] == [
+            people[0].id
+        ]
+
+
+async def test_unnamed_relative_is_displayed_by_its_source_span() -> None:
+    """A role mention labelled "User's brother" keeps the span "My brother" as its name."""
+
+    clock, factory = await memory_uow_factory()
+    text = "My brother lives in Redwood City."
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="My brother",
+        display_name="User's brother",
+        identifier_kind="role",
+        identifier_value="brother",
+        context="",
+        predicate="sibling",
+        qualifier="brother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    query = PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(query) if isinstance(r, Person)]
+        assert [person.display_name for person in people] == ["My brother"]
+        relationships = await uow.people.query(query.model_copy(update={"kinds": ["relationship"]}))
+        assert len(relationships) == 1 and isinstance(relationships[0], RelationshipAssertion)
+        assert relationships[0].predicate == "sibling"
+
+
+async def test_lowercased_name_label_persists_the_source_casing() -> None:
+    """A label spelt "cheryl" for the span "Cheryl" persists only the span's own casing."""
+
+    from agent_core.domain.people import PersonIdentifier
+
+    clock, factory = await memory_uow_factory()
+    text = "My mom, Cheryl, lives in Redwood City."
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="Cheryl",
+        display_name="cheryl",
+        identifier_kind="name",
+        identifier_value="cheryl",
+        context="",
+        predicate="parent",
+        qualifier="mother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    query = PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        rows = await uow.people.query(query)
+        identifiers = await uow.people.query(
+            query.model_copy(
+                update={"kinds": ["identifier"], "sensitivity_ceiling": Sensitivity.RESTRICTED}
+            )
+        )
+    assert [r.display_name for r in rows if isinstance(r, Person)] == ["Cheryl"]
+    assert [r.value for r in identifiers if isinstance(r, PersonIdentifier)] == ["Cheryl"]
+
+
+def test_source_casing_survives_case_folding_that_changes_length() -> None:
+    from agent_core.memory.people_formation import _source_cased
+
+    # "İ" folds to two code points, so a folded index is not a source index.
+    assert _source_cased("İCheryl and Riv", "cheryl") == "Cheryl"
+    assert _source_cased("Meet Straße Cheryl", "STRASSE") == "Straße"
+    assert _source_cased("My mom, Cheryl", "CHERYL") == "Cheryl"
+    assert _source_cased("My mom, Cheryl", "Cheryl") == "Cheryl"
+    assert _source_cased("My brother", "User's brother") is None
+
+
+async def test_invented_name_label_keeps_the_atomic_belief_unlinked() -> None:
+    """A name label the source does not support drops the link, never the belief."""
+
+    clock, factory = await memory_uow_factory()
+    text = "My mom lives in an independent living facility in Redwood City."
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="My mom",
+        display_name="Cheryl",
+        identifier_kind="name",
+        identifier_value="Cheryl",
+        context="",
+        predicate="parent",
+        qualifier="mother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    assert result.beliefs[0].subject == "Cheryl", "the atomic belief keeps its own subject"
+    assert result.run.decision_counts.get("rejected_people_evidence") == 1
+    assert result.run.decision_counts.get("people_unlinked") == 1
+    query = PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+    )
+    async with factory() as uow:
+        assert await uow.people.query(query) == [], "no People rows form from refused evidence"
+
+
 async def test_people_extractor_extends_only_new_policy_and_keeps_three_calls() -> None:
     import json
 
@@ -916,6 +1158,10 @@ async def test_a_draft_cannot_complete_a_person_commitment() -> None:
         )
     assert commitments == [], "drafting and negated delivery cannot establish completion"
     assert result.run.decision_counts.get("rejected_people_evidence", 0) >= 1
+    assert [belief.statement for belief in result.beliefs] == [text], (
+        "refused People evidence drops the link, not the atomic belief"
+    )
+    assert result.run.decision_counts.get("people_unlinked", 0) >= 1
 
 
 def test_completed_commitment_requires_affirmative_source_language() -> None:
