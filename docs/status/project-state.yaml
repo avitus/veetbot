@@ -1635,7 +1635,7 @@ milestones:
     deferred_scope:
     - private in-call tools, automatic commitments, transfers, SMS and call-derived memory
     open_items:
-    - Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
+    - Verify provider-side admission controls and account-level memory or persona attachments in the Bland dashboard
     - Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
     - Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
     evidence:
@@ -1754,6 +1754,24 @@ milestones:
         running release carries the earlier template until its next delivery.
         Account-level memory and persona attachments are outside this readback
         and remain open.
+    - check: signed post-call webhook delivery and verification in production
+      outcome: pass
+      detail: >-
+        Before release 20260921-064317-f7c3b7a, nothing could show whether
+        Bland's webhook arrived or verified. The proxy route keeps no access
+        log, the listener ran without one, and a rejection was silent. That
+        release added one content-free outcome line per delivery. The owner
+        called the receptionist at 15:59:50Z on 2026-09-22 for 43 seconds.
+        Polling created that call's receipt 32 seconds in, as it had before.
+        The listener's journal then recorded calling.callback_accepted at
+        16:00:45Z, about twelve seconds after the call ended. Bland's post-call
+        webhook therefore arrives, and its X-Webhook-Signature verifies as a
+        SHA-256 HMAC over the raw delivered bytes. The design's open question,
+        whether Bland's re-serialized signing matches raw-byte verification,
+        is settled without accepting a second convention. At 16:52:13Z an
+        unsigned probe was logged as calling.callback_rejected
+        reason=signature_missing, which confirms that each delivery's outcome
+        reaches the journal.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

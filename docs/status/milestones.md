@@ -219,10 +219,10 @@ executable offline gate bindings, PostgreSQL contract evidence and 289 passing
 Apple package tests. Calling has been active in production since 2026-09-17.
 Live inbound calls and one owner-approved outbound call are retained, readable from
 Chat and announced to every device. Reaching that point took two fixes: ADR-0105's
-tool-definition budget and the missing `call_finished` lock-screen alert. Call
-results so far arrived through reconciliation, not a proven signed webhook.
+tool-definition budget and the missing `call_finished` lock-screen alert. Bland's
+signed post-call webhook has been verified in production against the raw bytes.
 
-- [ ] Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
+- [ ] Verify provider-side admission controls and account-level memory or persona attachments in the Bland dashboard
 - [ ] Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
 - [ ] Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
 
