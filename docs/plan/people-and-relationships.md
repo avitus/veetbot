@@ -365,6 +365,14 @@ providers are explicitly later source extensions, not hidden prerequisites.
    significant interactions, and commitments in bounded batches.
 3. Resolve identities locally from admissible evidence. Provider responses refer
    to source-local mention IDs, not arbitrary database identities they invent.
+   Every mention span and identifier value must be an exact source substring.
+   A name label must appear in its span; a role mention ("My brother") whose
+   label paraphrases the span ("User's brother") is displayed by the span
+   itself. A contextual label the source does not state ("User's mother" for
+   "My mom") is dropped from identity resolution rather than refused. When the
+   People evidence still fails local validation, the atomic belief forms
+   without a person link and the run counts `people_unlinked`; only an erased
+   source or identity rejects the claim itself.
 4. Apply existing policy, sensitivity, authority, portability, and injection
    checks to each claim. A person link never upgrades any of these properties.
 5. Apply owner corrections and identity split constraints; match contradictions

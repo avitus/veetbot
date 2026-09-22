@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-21 — Paraphrased People labels no longer erase a family memory
+
+- "My mom, Cheryl, lives in … Marbella … My brother lives in Redwood City"
+  formed only the request itself. The extractor proposed every fact correctly,
+  but labelled Cheryl's mention with the context "User's mother" and the
+  brother's with the display name "User's brother"; the People linker required
+  both to be exact source substrings and formation discarded each whole belief.
+- The linker now drops an unstated context label, displays a paraphrased role
+  mention by its own span, and formation keeps a belief whose People evidence
+  is refused, unlinked, counting `people_unlinked`. An erased source or
+  identity still rejects the claim.
+
 ## 2026-09-21 — Two simulator UI cases no longer depend on timing
 
 - On the hosted iOS 27.0 simulators `testEmailThreadFeedbackEditingAndExplicitSend`

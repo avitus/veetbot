@@ -194,13 +194,25 @@ async def prepare_people(
             normalized = normalize_identifier(
                 mention.identifier_kind, mention.namespace, mention.identifier_value
             )
-            if (
-                mention.display_name.casefold() not in mention.text.casefold()
-                or mention.identifier_value.casefold() not in mention.text.casefold()
-                or (mention.context and mention.context.casefold() not in source.text.casefold())
-            ):
+            if mention.identifier_value.casefold() not in mention.text.casefold():
                 raise ToolValidationError("People identity label is not supported by its source")
-            context = mention.context or (
+            display_name = mention.display_name
+            if display_name.casefold() not in mention.text.casefold():
+                if mention.identifier_kind != "role":
+                    raise ToolValidationError(
+                        "People identity label is not supported by its source"
+                    )
+                # An unnamed relative or role ("My brother") is displayed by its own
+                # source span; a paraphrase such as "User's brother" never names it.
+                display_name = mention.text
+            # A contextual label the source does not state ("User's mother" for
+            # "My mom") is dropped rather than refusing the whole mention.
+            stated_context = (
+                mention.context
+                if mention.context and mention.context.casefold() in source.text.casefold()
+                else ""
+            )
+            context = stated_context or (
                 "email:" + hashlib.sha256(email.sender.encode()).hexdigest() if email else "owner"
             )
             resolved = await resolve_identity(
@@ -231,7 +243,7 @@ async def prepare_people(
                     raise ConflictError("People identity was erased")
                 records[person_id] = Person(
                     id=person_id,
-                    display_name=mention.display_name,
+                    display_name=display_name,
                     state="provisional",
                     support_ids=[sid],
                     **common,
