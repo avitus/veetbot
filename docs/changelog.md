@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-22 — A cleared email failure no longer lingers on the iPad
+
+- One refresh failed on 2026-09-17 at 22:48 UTC. Fifty minutes later the iPad
+  still showed "Mail couldn't be updated", although later refreshes had
+  succeeded and new mail was arriving beneath the banner. "Try again" reloaded
+  the inbox but left the banner in place.
+- The client cleared a refresh failure only when it watched a later operation
+  reach `COMPLETED`. Production refreshes take 67–94 seconds, and leaving Email
+  cancels the watch, so a short visit never saw one finish.
+- The client now also clears the failure when an account's `last_synced_at`
+  advances past the value it held when the failure was recorded. The server
+  advances that field only when a refresh completes. A cached read with no newer
+  sync still keeps the failure visible, as `email-experience.md` requires.
+
 ## 2026-09-22 — A reclaimed run resumes its proposed tool calls
 
 - A production run died with an internal `ValueError` after its lease was
