@@ -683,6 +683,23 @@ def _session_tool_filter(
     return filter_tools
 
 
+def _run_limits_from_defaults(run_defaults: Mapping[str, Any]) -> RunLimits:
+    return RunLimits(
+        max_steps=int(run_defaults["max_steps"]),
+        max_model_calls=int(run_defaults["max_model_calls"]),
+        max_tool_calls=int(run_defaults["max_tool_calls"]),
+        synthesis_reserve_model_calls=int(run_defaults.get("synthesis_reserve_model_calls", 0)),
+        synthesis_reserve_tool_calls=int(run_defaults.get("synthesis_reserve_tool_calls", 0)),
+    )
+
+
+def default_run_limits(settings: Settings) -> RunLimits:
+    """The interactive run limits the composition root gives the default agent."""
+
+    runtime_config = load_config_document(settings, "runtime/limits.yaml")
+    return _run_limits_from_defaults(runtime_config["run_defaults"])
+
+
 def _content_addressed_agent_version(agent: AgentSpec) -> str:
     payload = agent.model_dump(mode="json", exclude={"id", "version"})
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -4398,12 +4415,7 @@ async def build(
         enabled_tools=enabled_tools if enabled_tools is not None else default_enabled_tools,
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
-        limits=limits
-        or RunLimits(
-            max_steps=int(run_defaults["max_steps"]),
-            max_model_calls=int(run_defaults["max_model_calls"]),
-            max_tool_calls=int(run_defaults["max_tool_calls"]),
-        ),
+        limits=limits or _run_limits_from_defaults(run_defaults),
     )
     if storage == "postgres":
         agent = agent.model_copy(

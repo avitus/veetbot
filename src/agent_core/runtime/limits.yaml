@@ -22,8 +22,12 @@ context:
   max_compactions_per_step: 2
 run_defaults:
   max_steps: 32
-  max_model_calls: 16
-  max_tool_calls: 32
+  max_model_calls: 24
+  max_tool_calls: 64
+  # Final-synthesis reserves (ADR-0078): the model is told to answer from the
+  # evidence in context once this much of a budget remains.
+  synthesis_reserve_model_calls: 2
+  synthesis_reserve_tool_calls: 4
 email:
   daily_cost: 20.0
   monthly_cost: 200.0

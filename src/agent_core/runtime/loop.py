@@ -306,9 +306,15 @@ def _synthesis_reserve_dimension(
     """Name the first run budget whose final-synthesis reserve began."""
 
     limits = run.limits
+    remaining_tool_calls = limits.max_tool_calls - run.tool_call_count
+    if remaining_tool_calls <= 0:
+        # Exhaustion is not a reserve. Even all-zero reserves owe the model one
+        # tool-free turn to answer from the evidence it already gathered.
+        return "tool_calls"
     if not (
         limits.synthesis_reserve_steps
         or limits.synthesis_reserve_model_calls
+        or limits.synthesis_reserve_tool_calls
         or limits.synthesis_reserve_cost
     ):
         return None
@@ -317,6 +323,8 @@ def _synthesis_reserve_dimension(
         return "steps"
     if limits.max_model_calls - run.model_call_count <= limits.synthesis_reserve_model_calls:
         return "model_calls"
+    if remaining_tool_calls <= limits.synthesis_reserve_tool_calls:
+        return "tool_calls"
     if limits.max_cost is not None and (
         limits.max_cost - run.usage.cost <= limits.synthesis_reserve_cost
     ):
@@ -345,6 +353,41 @@ def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelReque
         update={"conversation": [*request.conversation, control]},
         deep=True,
     )
+
+
+def _fit_tool_batch(
+    run: Run, calls: list[ToolCallItem]
+) -> tuple[list[ToolCallItem], list[ToolResultItem]]:
+    """Split a batch into the calls that fit the tool-call budget and refusals.
+
+    A refused call never reaches the tool executor, so nothing runs
+    unaccounted for; its result tells the model to answer from what it has.
+    """
+
+    remaining = max(0, run.limits.max_tool_calls - run.tool_call_count)
+    fitted = calls[:remaining]
+    refused: list[ToolResultItem] = []
+    for call in calls[remaining:]:
+        outcome = ToolOutcome(
+            status=ToolOutcomeStatus.FAILED,
+            action=call.name,
+            reason_code="tool.budget_exhausted",
+            message=(
+                "Not performed. The run's tool-call budget is exhausted; "
+                "answer from the evidence already gathered."
+            ),
+            retryable=False,
+            remediation="none",
+        )
+        refused.append(
+            ToolResultItem(
+                call_id=call.call_id,
+                content=[TextPart(text=outcome.model_dump_json())],
+                is_error=True,
+                trust=TrustLevel.PLATFORM,
+            )
+        )
+    return fitted, refused
 
 
 def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
@@ -734,9 +777,17 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     step,
                 )
 
+        # Fit the batch to the remaining budget before anything runs. Refusals
+        # join the conversation now, so a resumed step re-dispatches only the
+        # calls that fit and the model still receives a result for every call.
+        fitted_calls, refused_results = _fit_tool_batch(context.run, turn.tool_calls)
+        context.checkpoint.conversation.extend(refused_results)
         context.checkpoint.pending_tool_calls = [
-            call.model_dump(mode="json") for call in turn.tool_calls
+            call.model_dump(mode="json") for call in fitted_calls
         ]
+        if not fitted_calls:
+            await checkpoint(context, "tool_call")
+            continue
         await checkpoint(context, "tool_pending")
         if context.uow_factory.is_open():
             raise RuntimeError("tool I/O cannot begin while a unit of work is open")
@@ -744,7 +795,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             results = await context.dispatch_tools(
                 run=context.run,
                 checkpoint=context.checkpoint,
-                tool_calls=turn.tool_calls,
+                tool_calls=fitted_calls,
                 principal=context.principal,
                 step=step,
                 agent=context.agent,
@@ -777,7 +828,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             question = next(
                 (
                     str(call.arguments.get("question"))
-                    for call in turn.tool_calls
+                    for call in fitted_calls
                     if call.name == "conversation.ask_user"
                     and isinstance(call.arguments.get("question"), str)
                 ),
@@ -810,7 +861,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
         context.checkpoint.conversation.extend(results)
         context.checkpoint.pending_tool_calls = []
-        repeated_denial = await _record_denials(context, step, turn.tool_calls, results)
+        repeated_denial = await _record_denials(context, step, fitted_calls, results)
         await checkpoint(context, "tool_call")
         if repeated_denial:
             return _failure(

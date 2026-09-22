@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-21 — The tool-call budget ends research, never the answer
+
+- An interactive research run with 29 of 32 tool calls used asked for five
+  more; the runtime ran all five, recorded 34 and failed the run, discarding
+  every result. The loop now fits a batch to the remaining budget before
+  dispatch and answers each refused call with a `tool.budget_exhausted`
+  result, so nothing runs unaccounted for.
+- Reaching `max_tool_calls` no longer fails a run before its final turn: the
+  next request is synthesis-only, and a tool call returned in that mode fails
+  closed as the other reserve dimensions do. `BudgetScope.TOOL_CALL` carries
+  the pre-call rule for single-call flows (email tasks).
+- `RunLimits` gains `synthesis_reserve_tool_calls`. The interactive defaults
+  become 24 model calls and 64 tool calls with reserves of 2 and 4, so the
+  model is told to write up before the wall (ADR-0115, amending ADR-0078).
+
 ## 2026-09-21 — Two simulator UI cases no longer depend on timing
 
 - On the hosted iOS 27.0 simulators `testEmailThreadFeedbackEditingAndExplicitSend`
