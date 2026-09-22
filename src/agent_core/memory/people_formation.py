@@ -88,6 +88,14 @@ def _admitted_source(source: FormationSource, email: EmailSemanticSource | None)
     )
 
 
+def _source_cased(text: str, label: str) -> str | None:
+    """Return `label` as the source span spells it, or None when the span lacks it."""
+    index = text.casefold().find(label.casefold())
+    if index < 0:
+        return None
+    return text[index : index + len(label)]
+
+
 def validate_commitment_state(state: str, text: str) -> None:
     """Terminal states need affirmative delivery/cancellation evidence, never a draft."""
     if state not in {"completed", "cancelled"}:
@@ -191,13 +199,13 @@ async def prepare_people(
                 else None
             )
         else:
-            normalized = normalize_identifier(
-                mention.identifier_kind, mention.namespace, mention.identifier_value
-            )
-            if mention.identifier_value.casefold() not in mention.text.casefold():
+            # Labels are matched to the span without regard to case, but only the
+            # span's own characters are ever persisted.
+            identifier_value = _source_cased(mention.text, mention.identifier_value)
+            if identifier_value is None:
                 raise ToolValidationError("People identity label is not supported by its source")
-            display_name = mention.display_name
-            if display_name.casefold() not in mention.text.casefold():
+            display_name = _source_cased(mention.text, mention.display_name)
+            if display_name is None:
                 if mention.identifier_kind != "role":
                     raise ToolValidationError(
                         "People identity label is not supported by its source"
@@ -215,12 +223,15 @@ async def prepare_people(
             context = stated_context or (
                 "email:" + hashlib.sha256(email.sender.encode()).hexdigest() if email else "owner"
             )
+            normalized = normalize_identifier(
+                mention.identifier_kind, mention.namespace, identifier_value
+            )
             resolved = await resolve_identity(
                 store,
                 principal,
                 kind=mention.identifier_kind,
                 namespace=mention.namespace,
-                value=mention.identifier_value,
+                value=identifier_value,
                 context=context,
                 at=email.sent_at if email is not None else source.event.created_at,
                 ceiling=Sensitivity.RESTRICTED,
@@ -257,7 +268,7 @@ async def prepare_people(
                     person_id=person_id,
                     identifier_kind=mention.identifier_kind,
                     namespace=mention.namespace,
-                    value=mention.identifier_value,
+                    value=identifier_value,
                     context=context,
                     verification="contextual",
                     valid_from=email.sent_at if email is not None else source.event.created_at,

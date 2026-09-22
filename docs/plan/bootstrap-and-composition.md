@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **180 configuration knobs** across the specifications;
+The corpus now declares **182 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -333,13 +333,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-180 falls out.
+182 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-180 tuning knobs in YAML.
+182 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -412,7 +412,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 180. Schema versions, profile names, rule identifiers,
+and asserts the total is 182. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -422,10 +422,10 @@ or invariants rather than knobs and are not counted.
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 28 |
 | `tools/limits.yaml` | 20 |
-| `runtime/limits.yaml` | 58 |
+| `runtime/limits.yaml` | 60 |
 | `memory/profiles.yaml` | 38 |
 | `folders/profiles.yaml` | 9 |
-| **Total** | **180** |
+| **Total** | **182** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -1271,7 +1271,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 180 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 182 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1293,7 +1293,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 180 declared knobs into files and leaves ten fields in
+   sorts all 182 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,

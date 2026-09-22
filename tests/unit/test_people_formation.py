@@ -331,6 +331,52 @@ async def test_unnamed_relative_is_displayed_by_its_source_span() -> None:
         assert relationships[0].predicate == "sibling"
 
 
+async def test_lowercased_name_label_persists_the_source_casing() -> None:
+    """A label spelt "cheryl" for the span "Cheryl" persists only the span's own casing."""
+
+    from agent_core.domain.people import PersonIdentifier
+
+    clock, factory = await memory_uow_factory()
+    text = "My mom, Cheryl, lives in Redwood City."
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="Cheryl",
+        display_name="cheryl",
+        identifier_kind="name",
+        identifier_value="cheryl",
+        context="",
+        predicate="parent",
+        qualifier="mother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    query = PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        rows = await uow.people.query(query)
+        identifiers = await uow.people.query(
+            query.model_copy(
+                update={"kinds": ["identifier"], "sensitivity_ceiling": Sensitivity.RESTRICTED}
+            )
+        )
+    assert [r.display_name for r in rows if isinstance(r, Person)] == ["Cheryl"]
+    assert [r.value for r in identifiers if isinstance(r, PersonIdentifier)] == ["Cheryl"]
+
+
 async def test_invented_name_label_keeps_the_atomic_belief_unlinked() -> None:
     """A name label the source does not support drops the link, never the belief."""
 

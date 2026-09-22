@@ -64,7 +64,13 @@ commands:
     steps:
       - run:
           name: Record the verified source tree
-          command: touch "/tmp/veetbot-verified/<< parameters.job >>-$(cat /tmp/veetbot-verified/tree)"
+          command: |
+            if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+              echo "Verification changed tracked files; the tree cannot be certified:" >&2
+              git status --short --untracked-files=no >&2
+              exit 1
+            fi
+            touch "/tmp/veetbot-verified/<< parameters.job >>-$(cat /tmp/veetbot-verified/tree)"
       - save_cache:
           key: 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
           paths:
