@@ -34,9 +34,6 @@ public struct MemoryDetailView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            if let model {
-                reviewSection(model)
-            }
 
             Section("Classification") {
                 KeyValueRow(key: "Belief type", value: memoryDisplayText(memory.beliefType))
@@ -91,6 +88,14 @@ public struct MemoryDetailView: View {
                 if memory.flaggedForReview {
                     Label("Flagged for review", systemImage: "flag.fill")
                         .foregroundColor(AppTheme.orange)
+                    if model != nil {
+                        Text("Formation committed this memory without an explicit statement from you. Use Review to confirm, correct, or remove it.")
+                            .appFont(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                if let message = model?.errorMessage {
+                    Text(message).appFont(.caption).foregroundColor(.secondary)
                 }
             }
 
@@ -119,6 +124,11 @@ public struct MemoryDetailView: View {
         }
         .navigationTitle("Memory")
         .accessibilityIdentifier("memory.detail")
+        .toolbar {
+            if let model {
+                ToolbarItem(placement: .primaryAction) { reviewMenu(model) }
+            }
+        }
         .confirmationDialog(
             "Delete this memory?", isPresented: $confirmingDeletion, titleVisibility: .visible
         ) {
@@ -134,37 +144,42 @@ public struct MemoryDetailView: View {
         }
     }
 
-    /// The review outcomes of ADR-0117, shown only when a browsing model can
-    /// carry them out. Each button sends a fresh idempotency key and replaces
-    /// this view's belief with the server's answer.
-    @ViewBuilder
-    private func reviewSection(_ model: MemoryViewModel) -> some View {
-        Section("Review") {
-            if memory.flaggedForReview {
-                Text("Formation committed this memory without an explicit statement from you. Confirm it, correct it, or remove it.")
-                    .appFont(.caption)
-                    .foregroundColor(.secondary)
-            }
-            if let message = model.errorMessage {
-                Text(message).appFont(.caption).foregroundColor(.secondary)
-            }
-            let busy = model.pendingActionID != nil || model.changesUnavailable
+    /// The review outcomes of ADR-0117, offered only when a browsing model can
+    /// carry them out. A toolbar menu rather than a list section, so the
+    /// belief's own rows keep their places on every layout. Each action sends
+    /// a fresh idempotency key and replaces this view's belief with the
+    /// server's answer.
+    private func reviewMenu(_ model: MemoryViewModel) -> some View {
+        let busy = model.pendingActionID != nil || model.changesUnavailable
+        return Menu {
             if memory.flaggedForReview {
                 Button("Mark reviewed") {
-                    Task { if let reviewed = await model.review(memory, outcome: .dismiss) { memory = reviewed } }
+                    Task {
+                        if let reviewed = await model.review(memory, outcome: .dismiss) {
+                            memory = reviewed
+                        }
+                    }
                 }
                 .disabled(busy)
                 .accessibilityIdentifier("memory.detail.review.dismiss")
             }
             if memory.status == "active" || memory.status == "provisional" {
                 Button("Not true") {
-                    Task { if let reviewed = await model.review(memory, outcome: .untrue) { memory = reviewed } }
+                    Task {
+                        if let reviewed = await model.review(memory, outcome: .untrue) {
+                            memory = reviewed
+                        }
+                    }
                 }
                 .disabled(busy)
                 .accessibilityIdentifier("memory.detail.review.untrue")
                 if memory.portability != "local" {
                     Button("Not relevant here") {
-                        Task { if let reviewed = await model.review(memory, outcome: .notHere) { memory = reviewed } }
+                        Task {
+                            if let reviewed = await model.review(memory, outcome: .notHere) {
+                                memory = reviewed
+                            }
+                        }
                     }
                     .disabled(busy)
                     .accessibilityIdentifier("memory.detail.review.not_here")
@@ -173,7 +188,11 @@ public struct MemoryDetailView: View {
             Button("Delete memory…", role: .destructive) { confirmingDeletion = true }
                 .disabled(busy)
                 .accessibilityIdentifier("memory.detail.delete")
+        } label: {
+            Label("Review", systemImage: memory.flaggedForReview ? "flag.fill" : "ellipsis.circle")
         }
+        .accessibilityLabel("Review this memory")
+        .accessibilityIdentifier("memory.detail.review")
     }
 }
 
