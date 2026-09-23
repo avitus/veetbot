@@ -126,7 +126,7 @@ already follow.
   This is the fixed-endpoint arrangement web-access.md:162-167 describes: the
   composition root selects the adapter and the adapter hard-codes its host.
   The egress policy governs sandbox traffic and tenant-supplied URLs
-  (sandbox-isolation.md:805-816) and gains no entry.
+  (sandbox-isolation.md:807-818) and gains no entry.
 - **Call-time credential.** `TYPESAFE_API_KEY` enters the existing credential
   broker as the reference `typesafe`, as web-access.md:140-146 describes for
   the web providers. The adapter resolves it on every call, sends it only as

@@ -81,7 +81,11 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.artifacts import auto_ingest_metadata, claimed_upload
+from agent_core.domain.artifacts import (
+    REPLY_ATTACHMENT_ORIGINS,
+    auto_ingest_metadata,
+    claimed_upload,
+)
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS,
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
@@ -2548,6 +2552,35 @@ class PostgresArtifactRepository:
         if row is None:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
+
+    async def retain_for_reply(
+        self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
+    ) -> list[ArtifactRef]:
+        wanted = set(artifact_ids)
+        if not wanted:
+            return []
+        # Serialize with People erasure exactly as knowledge retention does: an
+        # erased run's exports keep the expiry erasure gave them.
+        if await lock_run_erasure(self._session, run_id) is not None:
+            raise RunCancelledError("People erasure fenced reply attachments")
+        rows = (
+            await self._session.scalars(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.id.in_(sorted(wanted)),
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                    ArtifactRow.run_id == run_id,
+                    ArtifactRow.origin.in_(sorted(REPLY_ATTACHMENT_ORIGINS)),
+                )
+                .values(expires_at=None)
+                .returning(ArtifactRow)
+            )
+        ).all()
+        if len(rows) != len(wanted):
+            raise NotFoundError("artifact not found")
+        retained = {row.id: artifact_to_domain(row) for row in rows}
+        return [retained[artifact_id] for artifact_id in dict.fromkeys(artifact_ids)]
 
     async def expire(
         self, artifact_id: UUID, principal: Principal, expired_at: datetime

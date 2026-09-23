@@ -273,7 +273,7 @@ worker is that the worker itself dials nothing on a `gmail_*` call; the child
 does, and neither egress enforcement point reaches the child. The sandbox
 proxy governs a network namespace no MCP child is placed in, and the worker's
 outbound guard checks URLs the platform itself dials
-(sandbox-isolation.md:807-816); `gmail_mcp` opens its own sockets, which that
+(sandbox-isolation.md:809-818); `gmail_mcp` opens its own sockets, which that
 guard never sees. An `env`-scheme command line is not a network allowlist —
 it fixes who chose the binary, not where the binary may connect — and this
 document claims no more for it than that.

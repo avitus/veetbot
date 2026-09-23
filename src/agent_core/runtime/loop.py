@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.artifacts import reply_attachments, reply_file_reference
 from agent_core.domain.context import ContextPlan, WorkingState
 from agent_core.domain.errors import (
     ApprovalRequiredError,
@@ -118,6 +119,53 @@ async def _append_event(
             ),
             lease=context.lease,
         )
+
+
+async def _complete_reply(context: RunContext, message: AssistantMessage) -> AssistantMessage:
+    """Record the final reply with every file the run exported (ADR-0122).
+
+    One unit of work chooses the files, keeps them for the life of the
+    conversation, and records the reply, so a fenced lease or an erasure fence
+    rolls all three back together. The returned object is also the run's final
+    message: `run.completed` repeats it, and a client that compares the two
+    must see the same content.
+    """
+
+    async with context.uow_factory() as uow:
+        exported = reply_attachments(
+            await uow.artifacts.list_for_run(context.run.id, context.principal)
+        )
+        if exported:
+            retained = await uow.artifacts.retain_for_reply(
+                [artifact.id for artifact in exported],
+                context.principal,
+                run_id=context.run.id,
+            )
+            reply = message.model_copy(
+                update={
+                    "content": [
+                        *message.content,
+                        *(reply_file_reference(artifact) for artifact in retained),
+                    ]
+                },
+                deep=True,
+            )
+            conversation = context.checkpoint.conversation
+            for index, item in enumerate(conversation):
+                if item is message:
+                    conversation[index] = reply
+            message = reply
+        await uow.events.append(
+            NewEvent(
+                session_id=context.run.session_id,
+                run_id=context.run.id,
+                event_type="assistant.message.completed",
+                actor_type="runtime",
+                payload={"message": message.model_dump(mode="json")},
+            ),
+            lease=context.lease,
+        )
+    return message
 
 
 def _record_open_question(
@@ -745,11 +793,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     step,
                 )
             assert message is not None
-            await _append_event(
-                context,
-                "assistant.message.completed",
-                {"message": message.model_dump(mode="json")},
-            )
+            message = await _complete_reply(context, message)
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
         synthesis_reserve = _synthesis_reserve_dimension(

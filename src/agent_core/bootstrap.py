@@ -552,7 +552,7 @@ from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
-from agent_core.tools.artifact_export import ArtifactExportTool
+from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
@@ -706,7 +706,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "system.current_time, or web.search when available. Do not use sandbox.run_command "
     "for those requests; use it only when arbitrary code execution is necessary. If no "
     "read-only tool can answer, explain the limitation or ask before proposing sandboxed "
-    "code execution."
+    "code execution. To give the user a file, call artifact.export with the text as content "
+    "or a workspace path; the file is attached to your reply. Never say a file is attached "
+    "unless artifact.export succeeded."
 )
 _BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
 
@@ -2328,6 +2330,9 @@ async def _compose(
     registry.register(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
+    # A session keeps the exact tool version it was shown, and the registry
+    # treats the last registration as latest: 1.0.0 stays for pinned sessions.
+    registry.register(LegacyArtifactExportTool())
     registry.register(ArtifactExportTool())
     if web_search_provider is not None:
         registry.register(WebSearchTool(web_search_provider))

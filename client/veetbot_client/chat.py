@@ -8,6 +8,7 @@ import time
 import unicodedata
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Protocol, TextIO
 from uuid import uuid4
 
@@ -144,6 +145,8 @@ class ChatApi(Protocol):
     def stream_events(
         self, run_id: str, last_event_id: int | None = None
     ) -> Iterator[SSEEvent]: ...
+
+    def download_artifact(self, artifact_id: str, destination: Path | None = None) -> Path: ...
 
 
 class Console:
@@ -455,6 +458,13 @@ class ChatApplication:
                 raise
         return self.watch_run(run_id)
 
+    def _download(self, arguments: str) -> None:
+        artifact_id, _, destination = arguments.partition(" ")
+        saved = self.api.download_artifact(
+            artifact_id, Path(destination.strip()).expanduser() if destination.strip() else None
+        )
+        self.console.print(f"Saved {saved}")
+
     def _switch_session(self, session_id: str) -> None:
         session = self.api.get_session(session_id)
         self.session_id = self._required_string(session, "id")
@@ -464,7 +474,9 @@ class ChatApplication:
         self.open_session()
         if once is not None:
             return 0 if self.send(once) == "COMPLETED" else 1
-        self.console.print("Commands: /new, /session <id>, /help, /quit")
+        self.console.print(
+            "Commands: /new, /session <id>, /download <artifact-id> [path], /help, /quit"
+        )
         while True:
             try:
                 text = self.console.prompt("you> ").strip()
@@ -476,7 +488,7 @@ class ChatApplication:
             if text in {"/quit", "/exit"}:
                 return 0
             if text == "/help":
-                self.console.print("/new  /session <id>  /quit")
+                self.console.print("/new  /session <id>  /download <artifact-id> [path]  /quit")
                 continue
             try:
                 if text == "/new":
@@ -490,6 +502,9 @@ class ChatApplication:
                     continue
                 if text.startswith("/session "):
                     self._switch_session(text.removeprefix("/session ").strip())
+                    continue
+                if text.startswith("/download "):
+                    self._download(text.removeprefix("/download ").strip())
                     continue
                 self.send(text)
             except KeyboardInterrupt:

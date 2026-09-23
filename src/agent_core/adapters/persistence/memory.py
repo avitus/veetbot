@@ -21,7 +21,11 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.artifacts import auto_ingest_metadata, claimed_upload
+from agent_core.domain.artifacts import (
+    REPLY_ATTACHMENT_ORIGINS,
+    auto_ingest_metadata,
+    claimed_upload,
+)
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
@@ -1433,6 +1437,28 @@ class InMemoryArtifactRepository:
             )
             self._rows[artifact_id] = retained
             return retained.model_copy(deep=True)
+
+    async def retain_for_reply(
+        self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
+    ) -> list[ArtifactRef]:
+        async with self._lock:
+            if run_id in self._people_erased_runs:
+                raise RunCancelledError("People erasure fenced reply attachments")
+            retained: list[ArtifactRef] = []
+            for artifact_id in dict.fromkeys(artifact_ids):
+                artifact = self._rows.get(artifact_id)
+                if (
+                    artifact is None
+                    or artifact.tenant_id != principal.tenant_id
+                    or artifact.principal_id != principal.principal_id
+                    or artifact.run_id != run_id
+                    or artifact.origin not in REPLY_ATTACHMENT_ORIGINS
+                ):
+                    raise NotFoundError("artifact not found")
+                retained.append(artifact.model_copy(update={"expires_at": None}, deep=True))
+            for artifact in retained:
+                self._rows[artifact.id] = artifact
+            return [artifact.model_copy(deep=True) for artifact in retained]
 
     async def expire(
         self, artifact_id: UUID, principal: Principal, expired_at: datetime

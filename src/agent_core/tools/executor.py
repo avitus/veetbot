@@ -228,10 +228,13 @@ def _effective_output_trust(result: ToolResult, tool: Tool) -> TrustLevel:
     return trust
 
 
-def _writer_origin(tool: Tool) -> ArtifactOrigin:
+def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
     # artifact.export is intentionally an in-process capability over a sandbox
-    # workspace; its persisted object is nevertheless a sandbox export.
+    # workspace; its persisted object is nevertheless a sandbox export. Text the
+    # model passed as `content` never touched the workspace (ADR-0122).
     if tool.spec.name == "artifact.export":
+        if arguments.get("content") is not None:
+            return ArtifactOrigin.MODEL_OUTPUT
         return ArtifactOrigin.SANDBOX_EXPORT
     return ArtifactOrigin.TOOL_OUTPUT
 
@@ -1133,7 +1136,7 @@ class ToolPipeline:
                     principal_id=principal.principal_id,
                     session_id=run.session_id,
                     run_id=run.id,
-                    origin=_writer_origin(tool),
+                    origin=_writer_origin(tool, arguments),
                 )
             ),
             credentials=(

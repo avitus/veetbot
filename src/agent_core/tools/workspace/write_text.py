@@ -36,8 +36,9 @@ class WorkspaceWriteTextTool:
         name="workspace.write_text",
         version="1.0.0",
         description=(
-            "Write UTF-8 text inside this run's disposable workspace. "
-            "The workspace does not survive an interruption; export files worth keeping."
+            "Write UTF-8 text inside this run's disposable workspace. The workspace is "
+            "discarded when the run finishes or pauses, and the user never sees it: to give "
+            "the user a file, use artifact.export."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,

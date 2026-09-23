@@ -341,6 +341,16 @@ class ArtifactRepository(Protocol):
         self, artifact_id: UUID, principal: Principal
     ) -> ArtifactRef: ...
 
+    async def retain_for_reply(
+        self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
+    ) -> list[ArtifactRef]:
+        """Keep a run's exported files for the life of the conversation (ADR-0122).
+
+        Only the owner's `sandbox_export` and `model_output` artifacts of that run
+        qualify; any other id is `NotFoundError`. A People-erased run is fenced.
+        """
+        ...
+
     async def expire(
         self, artifact_id: UUID, principal: Principal, expired_at: datetime
     ) -> ArtifactRef: ...

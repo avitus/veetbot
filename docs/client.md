@@ -86,7 +86,8 @@ python veetbot-client.pyz --once "Summarize the current project state."
 ```
 
 Inside the interactive client, `/new` creates a new session, `/session ID`
-switches to an existing session, `/help` lists commands, and `/quit` exits.
+switches to an existing session, `/download ARTIFACT_ID [PATH]` saves an
+artifact, `/help` lists commands, and `/quit` exits.
 
 ## Runtime behavior
 
@@ -102,7 +103,11 @@ transient delta therefore cannot truncate the durable answer. Tool activity is
 rendered from tool events. Pending approvals are read through the approval API
 and can be approved once or denied. `WAITING_FOR_USER` questions are answered
 through the run-input endpoint. Artifact references in a final assistant message
-are displayed as opaque IDs.
+are displayed as opaque IDs. A file the agent attaches to its reply (ADR-0122) is
+one of them, and `/download` saves it: under the last component of its server
+name in the current directory, or at `PATH`, which may be a directory or a file.
+The client never overwrites an existing file and discards a download whose length
+does not match the artifact's metadata.
 
 When a provider rejects a model request, the terminal failure may include its
 validated HTTP status, error code, and field path. The client displays only
@@ -113,7 +118,7 @@ body.
 
 This release is deliberately a terminal client rather than a desktop GUI. It
 does not persist sessions or credentials locally, list historical sessions or
-runs, upload files, download artifact bytes, or implement device presence,
+runs, upload files, or implement device presence,
 device-scoped tools, pairing, notifications, or offline-authoritative state.
 Those omissions keep it within the public versioned API and leave device
 identity, notifications, and pairing to Milestones 12 and 14.

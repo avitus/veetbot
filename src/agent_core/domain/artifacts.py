@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from agent_core.domain.messages import FileReferencePart
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 
@@ -19,6 +20,36 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "upload"
     TRAJECTORY_EXPORT = "trajectory_export"
     KNOWLEDGE_SOURCE = "knowledge_source"
+
+
+# ADR-0122: every file a run exports rides on its final reply. Tool-output
+# captures and the owner's own uploads are never re-attached.
+REPLY_ATTACHMENT_ORIGINS = frozenset(
+    {ArtifactOrigin.SANDBOX_EXPORT.value, ArtifactOrigin.MODEL_OUTPUT.value}
+)
+
+
+def reply_attachments(artifacts: list[ArtifactRef]) -> list[ArtifactRef]:
+    """Choose a run's exported files in creation order, once per name and content."""
+
+    chosen: list[ArtifactRef] = []
+    seen: set[tuple[str, str]] = set()
+    for artifact in sorted(artifacts, key=lambda item: (item.created_at, item.id)):
+        key = (artifact.name, artifact.sha256)
+        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen:
+            continue
+        seen.add(key)
+        chosen.append(artifact)
+    return chosen
+
+
+def reply_file_reference(artifact: ArtifactRef) -> FileReferencePart:
+    return FileReferencePart(
+        artifact_id=artifact.id,
+        media_type=artifact.media_type,
+        filename=artifact.name,
+        size_bytes=artifact.size_bytes,
+    )
 
 
 @dataclass(frozen=True, slots=True)

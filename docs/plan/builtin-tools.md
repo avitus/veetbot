@@ -183,7 +183,8 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is the twenty-four checked-in, complete builtin tool
-identities (plus historical versions of `memory.remember` and `skill.load`):
+identities (plus historical versions of `memory.remember`, `skill.load`, and
+`artifact.export`):
 `math.calculate`, `conversation.ask_user`, `system.current_time`, the three
 `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
@@ -231,15 +232,17 @@ Milestone 6.
 Sharing a milestone with `sandbox.run_command` carries its own hazard,
 and it is worth naming so that the two designs are not allowed to
 merge. Exporting a file is not a property of having run a command.
-`artifact.export` takes a workspace path, is `IDEMPOTENT`, and runs
-`in_process`; `sandbox.run_command` is none of those. They share a
-milestone and nothing else.
+`artifact.export` takes a workspace path (or, since ADR-0122, text the
+model wrote), is `IDEMPOTENT`, and runs `in_process`;
+`sandbox.run_command` is none of those. They share a milestone and
+nothing else.
 
 Milestone 6 is right because Milestone 6 is where the model gains
 control tools and the programmatic bridge — the first point at which
 the model is deciding what leaves the run, rather than the executor
 deciding what to keep. `artifact.export` is that decision made explicit,
-and it belongs with the others.
+and it belongs with the others. ADR-0122 makes the decision visible: every
+file a run exports is attached to its final reply.
 
 This is a judgment call on a question the plan leaves open, and it is
 recorded as such.
@@ -1046,7 +1049,9 @@ worker's lease rather than for a run's logical lifetime. A run that
 pauses for an approval and resumes on another worker gets an empty
 one, and that document already requires `sandbox.run_command`'s
 description to tell the model that files worth keeping should be
-exported.
+exported. The worker in fact discards the workspace whenever a run
+finishes or pauses, and since ADR-0122 both descriptions say so and name
+`artifact.export` as the only way a file reaches the owner.
 
 `workspace.write_text`'s description carries the same sentence, for
 the same reason and with more force, because writing a file is the
@@ -1491,7 +1496,11 @@ two still owe:
 2.  **`artifact.export`, at Milestone 6.** The argument shape, the
     `ArtifactRef` it returns, the size ceiling, and the
     same-path-same-run identity that makes its `IDEMPOTENT`
-    classification true.
+    classification true. ADR-0122 adds version 2.0.0: `path` defaults to
+    the empty string, an optional `content` of at most 1 MiB is saved as
+    text under a bare file name, exactly one of the two is required, and
+    the text result states that the file is attached to the reply.
+    Version 1.0.0 stays registered for pinned sessions.
 
 ## Registration, and the startup check
 

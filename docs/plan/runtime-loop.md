@@ -1148,6 +1148,16 @@ tool call reaches the loop.
 `StopReason.CANCELLED` produces `OutcomeKind.CANCELLED` on a partial turn
 and never an error, per ADR-0002.
 
+A completed turn's text is not always the whole reply. ADR-0122 attaches every
+file the run exported: in one unit of work under the run's lease, the loop lists
+the run's `sandbox_export` and `model_output` artifacts, keeps one per name and
+content in creation order, clears their expiry so they live with the
+conversation, appends a `file` part for each to the final message, and records
+`assistant.message.completed`. That augmented message replaces the turn's copy
+in the checkpoint and is the outcome's `final_message`, so `run.completed`
+repeats exactly what `assistant.message.completed` recorded. A fenced lease or a
+People erasure fence rolls the three writes back together.
+
 ### After the run
 
 Four things happen after a terminal transition and none of them is in

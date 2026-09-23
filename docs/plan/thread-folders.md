@@ -122,7 +122,7 @@ source, and records an audited deterministic fallback on any failure
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance
-worker under an advisory lock (runtime-loop.md:1435), each on its own timer
+worker under an advisory lock (runtime-loop.md:1445), each on its own timer
 when it is slow. The proposal pass is one more sweep.
 
 ## The domain model

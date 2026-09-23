@@ -31,7 +31,7 @@ control tool that spawns a child run and suspends the parent
 `WAITING_FOR_APPROVAL` carrying a typed `CHILD_RUN` suspension rather than an
 eighth run state (runtime-loop.md:284-292); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
-(runtime-loop.md:1169-1180); a child's result enters the parent labelled
+(runtime-loop.md:1179-1190); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:977-983); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
@@ -236,7 +236,7 @@ terminal writer's finalize path, which today treats every non-user suspension
 as an approval, branches on the kind: a `CHILD_RUN` suspension appends no
 `approval.requested` and enqueues no Milestone 12 notification.
 
-The join is the post-terminal hook runtime-loop.md:1169-1180 describes. When a
+The join is the post-terminal hook runtime-loop.md:1179-1190 describes. When a
 `DELEGATED` child reaches a terminal state, the hook checks whether every
 sibling under the same `parent_run_id` is terminal. If so, it completes the
 parent's suspended invocation as `tool.call.completed` with one result item

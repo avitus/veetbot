@@ -122,8 +122,8 @@ not find it here should find the reason here.
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
-  (sandbox-isolation.md:811-816): resolve once, refuse any non-public
-  address, dial the address that was checked (sandbox-isolation.md:863-882).
+  (sandbox-isolation.md:813-818): resolve once, refuse any non-public
+  address, dial the address that was checked (sandbox-isolation.md:865-884).
   ADR-0098 already runs a dedicated public-HTTPS transport through it for the
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
@@ -437,7 +437,7 @@ separately auditable:
    all-numeric final label, none of the `.internal`, `.local`, `.localhost`,
    `.home`, or `.lan` suffixes.
 4. One resolution at the proxy. **Every** resolved address must be public
-   under the non-configurable denylist (sandbox-isolation.md:884-898) —
+   under the non-configurable denylist (sandbox-isolation.md:886-900) —
    private, loopback, link-local and metadata, carrier-grade NAT, unique
    local, and IPv4-mapped forms are refused, and one bad address refuses the
    connection.

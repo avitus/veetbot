@@ -817,6 +817,9 @@ the point read, a missing, cross-tenant, or differently owned session is 404.
 The route is a transcript projection rather than an event-log export. Ordinary
 `user.message.created` and `assistant.message.completed` events produce items,
 and the response converts their content to the public content-block vocabulary.
+An assistant item carries a `file` block for each file its run exported
+(ADR-0122), after the text; the block names an artifact the owner reads through
+`GET /v1/artifacts/{artifact_id}/content`.
 The scheduler-authored `user.message.created` event that seeds a scheduled run
 is context-only and does not produce a transcript item; its complete
 instruction remains available through the authorized schedule point read. Tool
@@ -1289,7 +1292,9 @@ receive the token deltas it missed. It receives
 durable record of what the deltas were building. A UI that renders
 deltas and never reconciles against the completed message will show a
 truncated answer after a reconnect, and the fix is to reconcile, not
-to persist deltas.
+to persist deltas. The completed message also carries the reply's `file`
+parts, and `run.completed` repeats that same message as `final_message`
+(ADR-0122), so a client that reconciles against either sees one reply.
 
 Once a stream has delivered `assistant.message.completed`, the saved answer
 supersedes buffered transient output for that run. The server discards those
