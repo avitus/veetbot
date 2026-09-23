@@ -506,8 +506,9 @@ work, a thread the unsubscribe census indexes
 ([email-unsubscribe.md](email-unsubscribe.md)) is bulk; after the assessment,
 a `bulk` verdict is bulk. A bulk message registers no semantic source, forms
 no semantic or People memory, and creates no provisional person. The formation
-service's source validation refuses the census-indexed thread, so the refresh,
-the historical import, and any replay meet the same rule; the refresh also
+service's source validation refuses the census-indexed thread and the thread
+whose persisted assessment carries a `bulk` verdict, so the refresh, the
+historical import, and any replay meet the same rule; the refresh also
 records a content-free `email.semantic.skipped` event naming the reason, so
 memory diagnostics can explain why nothing formed. Importance assessment is
 unchanged, and the assessment prompt is not revised for this rule. Memories

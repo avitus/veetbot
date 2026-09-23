@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from agent_core.domain.email import EmailRecord
-from agent_core.domain.email_semantics import semantic_source_key
+from agent_core.domain.email_semantics import semantic_source_key, thread_source_key
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.memory import MemoryRecord
 from agent_core.memory.email_people import EmailPeopleFormationService
@@ -82,6 +82,68 @@ async def test_a_historical_import_skips_a_retained_source_the_census_now_indexe
         retained = await uow.email.get(principal(), "semantic_source", key)
         assert retained is not None
         await _index_thread_in_census(uow, source.account_id, source.provider_thread_id)
+
+    async def guard(_uow: RepositoryUnitOfWork) -> None:
+        return None
+
+    importer = EmailPeopleFormationService(
+        factory,
+        legacy._clock,
+        ids(),
+        principal(),
+        provider="fake",
+        model="scripted",
+        import_window=(source.sent_at - timedelta(days=1), source.sent_at + timedelta(days=1)),
+        import_guard=guard,
+    )
+    assert await importer.import_passage(retained, after_offset=None) is None
+    assert await _stored_memories(factory) == []
+
+
+async def _persist_bulk_verdict(uow: RepositoryUnitOfWork, account_id: str, thread: str) -> None:
+    """The refresh's stored assessment for a non-census thread said ``bulk``."""
+    stamp = datetime(2026, 9, 22, tzinfo=UTC)
+    thread_id = "0f6a2a2e-6d4c-4a1e-9b0c-4c6a2f1e5d77"
+    records: list[tuple[str, str, dict[str, object]]] = [
+        (
+            "thread_source",
+            thread_source_key(account_id, thread),
+            {"thread_id": thread_id, "observed_message_ids": ["m1"]},
+        ),
+        ("assessment", thread_id, {"bulk": True, "analysis_complete": True}),
+    ]
+    for kind, key, payload in records:
+        await uow.email.put(
+            EmailRecord(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                kind=kind,
+                key=key,
+                revision=1,
+                payload=payload,
+                created_at=stamp,
+                updated_at=stamp,
+            ),
+            expected_revision=0,
+        )
+
+
+async def test_a_persisted_bulk_verdict_blocks_formation_and_import_without_the_census() -> None:
+    """The refresh's stored ``bulk`` verdict is a shared signal, not a refresh-only one."""
+    factory, legacy, source, fact, _ = await semantic_stack()
+    await legacy.register_source(source)
+    key = semantic_source_key(source.account_id, source.provider_thread_id, source.message_id)
+    async with factory() as uow:
+        retained = await uow.email.get(principal(), "semantic_source", key)
+        assert retained is not None
+        await _persist_bulk_verdict(uow, source.account_id, source.provider_thread_id)
+    people = EmailPeopleFormationService(
+        factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
+    )
+    with pytest.raises(ConflictError, match="bulk"):
+        await people.form(source, [fact])
+    with pytest.raises(ConflictError, match="bulk"):
+        await legacy.form(source, [fact])
 
     async def guard(_uow: RepositoryUnitOfWork) -> None:
         return None

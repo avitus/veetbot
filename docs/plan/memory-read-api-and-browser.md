@@ -83,15 +83,17 @@ Milestone 16's residue list excludes "an HTTP memory surface"
 of that exclusion and no more. The semantic arm, the external provider, the
 entity graph, and belief merge remain excluded exactly as ADR-0069 left them.
 The persona surface left that residue at Milestone 22 (ADR-0079,
-[persona-surface.md](persona-surface.md)); its routes are a distinct resource,
-and the write half of this milestone's exclusion — belief edit, retraction,
-and deletion over HTTP — stands unchanged, with hard gate 6 still walking the
-memory router to prove it.
+[persona-surface.md](persona-surface.md)); its routes are a distinct resource.
+Of the write half of this milestone's exclusion, ADR-0117 later admitted
+exactly deletion and the review outcomes; belief edit and replacement over
+HTTP stay excluded, with hard gate 6 still walking the memory router to prove
+the table is exactly the documented one.
 
 ## The routes
 
-Two routes, both GET, both requiring the exact scope `memory.read`, both
-mounted only when `AGENT_MEMORY_API_ENABLED` is set. They use the same
+Two read routes, both GET under the exact scope `memory.read`, and since
+ADR-0117 two governed writes under the exact scope `memory.write`, all mounted
+only when `AGENT_MEMORY_API_ENABLED` is set. They use the same
 authentication middleware, principal-first application signatures, request-id
 header, error envelope, and cross-principal not-found rule as every route in
 [http-api-and-streaming.md](http-api-and-streaming.md); that document carries a
@@ -99,7 +101,8 @@ stub subsection pointing here, and this document owns the schemas. Both success
 responses carry `Cache-Control: private, no-store`, because a belief body is
 principal-scoped and sensitivity-bearing and no shared or on-disk cache may
 retain it — the rule the artifact content route already applies to the other
-route that returns user content.
+route that returns user content. A write additionally requires a bounded
+`Idempotency-Key` header (see *Writes* below).
 
 ```text
 GET    /v1/memories                       memory.read    Page[MemoryView]
@@ -213,7 +216,8 @@ members; the two write routes add `conflict` for a reused idempotency key.
                            limit that is not a positive integer
 401  authentication_error  no credential, or a credential that does not
                            resolve
-403  authorization_error   a principal without memory.read
+403  authorization_error   a principal without memory.read on a read, or
+                           without memory.write on a write
 404  not_found             a belief above the ceiling, in another
                            principal's store, or absent
 409  conflict              writes only: an idempotency key reused for a
@@ -229,7 +233,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1594-1611) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1596-1613) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text

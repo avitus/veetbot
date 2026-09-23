@@ -1182,32 +1182,76 @@ import Testing
     }
 
     @Test
-    func testAMethodNotAllowedOnAMemoryWriteDegradesToChangesUnavailable() async throws {
+    func testALegacyServersAnswersToMemoryWritesDegradeToChangesUnavailable() async throws {
+        // A server that predates ADR-0117 but mounts the read router answers a
+        // DELETE on the GET-only path with a 400 "not supported" (Starlette's 405
+        // is rewritten), and a POST to the absent review route with the generic
+        // 404. Both mean the same thing to the client: no memory changes here.
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
+            let isDelete = request.httpMethod == "DELETE"
             let response = try #require(
                 HTTPURLResponse(
-                    url: request.url!, statusCode: 405, httpVersion: nil, headerFields: nil
+                    url: request.url!, statusCode: isDelete ? 400 : 404, httpVersion: nil, headerFields: nil
                 )
             )
-            return (
-                response,
-                Data(
-                    #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old-server"}}"#
-                        .utf8)
-            )
+            let body = isDelete
+                ? #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old-server"}}"#
+                : #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"old-server"}}"#
+            return (response, Data(body.utf8))
         }
         let client = try makeClient(token: "valid")
 
         do {
             try await client.deleteMemory(UUID(), ceiling: memoryBrowsingCeiling)
-            Issue.record("expected the write to degrade rather than surface a method error")
+            Issue.record("expected the delete to degrade rather than surface a method error")
         } catch let error as VeetbotAPIClientError {
             guard case .memoryChangesUnavailable = error else {
                 Issue.record("unexpected compatibility error: \(error)")
                 return
             }
             #expect(error.errorDescription == "This server does not support memory changes yet.")
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+        do {
+            _ = try await client.reviewMemory(UUID(), outcome: .dismiss, ceiling: memoryBrowsingCeiling)
+            Issue.record("expected the review to degrade rather than surface a route miss")
+        } catch let error as VeetbotAPIClientError {
+            guard case .memoryChangesUnavailable = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
+    @Test
+    func testAMissingBeliefOnReviewStaysAPlainNotFound() async throws {
+        // The service's own not-found carries its own message, so a belief that
+        // was deleted under the owner is not mistaken for a server without writes.
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"not_found","message":"memory not found","details":{},"request_id":"req-2"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.reviewMemory(UUID(), outcome: .dismiss, ceiling: memoryBrowsingCeiling)
+            Issue.record("expected a plain not-found")
+        } catch HTTPTransportError.api(let apiError) {
+            #expect(apiError.code == .notFound)
         } catch {
             Issue.record("unexpected error: \(error)")
         }

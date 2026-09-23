@@ -404,16 +404,25 @@ class EmailSemanticFormationService:
             raise ToolTrustRejectedError("email source result has invalid trust or identity")
         return document, event
 
-    async def bulk_indexed(
+    async def bulk_source(
         self, uow: RepositoryUnitOfWork, account_id: str, provider_thread_id: str
     ) -> bool:
-        """Whether the unsubscribe census indexes this thread to a bulk sender (ADR-0116).
+        """Whether this thread is bulk mail (ADR-0116): census-indexed, or assessed as bulk.
 
-        The index key is the account-qualified thread key that source exclusion
-        tombstones already use, so no application module is imported here.
+        Both signals are read through the account-qualified thread key that
+        source exclusion tombstones already use, so no application module is
+        imported here. The persisted assessment is keyed by the thread's own
+        identifier, which the thread-source index carries.
         """
         key = thread_source_key(account_id, provider_thread_id)
-        return await uow.email.get(self._principal, "subscription_thread", key) is not None
+        if await uow.email.get(self._principal, "subscription_thread", key) is not None:
+            return True
+        index = await uow.email.get(self._principal, "thread_source", key)
+        thread_id = None if index is None else index.payload.get("thread_id")
+        if not isinstance(thread_id, str):
+            return False
+        assessment = await uow.email.get(self._principal, "assessment", thread_id)
+        return assessment is not None and assessment.payload.get("bulk") is True
 
     async def _validate_source(
         self,
@@ -425,9 +434,9 @@ class EmailSemanticFormationService:
         ).hexdigest()
         if await uow.email.get(self._principal, "excluded_source", exclusion_key) is not None:
             raise ConflictError("this email thread was excluded")
-        if await self.bulk_indexed(uow, source.account_id, source.provider_thread_id):
-            # ADR-0116: a thread the unsubscribe census indexes is bulk mail, and bulk
-            # mail registers no source and forms nothing, whoever the caller is.
+        if await self.bulk_source(uow, source.account_id, source.provider_thread_id):
+            # ADR-0116: bulk mail, by census or by verdict, registers no source and
+            # forms nothing, whoever the caller is.
             raise ConflictError("bulk email never forms communication memory")
         session = await uow.sessions.get(source.session_id, self._principal)
         bindings = session.metadata.get("email_account_servers", {})

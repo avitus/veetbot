@@ -9,12 +9,15 @@ gains a ``flagged`` filter so the review queue can be asked for directly.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from agent_core.api import create_app
 from agent_core.bootstrap import build
-from agent_core.domain.memory import MemoryStatus, Portability, Sensitivity
+from agent_core.domain.memory import MemoryReviewOutcome, MemoryStatus, Portability, Sensitivity
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.contract.support import AGENT_ID, NOW
@@ -283,3 +286,72 @@ async def test_the_flagged_filter_composes_with_the_others() -> None:
                 "/v1/memories", params={"ceiling": "restricted", "flagged": "maybe"}
             )
             assert malformed.status_code == 400
+
+
+async def test_receipts_hold_no_statement_and_a_deleted_belief_cannot_be_replayed() -> None:
+    """A replay rebuilds the view from the live record, so deletion also ends replay."""
+    async with build(
+        settings=_enabled_settings(), storage="memory", sequential_ids=True, principal=WRITER
+    ) as composition:
+        belief = _flagged(belief_id=1, position=1, sensitivity=Sensitivity.SENSITIVE)
+        await _seed_with_session(composition, [belief])
+        async with _client(composition) as client:
+            reviewed = await client.post(
+                f"/v1/memories/{belief.id}/review",
+                params={"ceiling": "restricted"},
+                headers={"Idempotency-Key": "review-then-delete"},
+                json={"outcome": "dismiss"},
+            )
+            assert reviewed.status_code == 200, reviewed.text
+            deleted = await client.delete(
+                f"/v1/memories/{belief.id}",
+                params={"ceiling": "restricted"},
+                headers={"Idempotency-Key": "delete-after-review"},
+            )
+            assert deleted.status_code == 204
+            replay = await client.post(
+                f"/v1/memories/{belief.id}/review",
+                params={"ceiling": "restricted"},
+                headers={"Idempotency-Key": "review-then-delete"},
+                json={"outcome": "dismiss"},
+            )
+            assert replay.status_code == 404, replay.text
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(belief.source_session_id, 0, WRITER)
+        receipts = [
+            event
+            for event in events
+            if event.event_type in {"memory.review_completed", "memory.delete_completed"}
+        ]
+        assert len(receipts) == 2
+        for receipt in receipts:
+            assert set(receipt.payload) == {"request_hash", "memory_id"}, receipt.payload
+            assert belief.statement not in str(receipt.payload)
+
+
+async def test_concurrent_requests_with_one_key_apply_the_write_once() -> None:
+    """The write and its receipt commit together under the owner's locks."""
+    async with build(
+        settings=_enabled_settings(), storage="memory", sequential_ids=True, principal=WRITER
+    ) as composition:
+        belief = _flagged(belief_id=1, position=1, sensitivity=Sensitivity.SENSITIVE)
+        await _seed_with_session(composition, [belief])
+        service = composition.services.memory
+        results = await asyncio.gather(
+            *(
+                service.review(
+                    WRITER,
+                    belief.id,
+                    MemoryReviewOutcome.NOT_HERE,
+                    ceiling=Sensitivity.RESTRICTED,
+                    key="shared-key",
+                )
+                for _ in range(2)
+            )
+        )
+        assert results[0] == results[1]
+        assert results[0].confidence == pytest.approx(belief.confidence - 0.2)
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(belief.source_session_id, 0, WRITER)
+        assert [event.event_type for event in events].count("memory.rejected") == 1
+        assert [event.event_type for event in events].count("memory.review_completed") == 1

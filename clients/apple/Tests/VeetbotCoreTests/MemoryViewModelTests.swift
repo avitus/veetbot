@@ -603,9 +603,11 @@ import Testing
         let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000532"))
         let model = try makeModel { request in
             if request.httpMethod == "DELETE" {
+                // A server that predates ADR-0117 rewrites the method miss to a
+                // 400 with this exact message, never a bare 405.
                 return try self.response(
                     for: request,
-                    statusCode: 405,
+                    statusCode: 400,
                     body: #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old"}}"#
                 )
             }

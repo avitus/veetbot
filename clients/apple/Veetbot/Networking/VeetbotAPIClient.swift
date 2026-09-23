@@ -503,7 +503,8 @@ public struct VeetbotAPIClient: Sendable {
                 )
             )
         } catch {
-            throw memoryChangesCompatibilityError(from: error) ?? error
+            throw memoryChangesCompatibilityError(from: error, missingRouteIsUnsupported: true)
+                ?? error
         }
     }
 
@@ -705,12 +706,30 @@ private func memoryBrowsingCompatibilityError(from error: Error) -> VeetbotAPICl
     return nil
 }
 
-/// A server that predates ADR-0117 answers 404 or 405 on the memory write
-/// routes; a 404 for a belief that no longer exists is a plain API error the
-/// caller distinguishes by its body, so only a method-not-allowed degrades.
-private func memoryChangesCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+/// A server that predates ADR-0117 but mounts the memory read router answers a
+/// write with the same envelope it uses for any unsupported request: a method
+/// miss on the GET-only path is rewritten to a 400 `malformed_request` reading
+/// "The HTTP request is not supported.", and the absent review route is the
+/// generic 404 "The requested resource was not found." A belief that no longer
+/// exists carries the service's own message, so it stays a plain API error the
+/// caller acts on by its body. A bare 405 is kept for completeness.
+private func memoryChangesCompatibilityError(
+    from error: Error, missingRouteIsUnsupported: Bool = false
+) -> VeetbotAPIClientError? {
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
     if apiError.statusCode == 405 {
+        return .memoryChangesUnavailable
+    }
+    if apiError.statusCode == 400,
+        apiError.code == .malformedRequest,
+        apiError.message == "The HTTP request is not supported."
+    {
+        return .memoryChangesUnavailable
+    }
+    if missingRouteIsUnsupported,
+        apiError.statusCode == 404,
+        apiError.message == "The requested resource was not found."
+    {
         return .memoryChangesUnavailable
     }
     return nil

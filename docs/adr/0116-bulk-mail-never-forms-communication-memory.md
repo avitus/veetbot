@@ -34,11 +34,12 @@ review, which is why the review queue filled with newsletters.
    message registers no semantic source, forms no semantic or People memory,
    projects no correspondence, and creates no provisional person.
 2. **The rule lives in source validation, not in one caller.** The formation
-   service's source validation refuses a census-indexed thread, so the refresh,
-   the historical import, and any replay meet the same rule. The refresh
-   additionally skips the formation step after a `bulk` verdict and records a
-   content-free `email.semantic.skipped` event naming the reason, so the memory
-   diagnose command can explain why nothing formed.
+   service's source validation refuses a census-indexed thread and a thread
+   whose persisted assessment carries a `bulk` verdict, so the refresh, the
+   historical import, and any replay meet the same rule. The refresh
+   additionally skips the formation step as soon as the fresh verdict is known
+   and records a content-free `email.semantic.skipped` event naming the reason,
+   so the memory diagnose command can explain why nothing formed.
 3. **The assessment prompt is unchanged.** The prompt revision is part of the
    assessment identity; changing it would re-assess every retained thread at
    provider cost. The People design also wants attributed third-party reports
@@ -52,9 +53,12 @@ review, which is why the review queue filled with newsletters.
 
 ## Consequences
 
-- A personal sender whose mail carries list headers is treated as bulk. The
-  owner's manual paths remain: excluding a thread from learning, forgetting a
-  person, and the memory review actions of ADR-0117.
+- A personal sender whose mail carries list headers is treated as bulk only
+  when the census admits and indexes the thread: the census already leaves out
+  owner-sent, Spam, and Trash mail and protects senders the owner marked
+  Important or wrote to. The owner's manual paths remain: excluding a thread
+  from learning, forgetting a person, and the memory review actions of
+  ADR-0117.
 - A subscription the owner chose to keep still counts as bulk for memory.
 - A historical import skips a census-indexed retained source and counts it as
   excluded rather than failing the slice.

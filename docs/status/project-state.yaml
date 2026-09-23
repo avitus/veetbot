@@ -610,7 +610,8 @@ milestones:
       - the MemoryView exposure list and a shared browse contract suite
       - the native Apple memory browser at the restricted ceiling
     deferred_scope:
-      - every write, edit, retraction, and deletion over HTTP
+      - every write over HTTP other than the deletion and review outcomes
+        ADR-0117 later admitted; edit and replacement stay deferred
       - recall-trace viewing, blocked on tenant and principal trace predicates
       - consolidation and formation audit routes, knowledge documents
   "18":

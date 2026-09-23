@@ -11,7 +11,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
@@ -1490,11 +1490,27 @@ def _decode_memory_cursor(value: str | None) -> tuple[int, UUID] | None:
 
 
 class MemoryOwnerActions(Protocol):
-    """The two governed writes the memory API may reach (ADR-0117)."""
+    """The two governed writes the memory API may reach (ADR-0117).
 
-    async def delete(self, belief_id: UUID, *, trace_id: UUID | None = None) -> None: ...
+    Both accept the caller's unit of work so the write and its idempotency
+    receipt commit together under the owner's locks.
+    """
 
-    async def review(self, belief_id: UUID, outcome: MemoryReviewOutcome) -> MemoryRecord: ...
+    async def delete(
+        self,
+        belief_id: UUID,
+        *,
+        trace_id: UUID | None = None,
+        existing_uow: RepositoryUnitOfWork | None = None,
+    ) -> None: ...
+
+    async def review(
+        self,
+        belief_id: UUID,
+        outcome: MemoryReviewOutcome,
+        *,
+        existing_uow: RepositoryUnitOfWork | None = None,
+    ) -> MemoryRecord: ...
 
 
 class PublicMemoryService:
@@ -1574,6 +1590,14 @@ class PublicMemoryService:
         return MemoryView.from_record(record)
 
     # -- writes (ADR-0117) -------------------------------------------------------
+    #
+    # Each write runs in one unit of work under the owner's email and People
+    # locks: the replay check, the visibility check, the governed write, and
+    # the idempotency receipt commit together, so a crash leaves either both or
+    # neither, and two requests carrying one key serialize on the locks and
+    # the second one replays. A receipt records identifiers only; a replay
+    # rebuilds the view from the live record, so a belief deleted since is
+    # `not_found` on replay as it is on a read.
 
     def _governed(self, principal: Principal) -> MemoryOwnerActions:
         if self._memory_for is None:
@@ -1600,38 +1624,38 @@ class PublicMemoryService:
         ).hexdigest()
         return f"memory-write:{scoped}:completed", digest
 
-    async def _replay(
+    async def _replayed(
         self, uow: RepositoryUnitOfWork, principal: Principal, derivation: str, digest: str
-    ) -> dict[str, Any] | None:
+    ) -> bool:
+        """Whether this key already completed; a reused key with another request conflicts."""
         receipt = await uow.events.get_by_derivation(derivation, principal)
         if receipt is None:
-            return None
+            return False
         if receipt.payload.get("request_hash") != digest:
             raise ConflictError("memory idempotency key was reused")
-        result = receipt.payload.get("result")
-        return result if isinstance(result, dict) else {}
+        return True
 
+    @staticmethod
     async def _receipt(
-        self,
+        uow: RepositoryUnitOfWork,
         principal: Principal,
         session_id: UUID,
         derivation: str,
         digest: str,
-        result: dict[str, Any],
+        memory_id: UUID,
         event_type: str,
     ) -> None:
-        async with self._uow_factory() as uow:
-            await uow.events.append(
-                NewEvent(
-                    session_id=session_id,
-                    run_id=None,
-                    event_type=event_type,
-                    actor_type="user",
-                    actor_id=principal.principal_id,
-                    derivation_key=derivation,
-                    payload={"request_hash": digest, "result": result},
-                )
+        await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None,
+                event_type=event_type,
+                actor_type="user",
+                actor_id=principal.principal_id,
+                derivation_key=derivation,
+                payload={"request_hash": digest, "memory_id": str(memory_id)},
             )
+        )
 
     async def delete(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity, key: str
@@ -1641,19 +1665,25 @@ class PublicMemoryService:
         derivation, digest = self._write_key(
             principal, key, {"op": "delete", "memory_id": str(memory_id)}
         )
-        async with self._uow_factory() as uow:
-            if await self._replay(uow, principal, derivation, digest) is not None:
+        governed = self._governed(principal)
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(principal),
+            uow.people.lock(principal),
+        ):
+            if await self._replayed(uow, principal, derivation, digest):
                 return
             record = await self._visible(uow, principal, memory_id, ceiling)
-        await self._governed(principal).delete(memory_id)
-        await self._receipt(
-            principal,
-            record.source_session_id,
-            derivation,
-            digest,
-            {"memory_id": str(memory_id)},
-            "memory.delete_completed",
-        )
+            await governed.delete(memory_id, existing_uow=uow)
+            await self._receipt(
+                uow,
+                principal,
+                record.source_session_id,
+                derivation,
+                digest,
+                memory_id,
+                "memory.delete_completed",
+            )
 
     async def review(
         self,
@@ -1664,27 +1694,33 @@ class PublicMemoryService:
         ceiling: Sensitivity,
         key: str,
     ) -> MemoryView:
-        """Apply one review outcome to a belief; a repeated key replays its view."""
+        """Apply one review outcome to a belief; a repeated key replays its live view."""
         require_scope(principal, "memory.write")
         derivation, digest = self._write_key(
             principal, key, {"op": "review", "memory_id": str(memory_id), "outcome": outcome.value}
         )
-        async with self._uow_factory() as uow:
-            replayed = await self._replay(uow, principal, derivation, digest)
-            if replayed is not None:
-                return MemoryView.model_validate(replayed)
+        governed = self._governed(principal)
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(principal),
+            uow.people.lock(principal),
+        ):
+            if await self._replayed(uow, principal, derivation, digest):
+                return MemoryView.from_record(
+                    await self._visible(uow, principal, memory_id, ceiling)
+                )
             record = await self._visible(uow, principal, memory_id, ceiling)
-        reviewed = await self._governed(principal).review(memory_id, outcome)
-        view = MemoryView.from_record(reviewed)
-        await self._receipt(
-            principal,
-            record.source_session_id,
-            derivation,
-            digest,
-            view.model_dump(mode="json"),
-            "memory.review_completed",
-        )
-        return view
+            reviewed = await governed.review(memory_id, outcome, existing_uow=uow)
+            await self._receipt(
+                uow,
+                principal,
+                record.source_session_id,
+                derivation,
+                digest,
+                memory_id,
+                "memory.review_completed",
+            )
+            return MemoryView.from_record(reviewed)
 
 
 class PublicPersonaService:
