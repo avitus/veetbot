@@ -11,6 +11,8 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case memoryChangesUnavailable
     case scheduleBrowsingUnavailable
     case foldersUnavailable
+    case attachmentsUnavailable
+    case modelSettingsUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -24,6 +26,10 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
             return "This server does not support schedule browsing yet."
         case .foldersUnavailable:
             return "This server does not support conversation folders yet."
+        case .attachmentsUnavailable:
+            return "This server does not accept attachments yet."
+        case .modelSettingsUnavailable:
+            return "This server doesn't support model settings yet."
         }
     }
 }
@@ -306,6 +312,38 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    /// Upload one file for a session; sending a message later claims it (ADR-0120).
+    ///
+    /// The key makes a retry replay the stored upload instead of storing it twice.
+    public func uploadArtifact(
+        sessionID: UUID,
+        data: Data,
+        filename: String,
+        mediaType: String,
+        idempotencyKey: String,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> ArtifactView {
+        do {
+            let (body, _) = try await transport.sendData(
+                TransportRequest(
+                    method: .post,
+                    path: "/v1/sessions/\(sessionID.uuidString)/artifacts",
+                    headers: [
+                        "Content-Type": mediaType,
+                        "X-Filename": encodedHeaderFilename(filename),
+                        "Idempotency-Key": idempotencyKey,
+                    ],
+                    retryAttempts: 3
+                ),
+                uploading: data,
+                progress: progress
+            )
+            return try JSONDecoder.server.decode(ArtifactView.self, from: body)
+        } catch {
+            throw attachmentCompatibilityError(from: error) ?? error
+        }
+    }
+
     public func getArtifact(_ artifactID: UUID) async throws -> ArtifactView {
         try await transport.send(
             TransportRequest(method: .get, path: "/v1/artifacts/\(artifactID.uuidString)")
@@ -565,6 +603,45 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    /// The owner's chat and memory model choices with the options the server
+    /// offers. A server that predates the resource degrades to
+    /// `modelSettingsUnavailable` instead of a generic error.
+    public func getModelSettings() async throws -> ModelSettingsView {
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/settings/models")
+            )
+        } catch {
+            throw modelSettingsCompatibilityError(from: error) ?? error
+        }
+    }
+
+    /// Replaces both choices at once, guarded by the version the caller read.
+    /// A PUT that restates the stored values succeeds without a new version,
+    /// so a retry after a lost response is safe.
+    public func updateModelSettings(
+        expectedVersion: Int,
+        chat: ModelChoice,
+        memory: ModelChoice
+    ) async throws -> ModelSettingsView {
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .put,
+                    path: "/v1/settings/models",
+                    body: try JSONEncoder.server.encode(
+                        UpdateModelSettingsBody(
+                            expectedVersion: expectedVersion, chat: chat, memory: memory
+                        )
+                    ),
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw modelSettingsCompatibilityError(from: error) ?? error
+        }
+    }
+
     public func listFolders(limit: Int = 200, cursor: String? = nil) async throws -> Page<FolderView> {
         var query = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))]
         if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
@@ -735,6 +812,29 @@ private func memoryChangesCompatibilityError(
     return nil
 }
 
+/// Percent-encode a file name for the `X-Filename` header; the server decodes UTF-8.
+func encodedHeaderFilename(_ filename: String) -> String {
+    var allowed = CharacterSet.alphanumerics.intersection(.init(charactersIn: "\u{0}"..."\u{7F}"))
+    allowed.insert(charactersIn: "-._~")
+    return filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? "attachment"
+}
+
+/// Attachments are default-off (ADR-0120): a server without the upload route
+/// answers the generic 404 or a method miss, never the service's own message for
+/// a missing conversation, which stays a plain API error.
+private func attachmentCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 405 {
+        return .attachmentsUnavailable
+    }
+    if apiError.statusCode == 404,
+        apiError.message == "The requested resource was not found."
+    {
+        return .attachmentsUnavailable
+    }
+    return nil
+}
+
 /// Folders are an optional, default-off surface: a server that lacks the
 /// router answers 404 or 405 on the list routes, and the client degrades to
 /// the flat history rather than demanding an upgrade.
@@ -742,6 +842,16 @@ private func folderCompatibilityError(from error: Error) -> VeetbotAPIClientErro
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
     if apiError.statusCode == 404 || apiError.statusCode == 405 {
         return .foldersUnavailable
+    }
+    return nil
+}
+
+/// Model settings are a single resource with no per-item 404, so any 404 or
+/// 405 on it means the server predates the feature.
+private func modelSettingsCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 404 || apiError.statusCode == 405 {
+        return .modelSettingsUnavailable
     }
     return nil
 }

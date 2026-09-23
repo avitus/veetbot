@@ -21,6 +21,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
+from agent_core.domain.artifacts import auto_ingest_metadata, claimed_upload
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
@@ -39,6 +40,7 @@ from agent_core.domain.folders import (
     normalize_folder_name,
 )
 from agent_core.domain.messages import ProviderPin
+from agent_core.domain.model_settings import ModelSettings
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -1478,6 +1480,68 @@ class InMemoryArtifactRepository:
             del self._rows[artifact_id]
             return True
 
+    async def claim_upload(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        auto_ingest: bool,
+    ) -> ArtifactRef:
+        async with self._lock:
+            artifact = self._rows.get(artifact_id)
+            if (
+                artifact is None
+                or artifact.tenant_id != principal.tenant_id
+                or artifact.principal_id != principal.principal_id
+                or artifact.session_id != session_id
+                or artifact.origin not in {"upload", "knowledge_source"}
+            ):
+                raise NotFoundError("artifact not found")
+            claimed = claimed_upload(artifact, run_id=run_id, auto_ingest=auto_ingest)
+            self._rows[artifact_id] = claimed
+            return claimed.model_copy(deep=True)
+
+    async def pending_auto_ingest(self, principal: Principal, *, limit: int) -> list[ArtifactRef]:
+        async with self._lock:
+            pending = [
+                artifact
+                for artifact in self._rows.values()
+                if artifact.tenant_id == principal.tenant_id
+                and artifact.principal_id == principal.principal_id
+                and artifact.metadata.get("auto_ingest") == "pending"
+            ]
+        pending.sort(key=lambda artifact: (artifact.created_at, artifact.id))
+        return [artifact.model_copy(deep=True) for artifact in pending[:limit]]
+
+    async def record_auto_ingest(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        state: str,
+        reason: str | None,
+        attempts: int,
+    ) -> ArtifactRef:
+        async with self._lock:
+            artifact = self._rows.get(artifact_id)
+            if artifact is None or (
+                artifact.tenant_id != principal.tenant_id
+                or artifact.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("artifact not found")
+            recorded = artifact.model_copy(
+                update={
+                    "metadata": auto_ingest_metadata(
+                        artifact.metadata, state=state, reason=reason, attempts=attempts
+                    )
+                },
+                deep=True,
+            )
+            self._rows[artifact_id] = recorded
+            return recorded.model_copy(deep=True)
+
 
 class InMemoryMaintenanceRepository:
     def __init__(
@@ -1899,6 +1963,36 @@ class InMemoryFolderStore:
             )
             self._proposals[proposal_id] = resolved
             return resolved
+
+
+class InMemoryModelSettingsStore:
+    """Contract-backed owner model settings (ADR-0119)."""
+
+    def __init__(self) -> None:
+        self._versions: dict[tuple[str, str], list[ModelSettings]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def current(self, principal: Principal) -> ModelSettings | None:
+        async with self._lock:
+            versions = self._versions.get((principal.tenant_id, principal.principal_id), [])
+            return versions[-1] if versions else None
+
+    async def append_version(
+        self, settings: ModelSettings, *, expected_version: int
+    ) -> ModelSettings:
+        async with self._lock:
+            versions = self._versions[(settings.tenant_id, settings.principal_id)]
+            head = versions[-1].version if versions else 0
+            if expected_version != head:
+                raise ConflictError(
+                    f"model settings expected version {expected_version} but head is {head}"
+                )
+            if settings.version != head + 1:
+                raise ConflictError(
+                    f"model settings version {settings.version} does not follow head {head}"
+                )
+            versions.append(settings)
+            return settings
 
 
 class InMemoryPersonaStore:

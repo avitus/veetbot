@@ -20,6 +20,7 @@ from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
+from agent_core.domain.model_settings import ModelChoice, ModelSettingsView
 from agent_core.domain.people import (
     PeopleErasure,
     PeopleOperation,
@@ -165,6 +166,19 @@ class ArtifactService(Protocol):
     async def get(self, principal: Principal, artifact_id: UUID) -> ArtifactView: ...
 
     async def open_content(self, principal: Principal, artifact_id: UUID) -> ArtifactContent: ...
+
+    async def upload(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        *,
+        content: bytes,
+        filename: str,
+        declared_media_type: str,
+        idempotency_key: str | None,
+    ) -> tuple[ArtifactView, bool]:
+        """Store one chat attachment unclaimed; the flag is whether it replayed (ADR-0120)."""
+        ...
 
 
 class BrowserProfileService(Protocol):
@@ -555,6 +569,19 @@ class PeopleService(Protocol):
         states: Sequence[str] | None = None,
         review: bool = False,
     ) -> PeoplePage: ...
+
+
+class ModelSettingsService(Protocol):
+    async def get(self, principal: Principal) -> ModelSettingsView: ...
+
+    async def update(
+        self,
+        principal: Principal,
+        *,
+        expected_version: int,
+        chat: ModelChoice,
+        memory: ModelChoice,
+    ) -> ModelSettingsView: ...
 
 
 class PersonaService(Protocol):

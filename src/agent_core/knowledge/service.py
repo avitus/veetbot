@@ -38,6 +38,7 @@ from agent_core.knowledge.chunking import (
 from agent_core.memory.profiles import DEFAULT_TRACE_PROFILE, TraceProfile
 from agent_core.ports.artifacts import ArtifactStore
 from agent_core.ports.determinism import Clock, IdFactory
+from agent_core.ports.knowledge import Extractor
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 KNOWLEDGE_POLICY_VERSION = "knowledge@1"
@@ -56,7 +57,7 @@ class KnowledgeService:
         ids: IdFactory,
         principal: Principal,
         *,
-        extractor: PlainTextExtractor | None = None,
+        extractor: Extractor | None = None,
         chunker: DeterministicChunker | None = None,
         trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
     ) -> None:

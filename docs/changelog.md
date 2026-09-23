@@ -4,6 +4,25 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-23 — Files can be dropped into the chat
+
+- ADR-0120: `POST /v1/sessions/{id}/artifacts` uploads one file (at most
+  32 MiB) under `artifact.write`, behind `AGENT_ATTACHMENT_UPLOADS_ENABLED`.
+  Sending the message claims the upload for its run and keeps it for the
+  life of the conversation; an upload never sent expires after 24 hours.
+- The submit handler now checks every image or file block against the
+  caller's uploads in that session and records the server-detected type.
+- The model receives images as images, PDFs as documents, and text inside
+  the untrusted envelope, within a per-request budget the token estimator
+  also counts; anything else is a labelled reference. An artifact reference
+  in a truncated tool result no longer fails the next model call.
+- Text, Markdown, and PDF files the owner sends are added to knowledge by the
+  maintenance worker, with the secret scan and a reason code on refusal.
+- The Apple client accepts drops on macOS and iPad, and has a paperclip for
+  Files and Photos on every device.
+- Deploying: set the flag, grant `artifact.write` and `knowledge.write`, and
+  deploy the nginx change for the upload path.
+
 ## 2026-09-22 — Bulk mail forms no memory, and flagged memories can be reviewed
 
 - The automatic email refresh had formed People facts about a founder named

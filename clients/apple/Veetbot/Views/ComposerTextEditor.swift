@@ -1,4 +1,26 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// Decides whether a drop becomes attachments or text (ADR-0120).
+///
+/// Text, rich text, and web links keep their ordinary meaning and are inserted
+/// into the message; files, images, and anything else become attachments.
+enum ComposerDropPolicy {
+    private static let promisedFilePrefixes = [
+        "com.apple.pasteboard.promised-file",
+        "com.apple.NSFilePromiseItemMetaData",
+    ]
+
+    static func takesAttachments(typeIdentifiers: [String]) -> Bool {
+        typeIdentifiers.contains { identifier in
+            if promisedFilePrefixes.contains(where: identifier.hasPrefix) { return true }
+            guard let type = UTType(identifier) else { return false }
+            if type.conforms(to: .fileURL) { return true }
+            if type.conforms(to: .text) || type.conforms(to: .url) { return false }
+            return type.conforms(to: .data) || type.conforms(to: .content)
+        }
+    }
+}
 
 enum ComposerReturnAction: Equatable {
     case send
@@ -35,6 +57,7 @@ func composerBaseFont(textSize: AppTextSize) -> NSFont {
 struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
+    var onDropFiles: ([URL]) -> Void = { _ in }
     @Environment(\.appFontStyle) private var appFontStyle
     @Environment(\.appTextSize) private var appTextSize
 
@@ -53,6 +76,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         let textView = ComposerNSTextView()
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
+        textView.onDropFiles = onDropFiles
         textView.string = text
         installFontRefresh(on: textView)
         applyFont(to: textView)
@@ -86,6 +110,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         textView.onSubmit = onSubmit
+        textView.onDropFiles = onDropFiles
         installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.string != text {
@@ -124,8 +149,78 @@ struct ComposerTextEditor: NSViewRepresentable {
 
 final class ComposerNSTextView: NSTextView {
     var onSubmit: () -> Void = {}
+    var onDropFiles: ([URL]) -> Void = { _ in }
     let fontRefreshController = ComposerFontRefreshController()
     private var observesSystemTextSize = false
+
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.fileURL, .tiff, .png]
+            + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType(rawValue: $0) }
+    }
+
+    private func takesAttachments(_ sender: NSDraggingInfo) -> Bool {
+        let identifiers = (sender.draggingPasteboard.types ?? []).map(\.rawValue)
+        return ComposerDropPolicy.takesAttachments(typeIdentifiers: identifiers)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        takesAttachments(sender) ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        takesAttachments(sender) ? .copy : super.draggingUpdated(sender)
+    }
+
+    /// Files become attachments instead of pasted paths; text still inserts.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard takesAttachments(sender) else { return super.performDragOperation(sender) }
+        let pasteboard = sender.draggingPasteboard
+        let urls =
+            pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL] ?? []
+        if !urls.isEmpty {
+            onDropFiles(urls)
+            return true
+        }
+        let promises =
+            pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self]) as? [NSFilePromiseReceiver]
+            ?? []
+        if !promises.isEmpty {
+            let destination = FileManager.default.temporaryDirectory
+                .appendingPathComponent("veetbot-drops", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: destination, withIntermediateDirectories: true
+            )
+            let deliver = onDropFiles
+            for promise in promises {
+                promise.receivePromisedFiles(
+                    atDestination: destination, options: [:], operationQueue: .main
+                ) { url, error in
+                    if error == nil { deliver([url]) }
+                }
+            }
+            return true
+        }
+        if let image = NSImage(pasteboard: pasteboard),
+            let tiff = image.tiffRepresentation,
+            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+        {
+            let file = FileManager.default.temporaryDirectory
+                .appendingPathComponent("veetbot-drops", isDirectory: true)
+                .appendingPathComponent("\(UUID().uuidString).png")
+            try? FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            if (try? png.write(to: file)) != nil {
+                onDropFiles([file])
+                return true
+            }
+        }
+        return super.performDragOperation(sender)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -189,6 +284,7 @@ import UIKit
 struct ComposerTextEditor: UIViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
+    var onDropItems: ([NSItemProvider]) -> Void = { _ in }
     @Environment(\.appFontStyle) private var appFontStyle
     @Environment(\.appTextSize) private var appTextSize
 
@@ -199,6 +295,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     func makeUIView(context: Context) -> ComposerUITextView {
         let textView = ComposerUITextView()
         textView.delegate = context.coordinator
+        textView.textDropDelegate = context.coordinator
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
         installFontRefresh(on: textView)
         textView.text = text
@@ -253,11 +350,37 @@ struct ComposerTextEditor: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UITextDropDelegate {
         var parent: ComposerTextEditor
 
         init(parent: ComposerTextEditor) {
             self.parent = parent
+        }
+
+        private func attachmentProviders(_ drop: UITextDropRequest) -> [NSItemProvider] {
+            drop.dropSession.items.map(\.itemProvider).filter {
+                ComposerDropPolicy.takesAttachments(typeIdentifiers: $0.registeredTypeIdentifiers)
+            }
+        }
+
+        /// A file dropped on the message field becomes an attachment, not text.
+        func textDroppableView(
+            _ textDroppableView: UIView & UITextDroppable,
+            proposalForDrop drop: UITextDropRequest
+        ) -> UITextDropProposal {
+            guard !attachmentProviders(drop).isEmpty else { return drop.suggestedProposal }
+            let proposal = UITextDropProposal(operation: .copy)
+            proposal.dropPerformer = .delegate
+            return proposal
+        }
+
+        func textDroppableView(
+            _ textDroppableView: UIView & UITextDroppable,
+            willPerformDrop drop: UITextDropRequest
+        ) {
+            let providers = attachmentProviders(drop)
+            guard !providers.isEmpty else { return }
+            parent.onDropItems(providers)
         }
 
         func textViewDidChange(_ textView: UITextView) {

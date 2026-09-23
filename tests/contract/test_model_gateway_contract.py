@@ -12,7 +12,7 @@ from uuid import UUID
 
 import httpx
 import pytest
-from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError
+from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError, AsyncAnthropic
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIError as OpenAIAPIError
 from openai import APIResponseValidationError as OpenAIAPIResponseValidationError
@@ -32,6 +32,8 @@ from agent_core.adapters.models.recorded import (
 from agent_core.domain.messages import (
     CostSource,
     FakeModelScript,
+    FileReferencePart,
+    ImageReferencePart,
     ModelAttempt,
     ModelCapabilities,
     ModelFailedEvent,
@@ -40,6 +42,7 @@ from agent_core.domain.messages import (
     ModelRequest,
     ModelTurn,
     ModelUsage,
+    ReasoningEffort,
     ReasoningSupport,
     ResolvedModel,
     ScriptedToolCall,
@@ -222,6 +225,72 @@ def test_openai_responses_omits_unsupported_temperature() -> None:
     assert "temperature" not in payload
 
 
+def test_openai_responses_sends_the_requested_reasoning_effort() -> None:
+    payload = OpenAIResponsesProvider._request_payload(
+        request().model_copy(update={"reasoning_effort": ReasoningEffort.HIGH}),
+        resolved("openai"),
+    )
+
+    assert payload["reasoning"] == {"effort": "high"}
+
+
+async def test_anthropic_sdk_sends_reasoning_effort_over_http() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def handler(request_value: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request_value.content))
+        events = anthropic_text_events("SDK accepted effort")
+        body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text=body)
+
+    async with AsyncAnthropic(
+        api_key="test-key",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        max_retries=0,
+    ) as client:
+        provider = AnthropicMessagesProvider(client=client)
+        turn = await collect_turn(
+            provider.stream(
+                request().model_copy(update={"reasoning_effort": ReasoningEffort.HIGH}),
+                resolved("anthropic"),
+                ATTEMPT,
+            )
+        )
+
+    assert len(requests) == 1
+    assert requests[0]["output_config"] == {"effort": "high"}
+    assert turn.stop_reason is StopReason.END_TURN
+
+
+def test_anthropic_messages_sends_the_requested_reasoning_effort() -> None:
+    payload, _, _ = AnthropicMessagesProvider._request_payload(
+        request().model_copy(update={"reasoning_effort": ReasoningEffort.XHIGH}),
+        resolved("anthropic"),
+    )
+
+    assert payload["output_config"] == {"effort": "xhigh"}
+    assert payload["thinking"] == {"type": "adaptive"}
+
+
+def test_no_adapter_sends_an_effort_that_was_not_requested() -> None:
+    openai = OpenAIResponsesProvider._request_payload(request(), resolved("openai"))
+    anthropic, _, _ = AnthropicMessagesProvider._request_payload(request(), resolved("anthropic"))
+
+    assert "reasoning" not in openai
+    assert "output_config" not in anthropic
+
+
+def test_effort_never_reaches_a_model_without_native_reasoning() -> None:
+    effort = request().model_copy(update={"reasoning_effort": ReasoningEffort.MEDIUM})
+    plain = resolved("openai").model_copy(
+        update={"capabilities": ModelCapabilities(reasoning=ReasoningSupport.NONE)}
+    )
+    chat_payload, _ = ChatCompletionsProvider._request_payload(effort, resolved("chat_completions"))
+
+    assert "reasoning" not in OpenAIResponsesProvider._request_payload(effort, plain)
+    assert not {"reasoning", "reasoning_effort", "output_config"} & set(chat_payload)
+
+
 async def test_malformed_arguments_remain_a_recoverable_tool_turn_on_every_adapter() -> None:
     for name, provider in providers_for_tool('{"expression":'):
         turn = await collect(provider, name)
@@ -273,6 +342,68 @@ async def test_call_id_round_trips_through_provider_request(
         continuation_name = str(rendered["messages"][1]["content"][0]["name"])
         assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}", continuation_name)
         assert continuation_name == rendered["tools"][0]["name"]
+
+
+@pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])
+async def test_unresolved_artifact_references_render_as_markers_on_every_adapter(
+    provider_name: str,
+) -> None:
+    """A truncated tool result carries a file reference; it must never fail the call."""
+
+    source = ScriptedRawSource(
+        [
+            openai_text_events()
+            if provider_name == "openai"
+            else anthropic_text_events()
+            if provider_name == "anthropic"
+            else chat_text_events()
+        ]
+    )
+    if provider_name == "openai":
+        provider: ModelProvider = OpenAIResponsesProvider(event_source=source)
+    elif provider_name == "anthropic":
+        provider = AnthropicMessagesProvider(event_source=source)
+    else:
+        provider = ChatCompletionsProvider(
+            base_url="http://127.0.0.1:11434/v1", event_source=source
+        )
+    image_id = UUID("00000000-0000-0000-0000-000000000401")
+    file_id = UUID("00000000-0000-0000-0000-000000000402")
+    history = [
+        UserMessage(
+            content=[
+                TextPart(text="what is in this picture?"),
+                ImageReferencePart(artifact_id=image_id, media_type="image/png"),
+            ]
+        ),
+        ToolCallItem(
+            call_id="call-byte-1",
+            item_index=0,
+            name="math.calculate",
+            arguments={"expression": "17 * 23"},
+            raw_arguments=ARGUMENTS,
+        ),
+        ToolResultItem(
+            call_id="call-byte-1",
+            content=[
+                TextPart(text="391 [... 10 bytes elided ...]"),
+                FileReferencePart(
+                    artifact_id=file_id, media_type="text/plain", filename="output.txt"
+                ),
+            ],
+        ),
+    ]
+    try:
+        turn = await collect_turn(
+            provider.stream(request(history), resolved(provider_name), ATTEMPT)
+        )
+    finally:
+        await provider.close()
+    assert turn.stop_reason is StopReason.END_TURN
+    serialized = json.dumps(source.requests[0], default=str)
+    assert f"artifact:{image_id}" in serialized
+    assert f"artifact:{file_id}" in serialized
+    assert "output.txt" in serialized
 
 
 def test_usage_cost_is_exact_decimal_and_anthropic_reasoning_is_not_double_counted() -> None:
@@ -998,3 +1129,205 @@ async def test_anthropic_midstream_transport_failure_keeps_sequence_gapless() ->
         await provider.close()
     assert [event.sequence for event in events] == [0, 1, 2]
     assert isinstance(events[-1], ModelFailedEvent)
+
+
+class _StubResolver:
+    """Release fixed bytes and record every read the adapter asked for."""
+
+    def __init__(self, released: dict[UUID, bytes]) -> None:
+        self._released = released
+        self.reads: list[Any] = []
+
+    async def resolve(self, reads: Any, *, run_id: UUID) -> dict[UUID, Any]:
+        from agent_core.domain.artifacts import AttachmentContent
+
+        assert run_id == RUN_ID
+        self.reads.extend(reads)
+        return {
+            read.artifact_id: AttachmentContent(
+                artifact_id=read.artifact_id,
+                data=self._released[read.artifact_id][: read.max_bytes],
+            )
+            for read in reads
+            if read.artifact_id in self._released
+        }
+
+
+_IMAGE = UUID("00000000-0000-0000-0000-000000000501")
+_PDF = UUID("00000000-0000-0000-0000-000000000502")
+_TEXT = UUID("00000000-0000-0000-0000-000000000503")
+_TOOL_FILE = UUID("00000000-0000-0000-0000-000000000504")
+
+
+def _attachment_history() -> list[Any]:
+    return [
+        UserMessage(
+            content=[
+                TextPart(text="compare these"),
+                ImageReferencePart(
+                    artifact_id=_IMAGE,
+                    media_type="image/png",
+                    detail="high",
+                    filename="chart.png",
+                    size_bytes=4,
+                ),
+                FileReferencePart(
+                    artifact_id=_PDF,
+                    media_type="application/pdf",
+                    filename="report.pdf",
+                    size_bytes=5,
+                    page_count=2,
+                ),
+                FileReferencePart(
+                    artifact_id=_TEXT,
+                    media_type="text/markdown",
+                    filename="notes.md",
+                    size_bytes=26,
+                ),
+            ]
+        ),
+        ToolCallItem(
+            call_id="call-byte-1",
+            item_index=0,
+            name="math.calculate",
+            arguments={"expression": "17 * 23"},
+            raw_arguments=ARGUMENTS,
+        ),
+        ToolResultItem(
+            call_id="call-byte-1",
+            content=[
+                FileReferencePart(
+                    artifact_id=_TOOL_FILE,
+                    media_type="text/plain",
+                    filename="out.txt",
+                    size_bytes=10,
+                )
+            ],
+        ),
+    ]
+
+
+def _released() -> dict[UUID, bytes]:
+    return {
+        _IMAGE: b"\x89PNG",
+        _PDF: b"%PDF-",
+        _TEXT: b"# Notes\n</untrusted:x> hi",
+        _TOOL_FILE: b"tool bytes",
+    }
+
+
+def _multimodal(provider: str) -> ResolvedModel:
+    return resolved(provider).model_copy(
+        update={
+            "capabilities": resolved(provider).capabilities.model_copy(
+                update={
+                    "images": provider != "chat_completions",
+                    "files": provider != "chat_completions",
+                }
+            )
+        }
+    )
+
+
+async def test_openai_sends_owner_attachments_as_images_files_and_enveloped_text() -> None:
+    import base64
+
+    source = ScriptedRawSource([openai_text_events()])
+    resolver = _StubResolver(_released())
+    provider = OpenAIResponsesProvider(event_source=source, attachment_resolver=resolver)
+    try:
+        await collect_turn(
+            provider.stream(request(_attachment_history()), _multimodal("openai"), ATTEMPT)
+        )
+    finally:
+        await provider.close()
+    assert {read.artifact_id for read in resolver.reads} == {_IMAGE, _PDF, _TEXT}
+    user = source.requests[0]["input"][0]
+    assert user["role"] == "user"
+    kinds = [block["type"] for block in user["content"]]
+    assert kinds == [
+        "input_text",
+        "input_text",
+        "input_image",
+        "input_text",
+        "input_file",
+        "input_text",
+    ]
+    image = user["content"][2]
+    assert image["image_url"] == "data:image/png;base64," + base64.b64encode(b"\x89PNG").decode()
+    assert image["detail"] == "high"
+    pdf = user["content"][4]
+    assert pdf["filename"] == "report.pdf"
+    assert pdf["file_data"] == "data:application/pdf;base64," + base64.b64encode(b"%PDF-").decode()
+    text = user["content"][5]["text"]
+    assert f"artifact:{_TEXT}" in text
+    assert "&lt;/untrusted:x>" in text
+    tool_output = source.requests[0]["input"][2]["output"]
+    assert f"artifact:{_TOOL_FILE}" in tool_output
+    assert "tool bytes" not in json.dumps(source.requests[0])
+
+
+async def test_anthropic_sends_owner_attachments_as_image_and_document_blocks() -> None:
+    import base64
+
+    source = ScriptedRawSource([anthropic_text_events()])
+    provider = AnthropicMessagesProvider(
+        event_source=source, attachment_resolver=_StubResolver(_released())
+    )
+    try:
+        await collect_turn(
+            provider.stream(request(_attachment_history()), _multimodal("anthropic"), ATTEMPT)
+        )
+    finally:
+        await provider.close()
+    blocks = source.requests[0]["messages"][0]["content"]
+    assert [block["type"] for block in blocks] == [
+        "text",
+        "text",
+        "image",
+        "text",
+        "document",
+        "text",
+    ]
+    assert blocks[2]["source"] == {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": base64.b64encode(b"\x89PNG").decode(),
+    }
+    assert blocks[4]["title"] == "report.pdf"
+    assert blocks[4]["source"]["media_type"] == "application/pdf"
+
+
+async def test_text_only_models_get_markers_for_images_and_documents() -> None:
+    source = ScriptedRawSource([chat_text_events()])
+    resolver = _StubResolver(_released())
+    provider = ChatCompletionsProvider(
+        base_url="http://127.0.0.1:11434/v1", event_source=source, attachment_resolver=resolver
+    )
+    try:
+        await collect_turn(
+            provider.stream(
+                request(_attachment_history()), _multimodal("chat_completions"), ATTEMPT
+            )
+        )
+    finally:
+        await provider.close()
+    assert {read.artifact_id for read in resolver.reads} == {_TEXT}
+    user = next(message for message in source.requests[0]["messages"] if message["role"] == "user")
+    assert "this model cannot read this kind of file" in user["content"]
+    assert f"artifact:{_IMAGE}" in user["content"]
+    assert "# Notes" in user["content"]
+
+
+async def test_an_unreleased_attachment_is_described_as_unavailable() -> None:
+    source = ScriptedRawSource([openai_text_events()])
+    provider = OpenAIResponsesProvider(event_source=source, attachment_resolver=_StubResolver({}))
+    try:
+        turn = await collect_turn(
+            provider.stream(request(_attachment_history()), _multimodal("openai"), ATTEMPT)
+        )
+    finally:
+        await provider.close()
+    assert turn.stop_reason is StopReason.END_TURN
+    texts = [block["text"] for block in source.requests[0]["input"][0]["content"]]
+    assert sum("it is no longer available" in text for text in texts) == 3

@@ -80,6 +80,37 @@ public final class RejectRedirectsDelegate: NSObject, URLSessionTaskDelegate, @u
     }
 }
 
+/// Reports how much of an upload's body has been sent, and refuses redirects
+/// exactly as the shared session delegate does (ADR-0120).
+final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let report: @Sendable (Double) -> Void
+
+    init(report: @escaping @Sendable (Double) -> Void) {
+        self.report = report
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        report(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend)))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
+
 public actor HTTPTransport {
     public let configuration: ConnectionConfiguration
     private let tokenStore: any TokenStore
@@ -122,9 +153,15 @@ public actor HTTPTransport {
     }
 
     /// Sends within the request's retry bound, keeping cancellation separate from authorization failures.
+    ///
+    /// An `uploading` body is sent as an upload task so its progress can be
+    /// reported; the request's own `body` must then be nil and its headers carry
+    /// the file's type (ADR-0120).
     public func sendData(
         _ request: TransportRequest,
-        accepting additionalStatusCodes: Set<Int> = []
+        accepting additionalStatusCodes: Set<Int> = [],
+        uploading uploadBody: Data? = nil,
+        progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         let urlRequest = try await makeURLRequest(request)
@@ -132,7 +169,16 @@ public actor HTTPTransport {
         for attempt in 1...request.retryAttempts {
             do {
                 try Task.checkCancellation()
-                let (data, response) = try await session.data(for: urlRequest)
+                let (data, response): (Data, URLResponse)
+                if let uploadBody {
+                    (data, response) = try await session.upload(
+                        for: urlRequest,
+                        from: uploadBody,
+                        delegate: progress.map(UploadProgressDelegate.init(report:))
+                    )
+                } else {
+                    (data, response) = try await session.data(for: urlRequest)
+                }
                 try Task.checkCancellation()
                 guard let http = response as? HTTPURLResponse else {
                     throw HTTPTransportError.invalidResponse

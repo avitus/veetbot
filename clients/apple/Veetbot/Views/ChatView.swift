@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(iOS)
 import UIKit
@@ -26,6 +27,11 @@ public struct ChatView: View {
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
     @State private var showingPeople = false
+    @State private var isDropTargeted = false
+    @State private var showingFileImporter = false
+    #if os(iOS)
+    @State private var showingPhotoPicker = false
+    #endif
 
     #if os(macOS)
     private static let transcriptHorizontalPadding: CGFloat = 36
@@ -143,6 +149,36 @@ public struct ChatView: View {
             Divider()
             composer
         }
+        .onDrop(
+            of: [.item],
+            delegate: AttachmentDropDelegate(
+                isTargeted: $isDropTargeted,
+                isEnabled: model.isConfigured,
+                attach: { providers in Task { await model.attach(itemProviders: providers) } }
+            )
+        )
+        .overlay {
+            if isDropTargeted { AttachmentDropHighlight() }
+        }
+        .fileImporter(
+            isPresented: $showingFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                Task { await model.attach(fileURLs: urls) }
+            case .failure(let error):
+                model.reportConnectionError(error)
+            }
+        }
+        #if os(iOS)
+        .sheet(isPresented: $showingPhotoPicker) {
+            PhotoLibraryPicker { providers in
+                Task { await model.attach(itemProviders: providers) }
+            }
+        }
+        #endif
         .navigationTitle(activeMode == .chat ? "Conversation" : "Email")
         .sheet(item: Binding(get: { model.callResult }, set: { if $0 == nil { model.dismissCallResult() } })) { result in
             CallResultSheet(result: result, close: model.dismissCallResult) {
@@ -193,26 +229,102 @@ public struct ChatView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            ComposerTextEditor(text: $model.composerText, onSubmit: submitDraft)
-                .frame(minHeight: 42, maxHeight: 120)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(AppTheme.turquoise.opacity(0.42))
+        VStack(alignment: .leading, spacing: 8) {
+            if !model.attachments.isEmpty {
+                AttachmentChipsView(
+                    attachments: model.attachments,
+                    remove: { model.removeAttachment($0) },
+                    retry: { model.retryAttachment($0) }
                 )
-                .accessibilityLabel("Message")
-                .accessibilityIdentifier("chat.composer")
-            Button(action: submitDraft) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(canSendDraft ? AppTheme.orange : .secondary)
             }
-            .buttonStyle(.plain)
-            .disabled(!canSendDraft)
-            .accessibilityLabel("Send")
+            HStack(alignment: .bottom, spacing: 10) {
+                attachButton
+                messageField
+                sendButton
+            }
         }
         .padding()
         .background(AppTheme.turquoise.opacity(0.055))
+    }
+
+    @ViewBuilder
+    private var attachButton: some View {
+        #if os(iOS)
+        Menu {
+            Button {
+                showingFileImporter = true
+            } label: {
+                Label("Choose Files…", systemImage: "folder")
+            }
+            Button {
+                showingPhotoPicker = true
+            } label: {
+                Label("Photo Library…", systemImage: "photo.on.rectangle")
+            }
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.title3)
+                .frame(minWidth: 32, minHeight: 42)
+        }
+        .disabled(!model.isConfigured)
+        .accessibilityLabel("Attach files")
+        .accessibilityIdentifier("chat.attach")
+        #else
+        Button {
+            showingFileImporter = true
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.title3)
+                .frame(minWidth: 28, minHeight: 42)
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.isConfigured)
+        .help("Attach files")
+        .accessibilityLabel("Attach files")
+        .accessibilityIdentifier("chat.attach")
+        #endif
+    }
+
+    @ViewBuilder
+    private var messageField: some View {
+        #if os(macOS)
+        ComposerTextEditor(
+            text: $model.composerText,
+            onSubmit: submitDraft,
+            onDropFiles: { urls in Task { await model.attach(fileURLs: urls) } }
+        )
+        .frame(minHeight: 42, maxHeight: 120)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.turquoise.opacity(0.42))
+        )
+        .accessibilityLabel("Message")
+        .accessibilityIdentifier("chat.composer")
+        #else
+        ComposerTextEditor(
+            text: $model.composerText,
+            onSubmit: submitDraft,
+            onDropItems: { providers in Task { await model.attach(itemProviders: providers) } }
+        )
+        .frame(minHeight: 42, maxHeight: 120)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.turquoise.opacity(0.42))
+        )
+        .accessibilityLabel("Message")
+        .accessibilityIdentifier("chat.composer")
+        #endif
+    }
+
+    private var sendButton: some View {
+        Button(action: submitDraft) {
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.title2)
+                .foregroundColor(canSendDraft ? AppTheme.orange : .secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSendDraft)
+        .accessibilityLabel("Send")
     }
 
     private var activityLabel: String? {
@@ -222,9 +334,13 @@ public struct ChatView: View {
     }
 
     private var canSendDraft: Bool {
-        !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasText = !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let answering = state.runStatus == .waitingForUser
+        // Attachments alone make a message, but an answer to a question is text.
+        return (hasText || (!model.attachments.isEmpty && !answering))
+            && (answering || model.attachmentsReady)
             && !model.isSending
-            && (!state.isRunActive || state.runStatus == .waitingForUser)
+            && (!state.isRunActive || answering)
     }
 
     private static let bottomAnchorID = ConversationScrollTarget.bottom.scrollID

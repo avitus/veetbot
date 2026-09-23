@@ -11,6 +11,7 @@ from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
     FileReferencePart,
+    ImageReferencePart,
     ProviderReasoningItem,
     SystemMessage,
     TextPart,
@@ -50,7 +51,7 @@ def _artifact(item: ConversationItem) -> str | None:
     if not isinstance(item, (UserMessage, AssistantMessage, ToolResultItem)):
         return None
     for part in item.content:
-        if isinstance(part, FileReferencePart):
+        if isinstance(part, (FileReferencePart, ImageReferencePart)):
             return f"artifact:{part.artifact_id}"
     return None
 

@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import signal
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import partial
@@ -29,6 +27,7 @@ from sqlalchemy.sql.functions import func
 
 from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
+from agent_core.adapters.artifacts.inspection import SignatureAttachmentInspector
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.browser.authentications import (
     InMemoryBrowserAuthenticationRepository,
@@ -68,6 +67,7 @@ from agent_core.adapters.identity import (
     StaticPrincipalResolver,
 )
 from agent_core.adapters.judgment import TypeSafeJudgmentProvider
+from agent_core.adapters.knowledge.pdf import PdfTextExtractor
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
@@ -119,6 +119,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryFolderStore,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
+    InMemoryModelSettingsStore,
     InMemoryPersonaStore,
     InMemoryPolicyProfileRepository,
     InMemoryProcessEventRepository,
@@ -136,6 +137,7 @@ from agent_core.adapters.persistence.memory_repositories import (
     PostgresMemoryStore,
     PostgresTraceStore,
 )
+from agent_core.adapters.persistence.model_settings import PostgresModelSettingsStore
 from agent_core.adapters.persistence.notifications import (
     InMemoryDeviceRegistrationIdempotencyRepository,
     InMemoryDeviceRegistry,
@@ -241,6 +243,7 @@ from agent_core.adapters.whatsapp import (
 from agent_core.api.call_ingress import create_call_ingress
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
+from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
@@ -257,6 +260,7 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.folder_service import PublicFolderService
+from agent_core.application.model_settings import PublicModelSettingsService
 from agent_core.application.notification_dispatcher import (
     NotificationDispatcher,
     NotificationDispatchUnitOfWorkFactory,
@@ -301,6 +305,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     MemoryReadService as PublicMemoryReadServiceContract,
+)
+from agent_core.application.services import (
+    ModelSettingsService as PublicModelSettingsServiceContract,
 )
 from agent_core.application.services import (
     NotificationService as PublicNotificationServiceContract,
@@ -375,7 +382,7 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
-from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.agents import AgentSpec, Principal, content_addressed_agent_version
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
@@ -397,12 +404,20 @@ from agent_core.domain.messages import (
     FakeModelScript,
     ModelEvent,
     ReasoningDeltaEvent,
+    ReasoningEffort,
     ResolvedModel,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
     TextDeltaEvent,
     UsageEvent,
+)
+from agent_core.domain.model_settings import (
+    ChatModelOption,
+    MemoryModelOption,
+    ModelChoice,
+    ModelSettingsCatalog,
+    default_chat_effort,
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
@@ -441,7 +456,13 @@ from agent_core.folders.grouping import ModelAssistedThreadGrouper
 from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
+from agent_core.knowledge.chunking import (
+    MAX_KNOWLEDGE_SOURCE_BYTES,
+    PlainTextExtractor,
+    RoutingExtractor,
+)
 from agent_core.knowledge.service import KnowledgeService
+from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
     calling_server_configs,
     email_server_configs,
@@ -467,6 +488,7 @@ from agent_core.memory.formation import (
     GovernedMemoryService,
     HighRecallCandidateExtractor,
 )
+from agent_core.memory.model_choice import OwnerSelectedCandidateExtractor
 from agent_core.memory.people_legacy import link_existing_beliefs
 from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
@@ -490,6 +512,7 @@ from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.artifacts import AttachmentResolver
 from agent_core.ports.browser import BrowserProvider
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from agent_core.ports.browser_sessions import (
@@ -615,6 +638,7 @@ class ApplicationServices:
     email: EmailExperienceService
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
+    model_settings: PublicModelSettingsServiceContract | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -654,6 +678,7 @@ class Composition:
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
     judgment_provider: JudgmentProvider | None = None
+    attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
 
 
@@ -719,10 +744,7 @@ def default_run_limits(settings: Settings) -> RunLimits:
 
 
 def _content_addressed_agent_version(agent: AgentSpec) -> str:
-    payload = agent.model_dump(mode="json", exclude={"id", "version"})
-    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
-    return f"1.0.0+h{digest}"
+    return content_addressed_agent_version(agent)
 
 
 class _ActiveToken:
@@ -905,6 +927,7 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        model_settings=InMemoryModelSettingsStore(),
         folders=InMemoryFolderStore(),
         email=InMemoryEmailStore(),
         calls=InMemoryCallStore(),
@@ -993,6 +1016,7 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            model_settings=PostgresModelSettingsStore(session),
             folders=PostgresFolderStore(session),
             email=PostgresEmailStore(session),
             calls=PostgresCallStore(session),
@@ -2154,6 +2178,7 @@ async def _compose(
     memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
     memory_people_evaluation_mode: bool,
+    memory_reasoning_effort: ReasoningEffort | None,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
     browser_authentications: BrowserAuthenticationControlPlane,
@@ -2382,6 +2407,23 @@ async def _compose(
         )
         else memory_profiles.formation.model_policy
     )
+    evaluating_memory = (
+        memory_provider_evaluation_mode
+        or memory_distillation_evaluation_mode
+        or memory_people_evaluation_mode
+    )
+    # ADR-0119: evidence binds the effort, so formation sends exactly the
+    # evaluated one: the requested effort under evaluation, the profile's
+    # otherwise, and none for a deterministic development policy.
+    extraction_effort = (
+        memory_reasoning_effort
+        if evaluating_memory
+        else None
+        if agent.model_policy in NON_ROUTED_MODEL_POLICIES
+        else memory_profiles.formation.reasoning_effort
+    )
+    if memory_provider_evaluation_mode and extraction_effort is not None:
+        raise ConfigurationError("provider-assisted formation evaluates the provider default only")
     extraction_model: ResolvedModel | None = None
     evidence_build_ref: str | None = None
     evidence_corpus_sha256: str | None = None
@@ -2419,6 +2461,15 @@ async def _compose(
                 raise
             selection_outcome = "deterministic_fallback"
             selection_reason = "model_resolution_failed"
+        if (
+            extraction_model is not None
+            and extraction_effort is not None
+            and extraction_effort not in extraction_model.reasoning_efforts
+        ):
+            raise ConfigurationError(
+                f"memory model policy {extraction_model_policy!r} does not accept "
+                f"reasoning effort {extraction_effort.value!r}"
+            )
         if extraction_model is not None:
             extraction_provider = effective_providers.get(extraction_model.provider)
             provider_unavailable_reason = (
@@ -2470,6 +2521,7 @@ async def _compose(
                     clock=clock,
                     ids=ids,
                     fallback=HighRecallCandidateExtractor(),
+                    reasoning_effort=extraction_effort,
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_people_evaluation_mode"
@@ -2482,6 +2534,7 @@ async def _compose(
                     clock=clock,
                     ids=ids,
                     fallback=HighRecallCandidateExtractor(),
+                    reasoning_effort=extraction_effort,
                 )
                 selection_outcome = "evaluation"
                 selection_reason = "explicit_distillation_evaluation_mode"
@@ -2498,6 +2551,7 @@ async def _compose(
                     clock=clock,
                     ids=ids,
                     fallback=HighRecallCandidateExtractor(),
+                    reasoning_effort=extraction_effort,
                 )
                 memory_policy_version = "formation@11"
                 selection_outcome = "activated"
@@ -2507,47 +2561,9 @@ async def _compose(
                 selected_distillation_evidence = None
                 evidence_paths = provider_extraction_evidence_paths(settings)
                 policy_pin = settings.memory_formation_policy_pin
-                # An artifact activates only for the corpus this tree ships;
-                # a tree without its corpora activates no provider policy.
-                distillation_corpus_sha256 = (
-                    shipped_corpus_sha256(MEMORY_DISTILLATION_CORPUS_PATH) or "unavailable"
+                distillation_corpus_sha256, formation_corpus_sha256, distillation_holdout_sha256 = (
+                    _shipped_evidence_digests()
                 )
-                formation_corpus_sha256 = (
-                    shipped_corpus_sha256(MEMORY_FORMATION_CORPUS_PATH) or "unavailable"
-                )
-                distillation_holdout_sha256 = (
-                    shipped_corpus_sha256(MEMORY_DISTILLATION_HOLDOUT_PATH) or "unavailable"
-                )
-                if "unavailable" in (
-                    distillation_corpus_sha256,
-                    formation_corpus_sha256,
-                    distillation_holdout_sha256,
-                ):
-                    logger.warning("memory_evaluation_corpus_unavailable")
-
-                def operator_artifact_is_bound(evidence_path: Path, build_ref: str) -> bool:
-                    """An operator file must be built from the running release.
-
-                    A bundled artifact is checked by ancestry in the bundle
-                    test; an operator-supplied file never passes through it,
-                    so the runtime holds it to the one commit it can name.
-                    Outside production, where no release identity exists, the
-                    file is accepted and the gap is logged.
-                    """
-
-                    if evidence_path != settings.memory_provider_extraction_evidence:
-                        return True
-                    if settings.release_id is None:
-                        if settings.deployment_mode is DeploymentMode.PRODUCTION:
-                            logger.warning("memory_operator_evidence_unbound_in_production")
-                            return False
-                        logger.warning("memory_operator_evidence_unbound")
-                        return True
-                    deployed_sha = settings.release_id.rsplit("-", 1)[-1]
-                    if build_ref.startswith(deployed_sha):
-                        return True
-                    logger.warning("memory_operator_evidence_build_mismatch")
-                    return False
 
                 provider_pins = (
                     MemoryFormationPolicyPin.PROVIDER_ASSISTED,
@@ -2574,8 +2590,9 @@ async def _compose(
                             ruleset.policy_version,
                             corpus_sha256=distillation_corpus_sha256,
                             holdout_sha256=distillation_holdout_sha256,
-                        ) and operator_artifact_is_bound(
-                            evidence_path, candidate_distillation_evidence.build_ref
+                            reasoning_effort=extraction_effort,
+                        ) and _operator_artifact_is_bound(
+                            settings, evidence_path, candidate_distillation_evidence.build_ref
                         ):
                             selected_distillation_evidence = candidate_distillation_evidence
                             evidence_source = (
@@ -2600,7 +2617,9 @@ async def _compose(
                         REPAIRED_PROVIDER_FORMATION_POLICY_VERSION,
                         PROVIDER_FORMATION_POLICY_VERSION,
                     )
-                if selected_distillation_evidence is None:
+                # The provider-assisted artifacts were evaluated at the
+                # provider default and record no effort.
+                if selected_distillation_evidence is None and extraction_effort is None:
                     for provider_policy in provider_policies:
                         for evidence_path in evidence_paths:
                             try:
@@ -2616,8 +2635,8 @@ async def _compose(
                                 ruleset.policy_version,
                                 formation_policy_version=provider_policy,
                                 corpus_sha256=formation_corpus_sha256,
-                            ) and operator_artifact_is_bound(
-                                evidence_path, candidate_evidence.build_ref
+                            ) and _operator_artifact_is_bound(
+                                settings, evidence_path, candidate_evidence.build_ref
                             ):
                                 selected_evidence = candidate_evidence
                                 selected_provider_policy = provider_policy
@@ -2651,6 +2670,7 @@ async def _compose(
                             clock=clock,
                             ids=ids,
                             fallback=HighRecallCandidateExtractor(),
+                            reasoning_effort=extraction_effort,
                         )
                         memory_policy_version = NEMORI_FORMATION_POLICY_VERSION
                         evidence_build_ref = selected_distillation_evidence.build_ref
@@ -2700,6 +2720,7 @@ async def _compose(
             evidence_source or "none",
             "none" if extraction_model is None else extraction_model.provider,
             "none" if extraction_model is None else extraction_model.model,
+            "default" if extraction_effort is None else extraction_effort.value,
             evidence_build_ref or "none",
             evidence_corpus_sha256 or "none",
             "none"
@@ -2707,7 +2728,7 @@ async def _compose(
             else settings.memory_formation_policy_pin.value,
         )
     )
-    selection_key = f"memory.provider_extraction.selection:v4:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v5:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -2730,6 +2751,9 @@ async def _compose(
                     "chat_model_policy": agent.model_policy,
                     "provider": None if extraction_model is None else extraction_model.provider,
                     "model": None if extraction_model is None else extraction_model.model,
+                    "reasoning_effort": (
+                        None if extraction_effort is None else extraction_effort.value
+                    ),
                     "evidence_source": evidence_source,
                     "evidence_build_ref": evidence_build_ref,
                     "evidence_corpus_sha256": evidence_corpus_sha256,
@@ -2743,14 +2767,97 @@ async def _compose(
                 created_at=clock.now(),
             )
         )
-    if not (
-        memory_provider_evaluation_mode
-        or memory_distillation_evaluation_mode
-        or memory_people_evaluation_mode
-    ):
+    memory_default_choice = ModelChoice(
+        model_policy=extraction_model_policy, reasoning_effort=extraction_effort
+    )
+    memory_alternatives: dict[ModelChoice, MemoryCandidateExtractor] = {}
+    memory_alternative_options: list[MemoryModelOption] = []
+    if selection_reason == "people_default" and not evaluating_memory:
+        # ADR-0119: the owner may move People formation to another tuple only
+        # when a formation@9 artifact on this tree evaluated exactly it.
+        distillation_digest, _, holdout_digest = _shipped_evidence_digests()
+        for evidence_path in provider_extraction_evidence_paths(settings):
+            try:
+                alternative_evidence = load_memory_distillation_evidence(evidence_path)
+            except ConfigurationError:
+                continue
+            choice = ModelChoice(
+                model_policy=alternative_evidence.model_policy,
+                reasoning_effort=alternative_evidence.reasoning_effort,
+            )
+            if choice == memory_default_choice or choice in memory_alternatives:
+                continue
+            try:
+                alternative_model = await model_router.resolve(
+                    choice.model_policy,
+                    tenant_id=principal.tenant_id,
+                    required=frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING}),
+                )
+            except ConfigurationError:
+                continue
+            alternative_provider = effective_providers.get(alternative_model.provider)
+            if alternative_provider is None or isinstance(
+                alternative_provider, MissingCredentialProvider
+            ):
+                continue
+            if (
+                choice.reasoning_effort is not None
+                and choice.reasoning_effort not in alternative_model.reasoning_efforts
+            ):
+                continue
+            if not (
+                distillation_evidence_matches(
+                    alternative_evidence,
+                    alternative_model,
+                    agent.policy_profile,
+                    ruleset.policy_version,
+                    corpus_sha256=distillation_digest,
+                    holdout_sha256=holdout_digest,
+                    reasoning_effort=choice.reasoning_effort,
+                )
+                and _operator_artifact_is_bound(
+                    settings, evidence_path, alternative_evidence.build_ref
+                )
+            ):
+                continue
+            memory_alternatives[choice] = AttributedCommunicationCandidateExtractor(
+                PeopleAssistedCandidateExtractor(
+                    provider=alternative_provider,
+                    resolved_model=alternative_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    fallback=HighRecallCandidateExtractor(),
+                    reasoning_effort=choice.reasoning_effort,
+                )
+            )
+            memory_alternative_options.append(
+                MemoryModelOption(
+                    model_policy=choice.model_policy,
+                    display_name=alternative_model.display_name or alternative_model.model,
+                    provider=alternative_model.provider,
+                    model=alternative_model.model,
+                    reasoning_effort=choice.reasoning_effort,
+                )
+            )
+    model_settings_catalog = await _model_settings_catalog(
+        agent=agent,
+        model_router=model_router,
+        providers=effective_providers,
+        tenant_id=principal.tenant_id,
+        memory_default=memory_default_choice,
+        memory_alternatives=memory_alternative_options,
+    )
+    if not evaluating_memory:
         memory_extractor = AttributedCommunicationCandidateExtractor(
             memory_extractor or DeterministicCandidateExtractor()
         )
+        if memory_alternatives:
+            memory_extractor = OwnerSelectedCandidateExtractor(
+                uow_factory=uow_factory,
+                catalog=model_settings_catalog,
+                extractors={memory_default_choice: memory_extractor, **memory_alternatives},
+            )
     memory_service = GovernedMemoryService(
         uow_factory,
         clock,
@@ -2837,6 +2944,7 @@ async def _compose(
                     ids=ids,
                     commit_guard=guard,
                     source_isolated=True,
+                    reasoning_effort=extraction_effort,
                 ),
                 policy_version="formation@11",
                 people_enabled=True,
@@ -3005,6 +3113,13 @@ async def _compose(
             clock,
             ids,
             principal,
+            # ADR-0120: PDFs the owner sends reach knowledge through their text layer.
+            extractor=RoutingExtractor(
+                [
+                    PlainTextExtractor(),
+                    PdfTextExtractor(maximum_bytes=MAX_KNOWLEDGE_SOURCE_BYTES),
+                ]
+            ),
             trace_retention=memory_profiles.traces,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
@@ -3412,6 +3527,7 @@ async def _compose(
             notification_producer=notification_producer,
             task_runner=execute_email_task,
             typed_task=is_email_task,
+            model_settings=model_settings_catalog,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -3552,6 +3668,7 @@ async def _compose(
             on_session_closed=consolidate_closed_session,
             trajectory_artifacts=trajectory_artifact_store,
             general_artifacts=general_artifact_store,
+            model_settings=model_settings_catalog,
         )
 
         async def sweep_session_deletions() -> int:
@@ -3769,6 +3886,8 @@ async def _compose(
                 artifacts=trajectory_artifact_store,
                 general_artifacts=general_artifact_store,
                 clock=clock,
+                ids=ids,
+                inspector=SignatureAttachmentInspector(),
             ),
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
@@ -3783,6 +3902,9 @@ async def _compose(
             ),
             people=people_service,
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            model_settings=PublicModelSettingsService(
+                uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
+            ),
             folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
             calls=call_service,
             email=EmailExperienceService(
@@ -3931,6 +4053,9 @@ async def _compose(
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
                     ),
+                    sweep_upload_ingests=UploadAutoIngest(
+                        uow_factory=uow_factory, knowledge=knowledge_service, principal=principal
+                    ).sweep_once,
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
@@ -3978,7 +4103,11 @@ async def _compose(
         raise
 
 
-def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[str, ModelProvider]:
+def _provider_adapters(
+    settings: Settings,
+    registry: ProviderRegistry,
+    attachment_resolver: AttachmentResolver | None = None,
+) -> dict[str, ModelProvider]:
     providers: dict[str, ModelProvider] = {}
     for profile_name, loaded in registry.profiles.items():
         profile = loaded.document
@@ -3988,13 +4117,21 @@ def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[s
             provider: ModelProvider = (
                 MissingCredentialProvider("openai")
                 if api_key is None
-                else OpenAIResponsesProvider(api_key=api_key, base_url=profile.base_url)
+                else OpenAIResponsesProvider(
+                    api_key=api_key,
+                    base_url=profile.base_url,
+                    attachment_resolver=attachment_resolver,
+                )
             )
         elif profile.adapter == "anthropic":
             provider = (
                 MissingCredentialProvider("anthropic")
                 if api_key is None
-                else AnthropicMessagesProvider(api_key=api_key, base_url=profile.base_url)
+                else AnthropicMessagesProvider(
+                    api_key=api_key,
+                    base_url=profile.base_url,
+                    attachment_resolver=attachment_resolver,
+                )
             )
         elif profile.adapter == "chat_completions":
             tags = profile.in_band_reasoning
@@ -4003,6 +4140,7 @@ def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[s
                 api_key=api_key,
                 think_open="<think>" if tags is None else tags.open,
                 think_close="</think>" if tags is None else tags.close,
+                attachment_resolver=attachment_resolver,
             )
         else:
             raise ConfigurationError(f"adapter {profile.adapter!r} is not constructible")
@@ -4117,6 +4255,142 @@ def _browser_provider(
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
 
+def _shipped_evidence_digests() -> tuple[str, str, str]:
+    """The corpus, formation corpus, and holdout digests this tree ships.
+
+    An artifact activates only for the corpus this tree ships; a tree without
+    its corpora activates no provider policy.
+    """
+
+    distillation = shipped_corpus_sha256(MEMORY_DISTILLATION_CORPUS_PATH) or "unavailable"
+    formation = shipped_corpus_sha256(MEMORY_FORMATION_CORPUS_PATH) or "unavailable"
+    holdout = shipped_corpus_sha256(MEMORY_DISTILLATION_HOLDOUT_PATH) or "unavailable"
+    if "unavailable" in (distillation, formation, holdout):
+        logger.warning("memory_evaluation_corpus_unavailable")
+    return distillation, formation, holdout
+
+
+def _operator_artifact_is_bound(settings: Settings, evidence_path: Path, build_ref: str) -> bool:
+    """An operator file must be built from the running release.
+
+    A bundled artifact is checked by ancestry in the bundle test; an
+    operator-supplied file never passes through it, so the runtime holds it to
+    the one commit it can name. Outside production, where no release identity
+    exists, the file is accepted and the gap is logged.
+    """
+
+    if evidence_path != settings.memory_provider_extraction_evidence:
+        return True
+    if settings.release_id is None:
+        if settings.deployment_mode is DeploymentMode.PRODUCTION:
+            logger.warning("memory_operator_evidence_unbound_in_production")
+            return False
+        logger.warning("memory_operator_evidence_unbound")
+        return True
+    deployed_sha = settings.release_id.rsplit("-", 1)[-1]
+    if build_ref.startswith(deployed_sha):
+        return True
+    logger.warning("memory_operator_evidence_build_mismatch")
+    return False
+
+
+async def _model_settings_catalog(
+    *,
+    agent: AgentSpec,
+    model_router: StaticModelRouter,
+    providers: Mapping[str, ModelProvider],
+    tenant_id: str,
+    memory_default: ModelChoice,
+    memory_alternatives: Sequence[MemoryModelOption] = (),
+) -> ModelSettingsCatalog:
+    """What the owner may choose here, and what applies until they do (ADR-0119).
+
+    Chat offers every selectable policy whose provider holds a credential, and
+    always the deployment default. A non-routed development composition
+    offers only its own deterministic policy. Memory offers the tuple this
+    composition selected and any alternative with matching evidence.
+    """
+
+    async def resolved_or_none(policy: str) -> ResolvedModel | None:
+        if policy in NON_ROUTED_MODEL_POLICIES:
+            return None
+        try:
+            return await model_router.resolve(policy, tenant_id=tenant_id)
+        except ConfigurationError:
+            return None
+
+    chat_options: list[ChatModelOption] = []
+    if agent.model_policy in NON_ROUTED_MODEL_POLICIES:
+        chat_options.append(
+            ChatModelOption(
+                model_policy=agent.model_policy,
+                display_name="Deterministic development model",
+                provider="fake",
+                model="scripted",
+            )
+        )
+    else:
+        selectable = list(model_router.registry.policies.selectable_chat_policies)
+        if agent.model_policy not in selectable:
+            selectable.insert(0, agent.model_policy)
+        for policy in selectable:
+            resolved = await resolved_or_none(policy)
+            if resolved is None:
+                if policy == agent.model_policy:
+                    # Runs fail on an unresolvable default anyway; the choice
+                    # still names what the deployment uses.
+                    chat_options.append(
+                        ChatModelOption(
+                            model_policy=policy,
+                            display_name=policy,
+                            provider="unresolved",
+                            model=policy,
+                        )
+                    )
+                continue
+            provider = providers.get(resolved.provider)
+            if policy != agent.model_policy and (
+                provider is None or isinstance(provider, MissingCredentialProvider)
+            ):
+                continue
+            chat_options.append(
+                ChatModelOption(
+                    model_policy=policy,
+                    display_name=resolved.display_name or resolved.model,
+                    provider=resolved.provider,
+                    model=resolved.model,
+                    reasoning_efforts=resolved.reasoning_efforts,
+                )
+            )
+    default_option = next(
+        option for option in chat_options if option.model_policy == agent.model_policy
+    )
+    memory_resolved = await resolved_or_none(memory_default.model_policy)
+    memory_options = (
+        MemoryModelOption(
+            model_policy=memory_default.model_policy,
+            display_name=(
+                memory_default.model_policy
+                if memory_resolved is None
+                else memory_resolved.display_name or memory_resolved.model
+            ),
+            provider="fake" if memory_resolved is None else memory_resolved.provider,
+            model="scripted" if memory_resolved is None else memory_resolved.model,
+            reasoning_effort=memory_default.reasoning_effort,
+        ),
+        *memory_alternatives,
+    )
+    return ModelSettingsCatalog(
+        chat_default=ModelChoice(
+            model_policy=agent.model_policy,
+            reasoning_effort=default_chat_effort(default_option.reasoning_efforts),
+        ),
+        chat_options=tuple(chat_options),
+        memory_default=memory_default,
+        memory_options=memory_options,
+    )
+
+
 def _effective_model_policy(
     deployment_mode: DeploymentMode,
     requested_policy: str | None,
@@ -4163,6 +4437,7 @@ async def build(
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
     memory_people_evaluation_mode: bool = False,
+    memory_reasoning_effort: ReasoningEffort | None = None,
     service_logging: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
@@ -4558,7 +4833,17 @@ async def build(
                     effective_principal.tenant_id,
                 ),
             )
-        provider_adapters = _provider_adapters(effective_settings, provider_registry)
+        # ADR-0120: every constructed adapter can read the owner's attachments,
+        # whether or not the upload flag is on, so existing ones keep rendering.
+        attachment_resolver = StoredAttachmentResolver(
+            uow_factory=uow_factory,
+            store=FilesystemArtifactStore(effective_settings.artifact_root),
+            principal=effective_principal,
+            clock=effective_clock,
+        )
+        provider_adapters = _provider_adapters(
+            effective_settings, provider_registry, attachment_resolver
+        )
         effective_credential_resolver = credential_resolver or MappingCredentialResolver(
             {
                 name: secret.get_secret_value()
@@ -4741,6 +5026,7 @@ async def build(
             memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
             memory_people_evaluation_mode=memory_people_evaluation_mode,
+            memory_reasoning_effort=memory_reasoning_effort,
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,
             browser_authentications=browser_authentications,
@@ -4750,6 +5036,7 @@ async def build(
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
         )
+        composition = replace(composition, attachment_resolver=attachment_resolver)
         yield composition
     finally:
         if composition is not None:

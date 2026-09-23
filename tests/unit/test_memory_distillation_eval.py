@@ -1039,6 +1039,7 @@ def test_a_development_only_run_never_touches_the_holdout(
         policy_profile: str,
         policy_version: Any,
         seeds: Any,
+        reasoning_effort: Any = None,
     ) -> Any:
         return memory_eval.DistillationArmResult(
             policy_version=policy_version,
@@ -1242,3 +1243,78 @@ def test_a_result_records_its_repeat_count() -> None:
         ).repeats
         == 1
     )
+
+
+def test_an_effort_evaluation_sends_it_to_the_evaluated_arm_only_and_keeps_case_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0119: the controls run at the provider default; the evaluated arm at the effort.
+
+    Cases may run concurrently, but results keep the corpus order.
+    """
+
+    import asyncio
+    from datetime import UTC, datetime
+
+    from agent_core.domain.messages import ReasoningEffort
+
+    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+    monkeypatch.setattr(memory_eval, "require_committed_tree", lambda root, ref: None)
+    monkeypatch.setattr(memory_eval, "load_settings", lambda: object())
+    monkeypatch.setattr(memory_eval, "_evaluation_settings", lambda settings, root: settings)
+    sent: list[tuple[str, ReasoningEffort | None]] = []
+
+    async def recording_arm(
+        _settings: Any,
+        case: Any,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        policy_version: Any,
+        seeds: Any,
+        reasoning_effort: ReasoningEffort | None = None,
+    ) -> Any:
+        sent.append((policy_version, reasoning_effort))
+        await asyncio.sleep(0.001 * (hash(case.id) % 5))
+        return memory_eval.DistillationArmResult(
+            policy_version=policy_version,
+            beliefs=[],
+            score=memory_eval.score_distillation_case(case, []),
+            identity=("openai", "gpt-6-astra", "default@1"),
+            reasoning_effort=None if reasoning_effort is None else reasoning_effort.value,
+            provider_calls=0,
+            expected_provider_calls=0,
+            evaluated_at=datetime(2026, 9, 23, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(memory_eval, "_evaluate_case", recording_arm)
+    corpus, _ = memory_eval.load_distillation_corpus(Path.cwd())
+
+    result = asyncio.run(
+        memory_eval.run_live_evaluation(
+            Path.cwd(),
+            model_policy="astra",
+            policy_profile="default",
+            build_ref="0" * 40,
+            output=tmp_path / "evidence.json",
+            development_only=True,
+            reasoning_effort=ReasoningEffort.MEDIUM,
+            concurrency=4,
+        )
+    )
+
+    assert result is not None
+    assert {effort for policy, effort in sent if policy == "formation@9"} == {
+        ReasoningEffort.MEDIUM
+    }
+    assert {effort for policy, effort in sent if policy != "formation@9"} == {None}
+    assert [case.case_id for case in result.cases] == [case.id for case in corpus.cases]
+    assert result.reasoning_effort == "medium"
+
+
+def test_distillation_cli_offers_effort_and_concurrency() -> None:
+    result = CliRunner().invoke(app, ["eval", "memory-distillation", "--help"])
+
+    assert result.exit_code == 0
+    assert "--reasoning-effort" in result.output
+    assert "--concurrency" in result.output

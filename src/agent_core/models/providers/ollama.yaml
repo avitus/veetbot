@@ -25,5 +25,6 @@ limits:
   max_tool_count: 32
 models:
   - id: qwen3:8b
+    display_name: Qwen3 8B (local)
     aliases: [local-small]
     catalog: open-local-8b

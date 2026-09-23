@@ -370,7 +370,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:635` named `ApprovalService` as one of
+`bootstrap-and-composition.md:648` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -478,8 +478,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1206-1207` and the resolve at
-`policy-and-approvals.md:1233`, and one reference in
+at `policy-and-approvals.md:1207-1208` and the resolve at
+`policy-and-approvals.md:1234`, and one reference in
 `runtime-loop.md:1215` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -921,7 +921,8 @@ The design decisions that carry the most weight elsewhere in the
 corpus are four. Ingestion is a tool, `knowledge.ingest`, rather than
 a route or a CLI noun, because the Milestone 5 API baseline was closed at
 fourteen routes and an artifact is not uploaded through it in 0.1; ADR-0050's
-later list and delete routes do not add an upload surface. Ingestion requires `USER`
+later list and delete routes do not add an upload surface, and ADR-0120's later
+chat attachment upload feeds knowledge only for files the owner sends. Ingestion requires `USER`
 origin trust, so an agent cannot admit what it fetched. The secret
 scan blocks an ingest and the injection scan does not — a credential
 in a permanent corpus is unrecoverable, while instruction-like text is
@@ -1765,7 +1766,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1486` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2642` against
-    `model-gateway.md:1810` and `milestone-map.md:1856`. The map
+    `model-gateway.md:1850` and `milestone-map.md:1856`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

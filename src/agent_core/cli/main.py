@@ -48,7 +48,7 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import MemoryEdit, MemoryReviewOutcome, Portability, Sensitivity
-from agent_core.domain.messages import AssistantMessage, TextPart
+from agent_core.domain.messages import AssistantMessage, ReasoningEffort, TextPart
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import (
@@ -319,6 +319,8 @@ class _MemoryDistillationEvalModule(Protocol):
         output: Path,
         development_only: bool,
         repeats: int,
+        reasoning_effort: ReasoningEffort | None,
+        concurrency: int,
     ) -> Any | None: ...
 
 
@@ -1652,6 +1654,17 @@ def eval_memory_distillation(
             help="Run the whole evaluation this many times and gate on the pooled aggregate.",
         ),
     ] = 1,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help="Send this effort (low, medium, high, xhigh, max) from the evaluated arm.",
+        ),
+    ] = None,
+    concurrency: Annotated[
+        int,
+        typer.Option("--concurrency", min=1, help="Evaluate this many cases at once."),
+    ] = 1,
 ) -> None:
     """Compare formation@7, formation@8, and formation@9 on corpus v3."""
 
@@ -1670,6 +1683,10 @@ def eval_memory_distillation(
                 output=output,
                 development_only=development_only,
                 repeats=repeats,
+                reasoning_effort=(
+                    None if reasoning_effort is None else ReasoningEffort(reasoning_effort)
+                ),
+                concurrency=concurrency,
             )
         )
     except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:

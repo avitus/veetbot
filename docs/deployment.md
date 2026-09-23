@@ -335,6 +335,13 @@ provider-assisted formation falls back to deterministic until the evidence is
 regenerated on the new version. Observe first, read the
 `agent.policy.advisory.*` metrics, and enforce only when no approval is pending.
 
+The client's model settings (ADR-0119) need `settings.read,settings.write`
+appended to `AUTH_SCOPES` in that same file; without them the Settings screen
+reports the missing scopes and every model stays at the deployment default.
+The routes are always mounted. A saved chat model applies to new app chats;
+the chat effort applies to later agent runs except typed email tasks, which
+retain provider-default effort. The memory choice applies to later formation.
+
 The host exports no metrics, so the service log answers whether these consumers
 are running. Every long-running service writes JSON lines, one object per
 event, with first-party events from `INFO` and every other logger from
@@ -540,6 +547,14 @@ Before merging a new static-host configuration to `main`:
 The deployment deliberately does not bootstrap around a missing certificate:
 strict Nginx validation must fail rather than publish a plaintext or
 misidentified documentation endpoint.
+
+The API virtual host keeps `client_max_body_size 1m` for every path except
+the chat attachment upload (ADR-0120), whose location allows `33m` and
+streams the body to the application unbuffered. Activating attachments needs
+three changes together: set `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, add
+`artifact.write` and `knowledge.write` to the owner principal's
+`AUTH_SCOPES`, and let `deploy-nginx` publish the location after the release.
+Until the Nginx job lands, an upload above 1 MiB receives Nginx's own `413`.
 
 ## CircleCI setup
 

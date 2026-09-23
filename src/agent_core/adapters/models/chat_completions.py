@@ -11,10 +11,14 @@ import httpx
 
 from agent_core.adapters.models.common import (
     RawEventSource,
+    RenderedAttachments,
     classify_provider_failure,
     failed_event,
+    has_attachment_parts,
+    rendered_attachments,
     should_retry_failure_event,
     text_content,
+    user_segments,
 )
 from agent_core.adapters.models.registry import CHAT_COMPLETIONS_CAPABILITY_CEILING
 from agent_core.domain.messages import (
@@ -39,6 +43,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.tools import ToolSpec
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
+from agent_core.ports.artifacts import AttachmentResolver
 
 
 class ThinkScrubber:
@@ -145,7 +150,9 @@ class ChatCompletionsProvider:
         think_open: str = "<think>",
         think_close: str = "</think>",
         max_internal_attempts: int = 3,
+        attachment_resolver: AttachmentResolver | None = None,
     ) -> None:
+        self._attachment_resolver = attachment_resolver
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._event_source = event_source
@@ -201,8 +208,11 @@ class ChatCompletionsProvider:
         resolved: ResolvedModel,
         attempt: ModelAttempt,
     ) -> AsyncIterator[ModelEvent]:
+        attachments = await rendered_attachments(
+            self._attachment_resolver, request, resolved, attempt
+        )
         try:
-            payload, timeout = self._request_payload(request, resolved)
+            payload, timeout = self._request_payload(request, resolved, attachments)
         except (TypeError, ValueError, ModelStreamError):
             yield failed_event(
                 attempt=attempt,
@@ -590,14 +600,23 @@ class ChatCompletionsProvider:
 
     @staticmethod
     def _request_payload(
-        request: ModelRequest, resolved: ResolvedModel
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attachments: RenderedAttachments | None = None,
     ) -> tuple[dict[str, Any], httpx.Timeout]:
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)
         messages: list[dict[str, Any]] = []
-        for item in request.conversation:
-            if isinstance(item, (SystemMessage, UserMessage, AssistantMessage)):
+        for item_index, item in enumerate(request.conversation):
+            if isinstance(item, UserMessage) and has_attachment_parts(item):
+                # Text-only wire: an image or PDF could only arrive here as a
+                # marker, because this adapter's capability ceiling has neither.
+                segments = user_segments(item_index, item, attachments or {})
+                messages.append(
+                    {"role": "user", "content": "\n".join(segment.text for segment in segments)}
+                )
+            elif isinstance(item, (SystemMessage, UserMessage, AssistantMessage)):
                 messages.append({"role": item.kind, "content": text_content(item.content)})
             elif isinstance(item, ToolCallItem):
                 messages.append(

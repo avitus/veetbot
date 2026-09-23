@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_core.config import ConfigurationError
 from agent_core.domain.memory import BeliefType
+from agent_core.domain.messages import ReasoningEffort
 
 MEMORY_PROFILE_DOCUMENT = "memory/profiles.yaml"
 
@@ -118,6 +119,9 @@ class FormationProfile(_ProfileModel):
     """When consolidation runs and which formation behaviors are enabled."""
 
     model_policy: str = Field(default="balanced", pattern=r"^[a-z][a-z0-9_-]*$", max_length=64)
+    # Sent with every formation request; null keeps the provider default.
+    # Evidence binds it, so a change needs an evaluation at the new effort.
+    reasoning_effort: ReasoningEffort | None = None
     session_boundary_enabled: bool = True
     scheduled_enabled: bool = True
     scheduled_interval_seconds: int = Field(default=86_400, ge=1)

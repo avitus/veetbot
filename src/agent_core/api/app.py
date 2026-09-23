@@ -17,12 +17,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from agent_core.api.attachments import attachments_router
 from agent_core.api.auth import Authenticator
 from agent_core.api.calls import call_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
-from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
+from agent_core.api.middleware import (
+    PayloadTooLargeError,
+    RequestBoundaryMiddleware,
+    body_limit_message,
+)
+from agent_core.api.model_settings import model_settings_router
 from agent_core.api.people import people_router
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
@@ -43,6 +49,7 @@ from agent_core.application.services import (
     EmailService,
     FolderService,
     MemoryReadService,
+    ModelSettingsService,
     NotificationService,
     PeopleService,
     PersonaService,
@@ -189,6 +196,9 @@ class ApplicationServices(Protocol):
 
     @property
     def persona(self) -> PersonaService: ...
+
+    @property
+    def model_settings(self) -> ModelSettingsService | None: ...
 
     @property
     def folders(self) -> FolderService: ...
@@ -530,6 +540,7 @@ def create_app(
         RequestBoundaryMiddleware,
         new_request_id=new_request_id,
         early_authenticate=auth.authenticate_scope,
+        uploads_enabled=settings.attachment_uploads_enabled,
     )
 
     @app.exception_handler(AgentCoreError)
@@ -597,12 +608,11 @@ def create_app(
     @app.exception_handler(PayloadTooLargeError)
     async def payload_too_large(request: Request, exc: PayloadTooLargeError) -> JSONResponse:
         """Report the request size limit without including any rejected body content."""
-        del exc
         return _error_response(
             request,
             code="payload_too_large",
             status=API_ERROR_STATUS["payload_too_large"],
-            message="The request body exceeds the 1 MiB limit.",
+            message=body_limit_message(exc.limit_bytes),
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -1915,11 +1925,16 @@ def create_app(
             ),
         )
 
+    model_settings = getattr(services, "model_settings", None)
+    if model_settings is not None:
+        app.include_router(model_settings_router(model_settings, secured))
     if settings.email_mode_enabled:
         app.include_router(email_router(services.email, secured))
     if settings.email_mode_enabled and settings.email_unsubscribe_enabled:
         app.include_router(email_subscriptions_router(services.email.subscriptions, secured))
     if settings.call_enabled and services.calls is not None:
         app.include_router(call_router(services.calls, secured))
+    if settings.attachment_uploads_enabled:
+        app.include_router(attachments_router(services.artifacts, secured))
 
     return app

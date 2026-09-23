@@ -19,12 +19,18 @@ from anthropic import (
 
 from agent_core.adapters.models.common import (
     RawEventSource,
+    RenderedAttachments,
+    UserSegment,
     as_mapping,
+    base64_data,
     classify_provider_failure,
     failed_event,
+    has_attachment_parts,
+    rendered_attachments,
     should_retry_failure_event,
     text_content,
     tool_definition,
+    user_segments,
 )
 from agent_core.adapters.models.registry import ANTHROPIC_CAPABILITY_CEILING
 from agent_core.domain.messages import (
@@ -47,8 +53,10 @@ from agent_core.domain.messages import (
     UsageEvent,
     UserMessage,
 )
+from agent_core.model.attachments import display_name
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
+from agent_core.ports.artifacts import AttachmentResolver
 
 _ANTHROPIC_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
@@ -88,11 +96,13 @@ class AnthropicMessagesProvider:
         event_source: RawEventSource | None = None,
         client: object | None = None,
         max_internal_attempts: int = 3,
+        attachment_resolver: AttachmentResolver | None = None,
     ) -> None:
         self._event_source = event_source
         self._client = client
         self._owns_client = client is None and event_source is None
         self._max_internal_attempts = max_internal_attempts
+        self._attachment_resolver = attachment_resolver
         if self._owns_client:
             if not api_key:
                 raise ValueError("Anthropic provider requires its resolved credential")
@@ -116,8 +126,11 @@ class AnthropicMessagesProvider:
         resolved: ResolvedModel,
         attempt: ModelAttempt,
     ) -> AsyncIterator[ModelEvent]:
+        attachments = await rendered_attachments(
+            self._attachment_resolver, request, resolved, attempt
+        )
         try:
-            payload, sent, dropped = self._request_payload(request, resolved)
+            payload, sent, dropped = self._request_payload(request, resolved, attachments)
         except (TypeError, ValueError, ModelStreamError):
             yield failed_event(
                 attempt=attempt,
@@ -519,7 +532,9 @@ class AnthropicMessagesProvider:
 
     @staticmethod
     def _request_payload(
-        request: ModelRequest, resolved: ResolvedModel
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attachments: RenderedAttachments | None = None,
     ) -> tuple[dict[str, Any], int, int]:
         from agent_core.model.streaming import validate_conversation_pairing
 
@@ -535,9 +550,12 @@ class AnthropicMessagesProvider:
             definition = tool_definition(tool, anthropic=True)
             definition["name"] = canonical_to_wire[tool.name]
             tools.append(definition)
-        for item in request.conversation:
+        for item_index, item in enumerate(request.conversation):
             if isinstance(item, SystemMessage):
                 system.append({"type": "text", "text": text_content(item.content)})
+            elif isinstance(item, UserMessage) and has_attachment_parts(item):
+                for segment in user_segments(item_index, item, attachments or {}):
+                    _append_message(messages, "user", _user_block(segment))
             elif isinstance(item, UserMessage):
                 _append_message(
                     messages,
@@ -600,6 +618,8 @@ class AnthropicMessagesProvider:
         }
         if resolved.capabilities.reasoning.value == "native":
             payload["thinking"] = {"type": "adaptive"}
+            if request.reasoning_effort is not None:
+                payload["output_config"] = {"effort": request.reasoning_effort.value}
         return payload, sent, dropped
 
     async def close(self) -> None:
@@ -634,3 +654,19 @@ def _optional_string(value: object) -> str | None:
 
 def _integer(value: object, *, default: int = 0) -> int:
     return value if type(value) is int and value >= 0 else default
+
+
+def _user_block(segment: UserSegment) -> dict[str, Any]:
+    """Render one owner-message segment as a Messages content block."""
+
+    attachment = segment.attachment
+    if segment.kind == "text" or attachment is None or attachment.data is None:
+        return {"type": "text", "text": segment.text}
+    source = {
+        "type": "base64",
+        "media_type": attachment.part.media_type,
+        "data": base64_data(attachment.data),
+    }
+    if segment.kind == "image":
+        return {"type": "image", "source": source}
+    return {"type": "document", "source": source, "title": display_name(attachment.part)}

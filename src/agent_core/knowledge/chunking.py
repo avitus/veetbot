@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from uuid import UUID
 
 from agent_core.domain.errors import ToolValidationError
 from agent_core.domain.knowledge import KnowledgeChunk
+from agent_core.ports.knowledge import Extractor
 
 CHUNKER_VERSION = "knowledge-chunker@1"
 MAX_KNOWLEDGE_SOURCE_BYTES = 32 * 1024 * 1024
@@ -45,6 +46,28 @@ class PlainTextExtractor:
             return bytes(content).decode("utf-8")
         except UnicodeDecodeError as exc:
             raise ToolValidationError("knowledge source is not valid UTF-8") from exc
+
+
+class RoutingExtractor:
+    """Dispatch each media type to the one extractor that declares it."""
+
+    def __init__(self, extractors: Sequence[Extractor]) -> None:
+        routes: dict[str, Extractor] = {}
+        for extractor in extractors:
+            for media_type in extractor.media_types():
+                if media_type in routes:
+                    raise ValueError(f"two extractors declare {media_type!r}")
+                routes[media_type] = extractor
+        self._routes = routes
+
+    def media_types(self) -> set[str]:
+        return set(self._routes)
+
+    async def extract(self, source: AsyncIterator[bytes], media_type: str) -> str:
+        extractor = self._routes.get(media_type)
+        if extractor is None:
+            raise ToolValidationError(f"unsupported knowledge media type {media_type!r}")
+        return await extractor.extract(source, media_type)
 
 
 def normalize_text(text: str, *, tab_width: int = 4) -> str:

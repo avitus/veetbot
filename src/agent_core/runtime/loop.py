@@ -29,6 +29,7 @@ from agent_core.domain.messages import (
     ModelTransientError,
     ModelTurn,
     ModelUsage,
+    ReasoningEffort,
     ResolvedModel,
     StopReason,
     TextPart,
@@ -91,6 +92,8 @@ class RunContext:
     identical_call_threshold: int = 5
     identical_denial_threshold: int = 3
     max_compactions_per_step: int = 2
+    # ADR-0119: the owner's chat effort, when this run's model accepts it.
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class CheckpointContext(Protocol):
@@ -489,6 +492,10 @@ async def _invoke_model(
             if synthesis_reserve is not None
             else request
         )
+        if context.reasoning_effort is not None and attempt_request.reasoning_effort is None:
+            attempt_request = attempt_request.model_copy(
+                update={"reasoning_effort": context.reasoning_effort}
+            )
         step.attempt_count += 1
         attempt = ModelAttempt(
             attempt_id=context.ids.new_id(),
@@ -508,6 +515,11 @@ async def _invoke_model(
                 "context_total_tokens": attempt_request.metadata.get("context_total_tokens"),
                 "context_capacity_tokens": attempt_request.metadata.get("context_capacity_tokens"),
                 "context_reserve_tokens": attempt_request.metadata.get("context_reserve_tokens"),
+                "reasoning_effort": (
+                    None
+                    if attempt_request.reasoning_effort is None
+                    else attempt_request.reasoning_effort.value
+                ),
             },
         )
         expected_sequence = 0

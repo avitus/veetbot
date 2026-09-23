@@ -46,3 +46,30 @@ def test_tool_estimate_counts_the_model_visible_contract_only() -> None:
 
     assert estimator.estimate_tools([internal_metadata_changed], model_id) == baseline
     assert estimator.estimate_tools([visible_contract_changed], model_id) > baseline
+
+
+def test_owner_attachments_are_counted_as_what_the_adapter_may_send() -> None:
+    """ADR-0120: a reference serializes small, so the file itself is added."""
+
+    from uuid import UUID
+
+    from agent_core.domain.messages import FileReferencePart, ToolResultItem
+    from agent_core.model import attachments
+
+    estimator = ConservativeTokenEstimator()
+    pdf = FileReferencePart(
+        artifact_id=UUID(int=1),
+        media_type="application/pdf",
+        filename="a.pdf",
+        size_bytes=10_000,
+        page_count=5,
+    )
+    text_only = [UserMessage(content=[TextPart(text="read this")])]
+    with_pdf = [UserMessage(content=[TextPart(text="read this"), pdf])]
+    in_tool_result = [ToolResultItem(call_id="c", content=[pdf])]
+    base = estimator.estimate(text_only, "fake:scripted")
+    assert estimator.estimate(with_pdf, "fake:scripted") >= (
+        base + 5 * attachments.PDF_TOKENS_PER_PAGE + attachments.LABEL_TOKENS
+    )
+    # A reference outside an owner message is only ever a one-line marker.
+    assert estimator.estimate(in_tool_result, "fake:scripted") < 5 * attachments.PDF_TOKENS_PER_PAGE
