@@ -100,6 +100,22 @@ def test_estimate_is_an_upper_bound_of_the_selection() -> None:
     )
 
 
+def test_estimate_caps_content_but_keeps_labels_for_every_reference() -> None:
+    conversation: list[ConversationItem] = [
+        UserMessage(content=[_pdf(n, pages=60) for n in range(1, 11)]),
+        ToolResultItem(call_id="c", content=[_pdf(11)]),
+    ]
+    estimate = attachments.estimate_attachment_tokens(conversation)
+    assert estimate == attachments.REQUEST_INLINE_MAX_TOKENS + 11 * attachments.LABEL_TOKENS
+    selected = attachments.select_attachments(conversation)
+    sent = sum(
+        attachments.content_tokens(decision.part)
+        for decision in selected.values()
+        if decision.reason is None
+    )
+    assert sent + 11 * attachments.LABEL_TOKENS <= estimate
+
+
 def test_capability_and_resolution_turn_selected_items_into_markers() -> None:
     conversation = [UserMessage(content=[_image(1), _pdf(2), _text(3)])]
     decisions = attachments.select_attachments(conversation)

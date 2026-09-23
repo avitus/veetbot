@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
 from pathlib import PurePosixPath
 
 from pypdf import PdfReader
 
+from agent_core.adapters.pdf_process import parse_pdf
 from agent_core.domain.artifacts import AttachmentFacts
+from agent_core.domain.errors import ToolValidationError
 from agent_core.model.attachments import (
     IMAGE_MEDIA_TYPES,
     PDF_MEDIA_TYPE,
@@ -94,10 +95,11 @@ class SignatureAttachmentInspector:
             return AttachmentFacts(media_type=image, kind=AttachmentKind.IMAGE.value)
         if b"%PDF-" in content[:_PDF_SIGNATURE_WINDOW]:
             try:
-                pages = await asyncio.wait_for(
-                    asyncio.to_thread(_pdf_pages, content), timeout=self._pdf_timeout_seconds
+                result = await parse_pdf(
+                    content, operation="pages", timeout=self._pdf_timeout_seconds
                 )
-            except TimeoutError:
+                pages = result if type(result) is int else None
+            except (TimeoutError, OSError, ToolValidationError):
                 logger.info("attachment_pdf_inspection_timeout")
                 pages = None
             if pages is None:

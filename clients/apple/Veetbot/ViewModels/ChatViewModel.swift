@@ -1265,7 +1265,13 @@ public final class ChatViewModel: ObservableObject {
         let browserProfileID = selectedBrowserProfileID
         let creation = Task { try await api.createSession(browserProfileID: browserProfileID) }
         sessionCreation = creation
-        let session = try await creation.value
+        let session: SessionView
+        do {
+            session = try await creation.value
+        } catch {
+            if sessionCreation == creation { sessionCreation = nil }
+            throw error
+        }
         guard attachmentGeneration == generation else { throw CancellationError() }
         if sessionCreation == creation {
             sessionCreation = nil

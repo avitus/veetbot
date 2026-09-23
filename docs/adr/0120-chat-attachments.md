@@ -119,3 +119,14 @@ refused the whole history as invalid.
   a provider-held copy would need its own retention and deletion.
 - **A new `artifact.upload` scope:** rejected; `artifact.write` already names
   writing an artifact.
+
+## Review hardening (2026-09-23)
+
+PDF inspection and extraction use disposable, killable processes with a shared
+concurrency ceiling and bounded input/output. Timeouts must stop parsing before
+a retry can start; cancelling a thread await is insufficient. The detailed
+limits and platform handling are in `docs/plan/knowledge-documents.md`.
+Attachment estimates cap content at the request-wide token budget while counting
+every reference label. Native session creation clears a failed shared task so
+sending and uploads can retry, and mixed drop representations keep text/URL
+precedence over generic data while explicit files, images and PDFs remain files.

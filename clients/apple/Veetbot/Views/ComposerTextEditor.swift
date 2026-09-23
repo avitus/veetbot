@@ -12,13 +12,17 @@ enum ComposerDropPolicy {
     ]
 
     static func takesAttachments(typeIdentifiers: [String]) -> Bool {
-        typeIdentifiers.contains { identifier in
-            if promisedFilePrefixes.contains(where: identifier.hasPrefix) { return true }
-            guard let type = UTType(identifier) else { return false }
-            if type.conforms(to: .fileURL) { return true }
-            if type.conforms(to: .text) || type.conforms(to: .url) { return false }
-            return type.conforms(to: .data) || type.conforms(to: .content)
+        if typeIdentifiers.contains(where: { identifier in
+            promisedFilePrefixes.contains(where: identifier.hasPrefix)
+        }) { return true }
+        let types = typeIdentifiers.compactMap { UTType($0) }
+        if types.contains(where: {
+            $0.conforms(to: .fileURL) || $0.conforms(to: .image) || $0.conforms(to: .pdf)
+        }) { return true }
+        if types.contains(where: { $0.conforms(to: .text) || $0.conforms(to: .url) }) {
+            return false
         }
+        return types.contains { $0.conforms(to: .data) || $0.conforms(to: .content) }
     }
 }
 

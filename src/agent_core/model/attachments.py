@@ -167,18 +167,19 @@ def attachment_parts(item: ConversationItem) -> list[AttachmentPart]:
 def estimate_attachment_tokens(items: Sequence[ConversationItem]) -> int:
     """Upper bound on what attachments add beyond their serialized references.
 
-    The per-request budget and model capabilities only remove attachments, so
-    both are ignored here and the result never under-counts the adapter.
+    Content cannot exceed the shared request budget. Every reference still
+    needs its label, including references that render only as markers.
     """
 
-    total = 0
+    labels = 0
+    content = 0
     for item in items:
         owner = owner_message(item)
         for part in attachment_parts(item):
-            total += LABEL_TOKENS
+            labels += LABEL_TOKENS
             if owner and item_limit_reason(part) is None:
-                total += content_tokens(part)
-    return total
+                content += content_tokens(part)
+    return labels + min(content, REQUEST_INLINE_MAX_TOKENS)
 
 
 @dataclass(frozen=True, slots=True)
