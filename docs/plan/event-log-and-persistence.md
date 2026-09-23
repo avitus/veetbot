@@ -1555,3 +1555,26 @@ decision noted in
   same run id and nothing in the document says which builder made it —
   except `builder_version`, which is exactly the field a caller who has
   already stored the first one will not re-read.
+
+## Crash allowance and ordinary continuations (ADR-0118)
+
+[ADR-0118](../adr/0118-crash-retries-exclude-durable-continuations.md) clarifies
+queue-level retry: `attempts` remains the total claim count, while the new
+nonnegative `lease_expirations` column counts only expired worker executions.
+Input, approval and child-run resumptions neither consume nor reset this crash
+allowance. This supersedes using total claims for `max_attempts` and retry backoff.
+
+The claim predicate requires `lease_expirations < max_attempts`. The locked
+lease reaper increments that counter for an expired running execution only.
+With the unchanged default of three, the first two expirations requeue with
+one- and two-second backoff; the third fails with `max_attempts_exceeded`.
+The bounded reaper also terminalizes already exhausted queued rows, emitting
+`run.failed` in the same transaction. The `QUEUED -> FAILED` edge exists for
+that case, so a claim filter cannot strand a run indefinitely. Waiting runs
+remain excluded; fencing, deadlines, budgets and effect recovery are unchanged.
+
+The additive migration backfills from durable maintenance `run.requeued` and
+lease-exhaustion `run.failed` events, never from total claims. It preserves
+actual crash history and never reopens terminal runs. Existing queued
+continuations with unused crash allowance become claimable with their saved
+answers, checkpoints, tool identities and approval requirements intact.

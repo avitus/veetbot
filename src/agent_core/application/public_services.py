@@ -383,7 +383,7 @@ class PublicSessionService:
             )
             if self._model_settings is None:
                 return agent
-            # ADR-0118: a new app chat starts on the owner's chat model.
+            # ADR-0119: a new app chat starts on the owner's chat model.
             choice = self._model_settings.effective_chat(
                 await uow.model_settings.current(principal)
             )

@@ -52,7 +52,7 @@ def _activation_tuple(
     """The fields startup validation matches an artifact against.
 
     Formation@9 evidence also binds the reasoning effort it was evaluated at
-    (ADR-0118); the older provider-assisted artifacts sent none.
+    (ADR-0119); the older provider-assisted artifacts sent none.
     """
 
     effort = evidence.reasoning_effort if isinstance(evidence, MemoryDistillationEvidence) else None

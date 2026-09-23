@@ -1,7 +1,7 @@
-"""Add the owner's versioned model settings (ADR-0118).
+"""Add the owner's versioned model settings (ADR-0119).
 
 Revision ID: b7d2e4f8a613
-Revises: a4f7c1e9d2b3
+Revises: e6b8d2a4c901
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b7d2e4f8a613"
-down_revision: str | Sequence[str] | None = "a4f7c1e9d2b3"
+down_revision: str | Sequence[str] | None = "e6b8d2a4c901"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -107,7 +107,7 @@ class ModelEntry(BaseModel):
     catalog: str | None = None
     limits: dict[str, Any] | None = None
     pricing: dict[str, Any] | None = None
-    # The effort levels the provider accepts for this model (ADR-0118).
+    # The effort levels the provider accepts for this model (ADR-0119).
     reasoning_efforts: list[ReasoningEffort] = Field(default_factory=list)
 
 

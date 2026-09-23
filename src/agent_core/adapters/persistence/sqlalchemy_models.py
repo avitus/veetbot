@@ -120,6 +120,7 @@ class SessionDeletionArtifactRow(Base):
 class RunRow(Base):
     __tablename__ = "runs"
     __table_args__ = (
+        CheckConstraint("lease_expirations >= 0", name="run_lease_expirations_nonnegative"),
         Index("ix_runs_status_created", "status", "created_at"),
         Index("ix_runs_lease_expires", "lease_expires_at"),
         Index("ix_runs_session_created", "session_id", "created_at"),
@@ -186,6 +187,7 @@ class RunRow(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_epoch: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    lease_expirations: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     priority: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

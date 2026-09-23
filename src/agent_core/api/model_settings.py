@@ -1,4 +1,4 @@
-"""Owner model settings routes (ADR-0118). Exact scopes, private responses."""
+"""Owner model settings routes (ADR-0119). Exact scopes, private responses."""
 
 from collections.abc import Callable
 from typing import Annotated

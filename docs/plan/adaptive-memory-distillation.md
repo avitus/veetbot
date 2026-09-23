@@ -146,7 +146,7 @@ use the actual memory tuple. Off mode still resolves no extraction model.
 Sol remains temporary while Milestone 21 evaluates scorer semantics and a
 controlled Astra comparison. All exact-evidence checks above remain required.
 
-ADR-0118 makes reasoning effort part of the evaluated tuple.
+ADR-0119 makes reasoning effort part of the evaluated tuple.
 `formation.reasoning_effort` sets the effort every formation request sends,
 null keeping the provider default, and a startup whose memory model does not
 accept it is refused. Schema 8 of the formation@9 artifact records the effort

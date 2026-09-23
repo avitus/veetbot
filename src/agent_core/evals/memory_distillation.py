@@ -428,7 +428,7 @@ class MemoryDistillationEvaluationResult(BaseModel):
     development_only: bool = False
     # How many times the whole evaluation ran; the gates pool every run.
     repeats: int = Field(default=1, ge=1)
-    # The effort the evaluated arm sent (ADR-0118); the controls send none.
+    # The effort the evaluated arm sent (ADR-0119); the controls send none.
     reasoning_effort: str | None = None
     evidence: MemoryDistillationEvidence | None = None
 
@@ -1017,7 +1017,7 @@ async def run_live_evaluation(
 
     A reasoning effort is sent by the evaluated formation@9 arm only; the
     frozen controls keep the provider default, and the published evidence
-    binds the effort (ADR-0118). Concurrency runs that many cases at once,
+    binds the effort (ADR-0119). Concurrency runs that many cases at once,
     each in its own composition, and keeps results in corpus order.
     """
 

@@ -1,4 +1,4 @@
-# ADR-0118: Owner-chosen models and reasoning effort
+# ADR-0119: Owner-chosen models and reasoning effort
 
 - Status: Accepted (authorized by the repository owner, 2026-09-23)
 - Date: 2026-09-23

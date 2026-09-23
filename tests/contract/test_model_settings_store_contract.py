@@ -1,4 +1,4 @@
-"""Owner model-settings store contract (ADR-0118)."""
+"""Owner model-settings store contract (ADR-0119)."""
 
 from datetime import timedelta
 

@@ -559,7 +559,7 @@ class MemoryDistillationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # Schema 8 records the reasoning effort the evaluation sent (ADR-0118);
+    # Schema 8 records the reasoning effort the evaluation sent (ADR-0119);
     # a schema 7 artifact sent none and is provider-default evidence.
     schema_version: Literal[7, 8] = 8
     scorer_version: Literal["distillation-scorer@7"]

@@ -1,4 +1,4 @@
-"""PostgreSQL owner model-settings store (ADR-0118)."""
+"""PostgreSQL owner model-settings store (ADR-0119)."""
 
 from __future__ import annotations
 

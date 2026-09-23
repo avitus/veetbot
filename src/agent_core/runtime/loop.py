@@ -92,7 +92,7 @@ class RunContext:
     identical_call_threshold: int = 5
     identical_denial_threshold: int = 3
     max_compactions_per_step: int = 2
-    # ADR-0118: the owner's chat effort, when this run's model accepts it.
+    # ADR-0119: the owner's chat effort, when this run's model accepts it.
     reasoning_effort: ReasoningEffort | None = None
 
 

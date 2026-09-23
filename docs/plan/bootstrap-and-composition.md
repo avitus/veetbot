@@ -387,7 +387,7 @@ selection is independently configured by the policy-name reference
 the configuration inventory. The production credential preflight checks the current
 chat default's provider.
 
-ADR-0118 lets the owner choose among these at runtime. The composition builds
+ADR-0119 lets the owner choose among these at runtime. The composition builds
 one `ModelSettingsCatalog`: the chat default and the policies in
 `selectable_chat_policies` whose provider holds a credential, and the memory
 tuple it selected plus any exactly evidenced alternative. The public session

@@ -1789,3 +1789,13 @@ registry with identifiers, like every other gate.
    rather than on a run, so they have no session, and `events.session_id`
    is `NOT NULL`. `multi-device-and-surfaces.md` leaves the same question
    open for device lifecycle events, and one answer should cover both.
+
+## Continuations and the crash allowance (ADR-0118)
+
+Input, approval and child-run continuations increment the total claim count
+without spending the queue's crash allowance. The durable `lease_expirations`
+counter changes only when the reaper observes an expired running execution;
+normal resumptions do not reset actual crash history. Exhausted queued rows
+fail visibly in the bounded maintenance sweep rather than remaining excluded
+from claims forever. See [ADR-0118](../adr/0118-crash-retries-exclude-durable-continuations.md)
+and the queue design's crash-allowance amendment.

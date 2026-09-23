@@ -1,4 +1,4 @@
-"""What the owner may choose, and what applies when nothing valid is stored (ADR-0118)."""
+"""What the owner may choose, and what applies when nothing valid is stored (ADR-0119)."""
 
 from datetime import UTC, datetime
 

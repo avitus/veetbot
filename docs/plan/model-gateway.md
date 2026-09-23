@@ -939,7 +939,7 @@ selectable chat    each names one declared model policy     reject
 any level          an unknown key                           reject
 ```
 
-ADR-0118 adds two optional per-model keys, `display_name` and
+ADR-0119 adds two optional per-model keys, `display_name` and
 `reasoning_efforts`, the latter the closed `ReasoningEffort` levels the
 provider accepts for that model, and one optional key to `policies.yaml`,
 `selectable_chat_policies`, the chat models the owner may choose between.
@@ -1503,7 +1503,7 @@ Note the asymmetry that makes this safe: the display text is untrusted and
 non-persisted, and the persisted payload is opaque and never interpreted.
 Neither half is both readable and privileged.
 
-### Reasoning effort (ADR-0118)
+### Reasoning effort (ADR-0119)
 
 `ModelRequest.reasoning_effort` extends the Section 10.1 request with one
 nullable field: `low`, `medium`, `high`, `xhigh`, or `max`. Null sends

@@ -137,7 +137,7 @@ class ReasoningSupport(StrEnum):
 
 
 class ReasoningEffort(StrEnum):
-    """How much a natively reasoning model thinks before answering (ADR-0118)."""
+    """How much a natively reasoning model thinks before answering (ADR-0119)."""
 
     LOW = "low"
     MEDIUM = "medium"

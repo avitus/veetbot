@@ -37,7 +37,7 @@ def content_addressed_agent_version(agent: AgentSpec) -> str:
 
 
 def chat_model_variant(agent: AgentSpec, model_policy: str) -> AgentSpec:
-    """The same agent on another chat model (ADR-0118).
+    """The same agent on another chat model (ADR-0119).
 
     A variant has its own id, derived from the agent and the policy, so it
     never becomes the latest version of the agent it varies; surfaces that

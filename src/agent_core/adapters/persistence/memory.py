@@ -1903,7 +1903,7 @@ class InMemoryFolderStore:
 
 
 class InMemoryModelSettingsStore:
-    """Contract-backed owner model settings (ADR-0118)."""
+    """Contract-backed owner model settings (ADR-0119)."""
 
     def __init__(self) -> None:
         self._versions: dict[tuple[str, str], list[ModelSettings]] = defaultdict(list)

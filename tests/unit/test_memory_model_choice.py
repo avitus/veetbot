@@ -1,4 +1,4 @@
-"""ADR-0118: memory formation sends its evaluated effort and follows the owner's choice."""
+"""ADR-0119: memory formation sends its evaluated effort and follows the owner's choice."""
 
 from __future__ import annotations
 

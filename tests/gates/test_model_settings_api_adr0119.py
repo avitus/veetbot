@@ -1,4 +1,4 @@
-"""ADR-0118 owner model settings: the HTTP boundary and its effect on new chats."""
+"""ADR-0119 owner model settings: the HTTP boundary and its effect on new chats."""
 
 from __future__ import annotations
 

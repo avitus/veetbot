@@ -1,4 +1,4 @@
-"""The owner's model settings (ADR-0118).
+"""The owner's model settings (ADR-0119).
 
 One versioned document per principal names the chat model new app chats use,
 the reasoning effort every agent run sends, and the model and effort memory
@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.domain.messages import ReasoningEffort
 
 MODEL_POLICY_PATTERN = r"^[a-z][a-z0-9_-]*$"
-# The effort a chat sends until the owner chooses another (ADR-0118).
+# The effort a chat sends until the owner chooses another (ADR-0119).
 DEFAULT_CHAT_REASONING_EFFORT = ReasoningEffort.HIGH
 
 

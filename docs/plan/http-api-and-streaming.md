@@ -2138,9 +2138,9 @@ nullable `subscription` block. Every response carries
 `Cache-Control: private, no-store`, never includes an unsubscribe address, and
 answers a foreign or unknown subscription with an indistinguishable 404.
 
-## ADR-0118 model settings routes
+## ADR-0119 model settings routes
 
-ADR-0118 adds two routes and one scope pair, `settings.read` and
+ADR-0119 adds two routes and one scope pair, `settings.read` and
 `settings.write`, mounted in every composition:
 
 ```text

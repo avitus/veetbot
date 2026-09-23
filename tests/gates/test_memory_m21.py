@@ -4470,7 +4470,7 @@ def test_per_source_displacement_keeps_the_claims_stated_first() -> None:
 
 def test_distillation_evidence_is_schema_eight_and_records_every_run() -> None:
     """The artifact carries the repeat count, each run's own numbers, and the
-    reasoning effort it was evaluated at (ADR-0118; none is provider default)."""
+    reasoning effort it was evaluated at (ADR-0119; none is provider default)."""
 
     evidence = _passing_distillation_evidence()
 

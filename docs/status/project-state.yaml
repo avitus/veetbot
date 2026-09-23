@@ -35,12 +35,15 @@ project:
   # a tool batch is fitted to the remaining budget, an exhausted tool-call
   # budget owes one synthesis-only turn, and the interactive defaults carry
   # model-call and tool-call reserves (amends ADR-0078).
-  # ADR-0118 records the owner's non-milestone extension on 2026-09-23: the
+  # ADR-0119 records the owner's non-milestone extension on 2026-09-23: the
   # owner chooses the chat model, chat reasoning effort, and evaluated memory
   # model and effort from the client, under settings.read and settings.write.
   # ADR-0110 amends Milestone 29 on 2026-09-19: the typed-judgment port, the
   # TypeSafe Jev adapter and judgment folder matching, all default off, plus
   # an offline non-activating email-importance evaluation under Milestone 26.
+  # ADR-0118 records the owner-authorized runtime repair on 2026-09-23:
+  # normal continuations do not consume crash retries; exhausted queued runs
+  # fail visibly and the migration preserves actual lease-expiration history.
   authorized_milestones:
     - 0
     - 1
@@ -950,7 +953,7 @@ milestones:
       - check: Astra at medium reasoning effort, formation@9 (2026-09-23)
         outcome: memory_activation_blocked
         detail: >-
-          ADR-0118. Build 35958ef ran the unchanged three-repeat formation@9
+          ADR-0119. Build 35958ef ran the unchanged three-repeat formation@9
           evaluation with --reasoning-effort medium on the evaluated arm, the
           78-case development corpus and the 51-case frozen holdout under
           distillation-scorer@7, six cases at a time. Its 1,134 distillation

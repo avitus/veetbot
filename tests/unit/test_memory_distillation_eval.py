@@ -1248,7 +1248,7 @@ def test_a_result_records_its_repeat_count() -> None:
 def test_an_effort_evaluation_sends_it_to_the_evaluated_arm_only_and_keeps_case_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR-0118: the controls run at the provider default; the evaluated arm at the effort.
+    """ADR-0119: the controls run at the provider default; the evaluated arm at the effort.
 
     Cases may run concurrently, but results keep the corpus order.
     """

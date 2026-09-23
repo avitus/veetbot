@@ -2384,7 +2384,7 @@ async def _compose(
         or memory_distillation_evaluation_mode
         or memory_people_evaluation_mode
     )
-    # ADR-0118: evidence binds the effort, so formation sends exactly the
+    # ADR-0119: evidence binds the effort, so formation sends exactly the
     # evaluated one: the requested effort under evaluation, the profile's
     # otherwise, and none for a deterministic development policy.
     extraction_effort = (
@@ -2745,7 +2745,7 @@ async def _compose(
     memory_alternatives: dict[ModelChoice, MemoryCandidateExtractor] = {}
     memory_alternative_options: list[MemoryModelOption] = []
     if selection_reason == "people_default" and not evaluating_memory:
-        # ADR-0118: the owner may move People formation to another tuple only
+        # ADR-0119: the owner may move People formation to another tuple only
         # when a formation@9 artifact on this tree evaluated exactly it.
         distillation_digest, _, holdout_digest = _shipped_evidence_digests()
         for evidence_path in provider_extraction_evidence_paths(settings):
@@ -4239,7 +4239,7 @@ async def _model_settings_catalog(
     memory_default: ModelChoice,
     memory_alternatives: Sequence[MemoryModelOption] = (),
 ) -> ModelSettingsCatalog:
-    """What the owner may choose here, and what applies until they do (ADR-0118).
+    """What the owner may choose here, and what applies until they do (ADR-0119).
 
     Chat offers every selectable policy whose provider holds a credential, and
     always the deployment default. A non-routed development composition

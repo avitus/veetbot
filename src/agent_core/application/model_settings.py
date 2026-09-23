@@ -1,4 +1,4 @@
-"""The owner's model settings over HTTP (ADR-0118)."""
+"""The owner's model settings over HTTP (ADR-0119)."""
 
 from __future__ import annotations
 

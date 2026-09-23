@@ -1,4 +1,4 @@
-"""Owner model-settings store port (ADR-0118)."""
+"""Owner model-settings store port (ADR-0119)."""
 
 from __future__ import annotations
 

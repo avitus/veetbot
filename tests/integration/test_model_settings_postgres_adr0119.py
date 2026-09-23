@@ -1,4 +1,4 @@
-"""PostgreSQL owner model-settings parity (ADR-0118)."""
+"""PostgreSQL owner model-settings parity (ADR-0119)."""
 
 from __future__ import annotations
 
