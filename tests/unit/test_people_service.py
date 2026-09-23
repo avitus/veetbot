@@ -912,3 +912,61 @@ async def test_owner_identity_evidence_reads_the_original_owner_assertion() -> N
         owner, person.id, person.support_ids[0], ceiling=Sensitivity.SENSITIVE
     )
     assert evidence.model_dump()["owner_assertion"] == "Owner created person: Maya"
+
+
+async def test_profile_lists_each_alias_once() -> None:
+    """Per-message copies of one alias appear once and cannot crowd out history."""
+    from uuid import uuid4
+
+    from agent_core.domain.people import (
+        InteractionParticipant,
+        PeopleInteraction,
+        Person,
+        PersonIdentifier,
+    )
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Frequent Correspondent", **common)
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+        for _ in range(1200):
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="email",
+                    namespace="owner",
+                    value="frequent@example.test",
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        await uow.people.put(
+            PeopleInteraction(
+                id=uuid4(),
+                channel="email",
+                interaction_kind="exchange",
+                attribution="observed",
+                direction="outgoing",
+                summary="Sent email",
+                occurred_at=NOW,
+                participants=[InteractionParticipant(person_id=person.id, role="recipient")],
+                **common,
+            ),
+            expected_revision=0,
+        )
+    profile = await service.get(owner, person.id, ceiling=Sensitivity.RESTRICTED)
+    assert [alias.value for alias in profile.aliases] == ["frequent@example.test"]
+    assert len(profile.history) == 1

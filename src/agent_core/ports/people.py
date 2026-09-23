@@ -42,7 +42,20 @@ class PeopleStore(Protocol):
         """Remove at most limit fenced revision payloads; return whether more remain."""
         ...
 
-    async def erase(self, principal: Principal, record_ids: Sequence[UUID]) -> int: ...
+    async def erase(
+        self,
+        principal: Principal,
+        record_ids: Sequence[UUID],
+        *,
+        preserve_independent: bool = False,
+    ) -> int:
+        """Erase records and everything that depends on them.
+
+        By default every historical revision's links count as dependence. With
+        ``preserve_independent`` only current heads do, and survivors lose the
+        stale revisions that still named an erased record (ADR-0118 repair).
+        """
+        ...
 
     async def erase_email_source(
         self, principal: Principal, account_id: str, thread_id: str, message_ids: frozenset[str]

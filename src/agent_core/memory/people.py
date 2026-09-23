@@ -34,11 +34,17 @@ async def resolve_identity(
     ceiling: Sensitivity,
 ) -> IdentityResolution:
     normalized = normalize_identifier(kind, namespace, value)
+    # Exact values only, one row per distinct assignment (ADR-0118): per-message
+    # identifier copies and superstring names can no longer fill the bounded
+    # candidate set and turn a known person ambiguous.
     query = PeopleQuery(
         tenant_id=principal.tenant_id,
         principal_id=principal.principal_id,
         kinds=["identifier", "person"] if kind == "name" else ["identifier"],
-        text=normalized,
+        identifier_value=normalized,
+        assigned="attached",
+        valid_at=at,
+        distinct_assignments=True,
         sensitivity_ceiling=ceiling,
         limit=100,
     )
@@ -67,6 +73,13 @@ async def resolve_identity(
                 row.verification == "owner_confirmed"
                 or (row.verification == "channel_observed" and kind in {"email", "phone", "handle"})
                 or (row.verification == "contextual" and kind == "name" and bool(context))
+                # An address or number the owner stated in chat (context "owner")
+                # identifies that person for mail and texts (ADR-0118).
+                or (
+                    row.verification == "contextual"
+                    and kind in {"email", "phone"}
+                    and row.context == "owner"
+                )
             ):
                 qualified.add(row.person_id)
     # An evidenced, specific context can select one alias among unqualified

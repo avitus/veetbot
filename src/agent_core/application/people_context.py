@@ -29,6 +29,7 @@ from agent_core.domain.people import (
     PersonIdentifier,
     PersonMemoryLink,
     RelationshipAssertion,
+    is_non_person_reference,
     referenced_people,
 )
 from agent_core.ports.people_runtime import PeopleRecall
@@ -323,6 +324,9 @@ class PeopleContextService:
                             mentioned_in=query.text[:8192],
                             known_at=query.known_at,
                             as_of=query.as_of,
+                            # Per-message alias copies count once (ADR-0118).
+                            assigned="attached",
+                            distinct_assignments=True,
                             limit=100,
                         )
                     )
@@ -345,6 +349,9 @@ class PeopleContextService:
                                     continue
                                 label, person_id = row.value, row.person_id
                             else:
+                                continue
+                            # A pronoun label would match nearly every request.
+                            if is_non_person_reference(label):
                                 continue
                             if re.search(
                                 r"(?<!\w)" + re.escape(label) + r"(?!\w)", query.text, re.IGNORECASE

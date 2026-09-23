@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from typing import Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -731,3 +731,342 @@ async def people_erasure_fence_contract(store: PeopleStore) -> None:
 
 async def test_people_fence_is_immediate_and_cleanup_is_bounded() -> None:
     await people_erasure_fence_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+def _admission_fields() -> PeopleFields:
+    owner = principal()
+    return {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+
+
+async def people_preserving_erase_contract(store: PeopleStore) -> None:
+    """Erasing one person keeps records that no longer depend on it (ADR-0118).
+
+    The directory repair detaches mentions and endpoint identifiers, drops the
+    person from shared interactions, and then erases what still depends on the
+    person. A plain erase follows every historical revision's links and would
+    also destroy the detached rows; the preserving erase follows current heads
+    only and strips the survivors' stale revisions.
+    """
+    from agent_core.domain.people import (
+        InteractionParticipant,
+        PeopleEndpoint,
+        PeopleInteraction,
+        PersonMemoryLink,
+        PersonMention,
+        RelationshipAssertion,
+    )
+
+    owner = principal()
+    common = _admission_fields()
+    later: PeopleFields = {**common, "updated_at": NOW + timedelta(days=1)}
+
+    async def fixture() -> dict[str, PeopleRecord]:
+        source = PeopleSource(
+            id=uuid4(),
+            session_id=uuid4(),
+            event_sequence=1,
+            source_kind="owner",
+            source_revision="event@1",
+            evidence_at=NOW,
+            **common,
+        )
+        pruned = Person(id=uuid4(), display_name="Pruned stranger", **common)
+        kept = Person(id=uuid4(), display_name="Kept correspondent", **common)
+        for row in (source, pruned, kept):
+            await store.put(row, expected_revision=0)
+        identifier = PersonIdentifier(
+            id=uuid4(),
+            person_id=pruned.id,
+            identifier_kind="email",
+            namespace="owner",
+            value=f"stranger-{uuid4().hex[:8]}@example.test",
+            context="owner",
+            verification="channel_observed",
+            valid_from=NOW,
+            support_ids=[source.id],
+            **common,
+        )
+        mention = PersonMention(
+            id=uuid4(),
+            source_id=source.id,
+            person_id=pruned.id,
+            start=0,
+            end=7,
+            support_ids=[source.id],
+            **common,
+        )
+        shared = PeopleInteraction(
+            id=uuid4(),
+            channel="email",
+            interaction_kind="exchange",
+            attribution="observed",
+            direction="incoming",
+            summary="Received email",
+            occurred_at=NOW,
+            participants=[
+                InteractionParticipant(person_id=pruned.id, role="sender"),
+                InteractionParticipant(person_id=kept.id, role="recipient"),
+            ],
+            **common,
+        )
+        solo = shared.model_copy(
+            update={
+                "id": uuid4(),
+                "participants": [InteractionParticipant(person_id=pruned.id, role="sender")],
+            }
+        )
+        link = PersonMemoryLink(id=uuid4(), person_id=pruned.id, belief_id=uuid4(), **common)
+        relationship = RelationshipAssertion(
+            id=uuid4(),
+            subject=PeopleEndpoint(kind="person", id=pruned.id),
+            object=PeopleEndpoint(kind="owner"),
+            predicate="friend",
+            belief_id=uuid4(),
+            **common,
+        )
+        dependents: list[PeopleRecord] = [identifier, mention, shared, solo, link, relationship]
+        for dependent in dependents:
+            await store.put(dependent, expected_revision=0)
+        # Detach what survives, the way the repair does before it erases.
+        await store.put(
+            identifier.model_copy(update={"person_id": None, "revision": 2, **later}),
+            expected_revision=1,
+        )
+        await store.put(
+            mention.model_copy(update={"person_id": None, "revision": 2, **later}),
+            expected_revision=1,
+        )
+        await store.put(
+            shared.model_copy(
+                update={
+                    "participants": [InteractionParticipant(person_id=kept.id, role="recipient")],
+                    "revision": 2,
+                    **later,
+                }
+            ),
+            expected_revision=1,
+        )
+        return {
+            "pruned": pruned,
+            "kept": kept,
+            "identifier": identifier,
+            "mention": mention,
+            "shared": shared,
+            "solo": solo,
+            "link": link,
+            "relationship": relationship,
+        }
+
+    rows = await fixture()
+    await store.erase(owner, [rows["pruned"].id], preserve_independent=True)
+    for name in ("pruned", "link", "relationship", "solo"):
+        assert await store.is_erased(owner, rows[name].id), name
+    for name in ("identifier", "mention", "shared", "kept"):
+        assert not await store.is_erased(owner, rows[name].id), name
+        assert await store.get(owner, rows[name].id, ceiling=Sensitivity.RESTRICTED) is not None
+    # The survivors' revisions that still named the erased person are gone.
+    assert (
+        await store.get(owner, rows["identifier"].id, ceiling=Sensitivity.RESTRICTED, at_revision=1)
+        is None
+    )
+    detached = await store.get(owner, rows["identifier"].id, ceiling=Sensitivity.RESTRICTED)
+    assert isinstance(detached, PersonIdentifier) and detached.person_id is None
+    # A detached endpoint can be adopted by someone else later.
+    await store.put(
+        detached.model_copy(
+            update={
+                "person_id": rows["kept"].id,
+                "revision": detached.revision + 1,
+                "updated_at": NOW + timedelta(days=2),
+            }
+        ),
+        expected_revision=detached.revision,
+    )
+
+    # Control: a plain erase follows historical revisions and takes the detached rows too.
+    control = await fixture()
+    await store.erase(owner, [control["pruned"].id])
+    assert await store.is_erased(owner, control["identifier"].id)
+    assert await store.is_erased(owner, control["mention"].id)
+
+
+async def test_memory_people_preserving_erase_contract() -> None:
+    await people_preserving_erase_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+async def people_identifier_lookup_contract(store: PeopleStore) -> None:
+    """Exact, attached, distinct identifier lookup is immune to per-message copies (ADR-0118).
+
+    Correspondence writes one identifier row per message. A substring search
+    capped at one hundred rows made a frequent correspondent's address
+    ambiguous; resolution instead asks for each distinct assignment once.
+    """
+    owner = principal()
+    common = _admission_fields()
+    address = f"frequent-{uuid4().hex[:8]}@example.test"
+    source = PeopleSource(
+        id=uuid4(),
+        session_id=uuid4(),
+        event_sequence=1,
+        source_kind="owner",
+        source_revision="event@1",
+        evidence_at=NOW,
+        **common,
+    )
+    frequent = Person(id=uuid4(), display_name="Frequent correspondent", **common)
+    other = Person(id=uuid4(), display_name="Superstring owner", **common)
+    for row in (source, frequent, other):
+        await store.put(row, expected_revision=0)
+
+    def identifier(person_id: object, value: str, **changes: object) -> PersonIdentifier:
+        fields: dict[str, object] = {
+            "id": uuid4(),
+            "person_id": person_id,
+            "identifier_kind": "email",
+            "namespace": "owner",
+            "value": value,
+            "context": "owner",
+            "verification": "channel_observed",
+            "valid_from": NOW,
+            "support_ids": [source.id],
+            **common,
+            **changes,
+        }
+        return PersonIdentifier.model_validate(fields)
+
+    for _ in range(150):
+        await store.put(identifier(frequent.id, address), expected_revision=0)
+    unattached_ids: set[object] = set()
+    for _ in range(150):
+        endpoint = identifier(None, address)
+        unattached_ids.add(endpoint.id)
+        await store.put(endpoint, expected_revision=0)
+    await store.put(identifier(other.id, "a" + address), expected_revision=0)
+    # Valid only later, in its own context, so it stays a distinct assignment.
+    await store.put(
+        identifier(
+            frequent.id, address, context="email:later", valid_from=NOW + timedelta(days=10)
+        ),
+        expected_revision=0,
+    )
+    base = PeopleQuery(
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        kinds=["identifier"],
+        identifier_value=address.upper(),
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        limit=100,
+    )
+    attached = await store.query(
+        base.model_copy(
+            update={"assigned": "attached", "distinct_assignments": True, "valid_at": NOW}
+        )
+    )
+    assert [
+        (row.person_id, row.context) for row in attached if isinstance(row, PersonIdentifier)
+    ] == [(frequent.id, "owner")]
+    everything = await store.query(
+        base.model_copy(update={"assigned": "attached", "distinct_assignments": True})
+    )
+    assert {row.context for row in everything if isinstance(row, PersonIdentifier)} == {
+        "owner",
+        "email:later",
+    }
+    seen: set[object] = set()
+    after = None
+    while True:
+        page = await store.query(base.model_copy(update={"assigned": "unattached", "after": after}))
+        assert all(isinstance(row, PersonIdentifier) and row.person_id is None for row in page)
+        seen.update(row.id for row in page[:100])
+        if len(page) <= 100:
+            break
+        after = page[99].id
+    assert seen == unattached_ids
+
+
+async def test_memory_people_identifier_lookup_contract() -> None:
+    await people_identifier_lookup_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+async def people_review_directory_contract(store: PeopleStore) -> None:
+    """Needs review holds unconfirmed people known only by name or role (ADR-0118)."""
+    owner = principal()
+    common = _admission_fields()
+    marker = f"review-{uuid4().hex[:8]}"
+    source = PeopleSource(
+        id=uuid4(),
+        session_id=uuid4(),
+        event_sequence=1,
+        source_kind="owner",
+        source_revision="event@1",
+        evidence_at=NOW,
+        **common,
+    )
+    await store.put(source, expected_revision=0)
+
+    async def person(label: str, **changes: object) -> Person:
+        row = Person(id=uuid4(), display_name=f"{marker} {label}", **{**common, **changes})  # type: ignore[arg-type]
+        await store.put(row, expected_revision=0)
+        return row
+
+    async def alias(person_id: UUID, kind: str, verification: str) -> PersonIdentifier:
+        row = PersonIdentifier(
+            id=uuid4(),
+            person_id=person_id,
+            identifier_kind=kind,  # type: ignore[arg-type]
+            namespace="owner",
+            value=f"{marker}-{uuid4().hex[:6]}@example.test" if kind == "email" else marker,
+            context="owner",
+            verification=verification,  # type: ignore[arg-type]
+            valid_from=NOW,
+            support_ids=[source.id],
+            **common,
+        )
+        await store.put(row, expected_revision=0)
+        return row
+
+    named_only = await person("named only")
+    await alias(named_only.id, "name", "contextual")
+    bare = await person("bare")
+    correspondent = await person("correspondent")
+    await alias(correspondent.id, "email", "channel_observed")
+    confirmed = await person("confirmed")
+    await alias(confirmed.id, "name", "owner_confirmed")
+    await person("active", state="active")
+    await person("pinned", pinned=True)
+    await person("merged", state="merged", merged_into=named_only.id)
+    detached_owner = await person("detached")
+    detached = await alias(detached_owner.id, "email", "channel_observed")
+    await store.put(
+        detached.model_copy(
+            update={"person_id": None, "revision": 2, "updated_at": NOW + timedelta(days=1)}
+        ),
+        expected_revision=1,
+    )
+    query = PeopleQuery(
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        text=marker,
+        needs_review=True,
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        limit=1,
+    )
+    expected = sorted([named_only.id, bare.id, detached_owner.id])
+    seen: list[UUID] = []
+    after = None
+    while True:
+        page = await store.query(query.model_copy(update={"after": after}))
+        seen.extend(row.id for row in page[:1])
+        if len(page) <= 1:
+            break
+        after = page[0].id
+    assert seen == expected
+
+
+async def test_memory_people_review_directory_contract() -> None:
+    await people_review_directory_contract(InMemoryPeopleStore(FixedClock(NOW)))

@@ -501,3 +501,76 @@ async def test_knowledge_recall_registers_before_people_erasure_can_commit(
     async with factory() as uow:
         stored = await uow.traces.get(result.trace_id, owner)
         assert all(passage.deleted and passage.text is None for passage in stored.passages)
+
+
+async def _person_with_interaction(
+    factory: object, owner: object, display_name: str, *, name_copies: int = 0
+) -> Person:
+    from agent_core.domain.people import (
+        InteractionParticipant,
+        PeopleInteraction,
+        PersonIdentifier,
+    )
+
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,  # type: ignore[attr-defined]
+        "principal_id": owner.principal_id,  # type: ignore[attr-defined]
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name=display_name, **common)
+    async with factory() as uow:  # type: ignore[operator]
+        await uow.people.put(person, expected_revision=0)
+        await uow.people.put(
+            PeopleInteraction(
+                id=uuid4(),
+                channel="chat",
+                interaction_kind="meeting",
+                attribution="owner_reported",
+                direction="reported",
+                summary=f"Lunch with {display_name}",
+                participants=[InteractionParticipant(person_id=person.id, role="participant")],
+                **common,
+            ),
+            expected_revision=0,
+        )
+        for _ in range(name_copies):
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="name",
+                    namespace="owner",
+                    value=display_name,
+                    context="email:sender",
+                    verification="contextual",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    return person
+
+
+async def test_frequent_correspondent_still_selects_person_context() -> None:
+    """Per-message name copies of one person never make context selection abstain."""
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    alex = await _person_with_interaction(factory, owner, "Alex Rivera", name_copies=150)
+    service = PeopleContextService(factory, HybridMemoryRetriever(factory, clock, ids(), owner))
+    result = await service.automatic_recall(
+        owner, recall_query(text="Prepare for my call with Alex Rivera"), session_id=SESSION_ID
+    )
+    assert any(alex.id in item.person_ids for item in result.people)
+
+
+async def test_pronoun_named_person_is_never_selected_for_context() -> None:
+    """A person labelled 'I' must not ride along with every first-person request."""
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    pronoun = await _person_with_interaction(factory, owner, "I")
+    service = PeopleContextService(factory, HybridMemoryRetriever(factory, clock, ids(), owner))
+    result = await service.automatic_recall(
+        owner, recall_query(text="I need to prepare for the board meeting"), session_id=SESSION_ID
+    )
+    assert all(pronoun.id not in item.person_ids for item in result.people)

@@ -445,12 +445,82 @@ class PeopleQuery(PeopleValue):
     until: AwareDatetime | None = None
     after: UUID | None = None
     limit: int = Field(default=50, ge=1, le=100)
+    # ADR-0118 identity lookup: an exact (case-insensitive) identifier or name
+    # value, whether identifiers must be attached to a person, the instant an
+    # identifier must be valid at, and one row per distinct assignment so
+    # per-message copies of one address cannot crowd out a match.
+    identifier_value: str | None = Field(default=None, min_length=1, max_length=512)
+    assigned: Literal["any", "attached", "unattached"] = "any"
+    valid_at: AwareDatetime | None = None
+    distinct_assignments: bool = False
+    # ADR-0118 review queue: provisional, unpinned people with no attached
+    # owner-confirmed or channel-observed identifier.
+    needs_review: bool = False
 
     @model_validator(mode="after")
     def ordered_range(self) -> PeopleQuery:
         if self.since and self.until and self.since >= self.until:
             raise ValueError("history interval must be positive")
+        if self.distinct_assignments and self.sort != "id":
+            raise ValueError("distinct assignments are listed in identifier order")
         return self
+
+
+# Words that refer to a speaker, a listener, or nobody in particular. A mention
+# carrying one of these as its whole label is never a person of its own
+# (ADR-0118): pronouns bind to source participants or stay unresolved.
+NON_PERSON_REFERENCES: frozenset[str] = frozenset(
+    {
+        "i",
+        "me",
+        "my",
+        "mine",
+        "myself",
+        "we",
+        "us",
+        "our",
+        "ours",
+        "ourselves",
+        "you",
+        "your",
+        "yours",
+        "yourself",
+        "yourselves",
+        "he",
+        "him",
+        "his",
+        "himself",
+        "she",
+        "her",
+        "hers",
+        "herself",
+        "they",
+        "them",
+        "their",
+        "theirs",
+        "themselves",
+        "it",
+        "its",
+        "itself",
+        "someone",
+        "somebody",
+        "anyone",
+        "anybody",
+        "everyone",
+        "everybody",
+        "no one",
+        "nobody",
+        "user",
+        "the user",
+        "owner",
+        "the owner",
+    }
+)
+
+
+def is_non_person_reference(label: str) -> bool:
+    """Whether a mention label is a pronoun or generic reference, never a person."""
+    return " ".join(label.casefold().split()).strip(".,;:!?'\"") in NON_PERSON_REFERENCES
 
 
 def normalize_identifier(kind: str, namespace: str, value: str) -> str:

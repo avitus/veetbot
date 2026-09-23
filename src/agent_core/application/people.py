@@ -421,13 +421,33 @@ class PublicPeopleService:
             if not isinstance(person, Person) or not _safe(person.display_name):
                 raise NotFoundError("person not found")
             profile = PersonProfile(person=person)
+            # Identifiers are read once per distinct assignment below; correspondence
+            # writes one copy per message and those copies must not crowd out
+            # facts or history (ADR-0118).
+            aliases = await uow.people.query(
+                PeopleQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    person_id=person.id,
+                    sensitivity_ceiling=ceiling,
+                    kinds=["identifier"],
+                    distinct_assignments=True,
+                    limit=100,
+                )
+            )
+            profile.aliases.extend(
+                row
+                for row in aliases[:100]
+                if isinstance(row, PersonIdentifier) and _safe(row.model_dump_json())
+            )
+            aliases_truncated = len(aliases) > 100
             query = PeopleQuery(
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
                 person_id=person.id,
                 sensitivity_ceiling=ceiling,
                 limit=100,
-                kinds=["identifier", "memory_link", "relationship", "interaction", "commitment"],
+                kinds=["memory_link", "relationship", "interaction", "commitment"],
             )
             seen_beliefs: set[UUID] = set()
             for _ in range(10):
@@ -473,15 +493,19 @@ class PublicPeopleService:
                 if len(rows) <= 100:
                     break
                 query = query.model_copy(update={"after": rows[99].id})
-            truncated = len(rows) > 100 or (
-                max(
-                    len(profile.aliases),
-                    len(profile.relationships),
-                    len(profile.history),
-                    len(profile.commitments),
-                    len(profile.facts),
+            truncated = (
+                aliases_truncated
+                or len(rows) > 100
+                or (
+                    max(
+                        len(profile.aliases),
+                        len(profile.relationships),
+                        len(profile.history),
+                        len(profile.commitments),
+                        len(profile.facts),
+                    )
+                    > 20
                 )
-                > 20
             )
             profile.history.sort(
                 key=lambda row: (
