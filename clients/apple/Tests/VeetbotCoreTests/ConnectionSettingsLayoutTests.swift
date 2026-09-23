@@ -8,10 +8,10 @@ import Testing
         #expect(
             ConnectionSettingsSection.allCases == [
                 .connection,
+                .models,
                 .websiteAccess,
                 .smsIntegration,
                 .appearance,
-                .models,
                 .dataAndPrivacy,
             ]
         )
@@ -27,9 +27,9 @@ import Testing
         #expect(
             ConnectionSettingsSection.visibleCases == [
                 .connection,
+                .models,
                 .websiteAccess,
                 .appearance,
-                .models,
                 .dataAndPrivacy,
             ]
         )

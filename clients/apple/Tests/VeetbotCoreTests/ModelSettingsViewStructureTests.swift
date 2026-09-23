@@ -52,24 +52,31 @@ import Testing
         #expect(normalized.contains(".disabled(!modelSettings.isEditable)"))
     }
 
+    /// The card owns its view model and loads it when it appears. The
+    /// Settings view must not own it: every published change would re-render
+    /// the whole lazy stack, and on an iPad sheet that loses a half-typed
+    /// website-access entry (testWebsiteAccessCreatesARecoverableBrowserHandoff).
     @Test
-    func testModelsLoadOnAppearOnlyWhenConfigured() throws {
+    func testTheCardAloneOwnsAndLoadsItsSettingsWhenConfigured() throws {
         let source = try connectionSettingsSource()
-        let normalized = source.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let card = try modelsSectionSource()
+        let normalized = card.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let settingsView = try #require(source.range(of: "private struct ModelSettingsCard"))
 
         #expect(normalized.contains("@StateObject private var modelSettings = ModelSettingsViewModel()"))
         #expect(
             normalized.contains(
-                "if model.isConfigured { Task { await model.refreshBrowserProfiles() } Task { await modelSettings.load() } }"
+                ".onAppear { if isConfigured { Task { await modelSettings.load() } } }"
             )
         )
+        #expect(!source[..<settingsView.lowerBound].contains("ModelSettingsViewModel()"))
     }
 
     private func modelsSectionSource() throws -> Substring {
         let source = try connectionSettingsSource()
-        let start = try #require(source.range(of: "private var modelsSection:"))
+        let start = try #require(source.range(of: "private struct ModelSettingsCard"))
         let end = try #require(
-            source.range(of: "private var smsIntegrationSection:", range: start.upperBound..<source.endIndex)
+            source.range(of: "private struct SettingsCard", range: start.upperBound..<source.endIndex)
         )
         return source[start.lowerBound..<end.lowerBound]
     }
