@@ -44,10 +44,14 @@ review, which is why the review queue filled with newsletters.
    assessment identity; changing it would re-assess every retained thread at
    provider cost. The People design also wants attributed third-party reports
    from genuine correspondence, so no correspondent-only restriction is added.
-4. **Existing bulk-derived memories leave through source exclusion.** The
-   census names the affected threads; the existing exclusion path erases
-   derived influence and blocks re-formation. The operator command
-   `agent email exclude-bulk` applies it in one pass.
+4. **Existing bulk-derived memories leave through governed deletion.** The
+   census names the affected senders; the operator deletes each derived belief
+   with `agent memory delete`, which tombstones the statement, and rule 1
+   keeps the source from forming again. `agent email exclude-bulk` remains
+   available for a census-wide source exclusion, but it is deliberately not
+   the cleanup path: exclusion also removes the thread from the mailbox view
+   and blocks every later learning from it, and the census's list headers
+   admit group mail the owner takes part in.
 5. **No new registered hard gate.** As with ADR-0113, the evidence is unit and
    contract tests; the milestone gate counts do not change.
 
@@ -62,6 +66,12 @@ review, which is why the review queue filled with newsletters.
 - A subscription the owner chose to keep still counts as bulk for memory.
 - A historical import skips a census-indexed retained source and counts it as
   excluded rather than failing the slice.
+- Group mail carries list headers too, so a Google Group or a digest the
+  owner reads is bulk to this rule and forms no People memory; narrowing the
+  list case to threads the assessment also marks bulk is an open decision.
+- On 2026-09-23 the cleanup deleted twenty-three bulk-derived beliefs in
+  production this way; the census preview of `agent email exclude-bulk`
+  listed 450 threads, which is why exclusion was not used.
 - The census exists only when `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` is set; without
   it, only the `bulk` verdict gates formation.
 - Importance ranking is untouched: bulk threads are still assessed so the

@@ -16,7 +16,10 @@ title: Changelog
   assessment prompt is unchanged.
 - `agent email exclude-bulk` previews every retained thread the census
   indexes and, with `--confirm`, excludes each through the existing source
-  exclusion, which erases derived memories and blocks re-formation.
+  exclusion. That is coarser than it sounds: list headers also mark group
+  mail, and exclusion drops the thread from the mailbox view. The production
+  cleanup instead deleted the twenty-three bulk-derived beliefs with
+  `agent memory delete`, which the formation rule keeps from returning.
 - Every email-derived memory is committed flagged for review, and nothing could
   clear the flag or remove a belief from the clients. ADR-0117 adds
   `DELETE /v1/memories/{id}` and `POST /v1/memories/{id}/review` under a new

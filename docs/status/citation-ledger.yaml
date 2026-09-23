@@ -52,7 +52,7 @@ citations:
   - cite: "docs/plan/email-unsubscribe.md#docs/plan/email-experience.md:254-259"
     excerpt: "Approved admission bounds are 100 thread summaries per accou"
     digest: "35fb1c405abae1b1"
-  - cite: "docs/plan/email-unsubscribe.md#docs/plan/email-experience.md:710-726"
+  - cite: "docs/plan/email-unsubscribe.md#docs/plan/email-experience.md:712-728"
     excerpt: "Archive admission requires current `email.read`, `email.writ"
     digest: "a2b0d0131208ca8a"
   - cite: "docs/plan/email-unsubscribe.md#docs/plan/email-integration.md:334-342"
