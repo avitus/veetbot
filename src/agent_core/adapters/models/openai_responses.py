@@ -39,6 +39,7 @@ from agent_core.domain.messages import (
     ProviderMetadata,
     ProviderReasoningItem,
     ReasoningDeltaEvent,
+    ReasoningSupport,
     ResolvedModel,
     StopReason,
     SystemMessage,
@@ -536,6 +537,11 @@ class OpenAIResponsesProvider:
                     "schema": request.response_schema,
                 }
             }
+        if (
+            request.reasoning_effort is not None
+            and resolved.capabilities.reasoning is ReasoningSupport.NATIVE
+        ):
+            payload["reasoning"] = {"effort": request.reasoning_effort.value}
         return payload
 
     async def close(self) -> None:

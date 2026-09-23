@@ -1164,3 +1164,161 @@ public enum DeviceInvocationResult: String, Codable, Sendable {
     case failed
     case expired
 }
+
+
+/// One reasoning-effort level the model gateway passes to a provider
+/// (`GET /v1/settings/models`). The server offers exactly low, medium, high,
+/// xhigh, and max; a value this build does not know still decodes and shows
+/// its raw spelling, so a newer server never breaks the picker.
+public struct ReasoningEffort: RawRepresentable, Codable, Hashable, Sendable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public static let low = ReasoningEffort(rawValue: "low")
+    public static let medium = ReasoningEffort(rawValue: "medium")
+    public static let high = ReasoningEffort(rawValue: "high")
+    public static let xhigh = ReasoningEffort(rawValue: "xhigh")
+    public static let max = ReasoningEffort(rawValue: "max")
+
+    public var displayName: String {
+        switch rawValue {
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "Extra high"
+        case "max": return "Max"
+        default:
+            return rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+        }
+    }
+
+    /// A null effort means the provider's own default.
+    public static func displayName(for effort: ReasoningEffort?) -> String {
+        effort?.displayName ?? "Default"
+    }
+}
+
+/// One stored (model, effort) choice. `reasoningEffort` is always written,
+/// as an explicit null for the provider default, so an omitted key can never
+/// be read as "leave unchanged".
+public struct ModelChoice: Codable, Hashable, Sendable {
+    public let modelPolicy: String
+    public let reasoningEffort: ReasoningEffort?
+
+    enum CodingKeys: String, CodingKey {
+        case modelPolicy = "model_policy"
+        case reasoningEffort = "reasoning_effort"
+    }
+
+    public init(modelPolicy: String, reasoningEffort: ReasoningEffort?) {
+        self.modelPolicy = modelPolicy
+        self.reasoningEffort = reasoningEffort
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(modelPolicy, forKey: .modelPolicy)
+        try container.encode(reasoningEffort, forKey: .reasoningEffort)
+    }
+}
+
+/// A chat model the owner may choose, with the efforts it accepts. An empty
+/// `reasoningEfforts` list means the model takes no effort at all.
+public struct ChatModelOption: Codable, Hashable, Identifiable, Sendable {
+    public let modelPolicy: String
+    public let displayName: String
+    public let provider: String
+    public let model: String
+    public let reasoningEfforts: [ReasoningEffort]
+    public let defaultReasoningEffort: ReasoningEffort?
+
+    public var id: String { modelPolicy }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model
+        case modelPolicy = "model_policy"
+        case displayName = "display_name"
+        case reasoningEfforts = "reasoning_efforts"
+        case defaultReasoningEffort = "default_reasoning_effort"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        modelPolicy = try container.decode(String.self, forKey: .modelPolicy)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        provider = try container.decode(String.self, forKey: .provider)
+        model = try container.decode(String.self, forKey: .model)
+        reasoningEfforts =
+            try container.decodeIfPresent([ReasoningEffort].self, forKey: .reasoningEfforts) ?? []
+        defaultReasoningEffort = try container.decodeIfPresent(
+            ReasoningEffort.self, forKey: .defaultReasoningEffort
+        )
+    }
+
+    /// The effort a switch to this model starts from: its default when the
+    /// default is one it lists, else its first listed effort, else none.
+    public var initialReasoningEffort: ReasoningEffort? {
+        if let defaultReasoningEffort, reasoningEfforts.contains(defaultReasoningEffort) {
+            return defaultReasoningEffort
+        }
+        return reasoningEfforts.first
+    }
+}
+
+/// One exact (model, effort) combination that passed the memory evaluation.
+/// A model may appear once per evaluated effort.
+public struct MemoryModelOption: Codable, Hashable, Sendable {
+    public let modelPolicy: String
+    public let displayName: String
+    public let provider: String
+    public let model: String
+    public let reasoningEffort: ReasoningEffort?
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model
+        case modelPolicy = "model_policy"
+        case displayName = "display_name"
+        case reasoningEffort = "reasoning_effort"
+    }
+
+    public var choice: ModelChoice {
+        ModelChoice(modelPolicy: modelPolicy, reasoningEffort: reasoningEffort)
+    }
+}
+
+/// The owner's model settings resource. Version 0 is the never-saved state,
+/// whose chat and memory values are the deployment defaults.
+public struct ModelSettingsView: Codable, Equatable, Sendable {
+    public let version: Int
+    public let chat: ModelChoice
+    public let memory: ModelChoice
+    public let chatOptions: [ChatModelOption]
+    public let memoryOptions: [MemoryModelOption]
+
+    enum CodingKeys: String, CodingKey {
+        case version, chat, memory
+        case chatOptions = "chat_options"
+        case memoryOptions = "memory_options"
+    }
+}
+
+/// `PUT /v1/settings/models`: the whole state, guarded by the version read.
+public struct UpdateModelSettingsBody: Encodable, Equatable, Sendable {
+    public let expectedVersion: Int
+    public let chat: ModelChoice
+    public let memory: ModelChoice
+
+    enum CodingKeys: String, CodingKey {
+        case expectedVersion = "expected_version"
+        case chat, memory
+    }
+
+    public init(expectedVersion: Int, chat: ModelChoice, memory: ModelChoice) {
+        self.expectedVersion = expectedVersion
+        self.chat = chat
+        self.memory = memory
+    }
+}

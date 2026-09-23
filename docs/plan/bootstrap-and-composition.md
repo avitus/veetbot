@@ -387,6 +387,19 @@ selection is independently configured by the policy-name reference
 the configuration inventory. The production credential preflight checks the current
 chat default's provider.
 
+ADR-0118 lets the owner choose among these at runtime. The composition builds
+one `ModelSettingsCatalog`: the chat default and the policies in
+`selectable_chat_policies` whose provider holds a credential, and the memory
+tuple it selected plus any exactly evidenced alternative. The public session
+service binds a new app chat to a chat-model variant of the default agent,
+stored under an id derived from the agent and the policy so the deployed
+agent's latest version never changes; the executor sends the owner's chat
+effort, and memory formation reads the owner's tuple per extraction.
+`formation.reasoning_effort` and `selectable_chat_policies` are not counted as
+knobs: a null effort is a meaningful setting that the evidence, not the file,
+decides, and the selectable list names declared policies the way
+`model_policies` does.
+
 The plan set one precedent — `src/agent_core/policy/hardline.yaml` sits inside
 the policy package — and this document follows it rather than inventing a
 top-level `config/` directory, which would in any case collide with the

@@ -24,6 +24,7 @@ from agent_core.domain.messages import (
     ModelLimits,
     ModelPricing,
     ProviderPin,
+    ReasoningEffort,
     ReasoningSupport,
     ResolvedModel,
 )
@@ -70,6 +71,9 @@ PROFILE_VALIDATION_RULES = frozenset(
         "pricing_decimal_strings",
         "pricing_required_amount",
         "effective_at_offset",
+        "reasoning_efforts",
+        "reasoning_efforts_unique",
+        "selectable_chat_policy",
         "unknown_key",
     }
 )
@@ -98,10 +102,13 @@ class ModelEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
     aliases: list[str] = Field(default_factory=list)
     catalog: str | None = None
     limits: dict[str, Any] | None = None
     pricing: dict[str, Any] | None = None
+    # The effort levels the provider accepts for this model (ADR-0118).
+    reasoning_efforts: list[ReasoningEffort] = Field(default_factory=list)
 
 
 class ProviderProfile(BaseModel):
@@ -135,6 +142,8 @@ class PolicyDocument(BaseModel):
     model_policies: dict[str, PolicyTarget]
     request_defaults: dict[str, int | float]
     cache: dict[str, float]
+    # The chat models the owner may choose between, in presentation order.
+    selectable_chat_policies: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +159,8 @@ class RegistryModel:
     aliases: tuple[str, ...]
     limits: ModelLimits
     pricing: ModelPricing
+    display_name: str
+    reasoning_efforts: tuple[ReasoningEffort, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +314,15 @@ class ProviderRegistry:
                 "enabled_profiles",
                 "profile names must be unique across the merged registry",
             )
+        selectable = policies.selectable_chat_policies
+        if len(selectable) != len(set(selectable)) or any(
+            name not in policies.model_policies for name in selectable
+        ):
+            _fail(
+                policy_path,
+                "selectable_chat_policies",
+                "each entry must name one declared model policy",
+            )
 
         catalog_path = models_root / "catalog.yaml"
         catalog_overlay = None if overlay_root is None else overlay_root / "models/catalog.yaml"
@@ -449,6 +469,17 @@ class ProviderRegistry:
             if entry.id in seen_ids:
                 _fail(path, "models[].id", "must be unique within a profile")
             seen_ids.add(entry.id)
+            if len(entry.reasoning_efforts) != len(set(entry.reasoning_efforts)):
+                _fail(path, "models[].reasoning_efforts", "each effort must be listed once")
+            if (
+                entry.reasoning_efforts
+                and profile.capabilities.reasoning is not ReasoningSupport.NATIVE
+            ):
+                _fail(
+                    path,
+                    "models[].reasoning_efforts",
+                    "effort levels require native reasoning",
+                )
             if (entry.catalog is None) == (entry.pricing is None):
                 _fail(path, "models[]", "must declare pricing or catalog, but not both")
             if entry.catalog is not None:
@@ -484,6 +515,8 @@ class ProviderRegistry:
                     aliases=tuple(entry.aliases),
                     limits=limits,
                     pricing=_pricing(path, pricing_raw),
+                    display_name=entry.display_name or entry.id,
+                    reasoning_efforts=tuple(entry.reasoning_efforts),
                 )
             )
         return profile, models
@@ -523,6 +556,8 @@ class StaticModelRouter:
             credential_ref=profile.document.credential_ref or "none",
             policy_name=model_policy,
             resolved_at=self._clock.now(),
+            display_name=model.display_name,
+            reasoning_efforts=model.reasoning_efforts,
         )
 
     async def resolve_pinned(self, pin: ProviderPin) -> ResolvedModel:
@@ -545,6 +580,8 @@ class StaticModelRouter:
             credential_ref=profile.document.credential_ref or "none",
             policy_name="pinned",
             resolved_at=self._clock.now(),
+            display_name=model.display_name,
+            reasoning_efforts=model.reasoning_efforts,
         )
 
     @staticmethod

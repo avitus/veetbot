@@ -40,6 +40,7 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import (
     ModelAttempt,
     ModelRequest,
+    ReasoningEffort,
     ResolvedModel,
     StopReason,
     SystemMessage,
@@ -308,8 +309,9 @@ def distillation_evidence_matches(
     *,
     corpus_sha256: str | None = None,
     holdout_sha256: str | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> bool:
-    """Require the exact evaluated model and policy tuple for activation.
+    """Require the exact evaluated model, effort, and policy tuple for activation.
 
     When the digest of the corpus the running tree ships is supplied, the
     artifact must have been evaluated against that corpus: the bundle test
@@ -321,6 +323,8 @@ def distillation_evidence_matches(
     if corpus_sha256 is not None and evidence.corpus_sha256 != corpus_sha256:
         return False
     if holdout_sha256 is not None and evidence.holdout_sha256 != holdout_sha256:
+        return False
+    if evidence.reasoning_effort != reasoning_effort:
         return False
     expected = {
         "extractor_version": NEMORI_EXTRACTOR_VERSION,
@@ -1149,9 +1153,15 @@ class NemoriAssistedCandidateExtractor:
         timeout_seconds: float = DISTILLATION_TIMEOUT_SECONDS,
         commit_guard: Callable[[RepositoryUnitOfWork], Awaitable[None]] | None = None,
         source_isolated: bool = False,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> None:
+        if reasoning_effort is not None and reasoning_effort not in (
+            resolved_model.reasoning_efforts
+        ):
+            raise ValueError("the memory model does not accept that reasoning effort")
         self._provider = provider
         self._resolved_model = resolved_model
+        self._reasoning_effort = reasoning_effort
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
@@ -1602,6 +1612,7 @@ class NemoriAssistedCandidateExtractor:
             },
             timeout_seconds=self._timeout_seconds,
             stream_idle_seconds=min(10.0, self._timeout_seconds),
+            reasoning_effort=self._reasoning_effort,
         )
         attempt = ModelAttempt(
             attempt_id=attempt_id,

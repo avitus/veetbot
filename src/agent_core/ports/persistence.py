@@ -26,6 +26,7 @@ from agent_core.ports.folders import FolderStore
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
+from agent_core.ports.model_settings import ModelSettingsStore
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.personas import PersonaStore
@@ -86,6 +87,7 @@ class RepositoryUnitOfWork(Protocol):
     episodes: IntegratedEpisodeStore
     traces: TraceStore
     personas: PersonaStore
+    model_settings: ModelSettingsStore
     folders: FolderStore
     email: EmailStore
     calls: CallStore

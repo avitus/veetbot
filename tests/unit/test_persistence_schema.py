@@ -476,3 +476,30 @@ def test_email_records_encode_scoped_revisioned_state() -> None:
         "jsonb_typeof(payload) = 'object'" in str(getattr(constraint, "sqltext", ""))
         for constraint in table.constraints
     )
+
+
+def test_model_settings_are_versioned_per_principal_under_tenant_isolation() -> None:
+    table = Base.metadata.tables["model_settings"]
+    assert {column.name for column in table.primary_key.columns} == {
+        "tenant_id",
+        "principal_id",
+        "version",
+    }
+    assert set(table.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "version",
+        "chat_model_policy",
+        "chat_reasoning_effort",
+        "memory_model_policy",
+        "memory_reasoning_effort",
+        "created_at",
+    }
+    assert table.columns["chat_reasoning_effort"].nullable
+    assert table.columns["memory_reasoning_effort"].nullable
+
+    migration = next((ROOT / "migrations" / "versions").glob("*_add_model_settings.py"))
+    migration_sql = migration.read_text(encoding="utf-8")
+    assert "ALTER TABLE model_settings ENABLE ROW LEVEL SECURITY" in migration_sql
+    assert "ALTER TABLE model_settings FORCE ROW LEVEL SECURITY" in migration_sql
+    assert "model_settings_tenant_isolation" in migration_sql

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib
 import json
@@ -9,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -38,6 +40,7 @@ from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     MemoryLongevity,
 )
+from agent_core.domain.messages import ReasoningEffort
 from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT, assigned_longevity
 from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
@@ -366,6 +369,8 @@ class DistillationArmResult(BaseModel):
     beliefs: list[DistillationEvaluationBelief]
     score: DistillationCaseScore
     identity: tuple[str, str, str] | None = None
+    # The effort the arm's formation sent; none for a provider default.
+    reasoning_effort: str | None = None
     provider_calls: int = Field(ge=0)
     expected_provider_calls: int = Field(ge=0)
     provider_cost_usd: str = Field(default="0", pattern=r"^\d+(?:\.\d+)?$")
@@ -423,6 +428,8 @@ class MemoryDistillationEvaluationResult(BaseModel):
     development_only: bool = False
     # How many times the whole evaluation ran; the gates pool every run.
     repeats: int = Field(default=1, ge=1)
+    # The effort the evaluated arm sent (ADR-0118); the controls send none.
+    reasoning_effort: str | None = None
     evidence: MemoryDistillationEvidence | None = None
 
     @model_validator(mode="after")
@@ -737,6 +744,7 @@ async def _evaluate_case(
     policy_version: PolicyVersion,
     seeds: list[SeedBelief] | None = None,
     model_provider_overrides: dict[str, ModelProvider] | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> DistillationArmResult:
     principal = Principal(
         tenant_id="evaluation",
@@ -755,6 +763,7 @@ async def _evaluate_case(
         memory_provider_evaluation_mode=policy_version == "formation@8",
         memory_distillation_evaluation_mode=policy_version == "formation@9",
         memory_people_evaluation_mode=policy_version == "formation@11",
+        memory_reasoning_effort=reasoning_effort,
         model_provider_overrides=model_provider_overrides,
     ) as composition:
         seeded = await seed_prior_beliefs(composition, seeds or [], principal=principal)
@@ -784,6 +793,7 @@ async def _evaluate_case(
             session_id=session_id,
         )
         identity = None
+        arm_effort: str | None = None
         if policy_version != "formation@7":
             async with composition.uow_factory() as uow:
                 selections = await uow.process_events.list("memory.provider_extraction.selection")
@@ -796,6 +806,8 @@ async def _evaluate_case(
             if not all(isinstance(value, str) for value in (provider, model, compiled_policy)):
                 raise ValueError("distillation evaluation model selection is incomplete")
             identity = (str(provider), str(model), str(compiled_policy))
+            recorded_effort = payload.get("reasoning_effort")
+            arm_effort = recorded_effort if isinstance(recorded_effort, str) else None
         evaluated_at = composition.clock.now()
         async with composition.uow_factory() as uow:
             session_events = await uow.events.list_after(session_id, 0, principal)
@@ -847,6 +859,7 @@ async def _evaluate_case(
             evidence_units_formed=evidence_units_formed,
         ),
         identity=identity,
+        reasoning_effort=arm_effort,
         provider_calls=formed.run.provider_call_count,
         expected_provider_calls=expected_calls,
         provider_cost_usd=format(cost, "f"),
@@ -927,7 +940,7 @@ def load_distillation_holdout(
 def publish_distillation_evidence(
     path: Path,
     *,
-    identity: dict[str, str],
+    identity: dict[str, str | None],
     corpus_sha256: str,
     sample_count: int,
     positive_case_count: int,
@@ -989,6 +1002,8 @@ async def run_live_evaluation(
     output: Path,
     development_only: bool = False,
     repeats: int = 1,
+    reasoning_effort: ReasoningEffort | None = None,
+    concurrency: int = 1,
 ) -> MemoryDistillationEvaluationResult | None:
     """Evaluate all three frozen/new policies and publish only passing evidence.
 
@@ -999,6 +1014,11 @@ async def run_live_evaluation(
     With repeats, the whole evaluation runs that many times and the gates are
     decided over the pool of every run, because one run of this policy has
     been measured to move by up to a tenth on a gate against the next.
+
+    A reasoning effort is sent by the evaluated formation@9 arm only; the
+    frozen controls keep the provider default, and the published evidence
+    binds the effort (ADR-0118). Concurrency runs that many cases at once,
+    each in its own composition, and keeps results in corpus order.
     """
 
     if os.environ.get("RUN_LIVE_MODEL_TESTS") != "1":
@@ -1007,6 +1027,8 @@ async def run_live_evaluation(
         raise ValueError("model policy, policy profile, and build ref must be non-empty")
     if repeats < 1:
         raise ValueError("repeats must be at least one")
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least one")
     if _BUILD_REF.match(build_ref.strip()) is None:
         raise ValueError("build ref must be the full forty-character commit sha")
     require_committed_tree(repository_root, build_ref.strip())
@@ -1028,34 +1050,54 @@ async def run_live_evaluation(
         case_sets.append((holdout.cases, holdout.seeds_for, holdout_results))
     with tempfile.TemporaryDirectory(prefix="agent-memory-distillation-eval-") as root:
         settings = _evaluation_settings(base_settings, Path(root) / "artifacts")
+        slots = asyncio.Semaphore(concurrency)
+
+        async def evaluate(
+            case: MemoryDistillationCase,
+            seeds_for: Callable[[MemoryDistillationCase], list[SeedBelief]],
+            run_index: int,
+        ) -> DistillationCaseResult:
+            async with slots:
+                arms: dict[PolicyVersion, DistillationArmResult] = {}
+                seeds = seeds_for(case)
+                for policy_version in _POLICIES:
+                    arms[policy_version] = await _evaluate_case(
+                        settings,
+                        case,
+                        model_policy=model_policy,
+                        policy_profile=policy_profile,
+                        policy_version=policy_version,
+                        seeds=seeds,
+                        reasoning_effort=(
+                            reasoning_effort if policy_version == "formation@9" else None
+                        ),
+                    )
+                return DistillationCaseResult(
+                    case_id=case.id,
+                    label=case.label,
+                    scenario=case.scenario,
+                    arms=arms,
+                    run_index=run_index,
+                )
+
         for run_index in range(repeats):
             for case_set, seeds_for, sink in case_sets:
-                for case in case_set:
-                    arms: dict[PolicyVersion, DistillationArmResult] = {}
-                    seeds = seeds_for(case)
-                    for policy_version in _POLICIES:
-                        arm = await _evaluate_case(
-                            settings,
-                            case,
-                            model_policy=model_policy,
-                            policy_profile=policy_profile,
-                            policy_version=policy_version,
-                            seeds=seeds,
-                        )
-                        arms[policy_version] = arm
-                        if arm.identity is not None:
-                            identities.add(arm.identity)
-                        if policy_version == "formation@9":
-                            evaluated_at = arm.evaluated_at
-                    sink.append(
-                        DistillationCaseResult(
-                            case_id=case.id,
-                            label=case.label,
-                            scenario=case.scenario,
-                            arms=arms,
-                            run_index=run_index,
-                        )
+                sink.extend(
+                    await asyncio.gather(
+                        *(evaluate(case, seeds_for, run_index) for case in case_set)
                     )
+                )
+    for result in [*results, *holdout_results]:
+        for arm in result.arms.values():
+            if arm.identity is not None:
+                identities.add(arm.identity)
+        evaluated = result.arms["formation@9"].evaluated_at
+        evaluated_at = evaluated if evaluated_at is None else max(evaluated_at, evaluated)
+    requested_effort = None if reasoning_effort is None else reasoning_effort.value
+    if {result.arms["formation@9"].reasoning_effort for result in [*results, *holdout_results]} - {
+        requested_effort
+    }:
+        raise ValueError("the evaluated arm did not send the requested reasoning effort")
 
     if len(identities) != 1:
         raise ValueError("distillation evaluation resolved more than one provider tuple")
@@ -1108,6 +1150,7 @@ async def run_live_evaluation(
                 "model_policy": model_policy,
                 "provider": provider,
                 "model": model,
+                "reasoning_effort": requested_effort,
                 "policy_profile": policy_profile,
                 "policy_version": compiled_policy,
                 "build_ref": build_ref.strip(),
@@ -1164,6 +1207,7 @@ async def run_live_evaluation(
         holdout_policies=holdout_summaries,
         development_only=development_only,
         repeats=repeats,
+        reasoning_effort=requested_effort,
         evidence=evidence,
     )
 

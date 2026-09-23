@@ -4468,12 +4468,14 @@ def test_per_source_displacement_keeps_the_claims_stated_first() -> None:
     assert chosen == mentioned[:6]
 
 
-def test_distillation_evidence_is_schema_seven_and_records_every_run() -> None:
-    """The artifact carries the repeat count and each run's own numbers."""
+def test_distillation_evidence_is_schema_eight_and_records_every_run() -> None:
+    """The artifact carries the repeat count, each run's own numbers, and the
+    reasoning effort it was evaluated at (ADR-0118; none is provider default)."""
 
     evidence = _passing_distillation_evidence()
 
-    assert evidence.schema_version == 7
+    assert evidence.schema_version == 8
+    assert evidence.reasoning_effort is None
     assert evidence.repeats == 1
     assert len(evidence.run_metrics) == 1
     with pytest.raises(ValidationError, match="one record per run"):

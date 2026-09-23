@@ -5,6 +5,9 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case websiteAccess
     case smsIntegration
     case appearance
+    // After the sections UI tests assert on: the lazy stack never renders a
+    // row pushed below an iPad sheet's fold.
+    case models
     case dataAndPrivacy
 
     var id: String { rawValue }
@@ -50,6 +53,7 @@ public struct ConnectionSettingsView: View {
     @State private var token = ""
     @State private var isSaving = false
     @State private var websiteURL = ""
+    @StateObject private var modelSettings = ModelSettingsViewModel()
 
     public init(
         model: ChatViewModel,
@@ -90,6 +94,7 @@ public struct ConnectionSettingsView: View {
             if baseURL.isEmpty { baseURL = model.baseURL?.absoluteString ?? "" }
             if model.isConfigured {
                 Task { await model.refreshBrowserProfiles() }
+                Task { await modelSettings.load() }
             }
         }
     }
@@ -104,7 +109,7 @@ public struct ConnectionSettingsView: View {
                 Text(
                     embedded
                         ? "Connect securely, then choose how Veetbot looks."
-                        : "Connection, appearance, and device-local data."
+                        : "Connection, models, appearance, and device-local data."
                 )
                 .appFont(.caption)
                 .foregroundColor(.secondary)
@@ -168,6 +173,9 @@ public struct ConnectionSettingsView: View {
                     }
                 }
             }
+
+        case .models:
+            modelsSection
 
         case .websiteAccess:
             SettingsCard(
@@ -379,6 +387,136 @@ public struct ConnectionSettingsView: View {
         }
     }
 
+    /// The owner's chat and memory models (`/v1/settings/models`). Each picker
+    /// change saves the whole state at once; the pickers lock while a save is
+    /// in flight, and a failed save falls back to the server's last values.
+    @ViewBuilder
+    private var modelsSection: some View {
+        SettingsCard(
+            title: "Models",
+            summary: "Choose the models Veetbot uses to chat and to form memories.",
+            systemImage: "cpu",
+            tint: AppTheme.turquoise
+        ) {
+            if model.isConfigured {
+                VStack(alignment: .leading, spacing: 16) {
+                    if modelSettings.chat != nil, modelSettings.memory != nil,
+                        !modelSettings.unavailable
+                    {
+                        modelGroup(
+                            title: "Chat",
+                            footnote:
+                                "A model change applies to new chats. Reasoning applies from your next message."
+                        ) {
+                            modelRow("Model") {
+                                Picker("Chat model", selection: chatModelSelection) {
+                                    ForEach(modelSettings.chatModelChoices) { choice in
+                                        Text(choice.displayName).tag(choice.modelPolicy)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .disabled(!modelSettings.isEditable)
+                                .accessibilityIdentifier("settings.models.chat.model")
+                            }
+                            modelRow("Reasoning") {
+                                Picker("Chat reasoning", selection: chatEffortSelection) {
+                                    ForEach(modelSettings.chatEffortPickerValues, id: \.self) { effort in
+                                        Text(ReasoningEffort.displayName(for: effort)).tag(effort)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .disabled(
+                                    !modelSettings.isEditable
+                                        || modelSettings.chatEffortChoices.isEmpty
+                                )
+                                .accessibilityIdentifier("settings.models.chat.effort")
+                            }
+                        }
+
+                        Divider()
+
+                        modelGroup(
+                            title: "Memory",
+                            footnote:
+                                "Only combinations that passed Veetbot's memory evaluation are offered."
+                        ) {
+                            modelRow("Model") {
+                                Picker("Memory model", selection: memoryModelSelection) {
+                                    ForEach(modelSettings.memoryModelChoices) { choice in
+                                        Text(choice.displayName).tag(choice.modelPolicy)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .disabled(!modelSettings.isEditable)
+                                .accessibilityIdentifier("settings.models.memory.model")
+                            }
+                            modelRow("Reasoning") {
+                                Picker("Memory reasoning", selection: memoryEffortSelection) {
+                                    ForEach(modelSettings.memoryEffortPickerValues, id: \.self) { effort in
+                                        Text(ReasoningEffort.displayName(for: effort)).tag(effort)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .disabled(
+                                    !modelSettings.isEditable
+                                        || modelSettings.memoryEffortChoices.count < 2
+                                )
+                                .accessibilityIdentifier("settings.models.memory.effort")
+                            }
+                        }
+                    } else if modelSettings.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    if let status = modelSettings.statusMessage {
+                        Text(status)
+                            .appFont(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("settings.models.status")
+                    }
+                }
+            } else {
+                Text("Connect this app to Veetbot before choosing models.")
+                    .appFont(.body)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var chatModelSelection: Binding<String> {
+        Binding(
+            get: { modelSettings.chat?.modelPolicy ?? "" },
+            set: { policy in Task { await modelSettings.selectChatModel(policy) } }
+        )
+    }
+
+    private var chatEffortSelection: Binding<ReasoningEffort?> {
+        Binding(
+            get: { modelSettings.chat?.reasoningEffort },
+            set: { effort in Task { await modelSettings.selectChatEffort(effort) } }
+        )
+    }
+
+    private var memoryModelSelection: Binding<String> {
+        Binding(
+            get: { modelSettings.memory?.modelPolicy ?? "" },
+            set: { policy in Task { await modelSettings.selectMemoryModel(policy) } }
+        )
+    }
+
+    private var memoryEffortSelection: Binding<ReasoningEffort?> {
+        Binding(
+            get: { modelSettings.memory?.reasoningEffort },
+            set: { effort in Task { await modelSettings.selectMemoryEffort(effort) } }
+        )
+    }
+
     /// The owner's switch for the device SMS integration. Off by default, and
     /// off means the device never declares the capability, so the tool never
     /// registers (docs/plan/device-channel-and-sms.md).
@@ -434,6 +572,36 @@ public struct ConnectionSettingsView: View {
                 .appFont(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func modelGroup<Content: View>(
+        title: String,
+        footnote: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .appFont(.headline)
+            content()
+            Text(footnote)
+                .appFont(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func modelRow<Content: View>(
+        _ label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .appFont(.body)
+                .foregroundColor(.secondary)
+                .frame(width: 96, alignment: .leading)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

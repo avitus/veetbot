@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from agent_core.domain.events import EventEnvelope, ProcessEvent
+from agent_core.domain.messages import ReasoningEffort
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
 
 
@@ -558,13 +559,16 @@ class MemoryDistillationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[7] = 7
+    # Schema 8 records the reasoning effort the evaluation sent (ADR-0118);
+    # a schema 7 artifact sent none and is provider-default evidence.
+    schema_version: Literal[7, 8] = 8
     scorer_version: Literal["distillation-scorer@7"]
     extractor_version: Literal["nemori-assisted-v1"] = "nemori-assisted-v1"
     formation_policy_version: Literal["formation@9"] = "formation@9"
     model_policy: str = Field(min_length=1)
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
+    reasoning_effort: ReasoningEffort | None = None
     policy_profile: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
     # An immutable commit, never an operator-typed content label.
@@ -617,6 +621,8 @@ class MemoryDistillationEvidence(BaseModel):
 
     @model_validator(mode="after")
     def evidence_thresholds_are_coherent(self) -> MemoryDistillationEvidence:
+        if self.schema_version == 7 and self.reasoning_effort is not None:
+            raise ValueError("schema 7 distillation evidence predates reasoning effort")
         if self.positive_case_count > self.sample_count:
             raise ValueError("positive distillation cases exceed the sample")
         if self.positive_case_count * 10 < self.sample_count * 7:

@@ -42,6 +42,8 @@ PLATFORM_SCOPES = frozenset(
         "people.write",
         "persona.read",
         "persona.write",
+        "settings.read",
+        "settings.write",
         "email.read",
         "email.write",
         "call.read",

@@ -11,6 +11,7 @@ import Testing
                 .websiteAccess,
                 .smsIntegration,
                 .appearance,
+                .models,
                 .dataAndPrivacy,
             ]
         )
@@ -28,6 +29,7 @@ import Testing
                 .connection,
                 .websiteAccess,
                 .appearance,
+                .models,
                 .dataAndPrivacy,
             ]
         )

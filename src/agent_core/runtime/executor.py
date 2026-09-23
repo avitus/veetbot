@@ -31,6 +31,7 @@ from agent_core.domain.messages import (
     ToolCallItem,
     ToolResultItem,
 )
+from agent_core.domain.model_settings import ModelSettingsCatalog, chat_reasoning_effort
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import (
@@ -308,7 +309,9 @@ class RunExecutor:
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
         max_compactions_per_step: int = 2,
+        model_settings: ModelSettingsCatalog | None = None,
     ) -> None:
+        self._model_settings = model_settings
         self._principal = principal
         self._principals = principals
         self._uow_factory = uow_factory
@@ -708,6 +711,13 @@ class RunExecutor:
             async with self._uow_factory() as uow:
                 agent = await uow.agents.get_version(run.agent_id, run.agent_version)
                 session = await uow.sessions.get(run.session_id, principal)
+                chat_choice = (
+                    None
+                    if self._model_settings is None
+                    else self._model_settings.effective_chat(
+                        await uow.model_settings.current(principal)
+                    )
+                )
             model_provider = self._model_provider
             resolved_model = self._resolved_model
             pin_created = False
@@ -796,6 +806,13 @@ class RunExecutor:
                 identical_call_threshold=self._identical_call_threshold,
                 identical_denial_threshold=self._identical_denial_threshold,
                 max_compactions_per_step=self._max_compactions_per_step,
+                # A typed task keeps its provider default; the owner's effort
+                # is a chat setting.
+                reasoning_effort=(
+                    None
+                    if typed or chat_choice is None
+                    else chat_reasoning_effort(chat_choice, resolved_model.reasoning_efforts)
+                ),
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")

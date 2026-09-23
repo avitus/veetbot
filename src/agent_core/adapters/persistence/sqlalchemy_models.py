@@ -1862,6 +1862,20 @@ class ThreadFolderProposalRow(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ModelSettingsRow(Base):
+    __tablename__ = "model_settings"
+    __table_args__ = (CheckConstraint("version > 0", name="model_settings_version_positive"),)
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_model_policy: Mapped[str] = mapped_column(Text)
+    chat_reasoning_effort: Mapped[str | None] = mapped_column(Text)
+    memory_model_policy: Mapped[str] = mapped_column(Text)
+    memory_reasoning_effort: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class PersonaDocumentRow(Base):
     __tablename__ = "persona_documents"
 

@@ -136,6 +136,16 @@ class ReasoningSupport(StrEnum):
     IN_BAND = "in_band"
 
 
+class ReasoningEffort(StrEnum):
+    """How much a natively reasoning model thinks before answering (ADR-0118)."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+
+
 class Capability(StrEnum):
     NATIVE_TOOL_CALLING = "native_tool_calling"
     PARALLEL_TOOL_CALLS = "parallel_tool_calls"
@@ -268,6 +278,8 @@ class ModelRequest(BaseModel):
     cache_hints: CacheHints | None = None
     timeout_seconds: float = 600.0
     stream_idle_seconds: float = 60.0
+    # None leaves the provider's own default in force.
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class ModelCapabilities(BaseModel):
@@ -336,6 +348,8 @@ class ResolvedModel(BaseModel):
     credential_ref: str = "fake"
     policy_name: str = "balanced"
     resolved_at: datetime
+    display_name: str | None = None
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
 
 
 class ProviderPin(BaseModel):

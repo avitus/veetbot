@@ -57,6 +57,7 @@ enum ConversationNavigationUITestFixture {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
         ConversationNavigationUITestURLProtocol.resetEmail()
         ConversationNavigationUITestURLProtocol.resetFolders()
+        ConversationNavigationUITestURLProtocol.resetModelSettings()
         #if os(macOS)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
             let availableAfter = Date().addingTimeInterval(
@@ -164,6 +165,27 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 ConversationNavigationUITestFixture.planningSessionID: ConversationNavigationUITestFixture.workFolderID,
             ]
             : [:]
+    }
+    private static let modelSettingsLock = NSLock()
+    private static var modelSettingsVersion = 0
+    private static var chatModelChoice: (policy: String, effort: String?) = ("astra", "high")
+    private static var memoryModelChoice: (policy: String, effort: String?) = ("balanced", nil)
+    private static let chatModelOffers: [(policy: String, name: String, efforts: [String])] = [
+        ("astra", "GPT-6 Astra", ["low", "medium", "high", "xhigh", "max"]),
+        ("fable", "Claude Fable 5.1", ["low", "medium", "high", "xhigh", "max"]),
+        ("balanced", "GPT-5.6 Sol", ["low", "medium", "high", "xhigh", "max"]),
+    ]
+    private static let memoryModelOffers: [(policy: String, name: String, effort: String?)] = [
+        ("balanced", "GPT-5.6 Sol", nil),
+        ("astra", "GPT-6 Astra", "medium"),
+    ]
+    /// Starts each native UI test from the never-saved deployment defaults.
+    static func resetModelSettings() {
+        modelSettingsLock.withLock {
+            modelSettingsVersion = 0
+            chatModelChoice = ("astra", "high")
+            memoryModelChoice = ("balanced", nil)
+        }
     }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
@@ -530,6 +552,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)"):
             statusCode = 200
             body = Self.scheduleDetailJSON
+        case ("GET", "/v1/settings/models"):
+            statusCode = 200
+            body = Self.modelSettingsLock.withLock { Self.modelSettingsJSON }
+        case ("PUT", "/v1/settings/models"):
+            let result = Self.updateModelSettings(requestJSON())
+            statusCode = result.0
+            body = result.1
         case ("GET", "/v1/browser-profiles"):
             statusCode = 200
             body = #"{"items":[],"next_cursor":null}"#
@@ -598,6 +627,52 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    }
+
+    /// Applies the same rules as the server: the version guards the write,
+    /// only offered choices are stored, and restating the stored values does
+    /// not advance the version.
+    private static func updateModelSettings(_ payload: [String: Any]) -> (Int, String) {
+        func choice(_ key: String) -> (policy: String, effort: String?)? {
+            guard let object = payload[key] as? [String: Any],
+                let policy = object["model_policy"] as? String,
+                object.keys.contains("reasoning_effort")
+            else { return nil }
+            return (policy, object["reasoning_effort"] as? String)
+        }
+        return modelSettingsLock.withLock {
+            guard payload["expected_version"] as? Int == modelSettingsVersion else {
+                return (409, #"{"error":{"code":"conflict","message":"model settings version is stale","details":{},"request_id":"ui-test"}}"#)
+            }
+            guard let chat = choice("chat"), let memory = choice("memory"),
+                chatModelOffers.contains(where: { offer in
+                    offer.policy == chat.policy
+                        && (chat.effort.map { offer.efforts.contains($0) } ?? offer.efforts.isEmpty)
+                }),
+                memoryModelOffers.contains(where: { $0.policy == memory.policy && $0.effort == memory.effort })
+            else {
+                return (400, #"{"error":{"code":"malformed_request","message":"That model choice is not offered.","details":{},"request_id":"ui-test"}}"#)
+            }
+            if chat != chatModelChoice || memory != memoryModelChoice {
+                chatModelChoice = chat
+                memoryModelChoice = memory
+                modelSettingsVersion += 1
+            }
+            return (200, modelSettingsJSON)
+        }
+    }
+
+    /// Callers hold `modelSettingsLock`.
+    private static var modelSettingsJSON: String {
+        func effort(_ value: String?) -> String { value.map { "\"\($0)\"" } ?? "null" }
+        let chatOptions = chatModelOffers.map { offer in
+            let efforts = offer.efforts.map { "\"\($0)\"" }.joined(separator: ",")
+            return #"{"model_policy":"\#(offer.policy)","display_name":"\#(offer.name)","provider":"openai","model":"\#(offer.policy)","reasoning_efforts":[\#(efforts)],"default_reasoning_effort":"high"}"#
+        }.joined(separator: ",")
+        let memoryOptions = memoryModelOffers.map { offer in
+            #"{"model_policy":"\#(offer.policy)","display_name":"\#(offer.name)","provider":"openai","model":"\#(offer.policy)","reasoning_effort":\#(effort(offer.effort))}"#
+        }.joined(separator: ",")
+        return #"{"version":\#(modelSettingsVersion),"chat":{"model_policy":"\#(chatModelChoice.policy)","reasoning_effort":\#(effort(chatModelChoice.effort))},"memory":{"model_policy":"\#(memoryModelChoice.policy)","reasoning_effort":\#(effort(memoryModelChoice.effort))},"chat_options":[\#(chatOptions)],"memory_options":[\#(memoryOptions)]}"#
     }
 
     private static let emailThreadID = "00000000-0000-0000-0000-000000000801"

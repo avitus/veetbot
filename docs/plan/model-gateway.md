@@ -781,7 +781,7 @@ This section is that shape.
 ### Where a profile lives, and the two files it is not
 
 The routing section above says the registry is a YAML file per provider
-profile. `bootstrap-and-composition.md:399-400` places `models/policies.yaml`
+profile. `bootstrap-and-composition.md:412-413` places `models/policies.yaml`
 ("model_policies and provider profiles") and `models/catalog.yaml`
 ("aliases, limits, context windows, prices") inside the package. Read
 together those describe two layouts, and the difference is not cosmetic: one
@@ -802,7 +802,7 @@ src/agent_core/models/
 `policies.yaml` keeps `model_policies` unchanged and satisfies its "and
 provider profiles" half with the list of profile names this deployment
 loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
-the four things `bootstrap-and-composition.md:400` names it for and becomes
+the four things `bootstrap-and-composition.md:413` names it for and becomes
 the target of Section 10.5's fourth declaration, the model-catalog import,
 rather than a second place models are defined. A profile either declares a
 model inline or imports a catalog entry for it, never both.
@@ -934,8 +934,15 @@ models[].catalog   resolves to an entry in catalog.yaml     reject
 models[]           declares pricing or catalog, not both    reject
 pricing amounts    decimal strings, never YAML floats       reject
 effective_at       RFC 3339 with an explicit offset         reject
+models[] efforts   each listed once; native reasoning only  reject
+selectable chat    each names one declared model policy     reject
 any level          an unknown key                           reject
 ```
+
+ADR-0118 adds two optional per-model keys, `display_name` and
+`reasoning_efforts`, the latter the closed `ReasoningEffort` levels the
+provider accepts for that model, and one optional key to `policies.yaml`,
+`selectable_chat_policies`, the chat models the owner may choose between.
 
 Three of those rows are worth defending.
 
@@ -947,7 +954,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1186-1227` is
+family of the secret scanner at `bootstrap-and-composition.md:1199-1240` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1496,6 +1503,20 @@ Note the asymmetry that makes this safe: the display text is untrusted and
 non-persisted, and the persisted payload is opaque and never interpreted.
 Neither half is both readable and privileged.
 
+### Reasoning effort (ADR-0118)
+
+`ModelRequest.reasoning_effort` extends the Section 10.1 request with one
+nullable field: `low`, `medium`, `high`, `xhigh`, or `max`. Null sends
+nothing, so the provider's default applies. The OpenAI Responses adapter
+sends it as `reasoning.effort` and the Anthropic Messages adapter as
+`output_config.effort` beside adaptive thinking; both send it only to a
+resolved model with native reasoning, and the chat-completions adapter never
+sends it. `ResolvedModel.reasoning_efforts` carries the profile's accepted
+levels, and callers send only one of them: the run loop sends the owner's
+chat effort when the run's model accepts it, and memory formation sends
+exactly the effort its evidence was evaluated at. A pinned run re-resolves
+the same accepted levels, and effort is not part of the pin.
+
 ## Conversation invariants the gateway enforces
 
 Section 10.4 specifies the turn shape and does not say what the gateway
@@ -1909,7 +1930,7 @@ These are decisions taken to keep the plan moving. Each is recorded in
    the two declarations and cannot edit the plan's. The reconciliation table
    makes the divergence readable; it does not make it go away.
 7. Is one file per provider profile right, given that
-   `bootstrap-and-composition.md:399` describes a single `models/policies.yaml`
+   `bootstrap-and-composition.md:412` describes a single `models/policies.yaml`
    holding both policies and profiles? One file per profile is what ADR-0012's
    "without editing core" requires of an overlay, and merging the two back is
    a compatible change in the other direction.
