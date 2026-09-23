@@ -215,3 +215,31 @@ class PeopleCorrectionResult(PeopleValue):
     belief: MemoryView | None = None
     removed: bool = False
     erasure: PeopleErasureView | None = None
+
+
+class PeopleRepairCandidate(PeopleValue):
+    """A person the directory repair removes, and why (ADR-0118)."""
+
+    person_id: UUID
+    display_name: str
+    reason: Literal["unconfirmed", "pronoun", "self"]
+
+
+class PeopleRepairReport(PeopleValue):
+    """What `agent people repair-directory` found or did (ADR-0118).
+
+    A preview lists who would be removed before the correspondence backfill,
+    which can only keep more people. A confirmed run lists who was removed.
+    """
+
+    confirmed: bool
+    retained_mail: int = Field(ge=0)
+    mail_projected: int = Field(ge=0)
+    mail_skipped: int = Field(ge=0)
+    aliases_added: list[str]
+    candidates: list[PeopleRepairCandidate]
+    beliefs_deleted: int = Field(ge=0)
+    beliefs_unlinked: int = Field(ge=0)
+    # Deleting a fact resets the generated summary of the mail thread it came from.
+    mail_threads_reset: int = Field(ge=0)
+    note: str

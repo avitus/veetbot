@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TypedDict
 from uuid import UUID, uuid5
 
+from agent_core.application.people_self import owner_references as owner_references
 from agent_core.domain.agents import Principal
 from agent_core.domain.email_semantics import EmailSemanticSource
 from agent_core.domain.errors import ConflictError, ToolValidationError
@@ -38,6 +39,7 @@ from agent_core.domain.people import (
     PersonMention,
     RelationshipAssertion,
     is_non_person_reference,
+    is_self_reference,
     normalize_identifier,
 )
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
@@ -45,7 +47,6 @@ from agent_core.domain.people_sources import email_source_id as email_source_id
 from agent_core.domain.people_sources import source_id as source_id
 from agent_core.memory.communication_sources import FormationSource, FormationSourceKind
 from agent_core.memory.people import resolve_identity
-from agent_core.ports.email import EmailStore
 from agent_core.ports.people import PeopleStore
 
 PEOPLE_FORMATION_VERSION = "formation@11"
@@ -164,42 +165,6 @@ def creatable_keys(
         if label is not None and label in tied_labels:
             keys.add(mention.key)
     return frozenset(keys)
-
-
-async def owner_references(email: EmailStore, principal: Principal) -> frozenset[str]:
-    """The owner's own addresses and handles, from every mail account (ADR-0118).
-
-    Account status is irrelevant: an address stays the owner's while its account
-    syncs or is unavailable.
-    """
-    refs: set[str] = set()
-    after: str | None = None
-    for _ in range(10):
-        rows = await email.list(principal, "account", after=after, limit=100)
-        for row in rows:
-            payload = row.payload
-            verified = payload.get("verified_addresses")
-            values: list[object] = [
-                payload.get("email_address"),
-                *(verified if isinstance(verified, list) else []),
-            ]
-            for value in values:
-                if isinstance(value, str) and "@" in value:
-                    address = value.strip().casefold()
-                    refs.add("email:" + address)
-                    refs.add("handle:" + address.split("@", 1)[0])
-        if len(rows) < 100:
-            break
-        after = rows[-1].key
-    return frozenset(refs)
-
-
-def is_self_reference(kind: str, value: str, refs: frozenset[str]) -> bool:
-    """Whether a mention names the owner by one of the owner's addresses or handles."""
-    cleaned = value.strip().casefold()
-    if kind == "handle":
-        return "handle:" + cleaned.lstrip("@") in refs
-    return "email:" + cleaned in refs
 
 
 def _admitted_source(source: FormationSource, email: EmailSemanticSource | None) -> bool:

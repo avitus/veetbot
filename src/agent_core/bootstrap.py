@@ -267,6 +267,7 @@ from agent_core.application.people import PublicPeopleService
 from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
 from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import PeopleIdentityService
+from agent_core.application.people_repair import PeopleDirectoryRepair
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -379,7 +380,7 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
-from agent_core.domain.email import EmailBudgetLimits
+from agent_core.domain.email import EmailBudgetLimits, EmailRecord
 from agent_core.domain.email_subscriptions import SUBSCRIPTIONS_TOOL_NAME, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
@@ -580,6 +581,21 @@ logger = logging.getLogger(__name__)
 LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
 
 
+def _correspondence_reprojector(
+    uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
+) -> Callable[[Principal, EmailRecord], Awaitable[bool]]:
+    """The directory repair's header backfill (ADR-0118); it calls no model."""
+
+    async def reproject(owner: Principal, record: EmailRecord) -> bool:
+        from agent_core.memory.email_people import EmailPeopleFormationService
+
+        return await EmailPeopleFormationService(
+            uow_factory, clock, ids, owner, provider="people-repair", model="none"
+        ).reproject_correspondence(record)
+
+    return reproject
+
+
 @dataclass(frozen=True, slots=True)
 class ApplicationServices:
     sessions: PublicSessionServiceContract
@@ -638,6 +654,7 @@ class Composition:
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
     judgment_provider: JudgmentProvider | None = None
+    people_repair: PeopleDirectoryRepair | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2766,6 +2783,16 @@ async def _compose(
         if settings.people_enabled
         else None
     )
+    people_repair = (
+        PeopleDirectoryRepair(
+            uow_factory,
+            clock,
+            memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
+            reproject=_correspondence_reprojector(uow_factory, clock, ids),
+        )
+        if settings.people_enabled
+        else None
+    )
     people_import_runner = None
     if people_service is not None:
         from agent_core.memory.communication_sources import FormationSourceKind, formation_source
@@ -3932,6 +3959,7 @@ async def _compose(
                 mcp_proxy=mcp_proxy,
                 local_import_tasks=local_import_tasks,
                 judgment_provider=judgment_provider,
+                people_repair=people_repair,
             ),
             list(effective_providers.values()),
         )

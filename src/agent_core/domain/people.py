@@ -518,6 +518,14 @@ NON_PERSON_REFERENCES: frozenset[str] = frozenset(
 )
 
 
+def is_self_reference(kind: str, value: str, refs: frozenset[str]) -> bool:
+    """Whether a mention names the owner by one of the owner's addresses or handles."""
+    cleaned = value.strip().casefold()
+    if kind == "handle":
+        return "handle:" + cleaned.lstrip("@") in refs
+    return "email:" + cleaned in refs
+
+
 def is_non_person_reference(label: str) -> bool:
     """Whether a mention label is a pronoun or generic reference, never a person."""
     return " ".join(label.casefold().split()).strip(".,;:!?'\"") in NON_PERSON_REFERENCES

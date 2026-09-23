@@ -33,6 +33,79 @@ def test_people_operator_commands_and_explicit_write_owner() -> None:
     assert "--owner" in refused.output
 
 
+def test_directory_repair_is_listed_and_requires_the_owner() -> None:
+    runner = CliRunner()
+    listed = runner.invoke(app, ["people", "--help"])
+    assert "repair-directory" in listed.output
+    refused = runner.invoke(app, ["people", "repair-directory", "--confirm"])
+    assert refused.exit_code != 0
+    assert "--owner" in refused.output
+
+
+async def test_directory_repair_previews_by_default_and_audits_a_confirmed_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    from agent_core.cli import people
+    from agent_core.domain.errors import AuthorizationError, NotFoundError
+    from agent_core.domain.people_views import PeopleRepairReport
+    from tests.contract.support import principal
+
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    audit = UUID(int=91)
+    sessions: list[dict[str, object]] = []
+    runs: list[tuple[bool, UUID | None]] = []
+
+    class Sessions:
+        async def create(
+            self, who: object, agent_id: str, metadata: dict[str, object]
+        ) -> SimpleNamespace:
+            sessions.append(metadata)
+            return SimpleNamespace(id=audit)
+
+    class Repair:
+        async def run(
+            self, who: object, *, confirm: bool, session_id: UUID | None = None
+        ) -> PeopleRepairReport:
+            runs.append((confirm, session_id))
+            return PeopleRepairReport(
+                confirmed=confirm,
+                retained_mail=0,
+                mail_projected=0,
+                mail_skipped=0,
+                aliases_added=[],
+                candidates=[],
+                beliefs_deleted=0,
+                beliefs_unlinked=0,
+                mail_threads_reset=0,
+                note="",
+            )
+
+    repair: Repair | None = Repair()
+
+    @asynccontextmanager
+    async def build(**kwargs: Any) -> AsyncIterator[SimpleNamespace]:
+        yield SimpleNamespace(
+            principal=owner, people_repair=repair, services=SimpleNamespace(sessions=Sessions())
+        )
+
+    monkeypatch.setattr(people, "build", build)
+    identity = f"{owner.tenant_id}/{owner.principal_id}"
+    with pytest.raises(AuthorizationError):
+        await people.repair_directory_report("other/owner", True)
+    preview = await people.repair_directory_report(identity, False)
+    assert isinstance(preview, dict) and preview["confirmed"] is False
+    assert sessions == [] and runs == [(False, None)]
+    await people.repair_directory_report(identity, True)
+    assert sessions == [{"purpose": "people-management"}] and runs[-1] == (True, audit)
+    repair = None
+    with pytest.raises(NotFoundError, match="disabled"):
+        await people.repair_directory_report(identity, False)
+
+
 def test_erasure_replay_requires_offline_assertion_before_opening_receipt() -> None:
     result = CliRunner().invoke(
         app,
