@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,7 +65,7 @@ class PostgresRunQueue:
                 RunRow.status == RunStatus.QUEUED.value,
                 RunRow.priority.in_(classes),
                 (RunRow.scheduled_for.is_(None) | (RunRow.scheduled_for <= now)),
-                RunRow.attempts < self._max_attempts,
+                RunRow.lease_expirations < self._max_attempts,
             )
             .order_by(RunRow.priority, RunRow.created_at)
             .with_for_update(skip_locked=True)
@@ -155,9 +155,17 @@ class PostgresRunQueue:
                 await self._session.scalars(
                     select(RunRow)
                     .where(
-                        RunRow.status == RunStatus.RUNNING.value,
-                        RunRow.lease_expires_at.is_not(None),
-                        RunRow.lease_expires_at <= now,
+                        or_(
+                            and_(
+                                RunRow.status == RunStatus.RUNNING.value,
+                                RunRow.lease_expires_at.is_not(None),
+                                RunRow.lease_expires_at <= now,
+                            ),
+                            and_(
+                                RunRow.status == RunStatus.QUEUED.value,
+                                RunRow.lease_expirations >= self._max_attempts,
+                            ),
+                        ),
                     )
                     .order_by(RunRow.lease_expires_at)
                     .with_for_update(skip_locked=True)
@@ -167,25 +175,37 @@ class PostgresRunQueue:
         )
         for row in rows:
             previous_epoch = row.lease_epoch
-            if row.attempts >= self._max_attempts:
-                require_transition(RunStatus.RUNNING, RunStatus.FAILED)
+            previous_status = RunStatus(row.status)
+            if previous_status is RunStatus.RUNNING:
+                row.lease_expirations += 1
+            if row.lease_expirations >= self._max_attempts:
+                require_transition(previous_status, RunStatus.FAILED)
                 failure = RunFailure(
                     reason=FailureReason.MAX_ATTEMPTS_EXCEEDED,
                     error_class="MaxAttemptsExceeded",
-                    message="the durable worker attempt limit was reached",
-                    attempt_number=row.attempts,
+                    message="the durable worker lease-expiration limit was reached",
+                    attempt_number=row.lease_expirations,
                     occurred_at=now,
                 )
                 row.status = RunStatus.FAILED.value
                 row.failure = failure.model_dump(mode="json")
                 event_type = "run.failed"
-                payload = {"failure": row.failure, "reclaimed_epoch": previous_epoch}
+                payload = {
+                    "failure": row.failure,
+                    "lease_expirations": row.lease_expirations,
+                }
+                if previous_status is RunStatus.RUNNING:
+                    payload["reclaimed_epoch"] = previous_epoch
             else:
                 require_transition(RunStatus.RUNNING, RunStatus.QUEUED)
                 row.status = RunStatus.QUEUED.value
-                row.scheduled_for = now + timedelta(seconds=2 ** max(0, row.attempts - 1))
+                row.scheduled_for = now + timedelta(seconds=2 ** max(0, row.lease_expirations - 1))
                 event_type = "run.requeued"
-                payload = {"reclaimed_epoch": previous_epoch, "attempts": row.attempts}
+                payload = {
+                    "reclaimed_epoch": previous_epoch,
+                    "attempts": row.attempts,
+                    "lease_expirations": row.lease_expirations,
+                }
             row.lease_owner = None
             row.lease_expires_at = None
             row.updated_at = now

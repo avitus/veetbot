@@ -48,9 +48,11 @@ async def _run_worker(composition: Composition, worker_id: str) -> None:
     assert await worker.run_once()
 
 
-@pytest.mark.parametrize("database_delay", [0.0, 0.05])
+@pytest.mark.parametrize(
+    ("database_delay", "clarifications"), [(0.0, 1), (0.05, 1), (0.0, 3), (0.0, 5)]
+)
 async def test_clarified_reminder_resumes_once_and_creates_schedule(
-    monkeypatch: pytest.MonkeyPatch, database_delay: float
+    monkeypatch: pytest.MonkeyPatch, database_delay: float, clarifications: int
 ) -> None:
     """Clarification and approval persist one reminder despite database latency."""
 
@@ -82,18 +84,24 @@ async def test_clarified_reminder_resumes_once_and_creates_schedule(
     }
     script = FakeModelScript(
         turns=[
-            ScriptedTurn(
-                tool_calls=[
-                    ScriptedToolCall(
-                        name="conversation.ask_user",
-                        arguments={
-                            "question": ("Do you mean 7:00 PM today (August 25) in Pacific Time?")
-                        },
-                        call_id="clarify-reminder-time",
-                    )
-                ],
-                stop_reason=StopReason.TOOL_USE,
-            ),
+            *[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="conversation.ask_user",
+                            arguments={
+                                "question": (
+                                    f"Clarification {index + 1}: confirm 7:00 PM today "
+                                    "(August 25) in Pacific Time?"
+                                )
+                            },
+                            call_id=f"clarify-reminder-time-{index}",
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                )
+                for index in range(clarifications)
+            ],
             ScriptedTurn(
                 tool_calls=[
                     ScriptedToolCall(
@@ -126,19 +134,20 @@ async def test_clarified_reminder_resumes_once_and_creates_schedule(
             "Remind me at 7pm to throw the ball for Marzipan.",
             session_id,
         )
-        await _run_worker(composition, "clarification-worker")
-
-        waiting = await composition.runs.get(run_id)
-        events = await composition.runs.events(run_id)
-        waiting_event = next(
-            event for event in events if event.event_type == "run.waiting_for_user"
-        )
-        await composition.services.runs.deliver_input(
-            composition.principal,
-            run_id,
-            [TextContentBlock(text="Yes.")],
-            UUID(str(waiting_event.payload["question_id"])),
-        )
+        for index in range(clarifications):
+            await _run_worker(composition, f"clarification-worker-{index}")
+            waiting = await composition.runs.get(run_id)
+            assert waiting.status is RunStatus.WAITING_FOR_USER, waiting.failure
+            events = await composition.runs.events(run_id)
+            waiting_event = next(
+                event for event in reversed(events) if event.event_type == "run.waiting_for_user"
+            )
+            await composition.services.runs.deliver_input(
+                composition.principal,
+                run_id,
+                [TextContentBlock(text="Yes.")],
+                UUID(str(waiting_event.payload["question_id"])),
+            )
         await _run_worker(composition, "resumed-clarification-worker")
 
         resumed = await composition.runs.get(run_id)
@@ -146,24 +155,25 @@ async def test_clarified_reminder_resumes_once_and_creates_schedule(
         async with composition.uow_factory() as uow:
             checkpoint = await uow.checkpoints.latest(run_id)
 
-        assert waiting.status is RunStatus.WAITING_FOR_USER
+        assert waiting.status is RunStatus.WAITING_FOR_USER, waiting.failure
         assert resumed.status is RunStatus.WAITING_FOR_APPROVAL
         assert len(approvals) == 1
         assert approvals[0].tool_name == "schedule.create"
         assert checkpoint is not None
         assert (
             sum(
-                isinstance(item, ToolCallItem) and item.call_id == "clarify-reminder-time"
+                isinstance(item, ToolCallItem) and item.call_id.startswith("clarify-reminder-time-")
                 for item in checkpoint.conversation
             )
-            == 1
+            == clarifications
         )
         assert (
             sum(
-                isinstance(item, ToolResultItem) and item.call_id == "clarify-reminder-time"
+                isinstance(item, ToolResultItem)
+                and item.call_id.startswith("clarify-reminder-time-")
                 for item in checkpoint.conversation
             )
-            == 1
+            == clarifications
         )
 
         await composition.approvals.resolve(

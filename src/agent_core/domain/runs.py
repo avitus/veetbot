@@ -195,6 +195,7 @@ class Run(BaseModel):
     lease_expires_at: datetime | None = None
     lease_epoch: int = 0
     attempts: int = 0
+    lease_expirations: int = Field(default=0, ge=0)
     priority: int = 0
     scheduled_for: datetime | None = None
     deadline_at: datetime | None = None

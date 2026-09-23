@@ -4474,7 +4474,7 @@ Decision: run == turn. Submitting a user message creates exactly one run; that r
 
 ```text
 QUEUED
-  -> RUNNING
+  -> RUNNING | FAILED         (FAILED only for exhausted crash allowance; ADR-0118)
 RUNNING
   -> WAITING_FOR_APPROVAL     (a tool needs human approval)
   -> WAITING_FOR_USER         (the agent asked the user a question)

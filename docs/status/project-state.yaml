@@ -38,6 +38,9 @@ project:
   # ADR-0110 amends Milestone 29 on 2026-09-19: the typed-judgment port, the
   # TypeSafe Jev adapter and judgment folder matching, all default off, plus
   # an offline non-activating email-importance evaluation under Milestone 26.
+  # ADR-0118 records the owner-authorized runtime repair on 2026-09-23:
+  # normal continuations do not consume crash retries; exhausted queued runs
+  # fail visibly and the migration preserves actual lease-expiration history.
   authorized_milestones:
     - 0
     - 1
