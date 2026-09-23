@@ -541,6 +541,14 @@ The deployment deliberately does not bootstrap around a missing certificate:
 strict Nginx validation must fail rather than publish a plaintext or
 misidentified documentation endpoint.
 
+The API virtual host keeps `client_max_body_size 1m` for every path except
+the chat attachment upload (ADR-0118), whose location allows `33m` and
+streams the body to the application unbuffered. Activating attachments needs
+three changes together: set `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, add
+`artifact.write` and `knowledge.write` to the owner principal's
+`AUTH_SCOPES`, and let `deploy-nginx` publish the location after the release.
+Until the Nginx job lands, an upload above 1 MiB receives Nginx's own `413`.
+
 ## CircleCI setup
 
 Generate a Veetbot-only Ed25519 deploy key on a protected operator machine:

@@ -39,8 +39,8 @@ instruction and recalls under its own, smaller, recall class
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:1002-1005 and
-readiness.md:1006-1008): the objective had a carrier and no schema, the child
+The readiness review measured what was left (readiness.md:1003-1006 and
+readiness.md:1007-1009): the objective had a carrier and no schema, the child
 budget was additive with no rule deriving a child's own limits, the separate
 trace and the artifact references were picked up by no specification, and a
 child run could not be inserted into its parent's session. This document
@@ -372,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1011). The resolution is the one the review log recorded as
+(readiness.md:1012). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation

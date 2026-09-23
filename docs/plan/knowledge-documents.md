@@ -115,7 +115,9 @@ opposite, not because the reasoning changed.
 One tool, `knowledge.ingest`, taking an `ArtifactRef`, a title, and a visibility. Not a route:
 the Milestone 5 API baseline was fourteen routes, and that document already states
 that an artifact is not uploaded through the API in 0.1. ADR-0050's later session
-list and delete routes do not add an upload surface. Not a thirteenth CLI
+list and delete routes do not add an upload surface; ADR-0118 later adds a chat
+attachment upload, which reaches knowledge only through the owner-sent path below
+and never through a knowledge route. Not a thirteenth CLI
 noun either. Subject specifications declare their own tools — `memory.search`,
 `skill.load`, and `skill_manage` are all outside the builtin roster's eight — so this
 costs `builtin-tools.md` nothing, and the roster's count is unchanged.
@@ -138,7 +140,9 @@ for it, which is the entire point.
 
 ### 2. Extract
 
-`text/plain` and `text/markdown` in 0.1. An `Extractor` port exists from the first
+`text/plain` and `text/markdown` in 0.1; ADR-0118 adds `application/pdf` through a
+PDF extractor adapter, which refuses an encrypted or unreadable file. An `Extractor`
+port exists from the first
 commit so that PDF, HTML, and DOCX arrive as adapters rather than as a rewrite, and an
 unsupported media type fails **at ingest**, loudly, rather than producing an empty
 document that retrieves nothing and explains nothing.
@@ -182,6 +186,23 @@ The document row, the chunk rows, the index rows, and a `knowledge.document.inge
 event, in **one** transaction. A half-ingested document that retrieves three of its
 eleven sections is worse than a failed ingest, because nothing about the result
 announces that it is partial.
+
+### Owner-sent attachments (ADR-0118)
+
+A text, Markdown, or PDF file the owner attaches to a chat message is ingested
+automatically, and only that. Sending the message marks the attachment pending
+when the message's actor is the principal and the principal holds
+`knowledge.write`; a surface or scheduler message never marks one. The maintenance
+worker takes pending attachments in upload order and calls the same service with
+`USER` origin trust, because the owner sending the file is the human admission
+step 1 requires; the file itself stays `EXTERNAL_UNTRUSTED`. The request is fixed:
+the file name as the title, `principal` visibility, `principal_supplied` authority,
+`internal` sensitivity, and a document id derived from the tenant, the principal,
+and the file's SHA-256, so the same file sent twice is one document. Every step
+above still applies, the secret scan included. A refusal records `refused` and a
+reason code on the artifact, a transient failure is retried at most three times,
+and neither reaches the conversation. Deleting the conversation deletes the
+document through the existing cascade on its source artifact.
 
 ## Chunking
 
@@ -589,7 +610,8 @@ That is eight case gates, three property gates, and one corpus gate.
   deletion mechanism.
 - **Ingestion is a tool, not a route and not a CLI command.** The Milestone 5 API
   baseline was fourteen routes and explicitly does not accept artifact uploads in
-  0.1; ADR-0050's later session list and delete routes do not change that. The CLI is
+  0.1; ADR-0050's later session list and delete routes do not change that, and
+  ADR-0118's chat upload adds an automatic owner-sent path, not a route. The CLI is
   closed at twelve commands. Subject specs declaring their own tools is the established
   pattern.
 - **The secret scan blocks and the injection scan does not.** A credential is a durable

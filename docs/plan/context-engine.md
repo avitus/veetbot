@@ -514,6 +514,15 @@ usage. The estimator maintains a per-model correction factor from the observed
 ratio, which converges quickly and, more usefully, makes estimator drift a visible
 number rather than a mystery. The factor resets when the model changes.
 
+**It counts attachments (ADR-0118).** An attachment reference serializes to a few
+dozen bytes, but the adapter sends the file. The estimator therefore adds, for each
+image or file reference in an owner-written user message that passes the shared
+per-item limits in `agent_core.model.attachments`, that module's fixed estimate: a
+flat figure per image, a figure per PDF page, and the inlined length of a text file.
+It ignores the per-request budget and the model's capabilities, both of which only
+remove attachments, so the count stays an upper bound on what the adapter sends and
+an attachment can never push the correction factor up by being under-counted.
+
 ## Compaction
 
 Section 11.4 gives the first compactor a correct retention list — current goal,

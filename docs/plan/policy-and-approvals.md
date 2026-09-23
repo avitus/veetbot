@@ -298,7 +298,8 @@ them are the `required_scopes` the builtin roster declares in
 `artifact.read` and `artifact.write` are the pair that shows this is one
 namespace rather than two that happen to collide: the first gates a read
 route, the second gates `artifact.export`, and they are two actions on
-one resource.
+one resource. Since ADR-0118 the second also gates the chat attachment
+upload route, which adds no string to the vocabulary.
 
 Milestone 11 extends this closed vocabulary rather than creating a second one:
 
@@ -1532,7 +1533,7 @@ policy remain enforced. An uncertain write is not automatically repeated.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
-matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:597);
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:598);
 the arm holds that decision under every profile, so no profile can turn an
 unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent

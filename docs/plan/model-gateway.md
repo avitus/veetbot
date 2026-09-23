@@ -98,6 +98,25 @@ log and keeps the bytes under the artifact store's retention and redaction
 rules. The adapter resolves the reference at render time and the resolved bytes
 never re-enter the conversation.
 
+ADR-0118 makes that resolution concrete. `ImageReferencePart` and
+`FileReferencePart` gain optional, server-set `size_bytes` and `page_count`.
+An `AttachmentResolver` port, built in the composition root and passed to each
+provider adapter, reads an attachment's bytes after checking that it is an
+upload of the principal in the conversation's session and has not expired.
+Only references in a `UserMessage` with `USER` trust are resolved; one in a
+tool result, an assistant message, or a system message renders as a one-line
+text marker, and so does any reference when no resolver is configured. A
+reference never makes a request invalid. For a resolved attachment the adapter
+writes a label (name, media type, size, artifact id) and then the content:
+images as the provider's image input, PDFs as its document input (OpenAI
+Responses `input_file`, Anthropic `document`), and text inline inside the
+untrusted envelope with the context engine's escaping. Any other type, a model
+whose capability set lacks `images` or `files`, and anything outside the shared
+per-item limits or the per-request budget becomes a marker. The budget selects
+the newest owner messages first; the limits, the selection, and the token
+estimate per attachment live in one module, `agent_core.model.attachments`,
+which the token estimator also uses.
+
 ```python
 class SystemMessage(BaseModel):
     kind: Literal["system"] = "system"
@@ -589,7 +608,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:920-922`). The gateway translates those hints into
+(`context-engine.md:929-931`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -627,7 +646,7 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:898-900` and the
+The cached-prefix ratio is defined in `context-engine.md:907-909` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -984,7 +1003,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:820` because it answers the
+`policy_version` at `policy-and-approvals.md:821` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1466,7 +1485,7 @@ renames are.
 
 `engineering-plan.md:722` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:1021-1050` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:1022-1051` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.

@@ -496,7 +496,7 @@ model identifier.
 [sandbox-isolation.md](sandbox-isolation.md) as a production adapter in the
 sense the plan uses for the in-memory repositories, a real implementation of
 the port that runs the contract suite unchanged
-(`sandbox-isolation.md:1252`), and it is what lets the whole system be
+(`sandbox-isolation.md:1257`), and it is what lets the whole system be
 exercised without a hypervisor. Startup check 4 below refuses it in
 production beside `docker`.
 
@@ -587,7 +587,7 @@ checks run there, before any adapter exists:
 4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
     nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
     code under the development fallback." `fake` is behind the same check
-    because it executes nothing (`sandbox-isolation.md:1605`), and a
+    because it executes nothing (`sandbox-isolation.md:1610`), and a
     mechanism that executes nothing isolates less than the fallback this
     rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped
@@ -1492,3 +1492,18 @@ executable inventory; the flag is an environment variable like the other
 feature flags. The proxy and the transport are owned by the composition and
 closed with it. The detailed contract is
 [email-unsubscribe.md](email-unsubscribe.md).
+
+## ADR-0118 attachment composition
+
+`AGENT_ATTACHMENT_UPLOADS_ENABLED` defaults to off. When set, the API mounts
+the upload route and the middleware admits its 32 MiB body. Whatever the flag,
+the composition root builds one attachment resolver over the unit-of-work
+factory, the filesystem artifact store, the principal, and the clock, and
+passes it to every provider adapter it constructs, so a conversation that
+already holds attachments renders them after the flag is turned off; a
+provider passed in as an override receives none and renders markers. The
+maintenance worker registers the owner-sent knowledge ingestion as one more
+sweep, over the knowledge service with the PDF extractor adapter composed in
+front of the plain-text one. No versioned knob is added; the limits are
+constants in `agent_core.model.attachments`. The detailed contract is
+[ADR-0118](../adr/0118-chat-attachments.md).

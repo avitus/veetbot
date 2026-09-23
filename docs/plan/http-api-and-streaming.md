@@ -343,7 +343,7 @@ Scopes are dotted `resource.action` strings, and the set is enumerated:
 session.read      session.write
 run.read          run.write        run.cancel
 approval.read     approval.resolve
-artifact.read
+artifact.read     artifact.write
 skill.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
@@ -848,7 +848,11 @@ unrelated things.
 2. Check `run.write`.
 3. Load the session in the principal's tenant, or 404.
 4. Reject a `CLOSED` session with `invalid_state` and status 409.
-5. Validate the content blocks.
+5. Validate the content blocks. Since ADR-0118 an `image` or `file` block
+   must name an upload of the caller in this session that has not expired,
+   or it is `not_found`; the stored parts take the upload's recorded type,
+   name, size, and page count, and the upload is claimed by the run once it
+   is enqueued.
 6. Resolve the idempotency key, which either returns an existing run or
    reserves the key.
 7. Decide routing: new run, input delivery, or conflict.
@@ -1481,7 +1485,8 @@ metadata or content — is unchanged and is why both routes require
 `artifact.read` and both apply the tenant check before touching
 storage.
 
-Metadata is the `artifacts` row minus its storage location:
+Metadata is the `artifacts` row minus its storage location. `run_id` is
+null only for an ADR-0118 upload that no sent message has claimed yet:
 
 ```json
 {
@@ -1632,6 +1637,8 @@ before the body is read and enforced again while reading it, because a
 chunked request has no `Content-Length` to check. The bound is on the
 request, not on message content, and it is generous for a JSON body of
 text blocks — an artifact is not uploaded through this API in 0.1.
+ADR-0118's attachment upload is the one exception: its route alone accepts
+32 MiB, is exempt from the pre-read buffer, and keeps the same `413` shape.
 
 **Rate limiting is declared and not implemented.** `rate_limited` with
 status 429 is in the code table, and no handler returns it in 0.1.
@@ -1748,6 +1755,10 @@ class ArtifactService(Protocol):
         self, principal: Principal, artifact_id: UUID,
     ) -> ArtifactContent: ...
 ```
+
+ADR-0118 adds `upload(principal, session_id, *, stream, filename,
+declared_media_type, idempotency_key)`, returning the view and whether it was
+a replay.
 
 Five properties hold across all of them, and each one is a rule an
 implementer would otherwise decide per method.
@@ -2137,3 +2148,29 @@ additive `unsubscribe_supported` and the thread projection an additive
 nullable `subscription` block. Every response carries
 `Cache-Control: private, no-store`, never includes an unsubscribe address, and
 answers a foreign or unknown subscription with an indistinguishable 404.
+
+## ADR-0118 chat attachment upload
+
+One route, mounted only when `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, under the
+existing `artifact.write`; no new scope enters the vocabulary.
+
+```text
+POST   /v1/sessions/{session_id}/artifacts           artifact.write
+```
+
+The body is the file itself, at most 32 MiB, with its media type as
+`Content-Type`, its percent-encoded UTF-8 name as `X-Filename`, and a required
+`Idempotency-Key` of at most 255 characters. A name that is empty, longer than
+255 bytes, or contains a quote, a path separator, or a control character is
+`malformed_request`, as the artifact rules above require at creation.
+Authentication and the size check run before the body is read. An unknown or
+foreign session is `404` and a closed one is `409` with `invalid_state`. A new
+upload is `201` with the `ArtifactView` (`run_id` null, `metadata.attachment`
+holding the detected kind, and for a PDF the page count); a replay of the same
+key and bytes is `200` with the same view; the same key with a different body
+is `409` with `idempotency_key_reused`. Responses carry
+`Cache-Control: private, no-store`. The receipt that makes replay exact is a
+content-free session event, `artifact.uploaded`, keyed by the idempotency key.
+An unclaimed upload expires after 24 hours; sending it in a message claims it
+for that run and keeps it for the life of the conversation, as step 5 of the
+submit handler describes.
