@@ -147,9 +147,12 @@ Sol remains temporary while Milestone 21 evaluates scorer semantics and a
 controlled Astra comparison. All exact-evidence checks above remain required.
 
 ADR-0119 makes reasoning effort part of the evaluated tuple.
-`formation.reasoning_effort` sets the effort every formation request sends,
-null keeping the provider default, and a startup whose memory model does not
-accept it is refused. Schema 8 of the formation@9 artifact records the effort
+`formation.reasoning_effort` sets the effort for requests using the configured
+default tuple; null keeps the provider default. Owner-selected evidenced
+alternatives use their tuple's evaluated effort, and frozen evaluation controls
+use the provider default. Startup is refused when the configured memory model
+does not accept the configured effort.
+Schema 8 of the formation@9 artifact records the effort
 the evaluated arm sent; a schema 7 artifact is provider-default evidence.
 Activation and the bundle test's uniqueness key compare effort as an eighth
 field, and the formation@8 and formation@10 artifacts, which record none,

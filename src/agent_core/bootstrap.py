@@ -412,11 +412,11 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.domain.model_settings import (
-    DEFAULT_CHAT_REASONING_EFFORT,
     ChatModelOption,
     MemoryModelOption,
     ModelChoice,
     ModelSettingsCatalog,
+    default_chat_effort,
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
@@ -4355,11 +4355,7 @@ async def _model_settings_catalog(
     return ModelSettingsCatalog(
         chat_default=ModelChoice(
             model_policy=agent.model_policy,
-            reasoning_effort=(
-                DEFAULT_CHAT_REASONING_EFFORT
-                if DEFAULT_CHAT_REASONING_EFFORT in default_option.reasoning_efforts
-                else None
-            ),
+            reasoning_effort=default_chat_effort(default_option.reasoning_efforts),
         ),
         chat_options=tuple(chat_options),
         memory_default=memory_default,

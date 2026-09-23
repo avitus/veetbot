@@ -2172,8 +2172,9 @@ The `PUT` body is `expected_version`, `chat`, and `memory`, with no other
 field. A choice not on offer is `malformed_request`, a stale version is
 `conflict`, and saving the stored values again returns them without a new
 version, so a retried save is safe. A saved chat model applies to app chats
-created afterwards; the chat effort applies to every agent run from its next
-message; the memory choice applies to the next formation. Responses carry
+created afterward; the chat effort applies to later agent runs except typed
+email tasks, which retain provider-default effort. The memory choice applies
+to the next formation. Responses carry
 `Cache-Control: private, no-store`, and each save appends a content-free
 `settings.models.updated` process event.
 

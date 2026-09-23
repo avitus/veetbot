@@ -5,11 +5,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 from uuid import UUID
 
 import httpx
+import pytest
+import yaml
 from fastapi.routing import APIRoute
 from pydantic import SecretStr
 
@@ -81,6 +84,41 @@ def _body(
         "chat": {"model_policy": chat[0], "reasoning_effort": chat[1]},
         "memory": {"model_policy": memory[0], "reasoning_effort": memory[1]},
     }
+
+
+@pytest.mark.parametrize(
+    ("efforts", "expected"),
+    [(["low", "medium"], "low"), (["medium", "high"], "high"), ([], None)],
+)
+async def test_composition_and_settings_view_agree_on_an_accepted_default_effort(
+    tmp_path: Path, efforts: list[str], expected: str | None
+) -> None:
+    source = Path("src/agent_core/models/providers/openai.yaml")
+    profile = yaml.safe_load(source.read_text())
+    for model in profile["models"]:
+        if model["id"] == "gpt-6-astra":
+            model["reasoning_efforts"] = efforts
+    overlay = tmp_path / "models/providers/openai.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(yaml.safe_dump(profile))
+
+    async with (
+        build(
+            settings=replace(_settings("openai"), config_dir=tmp_path),
+            storage="memory",
+            sequential_ids=True,
+            model_policy="astra",
+            principal=_principal("settings.read"),
+        ) as composition,
+        _client(composition) as client,
+    ):
+        response = await client.get("/v1/settings/models")
+
+    assert response.status_code == 200
+    view = response.json()
+    option = next(item for item in view["chat_options"] if item["model_policy"] == "astra")
+    assert view["chat"]["reasoning_effort"] == expected
+    assert option["default_reasoning_effort"] == expected
 
 
 async def test_unsaved_settings_show_the_deployment_defaults_and_every_choice() -> None:

@@ -338,8 +338,9 @@ regenerated on the new version. Observe first, read the
 The client's model settings (ADR-0119) need `settings.read,settings.write`
 appended to `AUTH_SCOPES` in that same file; without them the Settings screen
 reports the missing scopes and every model stays at the deployment default.
-The routes are always mounted, and a saved choice changes only new app chats,
-the effort of later agent runs, and later memory formation.
+The routes are always mounted. A saved chat model applies to new app chats;
+the chat effort applies to later agent runs except typed email tasks, which
+retain provider-default effort. The memory choice applies to later formation.
 
 The host exports no metrics, so the service log answers whether these consumers
 are running. Every long-running service writes JSON lines, one object per
