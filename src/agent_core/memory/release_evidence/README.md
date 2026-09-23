@@ -11,6 +11,10 @@ Astra. ADR-0093 preserves evaluated memory with the independent
 new production chats default to `astra`. Sol is a temporary choice; memory
 formation remains active work. Audit scorer semantics and run a controlled
 Sol/Astra comparison before publishing evidence for another memory tuple.
+On 2026-09-23 the same evaluation with the evaluated arm at medium reasoning
+effort (ADR-0118) failed development precision, the rich conversation core,
+and holdout direct recall and precision, so Astra at medium has no artifact
+either.
 
 Since ADR-0118 a `formation@9` artifact also binds the reasoning effort its
 evaluated arm sent: schema 8 records it, and a schema 7 artifact, like both

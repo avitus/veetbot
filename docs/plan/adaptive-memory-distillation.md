@@ -162,6 +162,8 @@ operator formation@9 artifact evaluated exactly on this tree; the choice is
 read at each extraction, a withdrawn choice falls back to the configured
 tuple, and a consolidation formed on an alternative records its policy and
 effort after the extractor's name.
+Astra at medium effort failed the formation@9 gates on 2026-09-23, so Sol at
+the provider default remains the only evidenced memory tuple.
 
 ## The integrated episode
 

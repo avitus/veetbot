@@ -947,6 +947,22 @@ milestones:
           zero-fabrication gate with three provider candidates classified as
           fabricated by its scorer. Neither evaluator published an Astra
           activation artifact. Production configuration was not changed.
+      - check: Astra at medium reasoning effort, formation@9 (2026-09-23)
+        outcome: memory_activation_blocked
+        detail: >-
+          ADR-0118. Build 35958ef ran the unchanged three-repeat formation@9
+          evaluation with --reasoning-effort medium on the evaluated arm, the
+          78-case development corpus and the 51-case frozen holdout under
+          distillation-scorer@7, six cases at a time. Its 1,134 distillation
+          calls cost USD 10.24. Development direct recall was 0.981,
+          hypothesis recall 0.833, and precision 0.872; holdout direct recall
+          was 0.892, hypothesis recall 0.867, and precision 0.700. Development
+          precision, the rich conversation core, and holdout direct recall and
+          precision failed their gates; both sets had zero boundary failures.
+          Against the default-effort run of 2026-09-11, development hypothesis
+          recall and precision improved and the holdout did not. No artifact
+          was published, GPT-5.6 Sol stays the memory default and the only
+          memory choice offered, and production configuration was not changed.
       - check: attributed communication-source formation
         outcome: passed_locally
         detail: >-

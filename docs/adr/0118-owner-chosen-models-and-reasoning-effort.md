@@ -75,6 +75,12 @@ fixed per deployment, and memory formation's model is fixed at startup by
    with `formation.reasoning_effort: medium` becomes the default, with Sol
    still offered through its own artifact. If it fails, Sol stays the default
    and only Sol is offered.
+   **Outcome, 2026-09-23:** the evaluation at `35958ef` failed development
+   precision (0.872), the rich conversation core, and holdout direct recall
+   (0.892) and precision (0.700), at a recorded USD 10.24. No artifact was
+   published; Sol stays the default and the only memory choice. The same
+   evaluation at another effort, or after formation work, can add a choice
+   without code changes.
 
 ## Consequences
 
