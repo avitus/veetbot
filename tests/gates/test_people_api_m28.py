@@ -238,12 +238,17 @@ async def test_people_import_runs_selected_empty_history_without_advancing_autom
             assert await uow.memories.consolidation_watermark(source.id, owner) == 0
 
 
-async def test_people_import_preserves_failed_source_and_records_provider_cost() -> None:
+@pytest.mark.parametrize("alias_order", ["none", "first", "last"])
+async def test_people_import_preserves_failed_source_and_records_provider_cost(
+    alias_order: str,
+) -> None:
     from datetime import timedelta
+    from uuid import UUID
 
     from agent_core.domain.events import NewEvent
     from agent_core.domain.memory import Sensitivity
     from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+    from agent_core.domain.people import Person, PersonIdentifier
     from agent_core.domain.people_imports import PeopleImportRequest
 
     owner = principal().model_copy(
@@ -265,9 +270,43 @@ async def test_people_import_preserves_failed_source_and_records_provider_cost()
                     event_type="user.message.created",
                     actor_type="principal",
                     actor_id=owner.principal_id,
-                    payload={"content": "I prefer jasmine tea."},
+                    payload={"content": "I prefer jasmine tea with Alex."},
                 )
             )
+        person_ids = []
+        if alias_order != "none":
+            common: PeopleFields = {
+                "tenant_id": owner.tenant_id,
+                "principal_id": owner.principal_id,
+                "created_at": app.clock.now(),
+                "updated_at": app.clock.now(),
+            }
+            person = Person(id=UUID(int=990), display_name="Alex", **common)
+            confirmed = PersonIdentifier(
+                id=UUID(int=900 if alias_order == "first" else 1200),
+                person_id=person.id,
+                identifier_kind="name",
+                namespace="owner",
+                value="Alex",
+                context="owner",
+                verification="owner_confirmed",
+                valid_from=app.clock.now() - timedelta(days=1),
+                **common,
+            )
+            async with app.uow_factory() as uow:
+                await uow.people.put(person, expected_revision=0)
+                await uow.people.put(confirmed, expected_revision=0)
+                for index in range(150):
+                    await uow.people.put(
+                        confirmed.model_copy(
+                            update={
+                                "id": UUID(int=1000 + index),
+                                "verification": "channel_observed",
+                            }
+                        ),
+                        expected_revision=0,
+                    )
+            person_ids = [str(person.id)]
         service = app.services.people
         assert service is not None
         preview_request = PeopleImportRequest.model_validate(
@@ -276,6 +315,7 @@ async def test_people_import_preserves_failed_source_and_records_provider_cost()
                 "session_id": str(source.id),
                 "scope": {
                     "session_ids": [str(source.id)],
+                    "person_ids": person_ids,
                     "since": (app.clock.now() - timedelta(days=1)).isoformat(),
                     "until": (app.clock.now() + timedelta(days=1)).isoformat(),
                     "max_records": 10,

@@ -456,6 +456,7 @@ class InMemoryPeopleStore:
                         record.namespace,
                         record.context,
                         record.verification,
+                        record.valid_to,
                         _name(record).lower(),
                     )
                     if isinstance(record, PersonIdentifier)
@@ -1215,6 +1216,7 @@ class PostgresPeopleStore:
                 PeopleRevisionRow.payload["namespace"].astext,
                 PeopleRevisionRow.payload["context"].astext,
                 PeopleRevisionRow.payload["verification"].astext,
+                PeopleRevisionRow.payload["valid_to"].astext,
                 func.lower(PeopleRevisionRow.search_text),
             ]
             distinct = (

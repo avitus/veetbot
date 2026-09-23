@@ -225,6 +225,7 @@ class PeopleImportService:
                     principal_id=owner.principal_id,
                     kinds=["identifier"],
                     person_id=person_id,
+                    distinct_assignments=True,
                     sensitivity_ceiling=ceiling,
                     limit=100,
                 )

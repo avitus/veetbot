@@ -255,7 +255,7 @@ A person joins only from evidence the owner produced:
 1. **Owner action:** create, confirm, pin, rename, or correct.
 2. **An owner Chat claim tying them to the owner:** a relationship or
    commitment whose other endpoint is the owner, or a reported meeting whose
-   text is in the first person ("I", "me", "we", "us", "our").
+   text establishes owner participation ("I", "me", "we", "us").
 3. **Mail the owner sent:** a named To or Cc recipient that is not a role
    mailbox, a pronoun, or one of the owner's own names or addresses.
 
@@ -276,7 +276,15 @@ ends every observed copy of that assignment.
 Resolution reads exact normalized values, one row per distinct assignment, so
 per-message copies and longer names cannot crowd out a match. An address or
 number the owner states in Chat identifies that person for mail and texts, and
-a person the owner creates gets an owner-confirmed name alias.
+a person the owner creates gets an owner-confirmed name alias. Assignment
+deduplication retains distinct ended and live periods. Import admission and
+source selection use the same distinct assignments as identity snapshots.
+
+Cross-claim admission uses only owner-asserted sources in the requested scope;
+an untrusted or foreign-scope claim cannot supply another claim's owner tie.
+Possessives alone ("My sister met Jules") do not establish owner participation.
+Unresolved endpoints do not bypass commitment source and terminal-state
+validation; the atomic fact can remain without a People projection.
 
 ### Merge and split
 

@@ -38,7 +38,7 @@ and the people the owner interacts with.
    - an owner action: create, confirm, pin, rename or correct;
    - an owner Chat claim that ties them to the owner: a relationship or
      commitment whose other endpoint is the owner, or a reported meeting whose
-     text says "I", "me", "we", "us" or "our";
+     text establishes owner participation with "I", "me", "we" or "us";
    - mail the owner sent: a named To or Cc recipient who is not a role
      mailbox, a pronoun, or one of the owner's own names or addresses.
 2. **Every other mention links to someone already in People or stays

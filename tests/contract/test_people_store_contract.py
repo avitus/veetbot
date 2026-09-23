@@ -1008,6 +1008,17 @@ async def people_identifier_lookup_contract(store: PeopleStore) -> None:
         after = page[99].id
     assert len(copies) == 150
 
+    # Ending and later re-adding the same assignment must retain both periods.
+    ended_at = NOW + timedelta(days=1)
+    for _ in range(3):
+        await store.put(identifier(frequent.id, address, valid_to=ended_at), expected_revision=0)
+    periods = await store.query(
+        base.model_copy(update={"person_id": frequent.id, "distinct_assignments": True})
+    )
+    assert {
+        (row.context, row.valid_to) for row in periods if isinstance(row, PersonIdentifier)
+    } == {("owner", None), ("owner", ended_at), ("email:later", None)}
+
 
 async def test_memory_people_identifier_lookup_contract() -> None:
     await people_identifier_lookup_contract(InMemoryPeopleStore(FixedClock(NOW)))

@@ -90,7 +90,7 @@ class PreparedPeople:
 
 
 # First-person evidence that the owner took part in a reported meeting.
-_FIRST_PERSON = re.compile(r"\b(?:i|me|my|we|us|our)\b", re.IGNORECASE)
+_FIRST_PERSON = re.compile(r"\b(?:i|me|we|us)\b", re.IGNORECASE)
 
 
 def owner_tied_keys(claim: PeopleClaim) -> frozenset[str]:
@@ -542,25 +542,26 @@ async def prepare_people(
             source_timezone=relation.source_timezone,
             **common_validation,
         )
-    if proposal.commitment and commitment_ready:
+    if proposal.commitment:
         commitment = proposal.commitment
         if commitment.source_event_id not in candidate.source_event_ids:
             raise ToolValidationError("commitment state requires its own admitted evidence")
         evidence = sources[commitment.source_event_id]
         validate_commitment_state(commitment.state, evidence.text)
-        PeopleCommitment(
-            debtor=endpoint(commitment.debtor_key),
-            beneficiary=endpoint(commitment.beneficiary_key),
-            description=candidate.statement,
-            state=commitment.state,
-            due_at=commitment.due_at,
-            due_precision=commitment.due_precision,
-            source_timezone=commitment.source_timezone,
-            state_source_id=email_source_id(principal, email)
-            if email is not None
-            else source_id(principal, evidence.event.session_id, evidence.event.sequence),
-            **common_validation,
-        )
+        if commitment_ready:
+            PeopleCommitment(
+                debtor=endpoint(commitment.debtor_key),
+                beneficiary=endpoint(commitment.beneficiary_key),
+                description=candidate.statement,
+                state=commitment.state,
+                due_at=commitment.due_at,
+                due_precision=commitment.due_precision,
+                source_timezone=commitment.source_timezone,
+                state_source_id=email_source_id(principal, email)
+                if email is not None
+                else source_id(principal, evidence.event.session_id, evidence.event.sequence),
+                **common_validation,
+            )
     return PreparedPeople(
         tuple(records.values()),
         people,

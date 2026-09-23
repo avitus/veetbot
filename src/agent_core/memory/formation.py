@@ -3161,8 +3161,14 @@ class GovernedMemoryService:
                             proposed.people
                             for proposed, _ in candidates
                             if proposed.people is not None
+                            and proposed.proposed_scope == scope
+                            and set(proposed.source_event_ids) <= trusted_user_sources
                         ],
-                        list(extracted.people_interactions)
+                        [
+                            interaction
+                            for interaction in extracted.people_interactions
+                            if interaction.source_event_id in trusted_user_sources
+                        ]
                         if isinstance(extracted, MemoryExtractionResult)
                         else [],
                     )
