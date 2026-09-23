@@ -11,6 +11,7 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case memoryChangesUnavailable
     case scheduleBrowsingUnavailable
     case foldersUnavailable
+    case attachmentsUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -24,6 +25,8 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
             return "This server does not support schedule browsing yet."
         case .foldersUnavailable:
             return "This server does not support conversation folders yet."
+        case .attachmentsUnavailable:
+            return "This server does not accept attachments yet."
         }
     }
 }
@@ -304,6 +307,38 @@ public struct VeetbotAPIClient: Sendable {
                 retryAttempts: 3
             )
         )
+    }
+
+    /// Upload one file for a session; sending a message later claims it (ADR-0118).
+    ///
+    /// The key makes a retry replay the stored upload instead of storing it twice.
+    public func uploadArtifact(
+        sessionID: UUID,
+        data: Data,
+        filename: String,
+        mediaType: String,
+        idempotencyKey: String,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> ArtifactView {
+        do {
+            let (body, _) = try await transport.sendData(
+                TransportRequest(
+                    method: .post,
+                    path: "/v1/sessions/\(sessionID.uuidString)/artifacts",
+                    headers: [
+                        "Content-Type": mediaType,
+                        "X-Filename": encodedHeaderFilename(filename),
+                        "Idempotency-Key": idempotencyKey,
+                    ],
+                    retryAttempts: 3
+                ),
+                uploading: data,
+                progress: progress
+            )
+            return try JSONDecoder.server.decode(ArtifactView.self, from: body)
+        } catch {
+            throw attachmentCompatibilityError(from: error) ?? error
+        }
     }
 
     public func getArtifact(_ artifactID: UUID) async throws -> ArtifactView {
@@ -731,6 +766,29 @@ private func memoryChangesCompatibilityError(
         apiError.message == "The requested resource was not found."
     {
         return .memoryChangesUnavailable
+    }
+    return nil
+}
+
+/// Percent-encode a file name for the `X-Filename` header; the server decodes UTF-8.
+func encodedHeaderFilename(_ filename: String) -> String {
+    var allowed = CharacterSet.alphanumerics.intersection(.init(charactersIn: "\u{0}"..."\u{7F}"))
+    allowed.insert(charactersIn: "-._~")
+    return filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? "attachment"
+}
+
+/// Attachments are default-off (ADR-0118): a server without the upload route
+/// answers the generic 404 or a method miss, never the service's own message for
+/// a missing conversation, which stays a plain API error.
+private func attachmentCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 405 {
+        return .attachmentsUnavailable
+    }
+    if apiError.statusCode == 404,
+        apiError.message == "The requested resource was not found."
+    {
+        return .attachmentsUnavailable
     }
     return nil
 }

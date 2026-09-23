@@ -82,9 +82,9 @@ refused the whole history as invalid.
    macOS and iPad accept drops on the chat and its composer; every device has
    a paperclip for Files and, on iOS, the photo library. Each file uploads as
    soon as it is added, shows its progress, and can be removed or retried. A
-   message may be attachments alone. Images are downscaled to a 2000-pixel
-   long edge and re-encoded as JPEG before upload, which also removes their
-   location metadata.
+   message may be attachments alone. Images other than small PNG, GIF, and
+   WebP files are re-encoded as JPEG with a 2000-pixel long edge before
+   upload, which also removes their location metadata.
 
 ## Consequences
 
@@ -95,14 +95,19 @@ refused the whole history as invalid.
   commands are unchanged; the upload has no CLI command.
 - `pypdf` is a runtime dependency used only by adapters.
 - A document the owner sends becomes retrievable from every later chat until
-  the chat it came from is deleted.
+  the chat it came from is deleted. The same file sent from two chats is one
+  document with a version per chat, so deleting one chat keeps the other's.
+- An answer to a clarifying question is delivered as the suspended tool's
+  result, where a reference renders only as a marker; the native client keeps
+  staged files for the next message instead of sending them with an answer.
 - The data-model deviation from Section 15 (a nullable `run_id`) is limited
   to unclaimed uploads and knowledge sources and is enforced by a constraint.
 
 ## Alternatives considered
 
-- **Multipart form uploads:** rejected; a raw body needs no parser and streams
-  straight to the artifact store.
+- **Multipart form uploads:** rejected; a raw body needs no multipart parser,
+  and the file's name and type travel as headers the proxy and the
+  middleware can check before the body is read.
 - **Staging uploads outside the artifacts table:** rejected; the orphan sweep
   and session deletion already govern artifact rows, and a second store would
   need both again.

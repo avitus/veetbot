@@ -17,6 +17,7 @@
 		100000000000000000000008 /* ReconnectingEventStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* ReconnectingEventStream.swift */; };
 		100000000000000000000009 /* SSEReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* SSEReader.swift */; };
 		10000000000000000000000A /* ArtifactCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* ArtifactCache.swift */; };
+		1000000000000000000000E1 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000E1 /* AttachmentStaging.swift */; };
 		10000000000000000000000B /* FileSessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* FileSessionHistoryStore.swift */; };
 		10000000000000000000000C /* KeychainTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* KeychainTokenStore.swift */; };
 		10000000000000000000000D /* SessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* SessionHistoryStore.swift */; };
@@ -31,6 +32,7 @@
 		100000000000000000000016 /* VeetbotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000016 /* VeetbotApp.swift */; };
 		100000000000000000000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* Assets.xcassets */; };
 		100000000000000000000019 /* ComposerTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* ComposerTextEditor.swift */; };
+		1000000000000000000000E2 /* AttachmentChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000E2 /* AttachmentChipsView.swift */; };
 		10000000000000000000001A /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* AppTheme.swift */; };
 		10000000000000000000001B /* MarkdownContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001B /* MarkdownContentView.swift */; };
 		10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* ConversationNavigationUITestFixture.swift */; };
@@ -94,6 +96,7 @@
 		200000000000000000000008 /* ReconnectingEventStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconnectingEventStream.swift; sourceTree = "<group>"; };
 		200000000000000000000009 /* SSEReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEReader.swift; sourceTree = "<group>"; };
 		20000000000000000000000A /* ArtifactCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactCache.swift; sourceTree = "<group>"; };
+		2000000000000000000000E1 /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
 		20000000000000000000000B /* FileSessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSessionHistoryStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000C /* KeychainTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTokenStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* SessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistoryStore.swift; sourceTree = "<group>"; };
@@ -109,6 +112,7 @@
 		200000000000000000000017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		200000000000000000000018 /* Veetbot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Veetbot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000019 /* ComposerTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextEditor.swift; sourceTree = "<group>"; };
+		2000000000000000000000E2 /* AttachmentChipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentChipsView.swift; sourceTree = "<group>"; };
 		20000000000000000000001A /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		20000000000000000000001B /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
 		20000000000000000000001C /* ConversationNavigationUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationNavigationUITestFixture.swift; sourceTree = "<group>"; };
@@ -246,6 +250,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000000A /* ArtifactCache.swift */,
+				2000000000000000000000E1 /* AttachmentStaging.swift */,
 				20000000000000000000000B /* FileSessionHistoryStore.swift */,
 				20000000000000000000000C /* KeychainTokenStore.swift */,
 				20000000000000000000000D /* SessionHistoryStore.swift */,
@@ -284,6 +289,7 @@
 				200000000000000000000012 /* ArtifactViewerView.swift */,
 				200000000000000000000013 /* ChatView.swift */,
 				200000000000000000000019 /* ComposerTextEditor.swift */,
+				2000000000000000000000E2 /* AttachmentChipsView.swift */,
 				200000000000000000000014 /* ConnectionSettingsView.swift */,
 				20000000000000000000001B /* MarkdownContentView.swift */,
 				200000000000000000000024 /* MemoryBrowserView.swift */,
@@ -445,6 +451,7 @@
 				100000000000000000000008 /* ReconnectingEventStream.swift in Sources */,
 				100000000000000000000009 /* SSEReader.swift in Sources */,
 				10000000000000000000000A /* ArtifactCache.swift in Sources */,
+				1000000000000000000000E1 /* AttachmentStaging.swift in Sources */,
 				10000000000000000000000B /* FileSessionHistoryStore.swift in Sources */,
 				10000000000000000000000C /* KeychainTokenStore.swift in Sources */,
 				10000000000000000000000D /* SessionHistoryStore.swift in Sources */,
@@ -462,6 +469,7 @@
 				100000000000000000000013 /* ChatView.swift in Sources */,
 				10000000000000000000001A /* AppTheme.swift in Sources */,
 				100000000000000000000019 /* ComposerTextEditor.swift in Sources */,
+				1000000000000000000000E2 /* AttachmentChipsView.swift in Sources */,
 				100000000000000000000014 /* ConnectionSettingsView.swift in Sources */,
 				10000000000000000000001B /* MarkdownContentView.swift in Sources */,
 				100000000000000000000023 /* MemoryBrowserView.swift in Sources */,

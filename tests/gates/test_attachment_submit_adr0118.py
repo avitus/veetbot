@@ -227,7 +227,8 @@ async def test_blocks_must_match_what_was_uploaded(tmp_path: Path) -> None:
                 }
             ],
         )
-        assert bad_detail.status_code in {400, 422}
+        assert bad_detail.status_code == 400
+        assert bad_detail.json()["error"]["code"] == "malformed_request"
         eleven = [{"type": "file", "artifact_id": pdf["id"], "media_type": "application/pdf"}] * 11
         assert (await _send(client, session_id, eleven)).status_code == 400
         assert (await _artifact(composition, pdf["id"])).run_id is None
