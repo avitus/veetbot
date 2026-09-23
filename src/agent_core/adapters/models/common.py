@@ -244,7 +244,7 @@ def failed_event(
     )
 
 
-# -- attachments (ADR-0118) ------------------------------------------------------
+# -- attachments (ADR-0120) ------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)

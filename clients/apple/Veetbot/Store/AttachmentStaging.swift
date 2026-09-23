@@ -2,7 +2,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// One file prepared for upload: its bytes, a server-safe name, and a declared type (ADR-0118).
+/// One file prepared for upload: its bytes, a server-safe name, and a declared type (ADR-0120).
 public struct StagedAttachment: Equatable, Sendable {
     public let filename: String
     public let mediaType: String

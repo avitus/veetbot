@@ -1,4 +1,4 @@
-"""AttachmentResolver contract (ADR-0118): only the run's own live uploads."""
+"""AttachmentResolver contract (ADR-0120): only the run's own live uploads."""
 
 from __future__ import annotations
 

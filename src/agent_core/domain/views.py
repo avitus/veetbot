@@ -379,7 +379,7 @@ class MemoryView(BaseModel):
 class ArtifactView(BaseModel):
     id: UUID
     session_id: UUID
-    # Null only for an ADR-0118 upload that no sent message has claimed yet.
+    # Null only for an ADR-0120 upload that no sent message has claimed yet.
     run_id: UUID | None
     name: str
     media_type: str

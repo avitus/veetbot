@@ -298,7 +298,7 @@ them are the `required_scopes` the builtin roster declares in
 `artifact.read` and `artifact.write` are the pair that shows this is one
 namespace rather than two that happen to collide: the first gates a read
 route, the second gates `artifact.export`, and they are two actions on
-one resource. Since ADR-0118 the second also gates the chat attachment
+one resource. Since ADR-0120 the second also gates the chat attachment
 upload route, which adds no string to the vocabulary.
 
 Milestone 11 extends this closed vocabulary rather than creating a second one:

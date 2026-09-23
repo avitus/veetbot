@@ -1,4 +1,4 @@
-"""AttachmentInspector contract (ADR-0118): the bytes decide, never the claim."""
+"""AttachmentInspector contract (ADR-0120): the bytes decide, never the claim."""
 
 from __future__ import annotations
 

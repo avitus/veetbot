@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Decides whether a drop becomes attachments or text (ADR-0118).
+/// Decides whether a drop becomes attachments or text (ADR-0120).
 ///
 /// Text, rich text, and web links keep their ordinary meaning and are inserted
 /// into the message; files, images, and anything else become attachments.

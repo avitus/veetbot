@@ -15,7 +15,7 @@ from agent_core.model.attachments import UPLOAD_MAX_BYTES
 
 MAX_BODY_BYTES = 1024 * 1024
 MAX_CONCURRENT_BUFFERED_BODIES = 16
-# ADR-0118: the attachment upload streams to its handler instead of being
+# ADR-0120: the attachment upload streams to its handler instead of being
 # pre-read, under its own limit and its own small concurrency bound.
 MAX_CONCURRENT_UPLOADS = 4
 UPLOAD_PATH = re.compile(r"^/v1/sessions/[0-9A-Fa-f-]{36}/artifacts$")

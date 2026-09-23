@@ -1,4 +1,4 @@
-"""Boundary rules for a chat attachment upload (ADR-0118)."""
+"""Boundary rules for a chat attachment upload (ADR-0120)."""
 
 from __future__ import annotations
 

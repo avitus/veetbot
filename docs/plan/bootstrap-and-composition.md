@@ -1493,7 +1493,7 @@ feature flags. The proxy and the transport are owned by the composition and
 closed with it. The detailed contract is
 [email-unsubscribe.md](email-unsubscribe.md).
 
-## ADR-0118 attachment composition
+## ADR-0120 attachment composition
 
 `AGENT_ATTACHMENT_UPLOADS_ENABLED` defaults to off. When set, the API mounts
 the upload route and the middleware admits its 32 MiB body. Whatever the flag,
@@ -1506,4 +1506,4 @@ maintenance worker registers the owner-sent knowledge ingestion as one more
 sweep, over the knowledge service with the PDF extractor adapter composed in
 front of the plain-text one. No versioned knob is added; the limits are
 constants in `agent_core.model.attachments`. The detailed contract is
-[ADR-0118](../adr/0118-chat-attachments.md).
+[ADR-0120](../adr/0120-chat-attachments.md).

@@ -477,7 +477,7 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
 public struct ArtifactView: Codable, Identifiable, Sendable {
     public let id: UUID
     public let sessionID: UUID
-    /// Nil only for an upload that no sent message has claimed yet (ADR-0118).
+    /// Nil only for an upload that no sent message has claimed yet (ADR-0120).
     public let runID: UUID?
     public let name: String
     public let mediaType: String

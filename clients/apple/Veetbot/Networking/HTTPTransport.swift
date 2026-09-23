@@ -81,7 +81,7 @@ public final class RejectRedirectsDelegate: NSObject, URLSessionTaskDelegate, @u
 }
 
 /// Reports how much of an upload's body has been sent, and refuses redirects
-/// exactly as the shared session delegate does (ADR-0118).
+/// exactly as the shared session delegate does (ADR-0120).
 final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let report: @Sendable (Double) -> Void
 
@@ -156,7 +156,7 @@ public actor HTTPTransport {
     ///
     /// An `uploading` body is sent as an upload task so its progress can be
     /// reported; the request's own `body` must then be nil and its headers carry
-    /// the file's type (ADR-0118).
+    /// the file's type (ADR-0120).
     public func sendData(
         _ request: TransportRequest,
         accepting additionalStatusCodes: Set<Int> = [],

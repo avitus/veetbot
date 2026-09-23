@@ -27,7 +27,7 @@ class ArtifactRef(BaseModel):
     tenant_id: str
     principal_id: str
     session_id: UUID
-    # Null only before an ADR-0118 upload is claimed by the run of a sent
+    # Null only before an ADR-0120 upload is claimed by the run of a sent
     # message; the artifacts table enforces the same rule with a constraint.
     run_id: UUID | None
     name: str

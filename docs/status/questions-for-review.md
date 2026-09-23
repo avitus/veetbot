@@ -4608,7 +4608,7 @@ slower than a route would be.
 is a management surface rather than a fourteenth route — say so and
 it moves up.
 
-**Later:** ADR-0118 (2026-09-23) adds a chat attachment upload. It is
+**Later:** ADR-0120 (2026-09-23) adds a chat attachment upload. It is
 not a knowledge route: a file reaches knowledge from it only when the
 owner sends it in a message, through the same service and scans.
 

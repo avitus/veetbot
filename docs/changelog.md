@@ -6,7 +6,7 @@ title: Changelog
 
 ## 2026-09-23 — Files can be dropped into the chat
 
-- ADR-0118: `POST /v1/sessions/{id}/artifacts` uploads one file (at most
+- ADR-0120: `POST /v1/sessions/{id}/artifacts` uploads one file (at most
   32 MiB) under `artifact.write`, behind `AGENT_ATTACHMENT_UPLOADS_ENABLED`.
   Sending the message claims the upload for its run and keeps it for the
   life of the conversation; an upload never sent expires after 24 hours.

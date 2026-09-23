@@ -1,4 +1,4 @@
-"""Chat attachment rules at the application boundary (ADR-0118)."""
+"""Chat attachment rules at the application boundary (ADR-0120)."""
 
 from __future__ import annotations
 
@@ -137,7 +137,7 @@ async def claim_attachments(
 
 
 class StoredAttachmentResolver:
-    """Release attachment bytes from the artifact store for one run (ADR-0118)."""
+    """Release attachment bytes from the artifact store for one run (ADR-0120)."""
 
     def __init__(
         self,

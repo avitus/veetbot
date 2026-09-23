@@ -1,4 +1,4 @@
-"""Detect what an uploaded chat attachment is from its bytes (ADR-0118)."""
+"""Detect what an uploaded chat attachment is from its bytes (ADR-0120)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# ADR-0118: Files attached to chat messages
+# ADR-0120: Files attached to chat messages
 
 - Status: Accepted (authorized by the repository owner, 2026-09-23)
 - Date: 2026-09-23

@@ -69,7 +69,7 @@ class ArtifactWriterProvider(Protocol):
 
 
 class AttachmentInspector(Protocol):
-    """Classify an upload from its bytes (ADR-0118).
+    """Classify an upload from its bytes (ADR-0120).
 
     The result's media type is the detected one; a declared type is kept only
     when nothing in the bytes contradicts it. Inspection never refuses a file:
@@ -82,7 +82,7 @@ class AttachmentInspector(Protocol):
 
 
 class AttachmentResolver(Protocol):
-    """Release attachment bytes to a model adapter for one run (ADR-0118).
+    """Release attachment bytes to a model adapter for one run (ADR-0120).
 
     Only an upload of the run's principal in the run's session that has not
     expired is released; anything else is absent from the result, and the

@@ -176,7 +176,7 @@ class ArtifactService(Protocol):
         declared_media_type: str,
         idempotency_key: str | None,
     ) -> tuple[ArtifactView, bool]:
-        """Store one chat attachment unclaimed; the flag is whether it replayed (ADR-0118)."""
+        """Store one chat attachment unclaimed; the flag is whether it replayed (ADR-0120)."""
         ...
 
 

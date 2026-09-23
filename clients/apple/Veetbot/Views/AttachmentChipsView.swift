@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import PhotosUI
 #endif
 
-/// The files waiting to be sent with the next message (ADR-0118).
+/// The files waiting to be sent with the next message (ADR-0120).
 struct AttachmentChipsView: View {
     let attachments: [ComposerAttachment]
     let remove: (UUID) -> Void

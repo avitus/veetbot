@@ -1,4 +1,4 @@
-"""Let a chat upload exist before the run of the message that sends it (ADR-0118).
+"""Let a chat upload exist before the run of the message that sends it (ADR-0120).
 
 Revision ID: e5a2c9d7b3f1
 Revises: a4f7c1e9d2b3

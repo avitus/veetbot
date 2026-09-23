@@ -1,4 +1,4 @@
-"""Attachment classification, limits, selection, and rendering text (ADR-0118).
+"""Attachment classification, limits, selection, and rendering text (ADR-0120).
 
 One module owns every number the adapters and the token estimator must agree
 on. The estimator counts what `select_attachments` could send; the adapters
@@ -118,7 +118,7 @@ def item_limit_reason(part: AttachmentPart) -> MarkerReason | None:
     """Return why one attachment can never be sent, or None when it can."""
 
     if part.size_bytes is None:
-        # Only a reference admitted through ADR-0118 carries server-set facts.
+        # Only a reference admitted through ADR-0120 carries server-set facts.
         return MarkerReason.REFERENCE
     kind = attachment_kind(part)
     if kind is AttachmentKind.OTHER:

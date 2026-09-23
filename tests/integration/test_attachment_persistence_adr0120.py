@@ -1,4 +1,4 @@
-"""ADR-0118 attachments against PostgreSQL: unclaimed rows, claim, and ingestion."""
+"""ADR-0120 attachments against PostgreSQL: unclaimed rows, claim, and ingestion."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from agent_core.adapters.persistence.database import create_engine
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
 from agent_core.policy.scopes import PLATFORM_SCOPES
-from tests.gates.test_attachment_upload_adr0118 import PNG
+from tests.gates.test_attachment_upload_adr0120 import PNG
 from tests.integration.m2_support import database_settings
 
 

@@ -1,4 +1,4 @@
-"""Flag-mounted chat attachment upload (ADR-0118). The body is the file itself."""
+"""Flag-mounted chat attachment upload (ADR-0120). The body is the file itself."""
 
 from collections.abc import Callable
 from typing import Annotated

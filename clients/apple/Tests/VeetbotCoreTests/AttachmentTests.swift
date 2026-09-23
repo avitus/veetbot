@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 @testable import VeetbotCore
 
-/// ADR-0118: files attached to a chat message — staging, upload, and sending.
+/// ADR-0120: files attached to a chat message — staging, upload, and sending.
 @Suite(.serialized) @MainActor struct AttachmentTests {
     private let sessionID = UUID(uuidString: "00000000-0000-0000-0000-00000000a001")!
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-00000000a002")!

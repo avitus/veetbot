@@ -1,4 +1,4 @@
-"""PDF text extraction for knowledge ingestion (ADR-0118)."""
+"""PDF text extraction for knowledge ingestion (ADR-0120)."""
 
 from __future__ import annotations
 

@@ -34,7 +34,7 @@ The generated application property list declares
 Keychain protection and implements no non-exempt encryption. Reassess that
 declaration before adding a custom or third-party cryptographic implementation.
 
-Files can be attached to a chat message (ADR-0118). On Mac and iPad, drop files
+Files can be attached to a chat message (ADR-0120). On Mac and iPad, drop files
 anywhere on the conversation or on the message field; plain text dropped on the
 field is still inserted as text. The paperclip beside the field opens Files on
 every device and, on iOS, the photo library, which needs no photo permission.

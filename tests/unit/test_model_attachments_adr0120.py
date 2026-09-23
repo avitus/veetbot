@@ -1,4 +1,4 @@
-"""ADR-0118 attachment rules shared by the adapters and the token estimator."""
+"""ADR-0120 attachment rules shared by the adapters and the token estimator."""
 
 from __future__ import annotations
 

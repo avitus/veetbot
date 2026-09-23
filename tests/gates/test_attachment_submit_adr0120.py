@@ -1,4 +1,4 @@
-"""Sending a message validates and claims its attachments (ADR-0118).
+"""Sending a message validates and claims its attachments (ADR-0120).
 
 Step 5 of the submit handler checks every image or file block against the
 caller's uploads in the same session, rebuilds the stored parts from the
@@ -20,7 +20,7 @@ from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.contract.support import AGENT_ID, NOW
-from tests.gates.test_attachment_upload_adr0118 import (
+from tests.gates.test_attachment_upload_adr0120 import (
     JPEG,
     PNG,
     _client,

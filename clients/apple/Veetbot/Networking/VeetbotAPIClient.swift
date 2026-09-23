@@ -309,7 +309,7 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
-    /// Upload one file for a session; sending a message later claims it (ADR-0118).
+    /// Upload one file for a session; sending a message later claims it (ADR-0120).
     ///
     /// The key makes a retry replay the stored upload instead of storing it twice.
     public func uploadArtifact(
@@ -777,7 +777,7 @@ func encodedHeaderFilename(_ filename: String) -> String {
     return filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? "attachment"
 }
 
-/// Attachments are default-off (ADR-0118): a server without the upload route
+/// Attachments are default-off (ADR-0120): a server without the upload route
 /// answers the generic 404 or a method miss, never the service's own message for
 /// a missing conversation, which stays a plain API error.
 private func attachmentCompatibilityError(from error: Error) -> VeetbotAPIClientError? {

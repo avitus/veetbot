@@ -44,7 +44,7 @@ class FolderNameError(AgentCoreError):
 
 class AttachmentValidationError(AgentCoreError):
     """A chat attachment or an attachment reference broke one boundary rule
-    (ADR-0118): its name, media type, key, size, kind, or count."""
+    (ADR-0120): its name, media type, key, size, kind, or count."""
 
 
 class ScheduleValidationError(AgentCoreError):

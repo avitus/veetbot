@@ -50,7 +50,7 @@ def test_release_validates_and_restarts_surface_role() -> None:
 
 
 def test_only_the_attachment_upload_path_accepts_a_larger_body() -> None:
-    """ADR-0118: one regex location raises the limit; the server keeps 1m."""
+    """ADR-0120: one regex location raises the limit; the server keeps 1m."""
 
     nginx = (ROOT / "nginx/veetbot.conf").read_text(encoding="utf-8")
     api = nginx.split("live/api.veetbot.com/fullchain.pem;", 1)[1].split("\nserver {", 1)[0]

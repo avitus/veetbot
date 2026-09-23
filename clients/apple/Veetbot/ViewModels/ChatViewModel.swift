@@ -66,7 +66,7 @@ func nextPageCursor(
     return cursor
 }
 
-/// One file in the composer: staged, uploading, uploaded, or failed (ADR-0118).
+/// One file in the composer: staged, uploading, uploaded, or failed (ADR-0120).
 public struct ComposerAttachment: Identifiable, Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case uploading(progress: Double)
@@ -112,7 +112,7 @@ public protocol PushRegistrationRequesting: AnyObject {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     @Published public var composerText = ""
-    /// Files waiting to be sent with the next message (ADR-0118).
+    /// Files waiting to be sent with the next message (ADR-0120).
     @Published public private(set) var attachments: [ComposerAttachment] = []
     @Published public private(set) var connectionGeneration = UUID()
     @Published public private(set) var isReconfiguring = false
@@ -1102,7 +1102,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Attachments (ADR-0118)
+    // MARK: - Attachments (ADR-0120)
 
     /// Every staged file has finished uploading; a message may carry them now.
     public var attachmentsReady: Bool {

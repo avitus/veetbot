@@ -1,4 +1,4 @@
-"""Ingest the documents the owner sends in chat (ADR-0118).
+"""Ingest the documents the owner sends in chat (ADR-0120).
 
 Sending a message marks each owner-sent text, Markdown, or PDF attachment
 pending; this sweep admits it through the ordinary knowledge service. The

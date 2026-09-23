@@ -46,7 +46,7 @@ class StoredArtifactRef:
     media_type: str
 
 
-# ADR-0118 chat attachments. The metadata keys below are the only upload facts
+# ADR-0120 chat attachments. The metadata keys below are the only upload facts
 # kept on the artifact row, and every one of them is visible in ArtifactView.
 ATTACHMENT_METADATA_KEY = "attachment"
 AUTO_INGEST_KEY = "auto_ingest"

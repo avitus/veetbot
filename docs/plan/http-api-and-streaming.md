@@ -848,7 +848,7 @@ unrelated things.
 2. Check `run.write`.
 3. Load the session in the principal's tenant, or 404.
 4. Reject a `CLOSED` session with `invalid_state` and status 409.
-5. Validate the content blocks. Since ADR-0118 an `image` or `file` block
+5. Validate the content blocks. Since ADR-0120 an `image` or `file` block
    must name an upload of the caller in this session that has not expired,
    or it is `not_found`; the stored parts take the upload's recorded type,
    name, size, and page count, and the upload is claimed by the run once it
@@ -1486,7 +1486,7 @@ metadata or content — is unchanged and is why both routes require
 storage.
 
 Metadata is the `artifacts` row minus its storage location. `run_id` is
-null only for an ADR-0118 upload that no sent message has claimed yet:
+null only for an ADR-0120 upload that no sent message has claimed yet:
 
 ```json
 {
@@ -1637,7 +1637,7 @@ before the body is read and enforced again while reading it, because a
 chunked request has no `Content-Length` to check. The bound is on the
 request, not on message content, and it is generous for a JSON body of
 text blocks — an artifact is not uploaded through this API in 0.1.
-ADR-0118's attachment upload is the one exception: its route alone accepts
+ADR-0120's attachment upload is the one exception: its route alone accepts
 32 MiB, is exempt from the pre-read buffer, and keeps the same `413` shape.
 
 **Rate limiting is declared and not implemented.** `rate_limited` with
@@ -1756,7 +1756,7 @@ class ArtifactService(Protocol):
     ) -> ArtifactContent: ...
 ```
 
-ADR-0118 adds `upload(principal, session_id, *, content, filename,
+ADR-0120 adds `upload(principal, session_id, *, content, filename,
 declared_media_type, idempotency_key)`, returning the view and whether it was
 a replay.
 
@@ -2149,7 +2149,7 @@ nullable `subscription` block. Every response carries
 `Cache-Control: private, no-store`, never includes an unsubscribe address, and
 answers a foreign or unknown subscription with an indistinguishable 404.
 
-## ADR-0118 chat attachment upload
+## ADR-0120 chat attachment upload
 
 One route, mounted only when `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, under the
 existing `artifact.write`; no new scope enters the vocabulary.

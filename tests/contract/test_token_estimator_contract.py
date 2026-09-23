@@ -49,7 +49,7 @@ def test_tool_estimate_counts_the_model_visible_contract_only() -> None:
 
 
 def test_owner_attachments_are_counted_as_what_the_adapter_may_send() -> None:
-    """ADR-0118: a reference serializes small, so the file itself is added."""
+    """ADR-0120: a reference serializes small, so the file itself is added."""
 
     from uuid import UUID
 

@@ -1,4 +1,4 @@
-"""The chat attachment upload route (ADR-0118).
+"""The chat attachment upload route (ADR-0120).
 
 `POST /v1/sessions/{id}/artifacts` takes one file as the raw body under the
 existing `artifact.write` scope, only when `AGENT_ATTACHMENT_UPLOADS_ENABLED`

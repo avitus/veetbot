@@ -31,7 +31,7 @@ project:
   # ADR-0117 records the owner's non-milestone extension on 2026-09-22: memory
   # review and deletion over HTTP under memory.write, superseding ADR-0070
   # decision 3, with the native review actions and the flagged filter.
-  # ADR-0118 records the owner's non-milestone extension on 2026-09-23: files
+  # ADR-0120 records the owner's non-milestone extension on 2026-09-23: files
   # attached to chat messages through a flagged upload route under
   # artifact.write, claimed on submit, sent to the model within a budget, and
   # owner-sent documents added to knowledge.

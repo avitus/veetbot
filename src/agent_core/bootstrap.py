@@ -2989,7 +2989,7 @@ async def _compose(
             clock,
             ids,
             principal,
-            # ADR-0118: PDFs the owner sends reach knowledge through their text layer.
+            # ADR-0120: PDFs the owner sends reach knowledge through their text layer.
             extractor=RoutingExtractor(
                 [
                     PlainTextExtractor(),
@@ -4566,7 +4566,7 @@ async def build(
                     effective_principal.tenant_id,
                 ),
             )
-        # ADR-0118: every constructed adapter can read the owner's attachments,
+        # ADR-0120: every constructed adapter can read the owner's attachments,
         # whether or not the upload flag is on, so existing ones keep rendering.
         attachment_resolver = StoredAttachmentResolver(
             uow_factory=uow_factory,

@@ -59,7 +59,7 @@ class ConservativeTokenEstimator:
     def estimate(self, items: Sequence[ConversationItem], model_id: str) -> int:
         payload = canonical_json_bytes([item.model_dump(mode="json") for item in items])
         estimate = self._estimate("items", payload, len(items), model_id)
-        # ADR-0118: a reference serializes small, but the adapter may send the
+        # ADR-0120: a reference serializes small, but the adapter may send the
         # file; count every attachment it could send so budgets stay honest.
         attachments = estimate_attachment_tokens(items)
         if attachments:

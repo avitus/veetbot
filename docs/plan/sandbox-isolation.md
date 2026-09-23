@@ -1041,7 +1041,7 @@ PostgreSQL. This section supplies the types and the key derivation.
 @dataclass(frozen=True)
 class ArtifactMetadata:
     tenant_id: TenantId
-    run_id: RunId | None  # null only before an upload is claimed (ADR-0118)
+    run_id: RunId | None  # null only before an upload is claimed (ADR-0120)
     origin: ArtifactOrigin
     filename: str
     media_type: str
@@ -1081,7 +1081,7 @@ properties and an operator asking "what did this run produce" wants
 them separated. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
 `artifact.export`; `UPLOAD` is a client-supplied file, produced since
-ADR-0118 by the chat attachment route with no run until a sent message
+ADR-0120 by the chat attachment route with no run until a sent message
 claims it;
 `TRAJECTORY_EXPORT` is the redacted, consent-gated run export
 [event-log-and-persistence.md](event-log-and-persistence.md) owns,
@@ -1175,7 +1175,7 @@ redesign.
 
 Artifacts have a default retention of 30 days and a per-tenant byte
 cap, both operator configuration. `expires_at` is written at creation
-and a sweeper deletes expired objects and their metadata rows. ADR-0118
+and a sweeper deletes expired objects and their metadata rows. ADR-0120
 gives uploads their own two lifetimes: 24 hours while unclaimed, and none
 once a sent message claims one, so an attachment lives as long as its
 conversation and goes with it.

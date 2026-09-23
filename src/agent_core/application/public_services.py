@@ -1478,7 +1478,7 @@ class PublicArtifactService:
 
         return ArtifactContent(artifact=_artifact_view(artifact), open=open_stream)
 
-    # -- uploads (ADR-0118) -------------------------------------------------------
+    # -- uploads (ADR-0120) -------------------------------------------------------
     #
     # The receipt is a content-free session event keyed by the idempotency key,
     # appended in the same transaction as the artifact row. The append takes the

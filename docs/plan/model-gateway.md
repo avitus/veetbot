@@ -98,7 +98,7 @@ log and keeps the bytes under the artifact store's retention and redaction
 rules. The adapter resolves the reference at render time and the resolved bytes
 never re-enter the conversation.
 
-ADR-0118 makes that resolution concrete. `ImageReferencePart` and
+ADR-0120 makes that resolution concrete. `ImageReferencePart` and
 `FileReferencePart` gain optional, server-set `size_bytes` and `page_count`.
 An `AttachmentResolver` port, built in the composition root and passed to each
 provider adapter, reads an attachment's bytes after checking that it is an

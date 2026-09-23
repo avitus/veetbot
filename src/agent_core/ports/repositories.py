@@ -358,7 +358,7 @@ class ArtifactRepository(Protocol):
         run_id: UUID,
         auto_ingest: bool,
     ) -> ArtifactRef:
-        """Bind an upload to the run of the message that sent it (ADR-0118).
+        """Bind an upload to the run of the message that sent it (ADR-0120).
 
         The first claim sets the run and removes the expiry; a later claim of
         the same upload changes nothing but may still mark it for ingestion.

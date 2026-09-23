@@ -22,14 +22,14 @@ async def test_extractor_accepts_only_declared_utf8_text() -> None:
 
 
 async def test_pdf_extractor_reads_the_text_layer_and_refuses_what_it_cannot() -> None:
-    """ADR-0118: owner-sent PDFs reach knowledge through their text layer."""
+    """ADR-0120: owner-sent PDFs reach knowledge through their text layer."""
 
     import io
 
     from pypdf import PdfWriter
 
     from agent_core.adapters.knowledge.pdf import PdfTextExtractor
-    from tests.gates.test_attachment_auto_ingest_adr0118 import _text_pdf
+    from tests.gates.test_attachment_auto_ingest_adr0120 import _text_pdf
 
     extractor = PdfTextExtractor(maximum_bytes=1024 * 1024)
     assert extractor.media_types() == {"application/pdf"}

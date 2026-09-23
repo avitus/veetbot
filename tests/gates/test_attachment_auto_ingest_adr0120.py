@@ -1,4 +1,4 @@
-"""Owner-sent documents are added to knowledge (ADR-0118).
+"""Owner-sent documents are added to knowledge (ADR-0120).
 
 Sending a text, Markdown, or PDF attachment marks it pending; the maintenance
 worker ingests it through the ordinary knowledge service with `USER` origin
@@ -13,8 +13,8 @@ from typing import Any
 from uuid import UUID
 
 from agent_core.knowledge.uploads import upload_document_id
-from tests.gates.test_attachment_submit_adr0118 import _artifact, _send, _uploaded
-from tests.gates.test_attachment_upload_adr0118 import PNG, _client, _composition, _session
+from tests.gates.test_attachment_submit_adr0120 import _artifact, _send, _uploaded
+from tests.gates.test_attachment_upload_adr0120 import PNG, _client, _composition, _session
 
 
 def _text_pdf(text: str) -> bytes:
