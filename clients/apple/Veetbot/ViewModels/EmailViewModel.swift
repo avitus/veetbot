@@ -92,6 +92,8 @@ public final class EmailViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var refreshKey: String?
     private var refreshFailure: String?
+    /// Per-account freshness observed before the recorded failure, absent while never read.
+    private var syncedBaseline: [String: Date?] = [:]
     private var pendingNewItems: [EmailThreadView]?
     private var saveKeys: [UUID: (EmailDraftEdit, String)] = [:]
     private var sendKeys: [UUID: (Int, String)] = [:]
@@ -234,6 +236,7 @@ public final class EmailViewModel: ObservableObject {
         revisions = []
         refreshKey = nil
         refreshFailure = nil
+        syncedBaseline = [:]
         budgetPauseMessage = nil
         budgetRetryAt = nil
         saveKeys = [:]
@@ -310,6 +313,7 @@ public final class EmailViewModel: ObservableObject {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             accounts = loadedAccounts.items
+            recordAccountFreshness(loadedAccounts.items)
             unavailable = false
             seenCursors = []
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
@@ -494,7 +498,25 @@ public final class EmailViewModel: ObservableObject {
         return true
     }
 
-    /// Retains refresh failures across successful cache reads until an operation completes.
+    /// An account synced after a recorded failure proves a later refresh succeeded, even when
+    /// this client never read that operation's terminal status: a visit that ends, or an
+    /// admission that supersedes the poll, leaves the projection as the only surviving evidence.
+    private func recordAccountFreshness(_ loaded: [EmailAccountView]) {
+        let freshness = Dictionary(loaded.map { ($0.id, $0.lastSyncedAt) }, uniquingKeysWith: { _, latest in latest })
+        defer { syncedBaseline = freshness }
+        guard refreshFailure != nil else { return }
+        let advanced = loaded.contains { account in
+            // An account missing from the baseline was never observed, so it proves nothing.
+            guard let synced = account.lastSyncedAt, let baseline = syncedBaseline[account.id] else { return false }
+            guard let baseline else { return true }
+            return synced > baseline
+        }
+        guard advanced else { return }
+        refreshFailure = nil
+        errorMessage = nil
+    }
+
+    /// Retains refresh failures across successful cache reads until a later refresh succeeds.
     private func recordRefreshFailure(_ error: Error, readAccess: Bool = false) {
         guard !(error is CancellationError), !Task.isCancelled else { return }
         refreshFailure = error.localizedDescription

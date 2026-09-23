@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -25,6 +25,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.messages import (
     AssistantMessage,
+    ConversationItem,
     ResolvedModel,
     TextPart,
     ToolCallItem,
@@ -941,9 +942,37 @@ class RunExecutor:
                         extra={"run_id": str(run.id)},
                     )
 
+    @staticmethod
+    def _unanswered_trailing_calls(conversation: Sequence[ConversationItem]) -> list[ToolCallItem]:
+        """Trailing tool calls a checkpoint holds without their results.
+
+        A checkpoint written for the model response carries the turn's calls in
+        the conversation before the loop records them in `pending_tool_calls`.
+        A run reclaimed inside that window would otherwise resume with calls no
+        result can ever answer, which no provider request can represent.
+        """
+
+        trailing: list[ToolCallItem] = []
+        for item in reversed(conversation):
+            if isinstance(item, ToolCallItem):
+                trailing.append(item)
+                continue
+            break
+        answered = {item.call_id for item in conversation if isinstance(item, ToolResultItem)}
+        return [call for call in reversed(trailing) if call.call_id not in answered]
+
     async def _resume_pending_tools(self, context: RunContext) -> None:
-        if not context.checkpoint.pending_tool_calls:
-            return
+        pending = context.checkpoint.pending_tool_calls
+        if not pending:
+            # Reconcile the two representations before the loop assembles a
+            # request: the calls are durable in the conversation either way, so
+            # the pipeline re-enters at step 6 and the effect still happens once.
+            recovered = self._unanswered_trailing_calls(context.checkpoint.conversation)
+            if not recovered:
+                return
+            context.checkpoint.pending_tool_calls = [
+                call.model_dump(mode="json") for call in recovered
+            ]
         calls = [
             ToolCallItem.model_validate(call) for call in context.checkpoint.pending_tool_calls
         ]

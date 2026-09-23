@@ -4,6 +4,35 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-22 — A cleared email failure no longer lingers on the iPad
+
+- One refresh failed on 2026-09-17 at 22:48 UTC. Fifty minutes later the iPad
+  still showed "Mail couldn't be updated", although later refreshes had
+  succeeded and new mail was arriving beneath the banner. "Try again" reloaded
+  the inbox but left the banner in place.
+- The client cleared a refresh failure only when it watched a later operation
+  reach `COMPLETED`. Production refreshes take 67–94 seconds, and leaving Email
+  cancels the watch, so a short visit never saw one finish.
+- The client now also clears the failure when an account's `last_synced_at`
+  advances past the value it held when the failure was recorded. The server
+  advances that field only when a refresh completes. A cached read with no newer
+  sync still keeps the failure visible, as `email-experience.md` requires.
+
+## 2026-09-22 — A reclaimed run resumes its proposed tool calls
+
+- A production run died with an internal `ValueError` after its lease was
+  reclaimed: the checkpoint written for the model response carries the turn's
+  tool calls in the conversation, but the loop records them in
+  `pending_tool_calls` only at the next checkpoint. A run reclaimed inside that
+  window resumed with calls no result could answer, and assembling the next
+  request raised on the reasoning provider's continuation, which has no
+  trailing tool-result anchor to sit before.
+- The resume path now reconciles the two representations: trailing tool calls a
+  checkpoint holds without results become the pending batch, so the pipeline
+  re-enters at step 6 and each effect still happens once.
+- `ScriptedTurn` gains `provider_reasoning_payload`, so the fake provider can
+  return a continuation. Nothing in the suite could reach that branch before.
+
 ## 2026-09-21 — Paraphrased People labels no longer erase a family memory
 
 - "My mom, Cheryl, lives in … Marbella … My brother lives in Redwood City"
