@@ -744,7 +744,7 @@ def _admission_fields() -> PeopleFields:
 
 
 async def people_preserving_erase_contract(store: PeopleStore) -> None:
-    """Erasing one person keeps records that no longer depend on it (ADR-0118).
+    """Erasing one person keeps records that no longer depend on it (ADR-0121).
 
     The directory repair detaches mentions and endpoint identifiers, drops the
     person from shared interactions, and then erases what still depends on the
@@ -900,7 +900,7 @@ async def test_memory_people_preserving_erase_contract() -> None:
 
 
 async def people_identifier_lookup_contract(store: PeopleStore) -> None:
-    """Exact, attached, distinct identifier lookup is immune to per-message copies (ADR-0118).
+    """Exact, attached, distinct identifier lookup is immune to per-message copies (ADR-0121).
 
     Correspondence writes one identifier row per message. A substring search
     capped at one hundred rows made a frequent correspondent's address
@@ -1014,7 +1014,7 @@ async def test_memory_people_identifier_lookup_contract() -> None:
 
 
 async def people_review_directory_contract(store: PeopleStore) -> None:
-    """Needs review holds unconfirmed people known only by name or role (ADR-0118)."""
+    """Needs review holds unconfirmed people known only by name or role (ADR-0121)."""
     owner = principal()
     common = _admission_fields()
     marker = f"review-{uuid4().hex[:8]}"

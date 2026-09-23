@@ -100,7 +100,7 @@ def _interaction_id(principal: Principal, exchange: list[str]) -> UUID:
 
 @dataclass(frozen=True)
 class _Correspondent:
-    """What one address in one message may attach to (ADR-0118)."""
+    """What one address in one message may attach to (ADR-0121)."""
 
     person_id: UUID | None = None
     # No assignment of the address is live at or after the message, so a new
@@ -344,7 +344,7 @@ async def project_correspondence(
         return
     account = EmailAccount.model_validate(account_row.payload)
     # The account's own address is all direction needs; a syncing or unavailable
-    # account still belongs to the owner (ADR-0118).
+    # account still belongs to the owner (ADR-0121).
     if not account.email_address:
         return
     # A copy delivered to the work account can have been sent from the owner's
@@ -445,7 +445,7 @@ async def project_correspondence(
             and not is_non_person_reference(name)
             and " ".join(name.casefold().split()) != owner_name
         ):
-            # ADR-0118: the owner writing to someone is what adds them to People.
+            # ADR-0121: the owner writing to someone is what adds them to People.
             # A header name alone never merges identities.
             candidate_id = uuid5(sid, "correspondent:" + address)
             if not await uow.people.is_erased(principal, candidate_id):

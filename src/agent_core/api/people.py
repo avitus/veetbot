@@ -109,7 +109,7 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         cursor: Annotated[str | None, Query(max_length=2048)] = None,
         as_of: AwareDatetime | None = None,
-        # Repeat state to list several; People is active plus provisional (ADR-0118).
+        # Repeat state to list several; People is active plus provisional (ADR-0121).
         state: Annotated[
             list[Literal["active", "provisional", "merged"]] | None, Query(max_length=3)
         ] = None,

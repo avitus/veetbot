@@ -3,7 +3,7 @@ import Foundation
 /// People always carries the native viewing ceiling; the server clamps it to the surface.
 extension VeetbotAPIClient {
     /// Repeated `state` values list several states; `review` asks for the
-    /// server's Needs review filter (ADR-0118).
+    /// server's Needs review filter (ADR-0121).
     public func listPeople(text: String? = nil, cursor: String? = nil, asOf: Date? = nil, states: [String] = [], review: Bool = false, pinned: Bool? = nil, sort: String = "id", relationship: String? = nil) async throws -> Page<PersonView> {
         var query = peopleQuery
         query.append(URLQueryItem(name: "limit", value: "50"))

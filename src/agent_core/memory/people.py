@@ -34,7 +34,7 @@ async def resolve_identity(
     ceiling: Sensitivity,
 ) -> IdentityResolution:
     normalized = normalize_identifier(kind, namespace, value)
-    # Exact values only, one row per distinct assignment (ADR-0118): per-message
+    # Exact values only, one row per distinct assignment (ADR-0121): per-message
     # identifier copies and superstring names can no longer fill the bounded
     # candidate set and turn a known person ambiguous.
     query = PeopleQuery(
@@ -74,7 +74,7 @@ async def resolve_identity(
                 or (row.verification == "channel_observed" and kind in {"email", "phone", "handle"})
                 or (row.verification == "contextual" and kind == "name" and bool(context))
                 # An address or number the owner stated in chat (context "owner")
-                # identifies that person for mail and texts (ADR-0118).
+                # identifies that person for mail and texts (ADR-0121).
                 or (
                     row.verification == "contextual"
                     and kind in {"email", "phone"}

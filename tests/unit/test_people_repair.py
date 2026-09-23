@@ -1,4 +1,4 @@
-"""The one-time People directory repair keeps who the owner knows or writes to (ADR-0118)."""
+"""The one-time People directory repair keeps who the owner knows or writes to (ADR-0121)."""
 
 from __future__ import annotations
 
@@ -610,7 +610,7 @@ async def test_repair_is_idempotent_and_later_formation_neither_recreates_nor_fa
     )
     common = _fields()
     async with factory() as uow:
-        # formation@11 created both from this very message before ADR-0118.
+        # formation@11 created both from this very message before ADR-0121.
         for name in ("Alex", "Maya"):
             person = Person(id=uuid4(), display_name=name, **common)
             await uow.people.put(person, expected_revision=0)

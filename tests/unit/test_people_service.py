@@ -973,7 +973,7 @@ async def test_profile_lists_each_alias_once() -> None:
 
 
 async def test_ending_an_alias_ends_every_observed_copy_of_that_assignment() -> None:
-    """The profile shows one alias per assignment, so ending it ends every copy (ADR-0118)."""
+    """The profile shows one alias per assignment, so ending it ends every copy (ADR-0121)."""
     from datetime import timedelta
     from uuid import uuid4
 
@@ -1095,7 +1095,7 @@ async def test_review_directory_binds_its_cursor() -> None:
 
 
 async def test_owner_created_person_gets_an_owner_confirmed_name_alias() -> None:
-    """A person the owner adds is found again when the owner names them in chat (ADR-0118)."""
+    """A person the owner adds is found again when the owner names them in chat (ADR-0121)."""
     from agent_core.domain.people import PeopleQuery, PersonIdentifier
     from agent_core.memory.people import resolve_identity
 

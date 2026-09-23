@@ -115,7 +115,7 @@ import Testing
     }
 
     /// A fact about someone not in People keeps the name it was stated with
-    /// (ADR-0118); the unresolved identity key is never shown.
+    /// (ADR-0121); the unresolved identity key is never shown.
     @Test(arguments: [
         ("person:unresolved:00000000-0000-0000-0000-000000000201,00000000-0000-0000-0000-000000000202:Alex preference", "Alex preference", false),
         ("person:00000000-0000-0000-0000-000000000203:Maya", "Maya", true),

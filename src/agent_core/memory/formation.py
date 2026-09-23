@@ -3141,7 +3141,7 @@ class GovernedMemoryService:
                 superseded = 0
                 conflicted = 0
                 people_mentions = 0
-                # ADR-0118: a chat mention creates a person only when some claim in
+                # ADR-0121: a chat mention creates a person only when some claim in
                 # this batch ties that person to the owner, and never for the
                 # owner's own addresses or handles.
                 tied_labels: frozenset[tuple[str, str]] = frozenset()

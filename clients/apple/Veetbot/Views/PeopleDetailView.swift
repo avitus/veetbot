@@ -105,7 +105,7 @@ public struct PeopleDetailView: View {
             }
             if profile.person.state == "provisional" {
                 // Provisional covers people the owner writes to, so this names the
-                // state rather than asking for review (ADR-0118).
+                // state rather than asking for review (ADR-0121).
                 Label("Not confirmed yet", systemImage: "person.crop.circle.badge.questionmark").foregroundColor(.secondary)
                 Button("Confirm this identity") { Task { await model.confirmIdentity(sessionID: sessionID) } }
                     .disabled(model.isSaving || model.canRetrySave || model.requiresRefresh)

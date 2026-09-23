@@ -53,7 +53,7 @@ class PeopleStore(Protocol):
 
         By default every historical revision's links count as dependence. With
         ``preserve_independent`` only current heads do, and survivors lose the
-        stale revisions that still named an erased record (ADR-0118 repair).
+        stale revisions that still named an erased record (ADR-0121 repair).
         """
         ...
 

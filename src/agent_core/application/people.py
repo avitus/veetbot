@@ -261,7 +261,7 @@ class PublicPeopleService:
                 person = person.model_copy(update={"support_ids": [source.id]})
                 await uow.people.put(person, expected_revision=0)
                 # The owner named this person, so the name identifies them when the
-                # owner mentions them again in chat (ADR-0118).
+                # owner mentions them again in chat (ADR-0121).
                 await uow.people.put(
                     PersonIdentifier(
                         id=uuid5(NAMESPACE_URL, operation_key + ":created-name"),
@@ -440,7 +440,7 @@ class PublicPeopleService:
         """End every other open copy of the assignment the owner ended.
 
         The profile lists one alias per assignment while correspondence keeps
-        one observed copy per message (ADR-0118); ending only the listed row
+        one observed copy per message (ADR-0121); ending only the listed row
         would leave the address resolving to this person.
         """
         if ended.valid_to is None:
@@ -503,7 +503,7 @@ class PublicPeopleService:
             profile = PersonProfile(person=person)
             # Identifiers are read once per distinct assignment below; correspondence
             # writes one copy per message and those copies must not crowd out
-            # facts or history (ADR-0118).
+            # facts or history (ADR-0121).
             aliases = await uow.people.query(
                 PeopleQuery(
                     tenant_id=principal.tenant_id,
@@ -647,7 +647,7 @@ class PublicPeopleService:
             normalized = None if not text else normalize_identifier("name", "owner", text)
         except ValueError as exc:
             raise ToolValidationError("invalid People directory search") from exc
-        # People lists active and provisional people together (ADR-0118); the
+        # People lists active and provisional people together (ADR-0121); the
         # set is sorted so the same states in any order bind the same cursor.
         requested = sorted({*(states or ()), *((state,) if state else ())})
         if not set(requested) <= {"active", "provisional", "merged"}:

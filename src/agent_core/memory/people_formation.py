@@ -77,7 +77,7 @@ class PreparedPeople:
     source_ids: tuple[UUID, ...]
     candidate: MemoryCandidate
     subject: str
-    # ADR-0118: a mention can be left without a person for two reasons. An
+    # ADR-0121: a mention can be left without a person for two reasons. An
     # ambiguous one might be any of several people, so links from the same
     # claim are held back. A withheld one names someone outside People (a
     # stranger, a pronoun, the owner), which says nothing about the others.
@@ -126,7 +126,7 @@ def _label(kind: str, namespace: str, value: str) -> tuple[str, str] | None:
 def owner_tied_labels(
     claims: list[PeopleClaim], interactions: list[InteractionEvidence]
 ) -> frozenset[tuple[str, str]]:
-    """Labels the owner tied to themself anywhere in one formation batch (ADR-0118).
+    """Labels the owner tied to themself anywhere in one formation batch (ADR-0121).
 
     A person is admitted once, by any claim in the batch that ties them to the
     owner, so "Maya's partner is Jules" links Maya whether or not it is
@@ -231,7 +231,7 @@ async def prepare_people(
     creatable: frozenset[str] = frozenset(),
     self_references: frozenset[str] = frozenset(),
 ) -> PreparedPeople:
-    """Ground a claim's mentions in People without inventing anyone (ADR-0118).
+    """Ground a claim's mentions in People without inventing anyone (ADR-0121).
 
     Only keys in ``creatable`` may create a person; every other mention links to
     an existing person when resolution matches and otherwise stays a mention
@@ -390,7 +390,7 @@ async def prepare_people(
                 and person_id is None
                 and mention.key not in creatable
             ):
-                # Someone the owner is not tied to stays a mention (ADR-0118).
+                # Someone the owner is not tied to stays a mention (ADR-0121).
                 withheld.add(mention.key)
             elif resolved.status == "unresolved" and person_id is None:
                 person_id = uuid5(sid, f"person:{mention.start}:{mention.end}")
@@ -759,7 +759,7 @@ async def persist_interaction(
         ),
     )
     # A reported meeting admits its participants only when the owner took part
-    # (ADR-0118): "I met Maya" adds Maya, "Maya met Jules" adds no one.
+    # (ADR-0121): "I met Maya" adds Maya, "Maya met Jules" adds no one.
     creatable = (
         frozenset(proposal.participant_keys)
         if _FIRST_PERSON.search(proposal.text) is not None

@@ -58,7 +58,7 @@ def test_reservation_includes_worst_case_input_output_and_separate_reasoning() -
 
 
 async def test_scoped_import_survives_new_observed_identifiers() -> None:
-    """Only owner-confirmed identities pin a scoped import (ADR-0118).
+    """Only owner-confirmed identities pin a scoped import (ADR-0121).
 
     Correspondence now records who the owner writes to, one identifier per
     message. Those rows must neither exceed the snapshot bound nor stop an

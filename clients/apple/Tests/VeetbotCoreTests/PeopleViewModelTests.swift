@@ -314,7 +314,7 @@ import Testing
         _ = try await client.listPeople(cursor: "next", states: ["active", "provisional"], pinned: true, relationship: "family")
     }
     /// People lists everyone known or written to; Needs review is the server's
-    /// own filter rather than every provisional person (ADR-0118).
+    /// own filter rather than every provisional person (ADR-0121).
     @Test(arguments: PeopleCollection.allCases) func eachCollectionSendsItsDirectoryQuery(collection: PeopleCollection) async throws {
         let lock = NSLock()
         var queries: [[URLQueryItem]] = []

@@ -584,7 +584,7 @@ LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
 def _correspondence_reprojector(
     uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
 ) -> Callable[[Principal, EmailRecord], Awaitable[bool]]:
-    """The directory repair's header backfill (ADR-0118); it calls no model."""
+    """The directory repair's header backfill (ADR-0121); it calls no model."""
 
     async def reproject(owner: Principal, record: EmailRecord) -> bool:
         from agent_core.memory.email_people import EmailPeopleFormationService

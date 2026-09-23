@@ -1,4 +1,4 @@
-"""The owner's own mail identities, which never name or match a person (ADR-0118)."""
+"""The owner's own mail identities, which never name or match a person (ADR-0121)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from agent_core.ports.email import EmailStore
 
 
 async def owner_references(email: EmailStore, principal: Principal) -> frozenset[str]:
-    """The owner's own addresses and handles, from every mail account (ADR-0118).
+    """The owner's own addresses and handles, from every mail account (ADR-0121).
 
     Account status is irrelevant: an address stays the owner's while its account
     syncs or is unavailable.

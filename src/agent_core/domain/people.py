@@ -445,7 +445,7 @@ class PeopleQuery(PeopleValue):
     until: AwareDatetime | None = None
     after: UUID | None = None
     limit: int = Field(default=50, ge=1, le=100)
-    # ADR-0118 identity lookup: an exact (case-insensitive) identifier or name
+    # ADR-0121 identity lookup: an exact (case-insensitive) identifier or name
     # value, whether identifiers must be attached to a person, the instant an
     # identifier must be valid at, and one row per distinct assignment so
     # per-message copies of one address cannot crowd out a match.
@@ -453,7 +453,7 @@ class PeopleQuery(PeopleValue):
     assigned: Literal["any", "attached", "unattached"] = "any"
     valid_at: AwareDatetime | None = None
     distinct_assignments: bool = False
-    # ADR-0118 review queue: provisional, unpinned people with no attached
+    # ADR-0121 review queue: provisional, unpinned people with no attached
     # owner-confirmed or channel-observed identifier.
     needs_review: bool = False
 
@@ -468,7 +468,7 @@ class PeopleQuery(PeopleValue):
 
 # Words that refer to a speaker, a listener, or nobody in particular. A mention
 # carrying one of these as its whole label is never a person of its own
-# (ADR-0118): pronouns bind to source participants or stay unresolved.
+# (ADR-0121): pronouns bind to source participants or stay unresolved.
 NON_PERSON_REFERENCES: frozenset[str] = frozenset(
     {
         "i",

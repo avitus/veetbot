@@ -220,7 +220,7 @@ def repair_directory(
         bool, typer.Option("--confirm", help="Apply the repair. Without it, only preview.")
     ] = False,
 ) -> None:
-    """Keep only people you know or write to (ADR-0118); previews unless --confirm."""
+    """Keep only people you know or write to (ADR-0121); previews unless --confirm."""
     emit(repair_directory_report(owner, confirm))
 
 

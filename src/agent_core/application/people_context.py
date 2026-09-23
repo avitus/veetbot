@@ -324,7 +324,7 @@ class PeopleContextService:
                             mentioned_in=query.text[:8192],
                             known_at=query.known_at,
                             as_of=query.as_of,
-                            # Per-message alias copies count once (ADR-0118).
+                            # Per-message alias copies count once (ADR-0121).
                             assigned="attached",
                             distinct_assignments=True,
                             limit=100,

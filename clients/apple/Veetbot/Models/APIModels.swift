@@ -817,7 +817,7 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     }
 
     /// The subject as a row should show it. A fact about someone who is not
-    /// in People is keyed `person:unresolved:<source ids>:<name>` (ADR-0118);
+    /// in People is keyed `person:unresolved:<source ids>:<name>` (ADR-0121);
     /// only the name is shown.
     public var displaySubject: String {
         if let personLink { return personLink.name }

@@ -107,7 +107,7 @@ async def test_commitment_formation_retains_supported_calendar_precision() -> No
 async def test_owner_formation_links_known_people_with_a_directional_relationship() -> None:
     """Statements about people the owner knows link them, directionally and idempotently.
 
-    ADR-0118: naming someone without tying them to the owner no longer creates
+    ADR-0121: naming someone without tying them to the owner no longer creates
     them, so Maya and Jules are people the owner already knows here.
     """
     from datetime import timedelta
@@ -1021,7 +1021,7 @@ async def test_affiliation_uses_organization_endpoint_and_preserves_source() -> 
     from agent_core.domain.people_extraction import OrganizationEvidence
 
     clock, factory = await memory_uow_factory()
-    # ADR-0118: an affiliation links a person the owner already knows.
+    # ADR-0121: an affiliation links a person the owner already knows.
     await _seed_known(factory, "Maya")
     content = "Maya works at Acme."
     sequence = await user_event(factory, content)
@@ -1262,7 +1262,7 @@ async def test_episode_extraction_honors_erasure_before_and_during_provider(
 
 
 # ---------------------------------------------------------------------------
-# ADR-0118: People holds people the owner knows or interacts with.
+# ADR-0121: People holds people the owner knows or interacts with.
 # ---------------------------------------------------------------------------
 
 
@@ -1390,7 +1390,7 @@ async def _seed_known(factory: Any, *names: str) -> dict[str, Person]:
 
 
 async def test_chat_mentions_without_an_owner_tie_link_existing_people_only() -> None:
-    """Naming someone without tying them to the owner creates no one (ADR-0118)."""
+    """Naming someone without tying them to the owner creates no one (ADR-0121)."""
     clock, factory = await memory_uow_factory()
     text = "Maya introduced Jules."
     sequence = await user_event(factory, text)

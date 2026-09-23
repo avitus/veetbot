@@ -107,7 +107,7 @@ async def test_people_directory_filters_before_pagination_and_binds_cursor() -> 
 
 
 async def test_people_directory_accepts_repeated_states_and_review_filter() -> None:
-    """People lists active and provisional people; Needs review is its own filter (ADR-0118)."""
+    """People lists active and provisional people; Needs review is its own filter (ADR-0121)."""
     from uuid import UUID
 
     from agent_core.domain.people import Person, PersonIdentifier
@@ -452,7 +452,7 @@ async def test_people_api_write_read_retry_and_validation() -> None:
                 assert section_response.status_code == 200, section_response.text
                 items = section_response.json()["items"]
                 if section == "identity-evidence":
-                    # ADR-0118: the owner-created name is owner-confirmed identity.
+                    # ADR-0121: the owner-created name is owner-confirmed identity.
                     assert [(item["kind"], item["label"]) for item in items] == [
                         ("identifier", "Alex")
                     ]

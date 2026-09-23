@@ -135,7 +135,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
     async def reproject_correspondence(self, record: EmailRecord) -> bool:
         """Project one retained message's headers into People again; no model is called.
 
-        The directory repair (ADR-0118) uses this for mail registered while
+        The directory repair (ADR-0121) uses this for mail registered while
         correspondence could not run. It returns False for bulk, excluded or
         suppressed mail, and raises for mail that no longer verifies.
         """
@@ -337,7 +337,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         scope: str,
         self_references: frozenset[str],
     ) -> PreparedPeople:
-        """Ground one fact's People evidence; mail never creates a person (ADR-0118)."""
+        """Ground one fact's People evidence; mail never creates a person (ADR-0121)."""
         assert fact.people is not None
         if source.body.count(fact.quote) != 1:
             raise ToolValidationError("People email quote is ambiguous within this passage")

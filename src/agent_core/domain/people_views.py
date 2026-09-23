@@ -218,7 +218,7 @@ class PeopleCorrectionResult(PeopleValue):
 
 
 class PeopleRepairCandidate(PeopleValue):
-    """A person the directory repair removes, and why (ADR-0118)."""
+    """A person the directory repair removes, and why (ADR-0121)."""
 
     person_id: UUID
     display_name: str
@@ -226,7 +226,7 @@ class PeopleRepairCandidate(PeopleValue):
 
 
 class PeopleRepairReport(PeopleValue):
-    """What `agent people repair-directory` found or did (ADR-0118).
+    """What `agent people repair-directory` found or did (ADR-0121).
 
     A preview lists who would be removed before the correspondence backfill,
     which can only keep more people. A confirmed run lists who was removed.

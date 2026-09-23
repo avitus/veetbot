@@ -1474,7 +1474,7 @@ async def test_postgres_recall_waits_for_initial_erasure_without_blocking_anothe
 
 
 async def test_postgres_people_directory_repair() -> None:
-    """The repair's queries, deletes and erasure hold on PostgreSQL (ADR-0118)."""
+    """The repair's queries, deletes and erasure hold on PostgreSQL (ADR-0121)."""
     from dataclasses import replace
     from datetime import timedelta
 

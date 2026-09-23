@@ -9,7 +9,7 @@ public enum PeopleCollection: String, CaseIterable, Identifiable, Sendable {
     case people = "People", pinned = "Pinned", review = "Needs review", all = "All identities"
     public var id: String { rawValue }
     /// People holds everyone the owner knows or writes to, confirmed or not;
-    /// Needs review is the server's own filter (ADR-0118).
+    /// Needs review is the server's own filter (ADR-0121).
     var states: [String] { self == .people || self == .pinned ? ["active", "provisional"] : [] }
     var review: Bool { self == .review }
     var pinnedOnly: Bool? { self == .pinned ? true : nil }

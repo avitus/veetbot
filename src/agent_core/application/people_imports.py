@@ -40,7 +40,7 @@ async def import_identity_revisions(
 
     Selection reads only owner-confirmed identifiers, so only those pin the
     import. Correspondence writes an observed identifier for every message the
-    owner exchanges with someone (ADR-0118); those rows neither exceed the
+    owner exchanges with someone (ADR-0121); those rows neither exceed the
     snapshot bound nor stop an import that is already selecting that person.
     """
     identities: dict[UUID, int] = {}

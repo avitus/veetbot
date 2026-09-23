@@ -219,7 +219,7 @@ def _fields() -> dict[str, Any]:
 
 
 async def test_many_observed_copies_of_one_address_still_match() -> None:
-    """Per-message identifier copies never turn one correspondent ambiguous (ADR-0118)."""
+    """Per-message identifier copies never turn one correspondent ambiguous (ADR-0121)."""
     store = InMemoryPeopleStore(FixedClock(NOW))
     owner = principal()
     person = Person(id=uuid4(), display_name="Frequent Correspondent", **_fields())
@@ -291,7 +291,7 @@ async def test_superstring_names_and_addresses_never_crowd_out_a_match() -> None
 
 
 async def test_owner_stated_address_matches_mail() -> None:
-    """An address the owner stated in chat identifies the person for mail (ADR-0118)."""
+    """An address the owner stated in chat identifies the person for mail (ADR-0121)."""
     store = InMemoryPeopleStore(FixedClock(NOW))
     owner = principal()
     brother = Person(id=uuid4(), display_name="My brother", **_fields())

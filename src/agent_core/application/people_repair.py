@@ -1,7 +1,7 @@
-"""The one-time People directory repair (ADR-0118).
+"""The one-time People directory repair (ADR-0121).
 
 People holds the people the owner knows and the people the owner writes to.
-Before ADR-0118, formation admitted anyone named in mail, and correspondence
+Before ADR-0121, formation admitted anyone named in mail, and correspondence
 never ran because every refresh marked the account as syncing. The repair:
 
 1. projects the headers of retained mail from the last 90 days again, so

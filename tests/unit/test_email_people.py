@@ -53,7 +53,7 @@ async def test_unsent_email_draft_cannot_establish_a_committed_action(
     service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
-    # ADR-0118: mail links people the owner already knows and never adds them.
+    # ADR-0121: mail links people the owner already knows and never adds them.
     await _seed_sender_context_people(factory, source, "Alex", "Maya")
     fact = EmailPeopleFact.model_validate(
         {
@@ -257,7 +257,7 @@ async def test_email_people_reuses_source_and_keeps_attributed_tentative_authori
                 sensitivity_ceiling=Sensitivity.SENSITIVE,
             )
         )
-    # ADR-0118: names in a message body never add anyone to People, so no
+    # ADR-0121: names in a message body never add anyone to People, so no
     # person, alias, or relationship forms; the attributed fact still does.
     assert not [row for row in rows if isinstance(row, (Person, PersonIdentifier))]
     assert not [row for row in rows if isinstance(row, RelationshipAssertion)]
@@ -341,7 +341,7 @@ async def test_email_headers_link_confirmed_sender_to_observed_history(
         "updated_at": NOW,
     }
     person = Person(id=uuid4(), display_name="Alex", **common)
-    # A refresh marks the account syncing before it registers mail (ADR-0118).
+    # A refresh marks the account syncing before it registers mail (ADR-0121).
     account = EmailAccount(
         id="work",
         label="Work",
@@ -533,7 +533,7 @@ async def test_same_delivered_email_keeps_one_interaction_with_both_account_sour
                 ),
                 expected_revision=0,
             )
-        # Only a known sender has received-mail history (ADR-0118).
+        # Only a known sender has received-mail history (ADR-0121).
         await _seed_confirmed_alex(uow, source.sent_at)
         if existing_source == "source":
             await uow.people.put(
@@ -645,7 +645,7 @@ async def test_other_verified_owner_mailbox_is_not_created_as_a_person(
 
 
 # ---------------------------------------------------------------------------
-# ADR-0118: mail never adds a person from a name in its body.
+# ADR-0121: mail never adds a person from a name in its body.
 # ---------------------------------------------------------------------------
 
 
@@ -735,7 +735,7 @@ async def test_unsupported_email_people_label_keeps_the_passage_facts() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ADR-0118: correspondence records the people the owner writes to.
+# ADR-0121: correspondence records the people the owner writes to.
 # ---------------------------------------------------------------------------
 
 

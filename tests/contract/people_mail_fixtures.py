@@ -1,4 +1,4 @@
-"""Mail read by the owner's mailbox, for correspondence and repair tests (ADR-0118)."""
+"""Mail read by the owner's mailbox, for correspondence and repair tests (ADR-0121)."""
 
 from __future__ import annotations
 

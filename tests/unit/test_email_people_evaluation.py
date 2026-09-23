@@ -53,7 +53,7 @@ async def test_email_comparison_uses_production_assessment_without_gold_labels(
                     "actor": "third_party",
                     "text": "Alex once liked coffee.",
                 },
-                # The owner's earlier reply is what adds Alex to People (ADR-0118).
+                # The owner's earlier reply is what adds Alex to People (ADR-0121).
                 {
                     "session": "c",
                     "occurred_at": (NOW - timedelta(days=1)).replace(microsecond=0).isoformat(),
