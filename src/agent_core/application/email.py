@@ -35,6 +35,9 @@ from agent_core.domain.email import (
     EmailArchiveOperation,
     EmailAttachment,
     EmailBudgetLimits,
+    EmailBulkExclusionCandidate,
+    EmailBulkExclusionOutcome,
+    EmailBulkExclusionReport,
     EmailDraft,
     EmailDraftEdit,
     EmailDraftStatus,
@@ -55,6 +58,7 @@ from agent_core.domain.email import (
     feedback_matches,
     retained_thread,
 )
+from agent_core.domain.email_semantics import thread_source_key
 from agent_core.domain.errors import (
     AuthorizationError,
     BudgetExceededError,
@@ -2763,6 +2767,53 @@ class EmailExperienceService:
             )
             await save_value(uow.email, principal, "draft", str(draft.id), draft, self.clock.now())
             return draft
+
+    async def exclude_bulk_sources(
+        self, principal: Principal, *, confirm: bool
+    ) -> EmailBulkExclusionReport:
+        """Exclude every retained thread the unsubscribe census indexes (ADR-0116).
+
+        Bulk mail formed memories before the census gated formation. Exclusion is
+        the path that already erases a source's derived influence and blocks its
+        re-formation, so the operator applies it across the census in one pass.
+        Without ``confirm`` the pass only previews its candidates.
+        """
+        require_scope(principal, "email.write")
+        candidates: list[EmailBulkExclusionCandidate] = []
+        async with self.uow_factory() as uow:
+            async for row in records(uow.email, principal, "thread"):
+                thread = EmailThread.model_validate(row.payload)
+                key = thread_source_key(thread.account_id, thread.provider_thread_id)
+                if await uow.email.get(principal, "subscription_thread", key) is None:
+                    continue
+                candidates.append(
+                    EmailBulkExclusionCandidate(
+                        thread_id=thread.id,
+                        account_id=thread.account_id,
+                        subject=thread.subject,
+                        revision=thread.revision,
+                    )
+                )
+        excluded: list[EmailBulkExclusionOutcome] = []
+        if confirm:
+            for candidate in candidates:
+                try:
+                    result = await self.exclude_source(
+                        principal, candidate.thread_id, candidate.revision
+                    )
+                except ConflictError as exc:
+                    excluded.append(
+                        EmailBulkExclusionOutcome(
+                            thread_id=candidate.thread_id, status="conflict", reason=str(exc)
+                        )
+                    )
+                    continue
+                excluded.append(
+                    EmailBulkExclusionOutcome(
+                        thread_id=candidate.thread_id, status=str(result["status"])
+                    )
+                )
+        return EmailBulkExclusionReport(confirmed=confirm, candidates=candidates, excluded=excluded)
 
     async def exclude_source(
         self, principal: Principal, thread_id: UUID, expected_revision: int

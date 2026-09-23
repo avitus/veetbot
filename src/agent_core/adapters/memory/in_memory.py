@@ -438,6 +438,11 @@ class InMemoryMemoryStore:
                     continue
                 if query.session_id is not None and record.source_session_id != query.session_id:
                     continue
+                if (
+                    query.flagged_for_review is not None
+                    and record.flagged_for_review is not query.flagged_for_review
+                ):
+                    continue
                 if term_lexemes and not lexical_text_matches(
                     term_lexemes, f"{record.subject} {record.statement}"
                 ):

@@ -73,7 +73,7 @@ from agent_core.domain.devices import (
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
 from agent_core.domain.folders import FolderProposalState
-from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
+from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
 from agent_core.domain.notifications import NotificationKind
 from agent_core.domain.persona import (
     PERSONA_MAX_ENTRIES,
@@ -236,6 +236,12 @@ class AcceptFolderProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class MemoryReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: MemoryReviewOutcome
 
 
 class CreateSessionRequest(BaseModel):
@@ -1576,11 +1582,12 @@ def create_app(
         subject: str | None = None,
         session_id: UUID | None = None,
         text: str | None = None,
+        flagged: bool | None = None,
     ) -> Page[MemoryView]:
         # A belief body is principal-scoped and sensitivity-bearing, so no
         # shared or on-disk cache may keep it; the artifact content route
         # carries the same header for the same reason.
-        """Page through the scoped, read-only memory projection with requested filters."""
+        """Page through the scoped memory projection with the requested filters."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         # Pagination rule 3 clamps an oversized limit rather than rejecting
         # it; the domain query bounds `limit` at 200, so the clamp happens
@@ -1596,6 +1603,7 @@ def create_app(
                 text=text,
                 limit=min(limit, 200),
                 cursor=cursor,
+                flagged=flagged,
             )
         except MemoryCursorError as exc:
             raise MalformedRequestError("memory cursor is malformed") from exc
@@ -1613,6 +1621,46 @@ def create_app(
         """Read one memory through the principal's allowed retrieval ceiling."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
+
+    # The two writes of ADR-0117. Both take the caller's ceiling, so a belief
+    # above it is as absent to a write as it is to a read, and a bounded
+    # idempotency key, so a retried request replays rather than repeats.
+    @memory_router.delete(
+        "/v1/memories/{memory_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "memory.write"},
+    )
+    async def delete_memory(
+        memory_id: UUID,
+        authenticated: Annotated[Principal, secured("memory.write")],
+        ceiling: Sensitivity,
+        idempotency_key: Annotated[
+            str, Header(alias="Idempotency-Key", min_length=1, max_length=200)
+        ],
+    ) -> Response:
+        """Delete one belief through the governed path; its statement cannot re-form."""
+        await services.memory.delete(authenticated, memory_id, ceiling=ceiling, key=idempotency_key)
+        return Response(status_code=204)
+
+    @memory_router.post(
+        "/v1/memories/{memory_id}/review",
+        openapi_extra={"required_scope": "memory.write"},
+    )
+    async def review_memory(
+        memory_id: UUID,
+        body: MemoryReviewRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("memory.write")],
+        ceiling: Sensitivity,
+        idempotency_key: Annotated[
+            str, Header(alias="Idempotency-Key", min_length=1, max_length=200)
+        ],
+    ) -> MemoryView:
+        """Apply one review outcome to a flagged belief and return its new view."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.memory.review(
+            authenticated, memory_id, body.outcome, ceiling=ceiling, key=idempotency_key
+        )
 
     if settings.people_enabled and services.people is not None:
         app.include_router(people_router(services.people, secured))

@@ -496,6 +496,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
             statusCode = 200
             body = sessionID == ConversationNavigationUITestFixture.firstSessionID ? Self.firstSessionJSON : Self.secondSessionJSON
+        case ("DELETE", let path) where path.hasPrefix("/v1/memories/"):
+            statusCode = 204
+            body = ""
+        case ("POST", let path) where path.hasPrefix("/v1/memories/") && path.hasSuffix("/review"):
+            statusCode = 200
+            body = Self.memoryJSON
         case ("GET", "/v1/memories"):
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             guard query.contains(URLQueryItem(name: "ceiling", value: "restricted")) else {

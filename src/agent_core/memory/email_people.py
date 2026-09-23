@@ -155,6 +155,10 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             current = await uow.email.get(self._principal, record.kind, record.key)
             if current is None or current.payload.get("excluded"):
                 raise ConflictError("email import source was excluded")
+            if await self.bulk_source(uow, source.account_id, source.provider_thread_id):
+                # ADR-0116: a retained passage from bulk mail, by census or by the
+                # persisted verdict, is skipped and counted as excluded, not analyzed.
+                return None
             body, _ = await self._read_document(
                 uow, source, source.source_event_sequence, source.tool_name
             )

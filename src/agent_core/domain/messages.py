@@ -412,6 +412,9 @@ class ScriptedToolCall(BaseModel):
 class ScriptedTurn(BaseModel):
     text: str = ""
     reasoning: str = ""
+    # A reasoning provider returns an opaque block the next request must carry
+    # back. Scripting one is opt-in so existing turns keep no continuation.
+    provider_reasoning_payload: dict[str, Any] | None = None
     tool_calls: list[ScriptedToolCall] = Field(default_factory=list)
     stop_reason: StopReason = StopReason.END_TURN
     usage: ModelUsage | None = None

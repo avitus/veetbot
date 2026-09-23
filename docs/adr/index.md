@@ -124,3 +124,5 @@ implementation without one.
 - [ADR-0113 — Scheduled conversations are grouped by schedule, not filed in folders (Accepted)](0113-scheduled-conversations-grouped-by-schedule.md)
 - [ADR-0114 — `main` does not reverify a source tree that already passed (Proposed)](0114-main-skips-verified-trees.md)
 - [ADR-0115 — The tool-call budget ends research, never the answer (Accepted; amends ADR-0078)](0115-tool-call-budget-ends-research-not-the-answer.md)
+- [ADR-0116 — Bulk mail never forms communication memory (Accepted; amends ADR-0090 and ADR-0101)](0116-bulk-mail-never-forms-communication-memory.md)
+- [ADR-0117 — Memory review and deletion over HTTP (Accepted; supersedes ADR-0070 decision 3)](0117-memory-review-and-deletion-over-http.md)

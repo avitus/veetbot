@@ -349,7 +349,7 @@ browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
 device.read       device.write       notification.read
-memory.read
+memory.read       memory.write
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow
@@ -502,13 +502,16 @@ DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
 ### The Milestone 17 memory read extension
 
 [memory-read-api-and-browser.md](memory-read-api-and-browser.md) adds two
-read-only routes and one exact scope, `memory.read`, mounted only when
-`AGENT_MEMORY_API_ENABLED` is set. Both are GETs; nothing under `/v1/memories`
-mutates, and a gate walks the router to keep it that way.
+read routes with the exact scope `memory.read` and, since ADR-0117, two
+writes with the exact scope `memory.write`, all mounted only when
+`AGENT_MEMORY_API_ENABLED` is set. The writes require a bounded
+`Idempotency-Key`; a gate walks the router to keep the table exactly this.
 
 ```text
 GET    /v1/memories                                  memory.read
 GET    /v1/memories/{memory_id}                      memory.read
+DELETE /v1/memories/{memory_id}                      memory.write
+POST   /v1/memories/{memory_id}/review               memory.write
 ```
 
 The memory design owns their query parameters, the `MemoryView` projection and
@@ -523,8 +526,10 @@ indistinguishable from one that does not exist.
 [persona-surface.md](persona-surface.md) adds six routes and one exact scope
 pair, `persona.read` and `persona.write`, mounted only when
 `AGENT_PERSONA_API_ENABLED` is set. The persona document and its nominations
-are a distinct resource: nothing under `/v1/memories` is added or made
-non-GET, and Milestone 17's read-only walk still holds.
+are a distinct resource: nothing persona-shaped is added under
+`/v1/memories`, whose table is exactly the one the memory design documents
+(two reads and, since ADR-0117, two writes) and which Milestone 17's route
+walk still proves.
 
 ```text
 GET    /v1/persona                                   persona.read
@@ -2100,7 +2105,8 @@ The public directory binds relationship/state/pin filters, sort, ceiling, time,
 and both People and belief watermarks into its cursor. Import discovery uses
 its own owner-bound cursor and restores an existing job without widening its
 source scope. Static import and operation routes precede dynamic person IDs.
-The two `/v1/memories` routes remain read-only.
+The `/v1/memories` table is unchanged by People: two reads and the two
+ADR-0117 writes.
 
 ## Milestone 29 thread folder routes
 

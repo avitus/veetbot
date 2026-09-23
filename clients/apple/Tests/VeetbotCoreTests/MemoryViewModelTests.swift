@@ -472,6 +472,164 @@ import Testing
         #expect(query.contains(URLQueryItem(name: "text", value: "dark")))
     }
 
+    @Test
+    func testReviewQueueFilterAsksTheServerForFlaggedBeliefsOnly() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000501"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000502"))
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let model = try makeModel { request in
+            lock.withLock { requests.append(request) }
+            return try self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let plain = try #require(lock.withLock { requests.first })
+        let plainQuery = URLComponents(url: plain.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(!plainQuery.contains(where: { $0.name == "flagged" }), "the default list asks for both")
+
+        model.setFlaggedOnly(true)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(model.flaggedOnly)
+        let queue = try #require(lock.withLock { requests.last })
+        let queueQuery = URLComponents(url: queue.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(queueQuery.contains(URLQueryItem(name: "flagged", value: "true")))
+        #expect(queueQuery.contains(URLQueryItem(name: "ceiling", value: "restricted")))
+    }
+
+    @Test
+    func testDeleteSendsTheGovernedWriteAndRemovesTheRow() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000511"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000512"))
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let model = try makeModel { request in
+            lock.withLock { requests.append(request) }
+            if request.httpMethod == "DELETE" {
+                return try self.response(for: request, statusCode: 204, body: "")
+            }
+            return try self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        let deleted = await model.delete(memory)
+
+        #expect(deleted)
+        #expect(model.items.isEmpty)
+        #expect(model.errorMessage == nil)
+        #expect(model.changesUnavailable == false)
+        let request = try #require(lock.withLock { requests.last })
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.path == "/v1/memories/\(memoryID.uuidString)")
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(query.contains(URLQueryItem(name: "ceiling", value: "restricted")))
+        let key = request.value(forHTTPHeaderField: "Idempotency-Key")
+        #expect(key != nil && !(key ?? "").isEmpty, "every write carries a fresh idempotency key")
+    }
+
+    @Test
+    func testDismissReplacesTheRowAndLeavesTheReviewQueue() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000521"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000522"))
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let model = try makeModel { request in
+            lock.withLock { requests.append(request) }
+            if request.httpMethod == "POST" {
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: false)
+                )
+            }
+            return try self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        #expect(memory.flaggedForReview)
+        let reviewed = await model.review(memory, outcome: .dismiss)
+        #expect(reviewed?.flaggedForReview == false)
+        // Without the queue filter the row is replaced in place.
+        #expect(model.items.map(\.flaggedForReview) == [false])
+        let request = try #require(lock.withLock { requests.last })
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/v1/memories/\(memoryID.uuidString)/review")
+        let body = try #require(request.httpBody ?? request.httpBodyStream.map { stream in
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                data.append(buffer, count: read)
+            }
+            return data
+        })
+        let decoded = try JSONSerialization.jsonObject(with: body) as? [String: String]
+        #expect(decoded == ["outcome": "dismiss"])
+
+        // Under the queue filter, a dismissed belief leaves the list.
+        model.setFlaggedOnly(true)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let queued = try #require(model.items.first)
+        _ = await model.review(queued, outcome: .dismiss)
+        #expect(model.items.isEmpty)
+    }
+
+    @Test
+    func testAWriteTheServerDoesNotSupportDegradesWithoutDroppingTheRow() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000531"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000532"))
+        let model = try makeModel { request in
+            if request.httpMethod == "DELETE" {
+                // A server that predates ADR-0117 rewrites the method miss to a
+                // 400 with this exact message, never a bare 405.
+                return try self.response(
+                    for: request,
+                    statusCode: 400,
+                    body: #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old"}}"#
+                )
+            }
+            return try self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        let deleted = await model.delete(memory)
+
+        #expect(!deleted)
+        #expect(model.items.count == 1)
+        #expect(model.changesUnavailable)
+        #expect(model.errorMessage == "This server does not support memory changes yet.")
+    }
+
     private func makeModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> MemoryViewModel {
@@ -511,9 +669,9 @@ import Testing
         return (response, Data(body.utf8))
     }
 
-    private func memoryJSON(id: UUID, sessionID: UUID) -> String {
+    private func memoryJSON(id: UUID, sessionID: UUID, flagged: Bool = false) -> String {
         """
-        {"id":"\(id.uuidString)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(sessionID.uuidString)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
+        {"id":"\(id.uuidString)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":\(flagged),"conflicts_with":[],"superseded_by":null,"source_session_id":"\(sessionID.uuidString)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
         """
     }
 }

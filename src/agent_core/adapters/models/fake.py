@@ -18,6 +18,7 @@ from agent_core.domain.messages import (
     ModelTurn,
     ModelUsage,
     ProviderMetadata,
+    ProviderReasoningItem,
     ReasoningDeltaEvent,
     ResolvedModel,
     ScriptedToolCall,
@@ -105,19 +106,25 @@ class FakeModelProvider:
         sequence = 0
         item_index = 0
         accumulator = ModelStreamAccumulator()
+        # A real provider numbers its reasoning output item before the text and
+        # tool items that follow, whether or not it streams a summary for it;
+        # an opaque payload therefore reserves an index of its own too.
+        reasoning_index: int | None = None
+        if turn.reasoning or turn.provider_reasoning_payload is not None:
+            reasoning_index = item_index
+            item_index += 1
         if turn.reasoning:
             reasoning_event = ReasoningDeltaEvent(
                 attempt_id=attempt.attempt_id,
                 run_id=attempt.run_id,
                 step_number=attempt.step_number,
                 sequence=sequence,
-                item_index=item_index,
+                item_index=reasoning_index if reasoning_index is not None else 0,
                 text=turn.reasoning,
                 is_summary=False,
             )
             yield reasoning_event
             sequence += 1
-            item_index += 1
         if turn.text:
             text_event = TextDeltaEvent(
                 attempt_id=attempt.attempt_id,
@@ -155,6 +162,17 @@ class FakeModelProvider:
             metadata=ProviderMetadata(
                 provider_api="chat_completions",
                 resolved_model=resolved.model,
+            ),
+            reasoning_items=(
+                [
+                    ProviderReasoningItem(
+                        item_index=reasoning_index if reasoning_index is not None else 0,
+                        provider=self.name,
+                        provider_payload=dict(turn.provider_reasoning_payload),
+                    )
+                ]
+                if turn.provider_reasoning_payload is not None
+                else None
             ),
         )
         yield ModelCompletedEvent(

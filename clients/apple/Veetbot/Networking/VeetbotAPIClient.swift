@@ -8,6 +8,7 @@ public enum ArtifactContentResponse: Sendable {
 public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case serverUpgradeRequired
     case memoryBrowsingUnavailable
+    case memoryChangesUnavailable
     case scheduleBrowsingUnavailable
     case foldersUnavailable
 
@@ -17,6 +18,8 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
             return "This server is running an older Veetbot API that does not support synchronized conversation history or Delete Everywhere. Update the server and try again."
         case .memoryBrowsingUnavailable:
             return "This server does not support memory browsing yet."
+        case .memoryChangesUnavailable:
+            return "This server does not support memory changes yet."
         case .scheduleBrowsingUnavailable:
             return "This server does not support schedule browsing yet."
         case .foldersUnavailable:
@@ -421,12 +424,14 @@ public struct VeetbotAPIClient: Sendable {
         beliefTypes: [MemoryBeliefTypeKind]? = nil,
         subject: String? = nil,
         sessionID: UUID? = nil,
-        text: String? = nil
+        text: String? = nil,
+        flagged: Bool? = nil
     ) async throws -> Page<MemoryView> {
         var query = [
             URLQueryItem(name: "ceiling", value: ceiling.rawValue),
             URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
         ]
+        if let flagged { query.append(URLQueryItem(name: "flagged", value: flagged ? "true" : "false")) }
         if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
         for status in statuses ?? [] {
             query.append(URLQueryItem(name: "status", value: status.rawValue))
@@ -456,6 +461,51 @@ public struct VeetbotAPIClient: Sendable {
                 queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)]
             )
         )
+    }
+
+    /// Deletes one belief through the governed path (ADR-0117). The key makes a
+    /// retried request replay rather than repeat; a server without the route
+    /// degrades to `memoryChangesUnavailable`.
+    public func deleteMemory(
+        _ id: UUID, ceiling: MemorySensitivityKind, key: String = UUID().uuidString
+    ) async throws {
+        do {
+            _ = try await transport.sendData(
+                TransportRequest(
+                    method: .delete,
+                    path: "/v1/memories/\(id.uuidString)",
+                    queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)],
+                    headers: ["Idempotency-Key": key],
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw memoryChangesCompatibilityError(from: error) ?? error
+        }
+    }
+
+    /// Applies one review outcome to a flagged belief and returns its new view.
+    public func reviewMemory(
+        _ id: UUID,
+        outcome: MemoryReviewOutcome,
+        ceiling: MemorySensitivityKind,
+        key: String = UUID().uuidString
+    ) async throws -> MemoryView {
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .post,
+                    path: "/v1/memories/\(id.uuidString)/review",
+                    queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)],
+                    body: try JSONEncoder.server.encode(["outcome": outcome.rawValue]),
+                    headers: ["Idempotency-Key": key],
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw memoryChangesCompatibilityError(from: error, missingRouteIsUnsupported: true)
+                ?? error
+        }
     }
 
     public func getPersona() async throws -> PersonaView {
@@ -652,6 +702,35 @@ private func memoryBrowsingCompatibilityError(from error: Error) -> VeetbotAPICl
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
     if apiError.statusCode == 404 || apiError.statusCode == 405 {
         return .memoryBrowsingUnavailable
+    }
+    return nil
+}
+
+/// A server that predates ADR-0117 but mounts the memory read router answers a
+/// write with the same envelope it uses for any unsupported request: a method
+/// miss on the GET-only path is rewritten to a 400 `malformed_request` reading
+/// "The HTTP request is not supported.", and the absent review route is the
+/// generic 404 "The requested resource was not found." A belief that no longer
+/// exists carries the service's own message, so it stays a plain API error the
+/// caller acts on by its body. A bare 405 is kept for completeness.
+private func memoryChangesCompatibilityError(
+    from error: Error, missingRouteIsUnsupported: Bool = false
+) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 405 {
+        return .memoryChangesUnavailable
+    }
+    if apiError.statusCode == 400,
+        apiError.code == .malformedRequest,
+        apiError.message == "The HTTP request is not supported."
+    {
+        return .memoryChangesUnavailable
+    }
+    if missingRouteIsUnsupported,
+        apiError.statusCode == 404,
+        apiError.message == "The requested resource was not found."
+    {
+        return .memoryChangesUnavailable
     }
     return nil
 }

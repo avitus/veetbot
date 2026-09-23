@@ -189,6 +189,7 @@ def browse_query(
     text: str | None = None,
     limit: int = 50,
     cursor: tuple[int, UUID] | None = None,
+    flagged_for_review: bool | None = None,
 ) -> MemoryBrowseQuery:
     return MemoryBrowseQuery(
         tenant_id=tenant_id,
@@ -201,6 +202,7 @@ def browse_query(
         text=text,
         limit=limit,
         cursor=cursor,
+        flagged_for_review=flagged_for_review,
     )
 
 

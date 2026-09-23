@@ -501,6 +501,20 @@ author, account, thread, message identity, and event provenance. Distinguish
 commitment. Store separate supported facts when a thread contains several;
 avoid a raw email dump disguised as one memory.
 
+Bulk mail never forms communication memory (ADR-0116). Before any provider
+work, a thread the unsubscribe census indexes
+([email-unsubscribe.md](email-unsubscribe.md)) is bulk; after the assessment,
+a `bulk` verdict is bulk. A bulk message registers no semantic source, forms
+no semantic or People memory, and creates no provisional person. The formation
+service's source validation refuses the census-indexed thread and the thread
+whose persisted assessment carries a `bulk` verdict, so the refresh, the
+historical import, and any replay meet the same rule; the refresh also
+records a content-free `email.semantic.skipped` event naming the reason, so
+memory diagnostics can explain why nothing formed. Importance assessment is
+unchanged, and the assessment prompt is not revised for this rule. Memories
+that bulk mail already formed leave through source exclusion, which
+`agent email exclude-bulk` applies across every census-indexed retained source.
+
 Correspondent and historical Sent evidence remain attributed, inferred,
 sensitivity-governed, and unable to supersede an owner assertion. Current
 tentative communication facts retain the existing thirty-day evidence horizon.

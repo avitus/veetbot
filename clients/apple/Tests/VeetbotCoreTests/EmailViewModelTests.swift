@@ -1381,6 +1381,36 @@ import SwiftUI
         #expect(model.errorMessage == nil)
     }
 
+    /// A refresh that succeeds while this client is not watching its operation must still clear the
+    /// banner. A visit that ends, or a later admission that supersedes the poll, leaves advancing
+    /// account freshness as the only evidence the success happened.
+    @Test func testLaterRefreshSuccessClearsTheBannerWithoutATerminalOperationRead() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            let posts = requests.snapshot.filter { $0.httpMethod == "POST" }.count
+            if request.url!.path.hasSuffix("accounts") {
+                return (200, Self.accountsJSON(synced: posts >= 2 ? "2026-09-11T00:05:00Z" : "2026-09-11T00:00:00Z"))
+            }
+            if request.url!.path.hasSuffix("refresh") {
+                return (200, self.operationJSON(status: posts == 1 ? "FAILED" : "RUNNING"))
+            }
+            if request.url!.path.contains("/operations/") { return (200, self.operationJSON(status: "RUNNING")) }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        for _ in 0..<1000 {
+            if model.errorMessage != nil && !model.isRefreshing { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(model.errorMessage != nil)
+        await model.reload(preserveOrder: true)
+        #expect(model.errorMessage != nil, "a cached read without newer account freshness keeps the failure visible")
+        await model.refresh()
+        #expect(model.errorMessage == nil, "an account synced after the failure proves a later refresh succeeded")
+    }
+
     /// The first refresh exhausts two transport POST attempts; one manual retry is POST three.
     @Test func testGatewayRefreshFailurePersistsUntilConfirmedRefreshSuccess() async throws {
         let requests = EmailRequestRecorder()
@@ -2014,6 +2044,11 @@ import SwiftUI
     private static let accountsJSON = """
         {"items":[{"id":"personal","label":"Personal","email_address":"owner@example.test","status":"ready","last_synced_at":"2026-09-11T00:00:00Z","history_complete":false,"history_processed":25,"read_server_id":"gmail_read","send_server_id":"gmail_send"},{"id":"work","label":"Work","email_address":"owner@work.test","status":"ready","last_synced_at":null,"history_complete":false,"history_processed":0,"read_server_id":"gmail_work_read","send_server_id":"gmail_work_send"}],"next_cursor":null}
         """
+    private static func accountsJSON(synced: String) -> String {
+        """
+        {"items":[{"id":"personal","label":"Personal","email_address":"owner@example.test","status":"ready","last_synced_at":"\(synced)","history_complete":false,"history_processed":25,"read_server_id":"gmail_read","send_server_id":"gmail_send"}],"next_cursor":null}
+        """
+    }
     /// Mirrors the server's approval view: the first 512 characters plus the marker.
     private static func truncatedView(_ value: String) -> String {
         "\(value.prefix(512))…[TRUNCATED]"

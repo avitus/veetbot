@@ -361,11 +361,13 @@ the memory browser's is.
     snapshot slot while its persona entry stands, and regains eligibility
     when the entry is removed; in-turn recall is unfiltered. Registered as
     `gate.persona.snapshot_dedup`, case. **M22.**
-12. **Routes carry exact scopes and the memory API stays read-only.** Every
-    persona route requires exactly `persona.read` or `persona.write` and
+12. **Routes carry exact scopes and the memory API keeps its documented table.**
+    Every persona route requires exactly `persona.read` or `persona.write` and
     mounts only under `AGENT_PERSONA_API_ENABLED`; a walk of both routers
-    shows `/v1/memories` still serves only GETs under `memory.read`.
-    Registered as `gate.persona.routes_exact_scope`, structural. **M22.**
+    shows `/v1/memories` still serves only its two GETs under `memory.read`
+    and, since ADR-0117, the two writes under `memory.write`, and nothing
+    persona-shaped. Registered as `gate.persona.routes_exact_scope`,
+    structural. **M22.**
 13. **Writes are revision-guarded.** A persona write without a matching
     `expected_version` is rejected with the `conflict` code and no partial
     write, and a corrected retry succeeds. Registered as

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import func, select, text, update
@@ -21,8 +22,14 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.bootstrap import build
 from agent_core.domain.errors import ConflictError, WorkerFencedError
 from agent_core.domain.events import NewEvent
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    StopReason,
+)
 from agent_core.domain.runs import Run, RunCheckpoint, RunLimits, RunStatus, Step
+from agent_core.runtime import loop as runtime_loop
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from tests.contract.support import NOW
@@ -585,3 +592,167 @@ async def test_multiple_database_revisions_are_refused_cleanly() -> None:
                 text("DELETE FROM alembic_version WHERE version_num = 'unexpected_branch'")
             )
         await engine.dispose()
+
+
+async def test_resume_recovers_parallel_tool_results_after_a_lost_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lease lost between the effects and their checkpoint must still resume.
+
+    Production run d139f688 (2026-09-22) died here: a step dispatched two tool
+    calls, both succeeded, the lease expired before the `tool_call` checkpoint,
+    and the resumed attempt raised while assembling context instead of
+    recovering. Runtime gate 10 requires the resume to re-enter the pipeline.
+    """
+
+    clock = FixedClock(NOW)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                reasoning="two lookups before answering",
+                provider_reasoning_payload={"id": "rs_parallel", "summary": []},
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="parallel-first",
+                    ),
+                    ScriptedToolCall(
+                        name="system.current_time",
+                        arguments={"timezone": "UTC"},
+                        call_id="parallel-second",
+                    ),
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="recovered"),
+        ]
+    )
+    original_checkpoint = runtime_loop.checkpoint
+    crashed = False
+
+    async def crash_before_tool_checkpoint(context: Any, trigger: str) -> None:
+        nonlocal crashed
+        if trigger == "tool_call" and not crashed:
+            crashed = True
+            raise _InjectedWorkerCrash
+        await original_checkpoint(context, trigger)
+
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        script=script,
+        clock=clock,
+    ) as composition:
+        run_id = await composition.runs.submit("use two tools and then answer")
+        monkeypatch.setattr(runtime_loop, "checkpoint", crash_before_tool_checkpoint)
+        interrupted = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=clock,
+            worker_id="lost-lease-worker",
+        )
+        with pytest.raises(_InjectedWorkerCrash):
+            await interrupted.run_once()
+        monkeypatch.setattr(runtime_loop, "checkpoint", original_checkpoint)
+        clock.advance(timedelta(seconds=31))
+        maintenance = MaintenanceWorker(
+            uow_factory=composition.uow_factory,
+            clock=clock,
+            poll_interval_seconds=0,
+        )
+        assert await maintenance.run_once() == 1
+        clock.advance(timedelta(seconds=2))
+        recovery = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=clock,
+            worker_id="lost-lease-recovery",
+        )
+        assert await recovery.run_once()
+        recovered = await composition.runs.get(run_id)
+
+    assert recovered.failure is None
+    assert recovered.status is RunStatus.COMPLETED
+    assert recovered.tool_call_count == 2
+
+
+async def test_resume_after_a_crash_before_the_tool_pending_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run interrupted between `model_response` and `tool_pending` must resume.
+
+    That checkpoint holds a reasoning provider's continuation and a conversation
+    whose trailing items are the model's own tool calls, with nothing yet in
+    `pending_tool_calls`. Assembling the next request from it must not raise.
+    """
+
+    clock = FixedClock(NOW)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                reasoning="decide which tool to use",
+                provider_reasoning_payload={"id": "rs_durable", "summary": []},
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="continuation-call",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="recovered"),
+        ]
+    )
+    original_checkpoint = runtime_loop.checkpoint
+    crashed = False
+
+    async def crash_before_tool_pending(context: Any, trigger: str) -> None:
+        nonlocal crashed
+        if trigger == "tool_pending" and not crashed:
+            crashed = True
+            raise _InjectedWorkerCrash
+        await original_checkpoint(context, trigger)
+
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        script=script,
+        clock=clock,
+    ) as composition:
+        run_id = await composition.runs.submit("use one tool and then answer")
+        monkeypatch.setattr(runtime_loop, "checkpoint", crash_before_tool_pending)
+        interrupted = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=clock,
+            worker_id="pre-pending-crash",
+        )
+        with pytest.raises(_InjectedWorkerCrash):
+            await interrupted.run_once()
+        async with composition.uow_factory() as uow:
+            persisted = await uow.checkpoints.latest(run_id)
+        assert persisted is not None
+        assert persisted.provider_continuation is not None
+        assert persisted.pending_tool_calls == []
+        monkeypatch.setattr(runtime_loop, "checkpoint", original_checkpoint)
+        clock.advance(timedelta(seconds=31))
+        maintenance = MaintenanceWorker(
+            uow_factory=composition.uow_factory,
+            clock=clock,
+            poll_interval_seconds=0,
+        )
+        assert await maintenance.run_once() == 1
+        clock.advance(timedelta(seconds=2))
+        recovery = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=clock,
+            worker_id="pre-pending-recovery",
+        )
+        assert await recovery.run_once()
+        recovered = await composition.runs.get(run_id)
+
+    assert recovered.failure is None
+    assert recovered.status is RunStatus.COMPLETED

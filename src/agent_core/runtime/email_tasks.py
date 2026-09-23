@@ -34,6 +34,7 @@ from agent_core.domain.email_semantics import (
     EmailSemanticFact,
     EmailSemanticSource,
     semantic_source_key,
+    thread_source_key,
 )
 from agent_core.domain.errors import (
     ApprovalRequiredError,
@@ -1482,7 +1483,39 @@ class _TaskIO:
                     fact.message_id == item["id"] and fact.quote in item["body"] for item in visible
                 )
             ]
-            await self._form_semantics(thread, facts)
+            skipped = await self._bulk_reason(thread, assessment) if facts else None
+            if skipped is None:
+                await self._form_semantics(thread, facts)
+            else:
+                await self._record_skipped(thread, skipped, len(facts))
+
+    async def _bulk_reason(self, thread: EmailThread, assessment: EmailAssessment) -> str | None:
+        """Why bulk mail forms nothing (ADR-0116): the census first, then the verdict."""
+        async with self.context.uow_factory() as uow:
+            key = thread_source_key(thread.account_id, thread.provider_thread_id)
+            if await uow.email.get(self.context.principal, "subscription_thread", key) is not None:
+                return "bulk_sender"
+        return "bulk_assessment" if assessment.bulk else None
+
+    async def _record_skipped(self, thread: EmailThread, reason: str, facts: int) -> None:
+        """Leave a content-free trace so memory diagnostics can explain the absence."""
+        c = self.context
+        async with c.uow_factory() as uow:
+            await uow.events.append(
+                NewEvent(
+                    session_id=c.run.session_id,
+                    run_id=c.run.id,
+                    event_type="email.semantic.skipped",
+                    actor_type="runtime",
+                    payload={
+                        "account_id": thread.account_id,
+                        "thread_id": str(thread.id),
+                        "reason": reason,
+                        "facts": facts,
+                    },
+                ),
+                lease=c.lease,
+            )
 
     async def _form_semantics(self, thread: EmailThread, facts: list[EmailSemanticFact]) -> None:
         """Form eligible correspondence memories from exact, recent message evidence."""

@@ -69,7 +69,7 @@
   milestone: 22
   kind: structural
   spec: docs/plan/persona-surface.md#hard-gates
-  statement: "**Routes carry exact scopes and the memory API stays read-only.** Every persona route requires exactly `persona.read` or `persona.write` and mounts only under `AGENT_PERSONA_API_ENABLED`; a walk of both routers shows `/v1/memories` still serves only GETs under `memory.read`."
+  statement: "**Routes carry exact scopes and the memory API keeps its documented table.** Every persona route requires exactly `persona.read` or `persona.write` and mounts only under `AGENT_PERSONA_API_ENABLED`; a walk of both routers shows `/v1/memories` still serves only its two GETs under `memory.read` and, since ADR-0117, the two writes under `memory.write`, and nothing persona-shaped."
   check: tests/gates/test_persona_api_boundary_m22.py::test_routes_exact_scope_and_memory_read_only
 - id: gate.persona.revision_precondition
   milestone: 22

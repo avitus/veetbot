@@ -11,6 +11,7 @@ public struct MemoryBrowserView: View {
     @ObservedObject var model: MemoryViewModel
     @StateObject private var people = PeopleViewModel()
     @State private var collection = "memories"
+    @State private var pendingDeletion: MemoryView?
     private let sessionID: UUID?
     @Environment(\.dismiss) private var dismiss
 
@@ -48,12 +49,33 @@ public struct MemoryBrowserView: View {
                         Button("Close") { dismiss() }
                     }
                     ToolbarItem(placement: .primaryAction) {
+                        if collection == "memories" { reviewQueueToggle }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
                         if collection == "memories" { statusFilterMenu }
                     }
                     ToolbarItem(placement: .primaryAction) {
                         if collection == "memories" { typeFilterMenu }
                     }
                 }
+        }
+        .confirmationDialog(
+            "Delete this memory?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete memory", role: .destructive) {
+                if let memory = pendingDeletion {
+                    Task { await model.delete(memory) }
+                }
+                pendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: {
+            Text("The memory and its generated copies are removed, and the same statement will not form again. Original messages remain at their source.")
         }
         .accessibilityIdentifier("memory.browser")
         .task { await model.reload() }
@@ -95,7 +117,7 @@ public struct MemoryBrowserView: View {
         List {
             ForEach(model.items) { item in
                 NavigationLink {
-                    MemoryDetailView(memory: item)
+                    MemoryDetailView(memory: item, model: model)
                 } label: {
                     row(item)
                 }
@@ -103,6 +125,15 @@ public struct MemoryBrowserView: View {
                 .onAppear {
                     guard item.id == model.items.last?.id else { return }
                     Task { await model.loadMore() }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        pendingDeletion = item
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .disabled(model.pendingActionID != nil || model.changesUnavailable)
+                    .accessibilityIdentifier("memory.row.\(item.id.uuidString).delete")
                 }
             }
             if model.isLoadingMore {
@@ -136,7 +167,7 @@ public struct MemoryBrowserView: View {
                 .appFont(.body)
                 .lineLimit(3)
             HStack(spacing: 6) {
-                Text(item.subject)
+                Text(item.displaySubject)
                 Text("\u{00B7}")
                 Text(memoryDisplayText(item.beliefType))
             }
@@ -170,6 +201,17 @@ public struct MemoryBrowserView: View {
             .padding(.vertical, 2)
             .background(Color.secondary.opacity(0.12))
             .clipShape(Capsule())
+    }
+
+    /// Asks the server for the review queue only (ADR-0117).
+    private var reviewQueueToggle: some View {
+        Button {
+            model.setFlaggedOnly(!model.flaggedOnly)
+        } label: {
+            Image(systemName: model.flaggedOnly ? "flag.fill" : "flag")
+        }
+        .accessibilityLabel(model.flaggedOnly ? "Show all memories" : "Show only memories needing review")
+        .accessibilityIdentifier("memory.filter.review")
     }
 
     private var statusFilterMenu: some View {
@@ -256,10 +298,10 @@ public struct MemoryBrowserView: View {
 
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "tray")
+            Image(systemName: model.flaggedOnly ? "checkmark.circle" : "tray")
                 .font(.largeTitle)
                 .foregroundColor(.secondary)
-            Text("No memories found.")
+            Text(model.flaggedOnly ? "Nothing needs review." : "No memories found.")
                 .foregroundColor(.secondary)
         }
         .padding()

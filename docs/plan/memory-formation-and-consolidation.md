@@ -278,7 +278,7 @@ Each proposed write passes the deterministic policy engine, exactly like a tool
 call (Section 9):
 
 - Injection scan of the candidate statement.
-- Sensitivity classification. Formation is fully autonomous, so sensitive writes are **not** held for confirmation; they are committed and marked `flagged_for_review` for the user. The deterministic *eligibility* gates in stage 4 (never form secrets, credentials, untrusted instructions, or PII-beyond-policy) are hard filters that always apply - autonomy governs confirmation, never those.
+- Sensitivity classification. Formation is fully autonomous, so sensitive writes are **not** held for confirmation; they are committed and marked `flagged_for_review` for the user. The user clears the flag, retires the belief, or localizes it through the review route and native actions of ADR-0117 ([memory-read-api-and-browser.md](memory-read-api-and-browser.md)). The deterministic *eligibility* gates in stage 4 (never form secrets, credentials, untrusted instructions, or PII-beyond-policy) are hard filters that always apply - autonomy governs confirmation, never those.
 - Volume/rate caps, so one pathological session cannot flood memory.
 
 ### 7. Commit

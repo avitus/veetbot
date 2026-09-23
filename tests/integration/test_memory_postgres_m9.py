@@ -195,8 +195,10 @@ def _browse_query(
     text: str | None = None,
     limit: int = 50,
     cursor: tuple[int, UUID] | None = None,
+    flagged_for_review: bool | None = None,
 ) -> MemoryBrowseQuery:
     kwargs: dict[str, object] = {
+        "flagged_for_review": flagged_for_review,
         "tenant_id": composition.principal.tenant_id,
         "principal_id": composition.principal.principal_id,
         "ceiling": ceiling,
@@ -499,6 +501,8 @@ async def test_postgres_and_memory_stores_agree_on_browse_filters_and_text(
             _browse_query(composition, subject=non_ascii_subject),
             _browse_query(composition, subject=f"Straße-{marker}"),
             _browse_query(composition, subject=f"STRASSE-{marker}"),
+            _browse_query(composition, text=marker, flagged_for_review=True),
+            _browse_query(composition, text=marker, flagged_for_review=False),
         ]
         for query in cases:
             async with composition.uow_factory() as uow:

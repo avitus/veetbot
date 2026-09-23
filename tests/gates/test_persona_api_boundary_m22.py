@@ -360,12 +360,19 @@ async def test_routes_exact_scope_and_memory_read_only() -> None:
                 assert required == "persona.write"
         assert {"persona.read", "persona.write"} <= PLATFORM_SCOPES
 
+        # The memory router serves only its documented table: two GETs under
+        # memory.read and, since ADR-0117, the two writes under memory.write.
         memory = memory_routes(app)
-        assert len(memory) == 2
-        assert all(route.methods == {"GET"} for route in memory)
-        assert all(
-            (route.openapi_extra or {}).get("required_scope") == "memory.read" for route in memory
-        )
+        assert {
+            (route.path, method, (route.openapi_extra or {}).get("required_scope"))
+            for route in memory
+            for method in (route.methods or set())
+        } == {
+            ("/v1/memories", "GET", "memory.read"),
+            ("/v1/memories/{memory_id}", "GET", "memory.read"),
+            ("/v1/memories/{memory_id}", "DELETE", "memory.write"),
+            ("/v1/memories/{memory_id}/review", "POST", "memory.write"),
+        }
 
 
 async def test_persona_routes_absent_without_the_flag() -> None:

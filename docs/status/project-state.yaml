@@ -25,6 +25,12 @@ project:
   # the sidebar groups scheduled sessions by schedule; folders stay chat-only.
   # ADR-0114 records a non-milestone CI change on 2026-09-21: main skips a
   # verification job whose exact source tree already passed it.
+  # ADR-0116 records the owner's non-milestone repair on 2026-09-22: bulk mail
+  # never forms communication memory; the census and the bulk verdict gate
+  # formation and `agent email exclude-bulk` erases what already formed.
+  # ADR-0117 records the owner's non-milestone extension on 2026-09-22: memory
+  # review and deletion over HTTP under memory.write, superseding ADR-0070
+  # decision 3, with the native review actions and the flagged filter.
   # ADR-0115 records the owner's non-milestone runtime repair on 2026-09-21:
   # a tool batch is fitted to the remaining budget, an exhausted tool-call
   # budget owes one synthesis-only turn, and the interactive defaults carry
@@ -596,14 +602,16 @@ milestones:
     adr: docs/adr/0070-milestone-17-memory-read-api-and-browser.md
     gates_registered: 10
     authorized_scope:
-      - read-only GET /v1/memories list and detail routes
+      - read-only GET /v1/memories list and detail routes (ADR-0117 later added
+        DELETE and review writes under memory.write)
       - the exact scope memory.read and the AGENT_MEMORY_API_ENABLED flag
       - an explicit required ceiling on every request, never inferred
       - status, belief type, subject, session, and shared-lexical text filters
       - the MemoryView exposure list and a shared browse contract suite
       - the native Apple memory browser at the restricted ceiling
     deferred_scope:
-      - every write, edit, retraction, and deletion over HTTP
+      - every write over HTTP other than the deletion and review outcomes
+        ADR-0117 later admitted; edit and replacement stay deferred
       - recall-trace viewing, blocked on tenant and principal trace predicates
       - consolidation and formation audit routes, knowledge documents
   "18":
@@ -1189,7 +1197,8 @@ milestones:
       - agent persona CLI and the native Apple persona editor
     deferred_scope:
       - automatic promotion at any threshold
-      - belief edit, retraction, or deletion over HTTP (per ADR-0070)
+      - belief edit or replacement over HTTP (per ADR-0070; ADR-0117 admits
+        deletion and review outcomes only)
       - per-agent or per-surface persona variants
       - any change to AgentSpec.instructions
     open_items:
@@ -1635,7 +1644,7 @@ milestones:
     deferred_scope:
     - private in-call tools, automatic commitments, transfers, SMS and call-derived memory
     open_items:
-    - Verify provider-side admission controls, account-level memory or persona attachments, and the real signed-byte convention; receipts so far arrived through reconciliation
+    - Verify provider-side admission controls and account-level memory or persona attachments in the Bland dashboard
     - Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
     - Exact-head hosted CI and explicitly authorized CodeRabbit review evidence
     evidence:
@@ -1754,6 +1763,24 @@ milestones:
         running release carries the earlier template until its next delivery.
         Account-level memory and persona attachments are outside this readback
         and remain open.
+    - check: signed post-call webhook delivery and verification in production
+      outcome: pass
+      detail: >-
+        Before release 20260921-064317-f7c3b7a, nothing could show whether
+        Bland's webhook arrived or verified. The proxy route keeps no access
+        log, the listener ran without one, and a rejection was silent. That
+        release added one content-free outcome line per delivery. The owner
+        called the receptionist at 15:59:50Z on 2026-09-22 for 43 seconds.
+        Polling created that call's receipt 32 seconds in, as it had before.
+        The listener's journal then recorded calling.callback_accepted at
+        16:00:45Z, about twelve seconds after the call ended. Bland's post-call
+        webhook therefore arrives, and its X-Webhook-Signature verifies as a
+        SHA-256 HMAC over the raw delivered bytes. The design's open question,
+        whether Bland's re-serialized signing matches raw-byte verification,
+        is settled without accepting a second convention. At 16:52:13Z an
+        unsigned probe was logged as calling.callback_rejected
+        reason=signature_missing, which confirms that each delivery's outcome
+        reaches the journal.
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

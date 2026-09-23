@@ -102,6 +102,20 @@ class RejectionKind(StrEnum):
     DELETED = "deleted"
 
 
+class MemoryReviewOutcome(StrEnum):
+    """What the owner decided about a belief flagged for review (ADR-0117).
+
+    ``dismiss`` clears the flag and changes nothing else; ``untrue`` and
+    ``not_here`` are the existing rejection kinds of the same name. A belief
+    that was true but changed needs replacement text and is not a review
+    outcome.
+    """
+
+    DISMISS = "dismiss"
+    UNTRUE = "untrue"
+    NOT_HERE = "not_here"
+
+
 class RecallProfile(StrEnum):
     CORE = "core"
     TASK = "task"
@@ -728,6 +742,9 @@ class MemoryBrowseQuery(BaseModel):
     text: str | None = None
     limit: int = Field(default=50, ge=1, le=200)
     cursor: tuple[int, UUID] | None = None
+    # None selects both; True the review queue; False everything already reviewed
+    # or never flagged (ADR-0117).
+    flagged_for_review: bool | None = None
 
 
 class BeliefRejection(BaseModel):
