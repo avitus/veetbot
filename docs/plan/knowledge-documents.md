@@ -659,3 +659,16 @@ That is eight case gates, three property gates, and one corpus gate.
    wrote it. A tenant with both internal runbooks and vendor manuals may want the
    former to outrank the latter on a tie, which is a fourth step nobody has asked for
    yet.
+
+## PDF parser lifetime (ADR-0120 repair)
+
+Both upload inspection and knowledge extraction parse PDFs in disposable child
+processes, sharing at most two concurrent parsers per event loop. The existing
+10-second inspection and 60-second extraction deadlines include queue waiting;
+timeout or cancellation kills and reaps the child before releasing its slot.
+The child has a CPU deadline and bounded 32 MiB input and output. Production
+Linux additionally caps its address space at 512 MiB; Darwin development runs
+use the process-count and time limits because Darwin rejects that address-space
+limit. No PDF parser occupies the application's default thread executor.
+Unreadable, oversized, or terminated parses retain the existing marker/refusal
+behavior, and encrypted knowledge sources remain explicitly refused.

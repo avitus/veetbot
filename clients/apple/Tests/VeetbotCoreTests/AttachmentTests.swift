@@ -172,6 +172,24 @@ import UniformTypeIdentifiers
         #expect(!ComposerDropPolicy.takesAttachments(typeIdentifiers: []))
     }
 
+    @Test
+    func testTextRepresentationsBeatGenericDataButNotImagesOrFiles() {
+        for types in [
+            ["public.utf8-plain-text", "com.apple.webarchive"],
+            ["com.apple.flat-rtfd", "public.utf8-plain-text"],
+            ["public.data", "public.url"],
+        ] {
+            #expect(!ComposerDropPolicy.takesAttachments(typeIdentifiers: types))
+        }
+        for types in [
+            ["public.png", "public.url"],
+            ["public.utf8-plain-text", "public.file-url"],
+            ["com.adobe.pdf", "public.utf8-plain-text"],
+        ] {
+            #expect(ComposerDropPolicy.takesAttachments(typeIdentifiers: types))
+        }
+    }
+
     // MARK: View model
 
     @Test
@@ -290,6 +308,46 @@ import UniformTypeIdentifiers
             .compactMap { $0.headers["Idempotency-Key"] }
         #expect(keys.count == 2)
         #expect(Set(keys).count == 1)
+    }
+
+    @Test
+    func testFailedSessionCreationCanBeRetriedWithoutStartingAnotherConversation() async throws {
+        let recorder = AttachmentRequestRecorder()
+        let failures = FailureSwitch(remaining: 1)
+        let model = try makeModel { request in
+            recorder.record(request)
+            switch (request.httpMethod ?? "", request.url?.path ?? "") {
+            case ("GET", "/v1/sessions"):
+                return try jsonResponse(request, status: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("POST", "/v1/sessions"):
+                if failures.consume() {
+                    return try jsonResponse(
+                        request, status: 400,
+                        body: #"{"error":{"code":"malformed_request","message":"Temporary creation failure","details":{},"request_id":"r"}}"#
+                    )
+                }
+                return try jsonResponse(request, status: 201, body: sessionJSON())
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/artifacts"):
+                return try jsonResponse(request, status: 201, body: artifactJSON(UUID(), runID: nil))
+            default:
+                return try jsonResponse(request, status: 404, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "t"))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID()).txt")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("text".utf8).write(to: url)
+        await model.attach(fileURLs: [url])
+        try await waitUntil {
+            if case .failed = model.attachments.first?.state { return true }
+            return false
+        }
+        let id = try #require(model.attachments.first?.id)
+        model.retryAttachment(id)
+        try await waitUntil { model.attachmentsReady }
+        #expect(recorder.matching("POST", "/v1/sessions").count == 2)
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.attachmentsReady)
     }
 
     @Test

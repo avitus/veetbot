@@ -519,9 +519,9 @@ dozen bytes, but the adapter sends the file. The estimator therefore adds, for e
 image or file reference in an owner-written user message that passes the shared
 per-item limits in `agent_core.model.attachments`, that module's fixed estimate: a
 flat figure per image, a figure per PDF page, and the inlined length of a text file.
-It ignores the per-request budget and the model's capabilities, both of which only
-remove attachments, so the count stays an upper bound on what the adapter sends and
-an attachment can never push the correction factor up by being under-counted.
+The content estimate is capped at the shared request-wide attachment token budget;
+labels are counted for every reference, including markers. Model capabilities can
+only remove content, so this remains an upper bound on what the adapter sends.
 
 ## Compaction
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 from collections.abc import AsyncIterator
 
 from pypdf import PdfReader
 
+from agent_core.adapters.pdf_process import parse_pdf
 from agent_core.domain.errors import ToolValidationError
 
 PDF_MEDIA_TYPE = "application/pdf"
@@ -50,8 +50,11 @@ class PdfTextExtractor:
                 raise ToolValidationError("knowledge source exceeds the byte ceiling")
             content.extend(chunk)
         try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(_pdf_text, bytes(content)), timeout=self._timeout_seconds
+            result = await parse_pdf(
+                bytes(content), operation="text", timeout=self._timeout_seconds
             )
-        except TimeoutError as exc:
+            if not isinstance(result, str):
+                raise ToolValidationError("knowledge source could not be read")
+            return result
+        except (TimeoutError, OSError) as exc:
             raise ToolValidationError("knowledge source could not be read") from exc
