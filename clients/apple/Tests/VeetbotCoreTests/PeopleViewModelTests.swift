@@ -305,13 +305,31 @@ import Testing
     @Test func directoryFiltersAreSentWithEveryPage() async throws {
         let client = try makePeopleClient { request in
             let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            #expect(query.contains(URLQueryItem(name: "state", value: "active")))
+            #expect(query.filter { $0.name == "state" }.compactMap(\.value) == ["active", "provisional"])
             #expect(query.contains(URLQueryItem(name: "relationship", value: "family")))
             #expect(query.contains(URLQueryItem(name: "pinned", value: "true")))
             #expect(query.contains(URLQueryItem(name: "cursor", value: "next")))
             return (200, #"{"items":[],"next_cursor":null}"#)
         }
-        _ = try await client.listPeople(cursor: "next", state: "active", pinned: true, relationship: "family")
+        _ = try await client.listPeople(cursor: "next", states: ["active", "provisional"], pinned: true, relationship: "family")
+    }
+    /// People lists everyone known or written to; Needs review is the server's
+    /// own filter rather than every provisional person (ADR-0118).
+    @Test(arguments: PeopleCollection.allCases) func eachCollectionSendsItsDirectoryQuery(collection: PeopleCollection) async throws {
+        let lock = NSLock()
+        var queries: [[URLQueryItem]] = []
+        let client = try makePeopleClient { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            lock.withLock { queries.append(query) }
+            return (200, #"{"items":[],"next_cursor":null}"#)
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        if collection == .people { await model.reload() } else { await model.selectCollection(collection) }
+        let sent = try #require(lock.withLock { queries.last })
+        let states = sent.filter { $0.name == "state" }.compactMap(\.value)
+        #expect(states == (collection == .people || collection == .pinned ? ["active", "provisional"] : []))
+        #expect(sent.contains(URLQueryItem(name: "review", value: "true")) == (collection == .review))
+        #expect(sent.contains(URLQueryItem(name: "pinned", value: "true")) == (collection == .pinned))
     }
     @Test(arguments: [false, true]) func emailOnlyImportRequiresExplicitAccountSelection(fetchMailbox: Bool) async throws {
         let auditID = UUID(), jobID = UUID()

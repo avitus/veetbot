@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -638,6 +638,8 @@ class PublicPeopleService:
         pinned: bool | None = None,
         sort: str = "id",
         relationship: PeopleRelationshipFilter | None = None,
+        states: Sequence[str] | None = None,
+        review: bool = False,
     ) -> PeoplePage:
         require_scope(principal, "people.read")
         ceiling = self._ceiling(ceiling)
@@ -645,7 +647,10 @@ class PublicPeopleService:
             normalized = None if not text else normalize_identifier("name", "owner", text)
         except ValueError as exc:
             raise ToolValidationError("invalid People directory search") from exc
-        if state not in {None, "active", "provisional", "merged"}:
+        # People lists active and provisional people together (ADR-0118); the
+        # set is sorted so the same states in any order bind the same cursor.
+        requested = sorted({*(states or ()), *((state,) if state else ())})
+        if not set(requested) <= {"active", "provisional", "merged"}:
             raise ToolValidationError("invalid People directory state")
         if sort not in {"id", "recent"}:
             raise ToolValidationError("invalid People directory sort")
@@ -656,8 +661,9 @@ class PublicPeopleService:
             relationship=relationship,
             text=normalized,
             search_aliases=True,
-            states=[state] if state else None,
+            states=requested or None,
             pinned=pinned,
+            needs_review=review,
             as_of=as_of or self._clock.now(),
             sensitivity_ceiling=ceiling,
             limit=min(max(limit, 1), 100),

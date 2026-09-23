@@ -816,8 +816,18 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         return (id, name.isEmpty ? subject : name)
     }
 
-    /// The subject as a row should show it.
-    public var displaySubject: String { personLink?.name ?? subject }
+    /// The subject as a row should show it. A fact about someone who is not
+    /// in People is keyed `person:unresolved:<source ids>:<name>` (ADR-0118);
+    /// only the name is shown.
+    public var displaySubject: String {
+        if let personLink { return personLink.name }
+        let parts = subject.split(separator: ":", maxSplits: 3, omittingEmptySubsequences: false)
+        if parts.count == 4, parts[0] == "person", parts[1] == "unresolved" {
+            let name = String(parts[3]).trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { return name }
+        }
+        return subject
+    }
 }
 
 public enum ContentBlock: Codable, Hashable, Sendable {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -552,6 +552,8 @@ class PeopleService(Protocol):
         pinned: bool | None = None,
         sort: str = "id",
         relationship: PeopleRelationshipFilter | None = None,
+        states: Sequence[str] | None = None,
+        review: bool = False,
     ) -> PeoplePage: ...
 
 

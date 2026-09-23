@@ -106,6 +106,81 @@ async def test_people_directory_filters_before_pagination_and_binds_cursor() -> 
             assert confirmed.status_code == 200 and confirmed.json()["state"] == "active"
 
 
+async def test_people_directory_accepts_repeated_states_and_review_filter() -> None:
+    """People lists active and provisional people; Needs review is its own filter (ADR-0118)."""
+    from uuid import UUID
+
+    from agent_core.domain.people import Person, PersonIdentifier
+    from tests.contract.support import NOW
+
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    async with build(
+        settings=replace(memory_settings(), people_enabled=True), storage="memory", principal=owner
+    ) as app:
+        common: PeopleFields = {
+            "tenant_id": owner.tenant_id,
+            "principal_id": owner.principal_id,
+            "created_at": NOW,
+            "updated_at": NOW,
+        }
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+            for index, state, pinned in [
+                (1, "provisional", False),
+                (2, "active", False),
+                (3, "provisional", False),
+                (4, "merged", False),
+                (5, "provisional", True),
+            ]:
+                await uow.people.put(
+                    Person(
+                        id=UUID(int=index),
+                        display_name=f"Person {index}",
+                        state=state,  # type: ignore[arg-type]
+                        merged_into=UUID(int=2) if state == "merged" else None,
+                        pinned=pinned,
+                        **common,
+                    ),
+                    expected_revision=0,
+                )
+            # Someone the owner wrote to is identified by address, not waiting on review.
+            await uow.people.put(
+                PersonIdentifier(
+                    id=UUID(int=30),
+                    person_id=UUID(int=3),
+                    identifier_kind="email",
+                    namespace="owner",
+                    value="person3@example.test",
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        api = create_app(
+            app.services, app.settings, app.principal, app.new_request_id, app.readiness_probe
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api, client=("127.0.0.1", 1234)),
+            base_url="http://localhost",
+        ) as client:
+
+            async def ids(query: str) -> list[str]:
+                response = await client.get(f"/v1/people?ceiling=sensitive&limit=100&{query}")
+                assert response.status_code == 200, response.text
+                return [row["id"] for row in response.json()["items"]]
+
+            assert await ids("state=active&state=provisional") == [
+                str(UUID(int=n)) for n in (1, 2, 3, 5)
+            ]
+            assert await ids("state=active") == [str(UUID(int=2))]
+            assert await ids("review=true") == [str(UUID(int=1))]
+            # An unknown state is a request validation error, like any bad query value.
+            invalid = await client.get("/v1/people?ceiling=sensitive&state=forgotten")
+            assert invalid.status_code == 400
+
+
 async def test_people_import_runs_selected_empty_history_without_advancing_automatic_cursor() -> (
     None
 ):

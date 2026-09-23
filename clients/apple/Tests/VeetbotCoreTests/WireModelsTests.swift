@@ -114,6 +114,23 @@ import Testing
         #expect(reason == .unknown("future_failure"))
     }
 
+    /// A fact about someone not in People keeps the name it was stated with
+    /// (ADR-0118); the unresolved identity key is never shown.
+    @Test(arguments: [
+        ("person:unresolved:00000000-0000-0000-0000-000000000201,00000000-0000-0000-0000-000000000202:Alex preference", "Alex preference", false),
+        ("person:00000000-0000-0000-0000-000000000203:Maya", "Maya", true),
+        ("the user", "the user", false),
+    ])
+    func testPersonSubjectsDisplayTheirName(subject: String, shown: String, linked: Bool) throws {
+        let data = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"\#(subject)","statement":"A fact.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.5,"corroboration_count":1,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[1],"formation_run_id":"00000000-0000-0000-0000-000000000104","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
+                .utf8
+        )
+        let memory = try JSONDecoder.server.decode(MemoryView.self, from: data)
+        #expect(memory.displaySubject == shown)
+        #expect((memory.personLink != nil) == linked)
+    }
+
     @Test
     func testMemoryViewDecodesTheFullExposureListAndToleratesAnUnknownStatus() throws {
         let data = Data(

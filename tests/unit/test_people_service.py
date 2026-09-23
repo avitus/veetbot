@@ -1049,6 +1049,51 @@ async def test_ending_an_alias_ends_every_observed_copy_of_that_assignment() -> 
             assert resolved.status == status, value
 
 
+async def test_review_directory_binds_its_cursor() -> None:
+    from uuid import UUID
+
+    from agent_core.domain.people import Person
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    async with factory() as uow:
+        for index in (1, 2):
+            await uow.people.put(
+                Person(id=UUID(int=index), display_name=f"Person {index}", **common),
+                expected_revision=0,
+            )
+    first = await service.list(owner, ceiling=Sensitivity.SENSITIVE, review=True, limit=1)
+    assert [person.id for person in first.items] == [UUID(int=1)]
+    assert first.next_cursor is not None
+    second = await service.list(
+        owner, ceiling=Sensitivity.SENSITIVE, review=True, limit=1, cursor=first.next_cursor
+    )
+    assert [person.id for person in second.items] == [UUID(int=2)]
+    with pytest.raises(ConflictError):
+        await service.list(owner, ceiling=Sensitivity.SENSITIVE, limit=1, cursor=first.next_cursor)
+    # The same states in another order are the same directory.
+    both = await service.list(
+        owner, ceiling=Sensitivity.SENSITIVE, states=["provisional", "active"], limit=1
+    )
+    assert both.next_cursor is not None
+    again = await service.list(
+        owner,
+        ceiling=Sensitivity.SENSITIVE,
+        states=["active", "provisional"],
+        limit=1,
+        cursor=both.next_cursor,
+    )
+    assert [person.id for person in again.items] == [UUID(int=2)]
+
+
 async def test_owner_created_person_gets_an_owner_confirmed_name_alias() -> None:
     """A person the owner adds is found again when the owner names them in chat (ADR-0118)."""
     from agent_core.domain.people import PeopleQuery, PersonIdentifier
