@@ -970,3 +970,45 @@ async def test_profile_lists_each_alias_once() -> None:
     profile = await service.get(owner, person.id, ceiling=Sensitivity.RESTRICTED)
     assert [alias.value for alias in profile.aliases] == ["frequent@example.test"]
     assert len(profile.history) == 1
+
+
+async def test_owner_created_person_gets_an_owner_confirmed_name_alias() -> None:
+    """A person the owner adds is found again when the owner names them in chat (ADR-0118)."""
+    from agent_core.domain.people import PeopleQuery, PersonIdentifier
+    from agent_core.memory.people import resolve_identity
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    person = await service.create(
+        owner,
+        CreatePerson(session_id=session().id, display_name="Kyrri"),
+        key="create-kyrri",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        aliases = await uow.people.query(
+            PeopleQuery(
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                kinds=["identifier"],
+                person_id=person.id,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+            )
+        )
+        resolved = await resolve_identity(
+            uow.people,
+            owner,
+            kind="name",
+            namespace="owner",
+            value="kyrri",
+            context="owner",
+            at=clock.now(),
+            ceiling=Sensitivity.RESTRICTED,
+        )
+    assert [
+        (a.identifier_kind, a.value, a.verification)
+        for a in aliases
+        if isinstance(a, PersonIdentifier)
+    ] == [("name", "Kyrri", "owner_confirmed")]
+    assert (resolved.status, resolved.person_ids) == ("matched", [person.id])

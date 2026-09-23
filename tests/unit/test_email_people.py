@@ -1,6 +1,8 @@
 """Synthetic sources exercise the production People Email adapter and its boundaries."""
 
+from datetime import timedelta
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -11,6 +13,7 @@ from agent_core.domain.people import (
     PeopleSource,
     Person,
     PersonIdentifier,
+    PersonMemoryLink,
     RelationshipAssertion,
 )
 from agent_core.domain.people_extraction import PeopleClaim, PersonEvidence, RelationshipProposal
@@ -18,7 +21,7 @@ from agent_core.memory.email_people import EmailPeopleFormationService
 from agent_core.ports.persistence import RepositoryUnitOfWork
 from tests.contract.memory_fixtures import semantic_stack
 from tests.contract.people_fixtures import PeopleFields
-from tests.contract.support import ids, principal
+from tests.contract.support import NOW, ids, principal
 
 
 @pytest.mark.parametrize("state", ["proposed", "open", "completed", "cancelled", "uncertain"])
@@ -41,6 +44,8 @@ async def test_unsent_email_draft_cannot_establish_a_committed_action(
     service = EmailPeopleFormationService(
         factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
     )
+    # ADR-0118: mail links people the owner already knows and never adds them.
+    await _seed_sender_context_people(factory, source, "Alex", "Maya")
     fact = EmailPeopleFact.model_validate(
         {
             "message_id": source.message_id,
@@ -149,6 +154,39 @@ async def test_import_recovers_only_revision_bound_original_passages() -> None:
         await service.import_passage(changed, after_offset=None)
 
 
+async def _seed_sender_context_people(factory: Any, source: Any, *names: str) -> list[Person]:
+    """People the owner knows, named as this message's sender names them."""
+    import hashlib
+
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW - timedelta(days=90),
+        "updated_at": NOW - timedelta(days=90),
+    }
+    people = []
+    async with factory() as uow:
+        for name in names:
+            person = Person(id=uuid4(), display_name=name, state="active", **common)
+            await uow.people.put(person, expected_revision=0)
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="name",
+                    namespace="owner",
+                    value=name,
+                    context="email:" + hashlib.sha256(source.sender.encode()).hexdigest(),
+                    verification="contextual",
+                    valid_from=NOW - timedelta(days=90),
+                    **common,
+                ),
+                expected_revision=0,
+            )
+            people.append(person)
+    return people
+
+
 async def test_email_people_reuses_source_and_keeps_attributed_tentative_authority() -> None:
     factory, legacy, source, _fact, _ = await semantic_stack(
         age=3, body="Alex is Maya's colleague."
@@ -210,15 +248,14 @@ async def test_email_people_reuses_source_and_keeps_attributed_tentative_authori
                 sensitivity_ceiling=Sensitivity.SENSITIVE,
             )
         )
-    assert {row.display_name for row in rows if isinstance(row, Person)} == {"Alex", "Maya"}
+    # ADR-0118: names in a message body never add anyone to People, so no
+    # person, alias, or relationship forms; the attributed fact still does.
+    assert not [row for row in rows if isinstance(row, (Person, PersonIdentifier))]
+    assert not [row for row in rows if isinstance(row, RelationshipAssertion)]
+    assert belief.subject.startswith("person:unresolved:")
     evidence = next(row for row in rows if isinstance(row, PeopleSource))
     assert evidence.source_kind == "email" and evidence.message_id == source.message_id
     assert evidence.account_id == source.account_id and evidence.evidence_at == source.sent_at
-    assert all(
-        row.valid_from == source.sent_at for row in rows if isinstance(row, PersonIdentifier)
-    )
-    relation = next(row for row in rows if isinstance(row, RelationshipAssertion))
-    assert relation.belief_id == belief.id
     assert await service.form(source, [fact]) == result
     await service.exclude_source(source.account_id, source.provider_thread_id, source.message_id)
     async with factory() as uow:
@@ -549,3 +586,136 @@ async def test_other_verified_owner_mailbox_is_not_created_as_a_person() -> None
 
         history = [row for row in rows if isinstance(row, PeopleInteraction)]
         assert len(history) == 1 and history[0].direction == "outgoing"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0118: mail never adds a person from a name in its body.
+# ---------------------------------------------------------------------------
+
+
+def _colleague_fact(source: Any, *, maya_label: str = "Maya") -> EmailPeopleFact:
+    mentions = [
+        PersonEvidence(
+            key=name.casefold(),
+            source_event_id=1,
+            start=source.body.index(name),
+            end=source.body.index(name) + len(name),
+            text=name,
+            display_name=label,
+            identifier_kind="name",
+            identifier_value=name,
+            namespace="owner",
+            context="",
+            role="subject" if role == "subject" else "object",
+            referent_key=None,
+        )
+        for name, role, label in (("Alex", "subject", "Alex"), ("Maya", "object", maya_label))
+    ]
+    return EmailPeopleFact(
+        message_id=source.message_id,
+        quote=source.body,
+        belief_type=BeliefType.RELATIONSHIP,
+        subject="Alex relationship",
+        predicate="is",
+        value="Maya's colleague",
+        people=PeopleClaim(
+            mentions=mentions,
+            organizations=[],
+            relationship=RelationshipProposal(
+                subject_key="alex",
+                object_key="maya",
+                predicate="colleague",
+                qualifier="",
+                valid_from=None,
+                valid_to=None,
+                precision="unknown",
+                source_timezone=None,
+            ),
+            commitment=None,
+        ),
+    )
+
+
+async def test_email_body_mentions_form_unlinked_facts_and_create_no_people() -> None:
+    from agent_core.domain.people import PersonMention
+
+    factory, legacy, source, _fact, _ = await semantic_stack(
+        age=3, body="Alex is Maya's colleague."
+    )
+    service = EmailPeopleFormationService(
+        factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
+    )
+    [belief] = await service.form(source, [_colleague_fact(source)])
+    assert belief.subject.startswith("person:unresolved:")
+    async with factory() as uow:
+        rows = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                kinds=["person", "relationship", "memory_link", "mention"],
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+            )
+        )
+    assert not [row for row in rows if not isinstance(row, PersonMention)]
+    assert rows and all(isinstance(row, PersonMention) and row.person_id is None for row in rows)
+
+
+async def test_email_body_mention_links_an_existing_person_in_sender_context() -> None:
+    import hashlib
+
+    factory, legacy, source, _fact, _ = await semantic_stack(
+        age=3, body="Alex is Maya's colleague."
+    )
+    service = EmailPeopleFormationService(
+        factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
+    )
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    maya = Person(id=uuid4(), display_name="Maya", state="active", **common)
+    async with factory() as uow:
+        await uow.people.put(maya, expected_revision=0)
+        await uow.people.put(
+            PersonIdentifier(
+                id=uuid4(),
+                person_id=maya.id,
+                identifier_kind="name",
+                namespace="owner",
+                value="Maya",
+                context="email:" + hashlib.sha256(source.sender.encode()).hexdigest(),
+                verification="contextual",
+                valid_from=NOW - timedelta(days=30),
+                **common,
+            ),
+            expected_revision=0,
+        )
+    [belief] = await service.form(source, [_colleague_fact(source)])
+    async with factory() as uow:
+        rows = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                kinds=["person", "memory_link"],
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+            )
+        )
+    assert [row.id for row in rows if isinstance(row, Person)] == [maya.id]
+    links = [row for row in rows if isinstance(row, PersonMemoryLink)]
+    assert [(link.person_id, link.belief_id, link.unresolved) for link in links] == [
+        (maya.id, belief.id, False)
+    ]
+
+
+async def test_unsupported_email_people_label_keeps_the_passage_facts() -> None:
+    """A People label the passage does not support drops the link, not the fact."""
+    factory, legacy, source, _fact, _ = await semantic_stack(
+        age=3, body="Alex is Maya's colleague."
+    )
+    service = EmailPeopleFormationService(
+        factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
+    )
+    [belief] = await service.form(source, [_colleague_fact(source, maya_label="Maya Brook")])
+    assert belief.consolidation_policy_version == "email-semantic@2"

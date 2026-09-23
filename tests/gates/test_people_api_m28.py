@@ -375,7 +375,14 @@ async def test_people_api_write_read_retry_and_validation() -> None:
                     f"/v1/people/{data['id']}/{section}?ceiling=sensitive"
                 )
                 assert section_response.status_code == 200, section_response.text
-                assert section_response.json()["items"] == []
+                items = section_response.json()["items"]
+                if section == "identity-evidence":
+                    # ADR-0118: the owner-created name is owner-confirmed identity.
+                    assert [(item["kind"], item["label"]) for item in items] == [
+                        ("identifier", "Alex")
+                    ]
+                else:
+                    assert items == []
             assert (
                 await client.get(f"/v1/people/{data['id']}/history?ceiling=sensitive&limit=101")
             ).status_code == 400

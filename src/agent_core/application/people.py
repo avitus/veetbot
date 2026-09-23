@@ -260,6 +260,27 @@ class PublicPeopleService:
                 )
                 person = person.model_copy(update={"support_ids": [source.id]})
                 await uow.people.put(person, expected_revision=0)
+                # The owner named this person, so the name identifies them when the
+                # owner mentions them again in chat (ADR-0118).
+                await uow.people.put(
+                    PersonIdentifier(
+                        id=uuid5(NAMESPACE_URL, operation_key + ":created-name"),
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        person_id=person.id,
+                        created_at=self._clock.now(),
+                        updated_at=self._clock.now(),
+                        sensitivity=person.sensitivity,
+                        identifier_kind="name",
+                        namespace="owner",
+                        value=name,
+                        context="owner",
+                        verification="owner_confirmed",
+                        valid_from=self._clock.now(),
+                        support_ids=[source.id],
+                    ),
+                    expected_revision=0,
+                )
                 return person
 
     async def update(

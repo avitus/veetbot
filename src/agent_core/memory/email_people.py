@@ -19,6 +19,7 @@ from agent_core.domain.errors import (
     ToolTrustRejectedError,
     ToolValidationError,
 )
+from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
     MemoryAuthority,
     MemoryCandidate,
@@ -40,6 +41,7 @@ from agent_core.memory.people_correspondence import project_correspondence
 from agent_core.memory.people_formation import (
     PreparedPeople,
     email_source_id,
+    owner_references,
     persist_people,
     prepare_people,
 )
@@ -268,6 +270,56 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     uow, self._principal, source, header, event, self._clock.now()
                 )
 
+    async def _prepare_fact_people(
+        self,
+        uow: RepositoryUnitOfWork,
+        fact: EmailPeopleFact,
+        source: EmailSemanticSource,
+        event: EventEnvelope,
+        admitted: FormationSource,
+        scope: str,
+        self_references: frozenset[str],
+    ) -> PreparedPeople:
+        """Ground one fact's People evidence; mail never creates a person (ADR-0118)."""
+        assert fact.people is not None
+        if source.body.count(fact.quote) != 1:
+            raise ToolValidationError("People email quote is ambiguous within this passage")
+        offset = source.body.index(fact.quote)
+        payload = fact.people.model_dump()
+        for mention in [*payload["mentions"], *payload["organizations"]]:
+            mention.update(
+                source_event_id=event.sequence,
+                start=mention["start"] + offset,
+                end=mention["end"] + offset,
+            )
+        if payload["commitment"] is not None:
+            payload["commitment"]["source_event_id"] = event.sequence
+        candidate = MemoryCandidate(
+            belief_type=fact.belief_type,
+            subject=fact.subject,
+            statement=fact.quote,
+            source_event_ids=[event.sequence],
+            model_confidence=0.4,
+            proposed_scope=scope,
+            proposed_portability=Portability.CONTEXTUAL,
+            sensitivity_guess=Sensitivity.SENSITIVE,
+            derivation=MemoryDerivation.HYPOTHESIS,
+            longevity=MemoryLongevity.TENTATIVE,
+            people=PeopleClaim.model_validate(payload),
+        )
+        # Names in a message body link only to people already in People; the
+        # owner's own correspondence, not a mention, is what adds someone.
+        return await prepare_people(
+            uow.people,
+            self._principal,
+            candidate,
+            {event.sequence: admitted},
+            self._clock.now(),
+            email=source,
+            creatable=frozenset(),
+            self_references=self_references,
+        )
+
     async def form(
         self,
         source: EmailSemanticSource,
@@ -345,6 +397,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 text=source.body,
             )
             prepared: list[tuple[EmailSemanticFact, PreparedPeople | None]] = []
+            self_references = await owner_references(uow.email, self._principal)
             for proposed in facts:
                 fact = (
                     EmailPeopleFact.model_validate(proposed.model_dump())
@@ -359,41 +412,17 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     raise ToolValidationError("semantic email fact lacks exact source grounding")
                 linked = None
                 if isinstance(fact, EmailPeopleFact) and fact.people is not None:
-                    if source.body.count(fact.quote) != 1:
-                        raise ToolValidationError(
-                            "People email quote is ambiguous within this passage"
+                    try:
+                        linked = await self._prepare_fact_people(
+                            uow, fact, source, event, admitted, scope, self_references
                         )
-                    offset = source.body.index(fact.quote)
-                    payload = fact.people.model_dump()
-                    for mention in [*payload["mentions"], *payload["organizations"]]:
-                        mention.update(
-                            source_event_id=event.sequence,
-                            start=mention["start"] + offset,
-                            end=mention["end"] + offset,
-                        )
-                    if payload["commitment"] is not None:
-                        payload["commitment"]["source_event_id"] = event.sequence
-                    candidate = MemoryCandidate(
-                        belief_type=fact.belief_type,
-                        subject=fact.subject,
-                        statement=fact.quote,
-                        source_event_ids=[event.sequence],
-                        model_confidence=0.4,
-                        proposed_scope=scope,
-                        proposed_portability=Portability.CONTEXTUAL,
-                        sensitivity_guess=Sensitivity.SENSITIVE,
-                        derivation=MemoryDerivation.HYPOTHESIS,
-                        longevity=MemoryLongevity.TENTATIVE,
-                        people=PeopleClaim.model_validate(payload),
-                    )
-                    linked = await prepare_people(
-                        uow.people,
-                        self._principal,
-                        candidate,
-                        {event.sequence: admitted},
-                        self._clock.now(),
-                        email=source,
-                    )
+                    except (ValueError, ToolValidationError):
+                        # Unsupported People evidence drops the link, never the fact,
+                        # as chat formation already does.
+                        linked = None
+                    except ConflictError:
+                        # An erased source or identity rejects only this fact.
+                        continue
                 prepared.append((fact, linked))
             prior_facts = registered.payload.get("facts", {})
             fact_ids = dict(prior_facts) if isinstance(prior_facts, dict) else {}
