@@ -17,10 +17,16 @@ from agent_core.domain.errors import ToolValidationError
 
 
 @pytest.mark.parametrize("count", [1, 3])
+@pytest.mark.parametrize("startup_delay", [0, 0.1])
 @pytest.mark.parametrize("operation", ["inspect", "extract"])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_pdf_worker_stops_on_timeout_or_cancellation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str, cancel: bool, count: int
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    cancel: bool,
+    count: int,
+    startup_delay: float,
 ) -> None:
     finished = tmp_path / "parse-finished"
 
@@ -33,17 +39,27 @@ async def test_pdf_worker_stops_on_timeout_or_cancellation(
     monkeypatch.setattr(pdf, "_pdf_text", slow_parse)
     create = asyncio.create_subprocess_exec
     processes: list[asyncio.subprocess.Process] = []
+    worker_tasks: set[asyncio.Task[Any]] = set()
+    started = asyncio.Event()
     peak_workers = 0
 
     async def slow_worker(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
         nonlocal peak_workers
+        task = asyncio.current_task()
+        assert task is not None
+        worker_tasks.add(task)
+        # A worker owns its slot during subprocess startup as well as parsing.
+        peak_workers = max(peak_workers, sum(not item.done() for item in worker_tasks))
+        await asyncio.sleep(startup_delay)
         script = (
             "import sys,time; from pathlib import Path; sys.stdin.buffer.read(); "
-            f"time.sleep(0.3); Path({str(finished)!r}).write_text('work escaped its lifetime')"
+            f"time.sleep({10 if cancel else 0.3}); "
+            f"Path({str(finished)!r}).write_text('work escaped its lifetime')"
         )
         process = await create(sys.executable, "-c", script, **kwargs)
         processes.append(process)
-        peak_workers = max(peak_workers, sum(item.returncode is None for item in processes))
+        if len(processes) == min(count, 2):
+            started.set()
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", slow_worker)
@@ -66,11 +82,13 @@ async def test_pdf_worker_stops_on_timeout_or_cancellation(
 
     tasks = [asyncio.create_task(parse()) for _ in range(count)]
     if cancel:
-        await asyncio.sleep(0.05)
+        # Exercise cancellation of actual children, independently of spawn speed.
+        await asyncio.wait_for(started.wait(), timeout=10)
         for task in tasks:
             task.cancel()
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
         assert all(isinstance(outcome, asyncio.CancelledError) for outcome in outcomes)
+        assert len(processes) == min(count, 2)
     else:
         await asyncio.gather(*tasks)
     await asyncio.sleep(0.4)
