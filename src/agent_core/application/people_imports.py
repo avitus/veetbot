@@ -183,6 +183,16 @@ class PeopleImportService:
                 next_cursor=next_cursor,
             )
 
+    async def identity_revisions(
+        self,
+        uow: RepositoryUnitOfWork,
+        owner: Principal,
+        person_ids: Sequence[UUID],
+        ceiling: Sensitivity,
+    ) -> dict[UUID, int]:
+        """The identity snapshot a running import is checked against."""
+        return await import_identity_revisions(uow, owner, person_ids, ceiling)
+
     async def validate_sources(
         self,
         uow: RepositoryUnitOfWork,

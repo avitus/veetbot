@@ -9,7 +9,6 @@ from decimal import Decimal
 from typing import NamedTuple, Protocol
 from uuid import UUID
 
-from agent_core.application.people_imports import import_identity_revisions
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailImportBudget, EmailRecord
 from agent_core.domain.errors import (
@@ -308,7 +307,7 @@ class ImportSlice:
             uow, context.principal, job.scope, Sensitivity.RESTRICTED
         )
         try:
-            current_identities = await import_identity_revisions(
+            current_identities = await self.service.identity_revisions(
                 uow, context.principal, job.scope.person_ids, Sensitivity.RESTRICTED
             )
         except (NotFoundError, ToolValidationError) as exc:
