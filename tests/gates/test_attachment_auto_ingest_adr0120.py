@@ -9,10 +9,11 @@ with a reason code, and the same file sent twice is one document.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from agent_core.knowledge.uploads import upload_document_id
+from agent_core.runtime.worker import MaintenanceWorker
 from tests.gates.test_attachment_submit_adr0120 import _artifact, _send, _uploaded
 from tests.gates.test_attachment_upload_adr0120 import PNG, _client, _composition, _session
 
@@ -46,7 +47,7 @@ def _text_pdf(text: str) -> bytes:
 
 
 async def _sweep(composition: Any) -> None:
-    await composition.maintenance_factory().run_once()
+    await cast(MaintenanceWorker, composition.maintenance_factory()).run_once()
 
 
 async def _document(composition: Any, artifact: dict[str, Any]) -> Any:

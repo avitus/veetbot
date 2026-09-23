@@ -42,6 +42,7 @@ from agent_core.domain.messages import (
     ModelRequest,
     ModelTurn,
     ModelUsage,
+    ReasoningEffort,
     ReasoningSupport,
     ResolvedModel,
     ScriptedToolCall,
@@ -222,6 +223,44 @@ def test_openai_responses_omits_unsupported_temperature() -> None:
     )
 
     assert "temperature" not in payload
+
+
+def test_openai_responses_sends_the_requested_reasoning_effort() -> None:
+    payload = OpenAIResponsesProvider._request_payload(
+        request().model_copy(update={"reasoning_effort": ReasoningEffort.HIGH}),
+        resolved("openai"),
+    )
+
+    assert payload["reasoning"] == {"effort": "high"}
+
+
+def test_anthropic_messages_sends_the_requested_reasoning_effort() -> None:
+    payload, _, _ = AnthropicMessagesProvider._request_payload(
+        request().model_copy(update={"reasoning_effort": ReasoningEffort.XHIGH}),
+        resolved("anthropic"),
+    )
+
+    assert payload["output_config"] == {"effort": "xhigh"}
+    assert payload["thinking"] == {"type": "adaptive"}
+
+
+def test_no_adapter_sends_an_effort_that_was_not_requested() -> None:
+    openai = OpenAIResponsesProvider._request_payload(request(), resolved("openai"))
+    anthropic, _, _ = AnthropicMessagesProvider._request_payload(request(), resolved("anthropic"))
+
+    assert "reasoning" not in openai
+    assert "output_config" not in anthropic
+
+
+def test_effort_never_reaches_a_model_without_native_reasoning() -> None:
+    effort = request().model_copy(update={"reasoning_effort": ReasoningEffort.MEDIUM})
+    plain = resolved("openai").model_copy(
+        update={"capabilities": ModelCapabilities(reasoning=ReasoningSupport.NONE)}
+    )
+    chat_payload, _ = ChatCompletionsProvider._request_payload(effort, resolved("chat_completions"))
+
+    assert "reasoning" not in OpenAIResponsesProvider._request_payload(effort, plain)
+    assert not {"reasoning", "reasoning_effort", "output_config"} & set(chat_payload)
 
 
 async def test_malformed_arguments_remain_a_recoverable_tool_turn_on_every_adapter() -> None:

@@ -1,7 +1,7 @@
 """Let a chat upload exist before the run of the message that sends it (ADR-0120).
 
 Revision ID: e5a2c9d7b3f1
-Revises: a4f7c1e9d2b3
+Revises: b7d2e4f8a613
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e5a2c9d7b3f1"
-down_revision: str | Sequence[str] | None = "a4f7c1e9d2b3"
+down_revision: str | Sequence[str] | None = "b7d2e4f8a613"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

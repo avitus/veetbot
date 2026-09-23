@@ -28,7 +28,7 @@ from agent_core.application.errors import (
 from agent_core.application.folder_service import unfile_deleted_session
 from agent_core.application.session_service import bootstrap_session
 from agent_core.application.surfaces import PreparedSurfaceSubmission
-from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.agents import AgentSpec, Principal, chat_model_variant
 from agent_core.domain.approvals import (
     ApprovalCursor,
     ApprovalRequest,
@@ -83,6 +83,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
+from agent_core.domain.model_settings import ModelSettingsCatalog
 from agent_core.domain.persistence import IdempotencyRecord, WorkerLease
 from agent_core.domain.persona import (
     PersonaDocument,
@@ -357,11 +358,13 @@ class PublicSessionService:
         on_session_closed: Callable[[UUID], Awaitable[None]] | None = None,
         trajectory_artifacts: TrajectoryArtifactStore | None = None,
         general_artifacts: ArtifactStore | None = None,
+        model_settings: ModelSettingsCatalog | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
         self._default_agent = default_agent
+        self._model_settings = model_settings
         self._catalogs = catalogs
         self._activate_session = activate_session
         self._close_session = close_session
@@ -369,9 +372,23 @@ class PublicSessionService:
         self._trajectory_artifacts = trajectory_artifacts
         self._general_artifacts = general_artifacts
 
-    async def _resolve_agent(self, uow: RepositoryUnitOfWork, agent_id: str) -> AgentSpec:
+    async def _resolve_agent(
+        self, uow: RepositoryUnitOfWork, agent_id: str, principal: Principal
+    ) -> AgentSpec:
         if agent_id in {"general", str(self._default_agent.id)}:
-            return await uow.agents.get_version(self._default_agent.id, self._default_agent.version)
+            agent = await uow.agents.get_version(
+                self._default_agent.id, self._default_agent.version
+            )
+            if self._model_settings is None:
+                return agent
+            # ADR-0119: a new app chat starts on the owner's chat model.
+            choice = self._model_settings.effective_chat(
+                await uow.model_settings.current(principal)
+            )
+            variant = chat_model_variant(agent, choice.model_policy)
+            if variant is not agent:
+                await uow.agents.put(variant)
+            return variant
         try:
             requested = UUID(agent_id)
         except ValueError as exc:
@@ -399,7 +416,7 @@ class PublicSessionService:
             raise SessionMetadataValidationError("session metadata exceeds 8 KiB")
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            agent = await self._resolve_agent(uow, agent_id)
+            agent = await self._resolve_agent(uow, agent_id, principal)
             if browser_profile_id is not None:
                 profile = await uow.browser_profiles.get(browser_profile_id, principal)
                 if profile.status is not BrowserProfileStatus.READY:

@@ -16,6 +16,8 @@ model_policies:
   local:
     provider: ollama
     model: local-small
+# The chat models the owner may choose in the client (ADR-0119).
+selectable_chat_policies: [astra, fable, balanced]
 request_defaults:
   timeout_seconds: 600
   stream_idle_seconds: 60

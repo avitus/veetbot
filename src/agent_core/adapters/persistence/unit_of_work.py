@@ -29,6 +29,7 @@ from agent_core.ports.folders import FolderStore
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
+from agent_core.ports.model_settings import ModelSettingsStore
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
@@ -106,6 +107,7 @@ class UnitOfWorkRepositories:
     episodes: IntegratedEpisodeStore
     traces: TraceStore
     personas: PersonaStore
+    model_settings: ModelSettingsStore
     folders: FolderStore
     email: EmailStore
     calls: CallStore
@@ -170,6 +172,7 @@ class MemoryUnitOfWork:
         self.episodes = repositories.episodes
         self.traces = repositories.traces
         self.personas = repositories.personas
+        self.model_settings = repositories.model_settings
         self.folders = repositories.folders
         self.email = repositories.email
         self.calls = repositories.calls
@@ -290,6 +293,7 @@ class PostgresUnitOfWork:
         self.episodes = repositories.episodes
         self.traces = repositories.traces
         self.personas = repositories.personas
+        self.model_settings = repositories.model_settings
         self.folders = repositories.folders
         self.email = repositories.email
         self.calls = repositories.calls

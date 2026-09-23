@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import httpx
@@ -18,6 +19,7 @@ from agent_core.adapters.persistence.database import create_engine
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.runtime.worker import MaintenanceWorker
 from tests.gates.test_attachment_upload_adr0120 import PNG
 from tests.integration.m2_support import database_settings
 
@@ -102,7 +104,7 @@ async def test_an_upload_is_stored_unclaimed_then_claimed_and_ingested(tmp_path:
         assert notes.run_id == run_id and notes.metadata["auto_ingest"] == "pending"
         assert [artifact.id for artifact in pending] == [UUID(notes_id)]
 
-        await composition.maintenance_factory().run_once()
+        await cast(MaintenanceWorker, composition.maintenance_factory()).run_once()
         async with composition.uow_factory() as uow:
             ingested = await uow.artifacts.get(UUID(notes_id), composition.principal)
             remaining = await uow.artifacts.pending_auto_ingest(composition.principal, limit=10)

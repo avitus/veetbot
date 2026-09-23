@@ -15,6 +15,7 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.bootstrap import _effective_model_policy
 from agent_core.config import DeploymentMode
+from agent_core.domain.messages import ReasoningEffort
 from agent_core.model.registry import (
     PROFILE_VALIDATION_RULES,
     ProfileValidationError,
@@ -102,7 +103,14 @@ def mutate(root: Path, name: str) -> None:
         pricing["effective_at"] = "2026-08-03T00:00:00"
     elif name == "unknown_key":
         profile["unknown"] = True
-    elif name in {"duplicate_enabled", "alias_duplicate"}:
+    elif name == "effort_duplicate":
+        model["reasoning_efforts"] = ["low", "low"]
+    elif name in {
+        "duplicate_enabled",
+        "alias_duplicate",
+        "efforts_without_native_reasoning",
+        "selectable_undeclared",
+    }:
         pass
     else:
         raise AssertionError(f"unknown corpus mutation {name}")
@@ -118,6 +126,16 @@ def mutate(root: Path, name: str) -> None:
         anthropic = load_yaml(anthropic_path)
         anthropic["models"][0]["aliases"].append("default")
         write_yaml(anthropic_path, anthropic)
+    elif name == "efforts_without_native_reasoning":
+        ollama_path = root / "providers/ollama.yaml"
+        ollama = load_yaml(ollama_path)
+        ollama["models"][0]["reasoning_efforts"] = ["medium"]
+        write_yaml(ollama_path, ollama)
+    elif name == "selectable_undeclared":
+        policies_path = root / "policies.yaml"
+        policies = load_yaml(policies_path)
+        policies["selectable_chat_policies"].append("missing")
+        write_yaml(policies_path, policies)
 
 
 def test_all_shipped_provider_profiles_load_as_one_total_registry() -> None:
@@ -139,6 +157,25 @@ def test_every_invalid_profile_corpus_member_names_the_rule_it_broke(tmp_path: P
         with pytest.raises(ProfileValidationError) as captured:
             ProviderRegistry.load(case_root, adapters=ADAPTER_DEFINITIONS)
         assert str(member["expected"]) in str(captured.value)
+
+
+async def test_shipped_models_declare_the_efforts_and_names_the_owner_chooses_from() -> None:
+    registry = ProviderRegistry.load(MODELS, adapters=ADAPTER_DEFINITIONS)
+    router = StaticModelRouter(registry, FixedClock(NOW))
+    every_effort = tuple(ReasoningEffort)
+
+    astra = await router.resolve("astra", tenant_id="tenant-a")
+    fable = await router.resolve("fable", tenant_id="tenant-a")
+    sol = await router.resolve("balanced", tenant_id="tenant-a")
+    local = await router.resolve("local", tenant_id="tenant-a")
+
+    assert registry.policies.selectable_chat_policies == ["astra", "fable", "balanced"]
+    assert (astra.display_name, astra.reasoning_efforts) == ("GPT-6 Astra", every_effort)
+    assert (fable.display_name, fable.reasoning_efforts) == ("Claude Fable 5.1", every_effort)
+    assert (sol.display_name, sol.reasoning_efforts) == ("GPT-5.6 Sol", every_effort)
+    assert local.reasoning_efforts == ()
+    pinned = await router.resolve_pinned(router.pin(UUID(int=1), astra))
+    assert pinned.reasoning_efforts == every_effort
 
 
 def test_unquoted_yaml_dates_fail_as_profile_validation_not_hashing_type_errors(

@@ -618,6 +618,8 @@ class AnthropicMessagesProvider:
         }
         if resolved.capabilities.reasoning.value == "native":
             payload["thinking"] = {"type": "adaptive"}
+            if request.reasoning_effort is not None:
+                payload["output_config"] = {"effort": request.reasoning_effort.value}
         return payload, sent, dropped
 
     async def close(self) -> None:

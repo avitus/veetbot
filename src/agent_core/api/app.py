@@ -28,6 +28,7 @@ from agent_core.api.middleware import (
     RequestBoundaryMiddleware,
     body_limit_message,
 )
+from agent_core.api.model_settings import model_settings_router
 from agent_core.api.people import people_router
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
@@ -48,6 +49,7 @@ from agent_core.application.services import (
     EmailService,
     FolderService,
     MemoryReadService,
+    ModelSettingsService,
     NotificationService,
     PeopleService,
     PersonaService,
@@ -194,6 +196,9 @@ class ApplicationServices(Protocol):
 
     @property
     def persona(self) -> PersonaService: ...
+
+    @property
+    def model_settings(self) -> ModelSettingsService | None: ...
 
     @property
     def folders(self) -> FolderService: ...
@@ -1920,6 +1925,9 @@ def create_app(
             ),
         )
 
+    model_settings = getattr(services, "model_settings", None)
+    if model_settings is not None:
+        app.include_router(model_settings_router(model_settings, secured))
     if settings.email_mode_enabled:
         app.include_router(email_router(services.email, secured))
     if settings.email_mode_enabled and settings.email_unsubscribe_enabled:

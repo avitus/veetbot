@@ -335,6 +335,12 @@ provider-assisted formation falls back to deterministic until the evidence is
 regenerated on the new version. Observe first, read the
 `agent.policy.advisory.*` metrics, and enforce only when no approval is pending.
 
+The client's model settings (ADR-0119) need `settings.read,settings.write`
+appended to `AUTH_SCOPES` in that same file; without them the Settings screen
+reports the missing scopes and every model stays at the deployment default.
+The routes are always mounted, and a saved choice changes only new app chats,
+the effort of later agent runs, and later memory formation.
+
 The host exports no metrics, so the service log answers whether these consumers
 are running. Every long-running service writes JSON lines, one object per
 event, with first-party events from `INFO` and every other logger from

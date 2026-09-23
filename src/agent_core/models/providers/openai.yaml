@@ -22,7 +22,9 @@ limits:
   max_tool_count: 128
 models:
   - id: gpt-5.6-sol
+    display_name: GPT-5.6 Sol
     aliases: [gpt-5.6]
+    reasoning_efforts: [low, medium, high, xhigh, max]
     limits:
       context_window_tokens: 272000
       max_output_tokens: 128000
@@ -36,7 +38,9 @@ models:
       source: docs_snapshot
       effective_at: "2026-08-03T00:00:00Z"
   - id: gpt-6-astra
+    display_name: GPT-6 Astra
     aliases: [astra, default]
+    reasoning_efforts: [low, medium, high, xhigh, max]
     limits:
       # Stay within the standard pricing tier until tiered accounting is supported.
       context_window_tokens: 272000

@@ -40,6 +40,7 @@ from agent_core.domain.folders import (
     normalize_folder_name,
 )
 from agent_core.domain.messages import ProviderPin
+from agent_core.domain.model_settings import ModelSettings
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -1962,6 +1963,36 @@ class InMemoryFolderStore:
             )
             self._proposals[proposal_id] = resolved
             return resolved
+
+
+class InMemoryModelSettingsStore:
+    """Contract-backed owner model settings (ADR-0119)."""
+
+    def __init__(self) -> None:
+        self._versions: dict[tuple[str, str], list[ModelSettings]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def current(self, principal: Principal) -> ModelSettings | None:
+        async with self._lock:
+            versions = self._versions.get((principal.tenant_id, principal.principal_id), [])
+            return versions[-1] if versions else None
+
+    async def append_version(
+        self, settings: ModelSettings, *, expected_version: int
+    ) -> ModelSettings:
+        async with self._lock:
+            versions = self._versions[(settings.tenant_id, settings.principal_id)]
+            head = versions[-1].version if versions else 0
+            if expected_version != head:
+                raise ConflictError(
+                    f"model settings expected version {expected_version} but head is {head}"
+                )
+            if settings.version != head + 1:
+                raise ConflictError(
+                    f"model settings version {settings.version} does not follow head {head}"
+                )
+            versions.append(settings)
+            return settings
 
 
 class InMemoryPersonaStore:

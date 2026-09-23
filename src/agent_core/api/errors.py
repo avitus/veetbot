@@ -21,6 +21,7 @@ ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
     domain_errors.PersonaContentError: ErrorMapping("malformed_request", 400),
     domain_errors.FolderNameError: ErrorMapping("malformed_request", 400),
     domain_errors.AttachmentValidationError: ErrorMapping("malformed_request", 400),
+    domain_errors.ModelSettingsChoiceError: ErrorMapping("malformed_request", 400),
     domain_errors.ScheduleValidationError: ErrorMapping("schedule_validation_error", 422),
     domain_errors.DeviceValidationError: ErrorMapping("device_validation_error", 422),
     domain_errors.DeviceIngestError: ErrorMapping("device_ingest_error", 422),

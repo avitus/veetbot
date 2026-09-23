@@ -20,6 +20,7 @@ from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
+from agent_core.domain.model_settings import ModelChoice, ModelSettingsView
 from agent_core.domain.people import (
     PeopleErasure,
     PeopleOperation,
@@ -566,6 +567,19 @@ class PeopleService(Protocol):
         sort: str = "id",
         relationship: PeopleRelationshipFilter | None = None,
     ) -> PeoplePage: ...
+
+
+class ModelSettingsService(Protocol):
+    async def get(self, principal: Principal) -> ModelSettingsView: ...
+
+    async def update(
+        self,
+        principal: Principal,
+        *,
+        expected_version: int,
+        chat: ModelChoice,
+        memory: ModelChoice,
+    ) -> ModelSettingsView: ...
 
 
 class PersonaService(Protocol):

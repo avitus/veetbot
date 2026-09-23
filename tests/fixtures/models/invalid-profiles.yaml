@@ -64,3 +64,12 @@
 - rule: unknown_key
   mutation: unknown_key
   expected: unknown or invalid key
+- rule: reasoning_efforts
+  mutation: efforts_without_native_reasoning
+  expected: native reasoning
+- rule: reasoning_efforts_unique
+  mutation: effort_duplicate
+  expected: listed once
+- rule: selectable_chat_policy
+  mutation: selectable_undeclared
+  expected: declared model policy

@@ -48,6 +48,7 @@
 		100000000000000000000026 /* ScheduleBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* ScheduleBrowserView.swift */; };
 		100000000000000000000027 /* ScheduleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* ScheduleDetailView.swift */; };
 		100000000000000000000028 /* PersonaViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* PersonaViewModel.swift */; };
+		10000000000000000000E1 /* ModelSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E1 /* ModelSettingsViewModel.swift */; };
 		100000000000000000000029 /* PersonaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* PersonaEditorView.swift */; };
 		1000000000000000000000D1 /* ConversationFolders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D1 /* ConversationFolders.swift */; };
 		1000000000000000000000D2 /* ConversationFolderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D2 /* ConversationFolderViews.swift */; };
@@ -129,6 +130,7 @@
 		200000000000000000000027 /* ScheduleBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleBrowserView.swift; sourceTree = "<group>"; };
 		200000000000000000000028 /* ScheduleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleDetailView.swift; sourceTree = "<group>"; };
 		200000000000000000000029 /* PersonaViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaViewModel.swift; sourceTree = "<group>"; };
+		20000000000000000000E1 /* ModelSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsViewModel.swift; sourceTree = "<group>"; };
 		20000000000000000000002A /* PersonaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaEditorView.swift; sourceTree = "<group>"; };
 		2000000000000000000000D1 /* ConversationFolders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolders.swift; sourceTree = "<group>"; };
 		2000000000000000000000D2 /* ConversationFolderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolderViews.swift; sourceTree = "<group>"; };
@@ -269,6 +271,7 @@
 				20000000000000000000000F /* ChatViewModel.swift */,
 				200000000000000000000023 /* MemoryViewModel.swift */,
 				200000000000000000000029 /* PersonaViewModel.swift */,
+				20000000000000000000E1 /* ModelSettingsViewModel.swift */,
 				2000000000000000000000D1 /* ConversationFolders.swift */,
 				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
@@ -461,6 +464,7 @@
 				10000000000000000000000F /* ChatViewModel.swift in Sources */,
 				100000000000000000000022 /* MemoryViewModel.swift in Sources */,
 				100000000000000000000028 /* PersonaViewModel.swift in Sources */,
+				10000000000000000000E1 /* ModelSettingsViewModel.swift in Sources */,
 				1000000000000000000000D1 /* ConversationFolders.swift in Sources */,
 				100000000000000000000025 /* ScheduleViewModel.swift in Sources */,
 				100000000000000000000010 /* RunStateReducer.swift in Sources */,

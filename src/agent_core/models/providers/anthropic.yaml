@@ -22,7 +22,9 @@ limits:
   max_tool_count: 128
 models:
   - id: claude-opus-5
+    display_name: Claude Opus 5
     aliases: [opus]
+    reasoning_efforts: [low, medium, high, xhigh, max]
     limits:
       context_window_tokens: 1000000
       max_output_tokens: 128000
@@ -36,7 +38,9 @@ models:
       source: docs_snapshot
       effective_at: "2026-08-03T00:00:00Z"
   - id: claude-fable-5-1
+    display_name: Claude Fable 5.1
     aliases: [fable, anthropic-default]
+    reasoning_efforts: [low, medium, high, xhigh, max]
     limits:
       context_window_tokens: 1000000
       max_output_tokens: 128000

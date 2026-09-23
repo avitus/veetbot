@@ -298,4 +298,72 @@ import Testing
         let filed = try JSONEncoder.server.encode(SetSessionFolderBody(folderID: id))
         #expect(String(decoding: filed, as: UTF8.self) == #"{"folder_id":"\#(id.uuidString)"}"#)
     }
+
+    @Test
+    func testModelSettingsDecodeTheServerShapeAndTolerateUnknownKeys() throws {
+        let data = Data(
+            #"""
+            {"version":3,"future_top_level":{"x":1},
+             "chat":{"model_policy":"astra","reasoning_effort":"high","future":true},
+             "memory":{"model_policy":"balanced","reasoning_effort":null},
+             "chat_options":[
+               {"model_policy":"astra","display_name":"GPT-6 Astra","provider":"openai","model":"gpt-6-astra","reasoning_efforts":["low","medium","high","xhigh","max"],"default_reasoning_effort":"high","pricing":{"input":"1"}},
+               {"model_policy":"local","display_name":"Local model","provider":"local","model":"llama","reasoning_efforts":[],"default_reasoning_effort":null}
+             ],
+             "memory_options":[
+               {"model_policy":"balanced","display_name":"GPT-5.6 Sol","provider":"openai","model":"gpt-5.6-sol","reasoning_effort":null,"evaluated_at":"2026-09-20"},
+               {"model_policy":"astra","display_name":"GPT-6 Astra","provider":"openai","model":"gpt-6-astra","reasoning_effort":"medium"}
+             ]}
+            """#.utf8
+        )
+
+        let settings = try JSONDecoder.server.decode(ModelSettingsView.self, from: data)
+
+        #expect(settings.version == 3)
+        #expect(settings.chat == ModelChoice(modelPolicy: "astra", reasoningEffort: .high))
+        #expect(settings.memory == ModelChoice(modelPolicy: "balanced", reasoningEffort: nil))
+        #expect(settings.chatOptions.map(\.modelPolicy) == ["astra", "local"])
+        #expect(settings.chatOptions[0].displayName == "GPT-6 Astra")
+        #expect(settings.chatOptions[0].provider == "openai")
+        #expect(settings.chatOptions[0].model == "gpt-6-astra")
+        #expect(settings.chatOptions[0].reasoningEfforts == [.low, .medium, .high, .xhigh, .max])
+        #expect(settings.chatOptions[0].defaultReasoningEffort == .high)
+        #expect(settings.chatOptions[1].reasoningEfforts.isEmpty)
+        #expect(settings.chatOptions[1].defaultReasoningEffort == nil)
+        #expect(settings.memoryOptions.map(\.modelPolicy) == ["balanced", "astra"])
+        #expect(settings.memoryOptions[0].reasoningEffort == nil)
+        #expect(settings.memoryOptions[1].reasoningEffort == .medium)
+    }
+
+    @Test
+    func testModelSettingsUpdateBodyEncodesEveryEffortExplicitly() throws {
+        let body = UpdateModelSettingsBody(
+            expectedVersion: 0,
+            chat: ModelChoice(modelPolicy: "local", reasoningEffort: nil),
+            memory: ModelChoice(modelPolicy: "astra", reasoningEffort: .medium)
+        )
+
+        let encoded = try JSONEncoder.server.encode(body)
+
+        #expect(
+            String(decoding: encoded, as: UTF8.self)
+                == #"{"chat":{"model_policy":"local","reasoning_effort":null},"expected_version":0,"memory":{"model_policy":"astra","reasoning_effort":"medium"}}"#
+        )
+    }
+
+    @Test
+    func testReasoningEffortsCarryOwnerFacingLabels() throws {
+        #expect(ReasoningEffort.low.displayName == "Low")
+        #expect(ReasoningEffort.medium.displayName == "Medium")
+        #expect(ReasoningEffort.high.displayName == "High")
+        #expect(ReasoningEffort.xhigh.displayName == "Extra high")
+        #expect(ReasoningEffort.max.displayName == "Max")
+        #expect(ReasoningEffort.displayName(for: nil) == "Default")
+        #expect(ReasoningEffort.displayName(for: .xhigh) == "Extra high")
+        let unknown = try JSONDecoder.server.decode(
+            ModelChoice.self, from: Data(#"{"model_policy":"astra","reasoning_effort":"turbo"}"#.utf8)
+        )
+        #expect(unknown.reasoningEffort?.rawValue == "turbo")
+        #expect(unknown.reasoningEffort?.displayName == "Turbo")
+    }
 }

@@ -126,4 +126,6 @@ implementation without one.
 - [ADR-0115 — The tool-call budget ends research, never the answer (Accepted; amends ADR-0078)](0115-tool-call-budget-ends-research-not-the-answer.md)
 - [ADR-0116 — Bulk mail never forms communication memory (Accepted; amends ADR-0090 and ADR-0101)](0116-bulk-mail-never-forms-communication-memory.md)
 - [ADR-0117 — Memory review and deletion over HTTP (Accepted; supersedes ADR-0070 decision 3)](0117-memory-review-and-deletion-over-http.md)
+- [ADR-0118 — Crash retries exclude durable continuations (Accepted; amends ADR-0004)](0118-crash-retries-exclude-durable-continuations.md)
+- [ADR-0119 — Owner-chosen models and reasoning effort (Accepted)](0119-owner-chosen-models-and-reasoning-effort.md)
 - [ADR-0120 — Files attached to chat messages (Accepted)](0120-chat-attachments.md)

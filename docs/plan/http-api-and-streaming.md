@@ -2149,6 +2149,34 @@ nullable `subscription` block. Every response carries
 `Cache-Control: private, no-store`, never includes an unsubscribe address, and
 answers a foreign or unknown subscription with an indistinguishable 404.
 
+## ADR-0119 model settings routes
+
+ADR-0119 adds two routes and one scope pair, `settings.read` and
+`settings.write`, mounted in every composition:
+
+```text
+GET  /v1/settings/models   settings.read
+PUT  /v1/settings/models   settings.write
+```
+
+Both return the same view: `version` (0 before the first save), the `chat`
+and `memory` choices in effect, each a `model_policy` and a nullable
+`reasoning_effort`, and the choices on offer. Each `chat_options` entry names
+a policy, its display name, provider and model, the efforts it accepts, and
+the `default_reasoning_effort` a client selects when the owner picks that
+model. Each `memory_options` entry is one evaluated tuple, so one model may
+appear once per evaluated effort. A null effort sends none and keeps the
+provider default.
+
+The `PUT` body is `expected_version`, `chat`, and `memory`, with no other
+field. A choice not on offer is `malformed_request`, a stale version is
+`conflict`, and saving the stored values again returns them without a new
+version, so a retried save is safe. A saved chat model applies to app chats
+created afterwards; the chat effort applies to every agent run from its next
+message; the memory choice applies to the next formation. Responses carry
+`Cache-Control: private, no-store`, and each save appends a content-free
+`settings.models.updated` process event.
+
 ## ADR-0120 chat attachment upload
 
 One route, mounted only when `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, under the
@@ -2164,7 +2192,7 @@ The body is the file itself, at most 32 MiB, with its media type as
 255 bytes, or contains a quote, a path separator, or a control character is
 `malformed_request`, as the artifact rules above require at creation.
 Authentication and the size check run before the body is read. An unknown or
-foreign session is `404` and a closed one is `409` with `invalid_state`. A new
+foreign session is `404`, and a closed one is `409` as a message to it would be. A new
 upload is `201` with the `ArtifactView` (`run_id` null, `metadata.attachment`
 holding the detected kind, and for a PDF the page count); a replay of the same
 key and bytes is `200` with the same view; the same key with a different body

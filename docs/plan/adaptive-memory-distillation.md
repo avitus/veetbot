@@ -146,6 +146,25 @@ use the actual memory tuple. Off mode still resolves no extraction model.
 Sol remains temporary while Milestone 21 evaluates scorer semantics and a
 controlled Astra comparison. All exact-evidence checks above remain required.
 
+ADR-0119 makes reasoning effort part of the evaluated tuple.
+`formation.reasoning_effort` sets the effort every formation request sends,
+null keeping the provider default, and a startup whose memory model does not
+accept it is refused. Schema 8 of the formation@9 artifact records the effort
+the evaluated arm sent; a schema 7 artifact is provider-default evidence.
+Activation and the bundle test's uniqueness key compare effort as an eighth
+field, and the formation@8 and formation@10 artifacts, which record none,
+match only a null effort. `agent eval memory-distillation --reasoning-effort`
+sends the effort from the formation@9 arm alone, the frozen controls keeping
+the provider default, and `--concurrency` evaluates that many cases at once
+in separate compositions without changing their order. On the People default
+path the owner may move formation to any other tuple a bundled or bound
+operator formation@9 artifact evaluated exactly on this tree; the choice is
+read at each extraction, a withdrawn choice falls back to the configured
+tuple, and a consolidation formed on an alternative records its policy and
+effort after the extractor's name.
+Astra at medium effort failed the formation@9 gates on 2026-09-23, so Sol at
+the provider default remains the only evidenced memory tuple.
+
 ## The integrated episode
 
 Raw events remain the source of truth. An integrated episode is a derived,

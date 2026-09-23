@@ -242,5 +242,7 @@ nav:
       - ADR-0115 The tool-call budget ends research, never the answer: adr/0115-tool-call-budget-ends-research-not-the-answer.md
       - ADR-0116 Bulk mail never forms communication memory: adr/0116-bulk-mail-never-forms-communication-memory.md
       - ADR-0117 Memory review and deletion over HTTP: adr/0117-memory-review-and-deletion-over-http.md
+      - ADR-0118 Crash retries exclude durable continuations: adr/0118-crash-retries-exclude-durable-continuations.md
+      - ADR-0119 Owner-chosen models and reasoning effort: adr/0119-owner-chosen-models-and-reasoning-effort.md
       - ADR-0120 Files attached to chat messages: adr/0120-chat-attachments.md
   - Changelog: changelog.md
