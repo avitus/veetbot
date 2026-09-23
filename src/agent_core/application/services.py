@@ -166,6 +166,19 @@ class ArtifactService(Protocol):
 
     async def open_content(self, principal: Principal, artifact_id: UUID) -> ArtifactContent: ...
 
+    async def upload(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        *,
+        content: bytes,
+        filename: str,
+        declared_media_type: str,
+        idempotency_key: str | None,
+    ) -> tuple[ArtifactView, bool]:
+        """Store one chat attachment unclaimed; the flag is whether it replayed (ADR-0118)."""
+        ...
+
 
 class BrowserProfileService(Protocol):
     async def create(

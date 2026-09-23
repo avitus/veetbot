@@ -198,6 +198,7 @@ class MaintenanceWorker:
         sweep_device_invocations: Callable[[], Awaitable[int]] | None = None,
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
+        sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
@@ -223,6 +224,7 @@ class MaintenanceWorker:
         self._sweep_device_invocations = sweep_device_invocations
         self._sweep_terminal_schedules = sweep_terminal_schedules
         self._sweep_folder_proposals = sweep_folder_proposals
+        self._sweep_upload_ingests = sweep_upload_ingests
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
@@ -309,6 +311,11 @@ class MaintenanceWorker:
                 await self._sweep_artifacts()
             except Exception:
                 logger.exception("general artifact expiry sweep failed")
+        if self._sweep_upload_ingests is not None:
+            try:
+                await self._sweep_upload_ingests()
+            except Exception:
+                logger.exception("owner upload knowledge ingestion sweep failed")
         email_cache_sweep_due = (
             self._last_email_cache_sweep_at is None
             or self._clock.now() - self._last_email_cache_sweep_at

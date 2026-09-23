@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent_core.domain.policies import TrustLevel
 
@@ -27,7 +27,9 @@ class ArtifactRef(BaseModel):
     tenant_id: str
     principal_id: str
     session_id: UUID
-    run_id: UUID
+    # Null only before an ADR-0118 upload is claimed by the run of a sent
+    # message; the artifacts table enforces the same rule with a constraint.
+    run_id: UUID | None
     name: str
     media_type: str
     storage_uri: str
@@ -45,6 +47,12 @@ class ArtifactRef(BaseModel):
     expires_at: datetime | None
     created_at: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _run_required_outside_uploads(self) -> ArtifactRef:
+        if self.run_id is None and self.origin not in {"upload", "knowledge_source"}:
+            raise ValueError("only an upload or a knowledge source may have no run")
+        return self
 
 
 class TrajectoryExport(BaseModel):

@@ -42,6 +42,11 @@ class FolderNameError(AgentCoreError):
     control characters, or content failing the secret or injection scans."""
 
 
+class AttachmentValidationError(AgentCoreError):
+    """A chat attachment or an attachment reference broke one boundary rule
+    (ADR-0118): its name, media type, key, size, kind, or count."""
+
+
 class ScheduleValidationError(AgentCoreError):
     """A schedule definition failed one stable boundary rule."""
 

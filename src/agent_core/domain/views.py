@@ -67,7 +67,7 @@ class ImageContentBlock(BaseModel):
     type: Literal["image"] = "image"
     artifact_id: UUID
     media_type: str = Field(min_length=1)
-    detail: str = "auto"
+    detail: Literal["auto", "low", "high"] = "auto"
 
 
 class FileContentBlock(BaseModel):
@@ -379,7 +379,8 @@ class MemoryView(BaseModel):
 class ArtifactView(BaseModel):
     id: UUID
     session_id: UUID
-    run_id: UUID
+    # Null only for an ADR-0118 upload that no sent message has claimed yet.
+    run_id: UUID | None
     name: str
     media_type: str
     sha256: str

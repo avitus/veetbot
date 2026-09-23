@@ -11,7 +11,7 @@ import signal
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import partial
@@ -29,6 +29,7 @@ from sqlalchemy.sql.functions import func
 
 from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
+from agent_core.adapters.artifacts.inspection import SignatureAttachmentInspector
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.browser.authentications import (
     InMemoryBrowserAuthenticationRepository,
@@ -68,6 +69,7 @@ from agent_core.adapters.identity import (
     StaticPrincipalResolver,
 )
 from agent_core.adapters.judgment import TypeSafeJudgmentProvider
+from agent_core.adapters.knowledge.pdf import PdfTextExtractor
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
@@ -241,6 +243,7 @@ from agent_core.adapters.whatsapp import (
 from agent_core.api.call_ingress import create_call_ingress
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
+from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
@@ -440,7 +443,13 @@ from agent_core.folders.grouping import ModelAssistedThreadGrouper
 from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
+from agent_core.knowledge.chunking import (
+    MAX_KNOWLEDGE_SOURCE_BYTES,
+    PlainTextExtractor,
+    RoutingExtractor,
+)
 from agent_core.knowledge.service import KnowledgeService
+from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
     calling_server_configs,
     email_server_configs,
@@ -489,6 +498,7 @@ from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.artifacts import AttachmentResolver
 from agent_core.ports.browser import BrowserProvider
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from agent_core.ports.browser_sessions import (
@@ -638,6 +648,7 @@ class Composition:
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
     judgment_provider: JudgmentProvider | None = None
+    attachment_resolver: AttachmentResolver | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2978,6 +2989,13 @@ async def _compose(
             clock,
             ids,
             principal,
+            # ADR-0118: PDFs the owner sends reach knowledge through their text layer.
+            extractor=RoutingExtractor(
+                [
+                    PlainTextExtractor(),
+                    PdfTextExtractor(maximum_bytes=MAX_KNOWLEDGE_SOURCE_BYTES),
+                ]
+            ),
             trace_retention=memory_profiles.traces,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
@@ -3742,6 +3760,8 @@ async def _compose(
                 artifacts=trajectory_artifact_store,
                 general_artifacts=general_artifact_store,
                 clock=clock,
+                ids=ids,
+                inspector=SignatureAttachmentInspector(),
             ),
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
@@ -3904,6 +3924,9 @@ async def _compose(
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
                     ),
+                    sweep_upload_ingests=UploadAutoIngest(
+                        uow_factory=uow_factory, knowledge=knowledge_service, principal=principal
+                    ).sweep_once,
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
@@ -3950,7 +3973,11 @@ async def _compose(
         raise
 
 
-def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[str, ModelProvider]:
+def _provider_adapters(
+    settings: Settings,
+    registry: ProviderRegistry,
+    attachment_resolver: AttachmentResolver | None = None,
+) -> dict[str, ModelProvider]:
     providers: dict[str, ModelProvider] = {}
     for profile_name, loaded in registry.profiles.items():
         profile = loaded.document
@@ -3960,13 +3987,21 @@ def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[s
             provider: ModelProvider = (
                 MissingCredentialProvider("openai")
                 if api_key is None
-                else OpenAIResponsesProvider(api_key=api_key, base_url=profile.base_url)
+                else OpenAIResponsesProvider(
+                    api_key=api_key,
+                    base_url=profile.base_url,
+                    attachment_resolver=attachment_resolver,
+                )
             )
         elif profile.adapter == "anthropic":
             provider = (
                 MissingCredentialProvider("anthropic")
                 if api_key is None
-                else AnthropicMessagesProvider(api_key=api_key, base_url=profile.base_url)
+                else AnthropicMessagesProvider(
+                    api_key=api_key,
+                    base_url=profile.base_url,
+                    attachment_resolver=attachment_resolver,
+                )
             )
         elif profile.adapter == "chat_completions":
             tags = profile.in_band_reasoning
@@ -3975,6 +4010,7 @@ def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[s
                 api_key=api_key,
                 think_open="<think>" if tags is None else tags.open,
                 think_close="</think>" if tags is None else tags.close,
+                attachment_resolver=attachment_resolver,
             )
         else:
             raise ConfigurationError(f"adapter {profile.adapter!r} is not constructible")
@@ -4530,7 +4566,17 @@ async def build(
                     effective_principal.tenant_id,
                 ),
             )
-        provider_adapters = _provider_adapters(effective_settings, provider_registry)
+        # ADR-0118: every constructed adapter can read the owner's attachments,
+        # whether or not the upload flag is on, so existing ones keep rendering.
+        attachment_resolver = StoredAttachmentResolver(
+            uow_factory=uow_factory,
+            store=FilesystemArtifactStore(effective_settings.artifact_root),
+            principal=effective_principal,
+            clock=effective_clock,
+        )
+        provider_adapters = _provider_adapters(
+            effective_settings, provider_registry, attachment_resolver
+        )
         effective_credential_resolver = credential_resolver or MappingCredentialResolver(
             {
                 name: secret.get_secret_value()
@@ -4722,6 +4768,7 @@ async def build(
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
         )
+        composition = replace(composition, attachment_resolver=attachment_resolver)
         yield composition
     finally:
         if composition is not None:

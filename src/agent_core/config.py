@@ -158,6 +158,7 @@ class Settings:
     email_enabled: bool = False
     email_mode_enabled: bool = False
     email_unsubscribe_enabled: bool = False
+    attachment_uploads_enabled: bool = False
     email_semantic_evidence: Path | None = None
     email_account_ids: tuple[str, ...] = ()
     push_provider: PushProviderKind = PushProviderKind.DISABLED
@@ -1667,6 +1668,7 @@ def _load_settings(
             "AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
             "and AGENT_EMAIL_MODE_ENABLED=1"
         )
+    attachment_uploads_enabled = _parse_flag(values, "AGENT_ATTACHMENT_UPLOADS_ENABLED")
     raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
     email_semantic_evidence = (
         Path(raw_email_semantic_evidence).expanduser().resolve()
@@ -1863,6 +1865,7 @@ def _load_settings(
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
         email_unsubscribe_enabled=email_unsubscribe_enabled,
+        attachment_uploads_enabled=attachment_uploads_enabled,
         email_semantic_evidence=email_semantic_evidence,
         email_account_ids=email_account_ids,
         push_provider=push_provider,

@@ -1756,7 +1756,7 @@ class ArtifactService(Protocol):
     ) -> ArtifactContent: ...
 ```
 
-ADR-0118 adds `upload(principal, session_id, *, stream, filename,
+ADR-0118 adds `upload(principal, session_id, *, content, filename,
 declared_media_type, idempotency_key)`, returning the view and whether it was
 a replay.
 

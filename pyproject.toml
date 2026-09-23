@@ -31,6 +31,7 @@ dependencies = [
   "uvicorn>=0.34,<1",
   "mcp>=2.0,<3",
   "zstandard==0.25.0",
+  "pypdf>=6.1,<7",
 ]
 
 [project.scripts]

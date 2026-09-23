@@ -349,6 +349,36 @@ class ArtifactRepository(Protocol):
 
     async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool: ...
 
+    async def claim_upload(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        auto_ingest: bool,
+    ) -> ArtifactRef:
+        """Bind an upload to the run of the message that sent it (ADR-0118).
+
+        The first claim sets the run and removes the expiry; a later claim of
+        the same upload changes nothing but may still mark it for ingestion.
+        """
+        ...
+
+    async def pending_auto_ingest(
+        self, principal: Principal, *, limit: int
+    ) -> list[ArtifactRef]: ...
+
+    async def record_auto_ingest(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        state: str,
+        reason: str | None,
+        attempts: int,
+    ) -> ArtifactRef: ...
+
 
 class MaintenanceRepository(Protocol):
     async def live_run_leases(self) -> frozenset[tuple[UUID, int]]: ...

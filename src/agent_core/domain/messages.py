@@ -39,6 +39,10 @@ class ImageReferencePart(BaseModel):
     artifact_id: UUID
     media_type: str
     detail: str = "auto"
+    # Server-set facts of an admitted upload (ADR-0118); absent on older events.
+    filename: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    page_count: int | None = Field(default=None, ge=0)
 
 
 class FileReferencePart(BaseModel):
@@ -46,6 +50,9 @@ class FileReferencePart(BaseModel):
     artifact_id: UUID
     media_type: str
     filename: str | None = None
+    # Server-set facts of an admitted upload (ADR-0118); absent on older events.
+    size_bytes: int | None = Field(default=None, ge=0)
+    page_count: int | None = Field(default=None, ge=0)
 
 
 type ContentPart = TextPart | ImageReferencePart | FileReferencePart

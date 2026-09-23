@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 from agent_core.domain.messages import ConversationItem
 from agent_core.domain.tools import ToolSpec
+from agent_core.model.attachments import estimate_attachment_tokens
 from agent_core.model.tool_definitions import tool_definition
 
 
@@ -57,7 +58,14 @@ class ConservativeTokenEstimator:
 
     def estimate(self, items: Sequence[ConversationItem], model_id: str) -> int:
         payload = canonical_json_bytes([item.model_dump(mode="json") for item in items])
-        return self._estimate("items", payload, len(items), model_id)
+        estimate = self._estimate("items", payload, len(items), model_id)
+        # ADR-0118: a reference serializes small, but the adapter may send the
+        # file; count every attachment it could send so budgets stay honest.
+        attachments = estimate_attachment_tokens(items)
+        if attachments:
+            factor = max(1.0, self._correction.get(model_id, 1.0))
+            estimate += math.ceil(attachments * factor)
+        return estimate
 
     def estimate_tools(self, tools: Sequence[ToolSpec], model_id: str) -> int:
         # Use the larger normalized provider shape as the conservative bound.

@@ -20,13 +20,19 @@ from openai import (
 
 from agent_core.adapters.models.common import (
     RawEventSource,
+    RenderedAttachments,
+    UserSegment,
     as_mapping,
+    base64_data,
     classify_provider_failure,
     failed_event,
+    has_attachment_parts,
     nested,
+    rendered_attachments,
     should_retry_failure_event,
     text_content,
     tool_definition,
+    user_segments,
 )
 from agent_core.adapters.models.registry import OPENAI_CAPABILITY_CEILING
 from agent_core.domain.messages import (
@@ -48,8 +54,10 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
+from agent_core.model.attachments import display_name
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
+from agent_core.ports.artifacts import AttachmentResolver
 
 _OPENAI_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 logger = logging.getLogger(__name__)
@@ -90,6 +98,7 @@ class OpenAIResponsesProvider:
         event_source: RawEventSource | None = None,
         client: object | None = None,
         max_internal_attempts: int = 3,
+        attachment_resolver: AttachmentResolver | None = None,
     ) -> None:
         self._event_source = event_source
         self._client = client
@@ -97,6 +106,7 @@ class OpenAIResponsesProvider:
         self._base_url = base_url
         self._api_key = api_key
         self._max_internal_attempts = max_internal_attempts
+        self._attachment_resolver = attachment_resolver
         if self._owns_client:
             if not api_key:
                 raise ValueError("OpenAI provider requires its resolved credential")
@@ -121,8 +131,11 @@ class OpenAIResponsesProvider:
         resolved: ResolvedModel,
         attempt: ModelAttempt,
     ) -> AsyncIterator[ModelEvent]:
+        attachments = await rendered_attachments(
+            self._attachment_resolver, request, resolved, attempt
+        )
         try:
-            payload = self._request_payload(request, resolved)
+            payload = self._request_payload(request, resolved, attachments)
         except (TypeError, ValueError, ModelStreamError):
             yield failed_event(
                 attempt=attempt,
@@ -470,14 +483,27 @@ class OpenAIResponsesProvider:
         return StopReason.END_TURN
 
     @staticmethod
-    def _request_payload(request: ModelRequest, resolved: ResolvedModel) -> dict[str, Any]:
+    def _request_payload(
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attachments: RenderedAttachments | None = None,
+    ) -> dict[str, Any]:
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)
         canonical_to_wire, _ = _tool_name_maps(request)
         inputs: list[dict[str, Any]] = []
-        for item in request.conversation:
-            if isinstance(item, (SystemMessage, UserMessage, AssistantMessage)):
+        for item_index, item in enumerate(request.conversation):
+            if isinstance(item, UserMessage) and has_attachment_parts(item):
+                inputs.append(
+                    {
+                        "role": "user",
+                        "content": _user_content(
+                            user_segments(item_index, item, attachments or {})
+                        ),
+                    }
+                )
+            elif isinstance(item, (SystemMessage, UserMessage, AssistantMessage)):
                 inputs.append(
                     {
                         "role": item.kind,
@@ -554,3 +580,33 @@ def payload_previous_id(request: ModelRequest) -> str | None:
             if value is not None:
                 return str(value)
     return None
+
+
+def _user_content(segments: list[UserSegment]) -> list[dict[str, Any]]:
+    """Render an owner message with attachments as Responses input content."""
+
+    content: list[dict[str, Any]] = []
+    for segment in segments:
+        attachment = segment.attachment
+        if segment.kind == "text" or attachment is None or attachment.data is None:
+            content.append({"type": "input_text", "text": segment.text})
+        elif segment.kind == "image":
+            detail = getattr(attachment.part, "detail", "auto")
+            content.append(
+                {
+                    "type": "input_image",
+                    "image_url": (
+                        f"data:{attachment.part.media_type};base64,{base64_data(attachment.data)}"
+                    ),
+                    "detail": detail if detail in {"low", "high"} else "auto",
+                }
+            )
+        else:
+            content.append(
+                {
+                    "type": "input_file",
+                    "filename": display_name(attachment.part),
+                    "file_data": f"data:application/pdf;base64,{base64_data(attachment.data)}",
+                }
+            )
+    return content

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
+from uuid import UUID
 
+from agent_core.domain.artifacts import AttachmentContent
 from agent_core.domain.messages import (
     AssistantMessage,
     ContentPart,
@@ -16,12 +20,27 @@ from agent_core.domain.messages import (
     ModelFailedEvent,
     ModelPermanentError,
     ModelProtocolError,
+    ModelRequest,
     ModelTransientError,
+    ResolvedModel,
     TextPart,
+    UserMessage,
     sanitize_provider_code,
     sanitize_provider_parameter,
 )
+from agent_core.model.attachments import (
+    AttachmentKind,
+    MarkerReason,
+    RenderedAttachment,
+    planned_reads,
+    reference_marker,
+    render_attachments,
+    select_attachments,
+)
 from agent_core.model.tool_definitions import tool_definition as tool_definition
+from agent_core.ports.artifacts import AttachmentResolver
+
+logger = logging.getLogger(__name__)
 
 type RawEventSource = Callable[[dict[str, Any]], AsyncIterator[dict[str, Any]]]
 
@@ -158,7 +177,7 @@ def text_content(parts: list[ContentPart]) -> str:
         if isinstance(part, TextPart):
             rendered.append(part.text)
         elif isinstance(part, (ImageReferencePart, FileReferencePart)):
-            raise ValueError("artifact references require an artifact resolver")
+            rendered.append(reference_marker(part, MarkerReason.REFERENCE))
     return "\n".join(rendered)
 
 
@@ -223,3 +242,75 @@ def failed_event(
         sequence=sequence,
         error=error,
     )
+
+
+# -- attachments (ADR-0118) ------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UserSegment:
+    """One unit of an owner message: text, or an image or PDF to send natively."""
+
+    kind: Literal["text", "image", "pdf"]
+    text: str = ""
+    attachment: RenderedAttachment | None = None
+
+
+type RenderedAttachments = dict[tuple[int, int], RenderedAttachment]
+
+
+async def rendered_attachments(
+    resolver: AttachmentResolver | None,
+    request: ModelRequest,
+    resolved: ResolvedModel,
+    attempt: ModelAttempt,
+) -> RenderedAttachments:
+    """Select, read, and render the owner's attachments for one request."""
+
+    decisions = select_attachments(request.conversation)
+    if not decisions:
+        return {}
+    reads = planned_reads(decisions, resolved.capabilities)
+    contents: dict[UUID, AttachmentContent] = {}
+    if reads and resolver is not None:
+        try:
+            contents = dict(await resolver.resolve(reads, run_id=attempt.run_id))
+        except Exception:  # resolution failure degrades to markers, never a failed turn
+            logger.warning("attachment_resolution_failed", extra={"run_id": str(attempt.run_id)})
+    return render_attachments(decisions, resolved.capabilities, contents)
+
+
+def has_attachment_parts(item: UserMessage) -> bool:
+    return any(isinstance(part, (ImageReferencePart, FileReferencePart)) for part in item.content)
+
+
+def user_segments(
+    item_index: int, item: UserMessage, rendered: RenderedAttachments
+) -> list[UserSegment]:
+    segments: list[UserSegment] = []
+    for part_index, part in enumerate(item.content):
+        if isinstance(part, TextPart):
+            segments.append(UserSegment(kind="text", text=part.text))
+            continue
+        attachment = rendered.get((item_index, part_index))
+        if attachment is None:
+            segments.append(
+                UserSegment(kind="text", text=reference_marker(part, MarkerReason.REFERENCE))
+            )
+        elif attachment.marker is not None:
+            segments.append(UserSegment(kind="text", text=attachment.marker))
+        elif attachment.text is not None:
+            segments.append(UserSegment(kind="text", text=f"{attachment.label}\n{attachment.text}"))
+        elif attachment.data is not None:
+            segments.append(UserSegment(kind="text", text=attachment.label))
+            segments.append(
+                UserSegment(
+                    kind="image" if attachment.kind is AttachmentKind.IMAGE else "pdf",
+                    attachment=attachment,
+                )
+            )
+    return segments
+
+
+def base64_data(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")

@@ -14,6 +14,11 @@ from datetime import datetime, timedelta
 from typing import Literal, Protocol
 from uuid import UUID
 
+from agent_core.application.attachments import (
+    admit_content,
+    attachment_title,
+    claim_attachments,
+)
 from agent_core.application.authorization import require_scope
 from agent_core.application.errors import (
     MemoryCursorError,
@@ -31,11 +36,19 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.artifacts import StoredArtifactRef
+from agent_core.domain.artifacts import (
+    ATTACHMENT_METADATA_KEY,
+    UPLOAD_UNCLAIMED_TTL,
+    ArtifactMetadata,
+    ArtifactOrigin,
+    StoredArtifactRef,
+)
+from agent_core.domain.attachments import upload_key, upload_media_type, upload_name
 from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.canonical import canonical_json
 from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
+    AttachmentValidationError,
     AuthorizationError,
     ConflictError,
     InvalidStateTransition,
@@ -116,7 +129,12 @@ from agent_core.domain.views import (
     TextContentBlock,
     TransientStreamFrame,
 )
-from agent_core.ports.artifacts import ArtifactStore, TrajectoryArtifactStore
+from agent_core.model.attachments import UPLOAD_MAX_BYTES
+from agent_core.ports.artifacts import (
+    ArtifactStore,
+    AttachmentInspector,
+    TrajectoryArtifactStore,
+)
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import RunDispatcher
 from agent_core.ports.live_events import LiveEventBroadcaster
@@ -224,36 +242,16 @@ def _artifact_view(artifact: ArtifactRef) -> ArtifactView:
     )
 
 
-def _domain_content(
-    content: list[ContentBlock],
-) -> list[TextPart | ImageReferencePart | FileReferencePart]:
-    parts: list[TextPart | ImageReferencePart | FileReferencePart] = []
-    for block in content:
-        if isinstance(block, TextContentBlock):
-            parts.append(TextPart(text=block.text))
-        elif isinstance(block, ImageContentBlock):
-            parts.append(
-                ImageReferencePart(
-                    artifact_id=block.artifact_id,
-                    media_type=block.media_type,
-                    detail=block.detail,
-                )
-            )
-        elif isinstance(block, FileContentBlock):
-            parts.append(
-                FileReferencePart(
-                    artifact_id=block.artifact_id,
-                    media_type=block.media_type,
-                    filename=block.filename,
-                )
-            )
-    if not parts:
-        raise ValueError("content must contain at least one block")
-    return parts
-
-
 def _wire_content(content: list[ContentBlock]) -> list[dict[str, object]]:
     return [block.model_dump(mode="json") for block in content]
+
+
+def _image_detail(detail: str) -> Literal["auto", "low", "high"]:
+    if detail == "low":
+        return "low"
+    if detail == "high":
+        return "high"
+    return "auto"
 
 
 def _content_view(
@@ -268,7 +266,7 @@ def _content_view(
                 ImageContentBlock(
                     artifact_id=part.artifact_id,
                     media_type=part.media_type,
-                    detail=part.detail,
+                    detail=_image_detail(part.detail),
                 )
             )
         elif isinstance(part, FileReferencePart):
@@ -802,7 +800,7 @@ class PublicRunService:
                 disposition=InboundDisposition.INPUT_DELIVERED,
                 dispatch_kind="resume",
             )
-        parts = _domain_content(content)
+        parts = await admit_content(uow, principal, session.id, content, now=self._clock.now())
         if session.title is None and (
             await uow.runs.latest_for_session(session.id, principal) is None
         ):
@@ -815,6 +813,8 @@ class PublicRunService:
                 ),
                 None,
             )
+            if title is None and (named := attachment_title(parts)) is not None:
+                title = conversation_title(named)
             if title is not None:
                 session = await uow.sessions.set_title_if_missing(session.id, principal, title)
         agent = await uow.agents.get_version(session.agent_id, session.agent_version)
@@ -842,6 +842,9 @@ class PublicRunService:
             await uow.runs.create(run)
         else:
             await uow.queue.enqueue(run, priority=run.priority, scheduled_for=now)
+        await claim_attachments(
+            uow, principal, session.id, run.id, parts, owner_sent=actor_type == "principal"
+        )
         derivation_key = (
             None
             if derivation_namespace is None or derivation_suffix is None
@@ -1116,7 +1119,10 @@ class PublicRunService:
         effective_question = question_id or outstanding_id
         if effective_question != outstanding_id:
             raise ConflictError("the question was already resolved")
-        parts = _domain_content(content)
+        parts = await admit_content(uow, principal, run.session_id, content, now=self._clock.now())
+        await claim_attachments(
+            uow, principal, run.session_id, run.id, parts, owner_sent=actor_type == "principal"
+        )
         suffix = derivation_suffix or f"{run.id}:{effective_question}"
         await uow.events.append(
             NewEvent(
@@ -1400,6 +1406,20 @@ class PublicApprovalService:
         return _approval_view(outcome.approval)
 
 
+class _UploadRaceError(Exception):
+    """Another request with the same key committed first; replay it instead."""
+
+    def __init__(self, request_hash: object, artifact_id: object) -> None:
+        super().__init__("upload idempotency race")
+        self.request_hash = request_hash
+        self.artifact_id = artifact_id
+
+
+async def _chunks(content: bytes, size: int = 64 * 1024) -> AsyncIterator[bytes]:
+    for offset in range(0, len(content), size):
+        yield content[offset : offset + size]
+
+
 class PublicArtifactService:
     def __init__(
         self,
@@ -1408,11 +1428,15 @@ class PublicArtifactService:
         artifacts: TrajectoryArtifactStore,
         general_artifacts: ArtifactStore,
         clock: Clock,
+        ids: IdFactory | None = None,
+        inspector: AttachmentInspector | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._artifacts = artifacts
         self._general_artifacts = general_artifacts
         self._clock = clock
+        self._ids = ids
+        self._inspector = inspector
 
     async def _get_ref(self, principal: Principal, artifact_id: UUID) -> tuple[ArtifactRef, bool]:
         async with self._uow_factory() as uow:
@@ -1453,6 +1477,147 @@ class PublicArtifactService:
                 raise NotFoundError("artifact not found") from exc
 
         return ArtifactContent(artifact=_artifact_view(artifact), open=open_stream)
+
+    # -- uploads (ADR-0118) -------------------------------------------------------
+    #
+    # The receipt is a content-free session event keyed by the idempotency key,
+    # appended in the same transaction as the artifact row. The append takes the
+    # derivation lock, so of two requests carrying one key exactly one receipt
+    # commits; the other request rolls back its row, deletes its bytes, and
+    # replays the winner.
+
+    async def upload(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        *,
+        content: bytes,
+        filename: str,
+        declared_media_type: str,
+        idempotency_key: str | None,
+    ) -> tuple[ArtifactView, bool]:
+        require_scope(principal, "artifact.write")
+        if self._ids is None or self._inspector is None:
+            raise NotFoundError("attachment uploads are unavailable")
+        name = upload_name(filename)
+        declared = upload_media_type(declared_media_type)
+        key = upload_key(idempotency_key)
+        if not content:
+            raise AttachmentValidationError("An upload needs a non-empty body.")
+        if len(content) > UPLOAD_MAX_BYTES:
+            raise AttachmentValidationError("The file exceeds the 32 MiB upload limit.")
+        sha256 = hashlib.sha256(content).hexdigest()
+        scoped = hashlib.sha256(
+            json.dumps([principal.tenant_id, principal.principal_id, key]).encode()
+        ).hexdigest()
+        derivation = f"artifact.upload:{scoped}"
+        request_hash = hashlib.sha256(
+            canonical_json(
+                {
+                    "session_id": str(session_id),
+                    "name": name,
+                    "media_type": declared,
+                    "sha256": sha256,
+                    "size_bytes": len(content),
+                }
+            ).encode("utf-8")
+        ).hexdigest()
+        async with self._uow_factory() as uow:
+            session = await uow.sessions.get(session_id, principal)
+            if session.status is SessionStatus.CLOSED:
+                raise InvalidStateTransition("closed sessions cannot accept uploads")
+            receipt = await uow.events.get_by_derivation(derivation, principal)
+        if receipt is not None:
+            return await self._replay_upload(
+                principal,
+                receipt.payload.get("request_hash"),
+                receipt.payload.get("artifact_id"),
+                request_hash,
+            ), True
+        facts = await self._inspector.inspect(content, filename=name, declared_media_type=declared)
+        artifact_id = self._ids.new_id()
+        now = self._clock.now()
+        expires_at = now + UPLOAD_UNCLAIMED_TTL
+        stored = await self._general_artifacts.put(
+            _chunks(content),
+            ArtifactMetadata(
+                artifact_id=artifact_id,
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                session_id=session_id,
+                run_id=None,
+                origin=ArtifactOrigin.UPLOAD,
+                filename=name,
+                media_type=facts.media_type,
+                size_bytes=len(content),
+                sha256=sha256,
+                trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                created_at=now,
+                expires_at=expires_at,
+            ),
+        )
+        artifact = ArtifactRef(
+            id=artifact_id,
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            session_id=session_id,
+            run_id=None,
+            name=name,
+            media_type=facts.media_type,
+            storage_uri="",
+            sha256=stored.sha256,
+            size_bytes=stored.size_bytes,
+            origin=ArtifactOrigin.UPLOAD.value,
+            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            expires_at=expires_at,
+            created_at=now,
+            metadata={ATTACHMENT_METADATA_KEY: facts.metadata()},
+        )
+        try:
+            async with self._uow_factory() as uow:
+                # The row precedes its receipt, so a failed row never leaves a
+                # receipt behind even in the in-memory tier, which cannot roll back.
+                created = await uow.artifacts.create(artifact)
+                appended = await uow.events.append(
+                    NewEvent(
+                        session_id=session_id,
+                        run_id=None,
+                        event_type="artifact.uploaded",
+                        actor_type="user",
+                        actor_id=principal.principal_id,
+                        derivation_key=derivation,
+                        payload={"request_hash": request_hash, "artifact_id": str(artifact_id)},
+                    )
+                )
+                if appended.payload.get("artifact_id") != str(artifact_id):
+                    raise _UploadRaceError(
+                        appended.payload.get("request_hash"), appended.payload.get("artifact_id")
+                    )
+        except BaseException as exc:
+            try:
+                await self._general_artifacts.delete(stored, tenant_id=principal.tenant_id)
+            except Exception:
+                logger.exception(
+                    "upload_rollback_delete_failed", extra={"artifact_id": str(artifact_id)}
+                )
+            if isinstance(exc, _UploadRaceError):
+                return await self._replay_upload(
+                    principal, exc.request_hash, exc.artifact_id, request_hash
+                ), True
+            raise
+        return _artifact_view(created), False
+
+    async def _replay_upload(
+        self, principal: Principal, recorded_hash: object, artifact_id: object, request_hash: str
+    ) -> ArtifactView:
+        if recorded_hash != request_hash:
+            raise ConflictError(
+                "The idempotency key was reused with a different upload.",
+                reason="idempotency_key_reused",
+            )
+        async with self._uow_factory() as uow:
+            artifact = await uow.artifacts.get(UUID(str(artifact_id)), principal)
+        return _artifact_view(artifact)
 
 
 def _encode_memory_cursor(row: MemoryRecord) -> str:

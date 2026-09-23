@@ -600,6 +600,15 @@ class ArtifactRow(Base):
             "expires_at",
             postgresql_where=text("origin <> 'trajectory_export' AND expires_at IS NOT NULL"),
         ),
+        Index(
+            "ix_artifacts_upload_ingest_pending",
+            "created_at",
+            postgresql_where=text("(metadata ->> 'auto_ingest') = 'pending'"),
+        ),
+        CheckConstraint(
+            "run_id IS NOT NULL OR origin IN ('upload', 'knowledge_source')",
+            name="run_or_upload",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -608,7 +617,7 @@ class ArtifactRow(Base):
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
     )
-    run_id: Mapped[UUID] = mapped_column(
+    run_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(Text)

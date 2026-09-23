@@ -11,14 +11,27 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import AuthenticationError
+from agent_core.model.attachments import UPLOAD_MAX_BYTES
 
 MAX_BODY_BYTES = 1024 * 1024
 MAX_CONCURRENT_BUFFERED_BODIES = 16
+# ADR-0118: the attachment upload streams to its handler instead of being
+# pre-read, under its own limit and its own small concurrency bound.
+MAX_CONCURRENT_UPLOADS = 4
+UPLOAD_PATH = re.compile(r"^/v1/sessions/[0-9A-Fa-f-]{36}/artifacts$")
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+def body_limit_message(limit_bytes: int) -> str:
+    return f"The request body exceeds the {limit_bytes // (1024 * 1024)} MiB limit."
 
 
 class PayloadTooLargeError(ValueError):
     """The ASGI receive stream exceeded the public request cap."""
+
+    def __init__(self, limit_bytes: int = MAX_BODY_BYTES) -> None:
+        super().__init__(body_limit_message(limit_bytes))
+        self.limit_bytes = limit_bytes
 
 
 class RequestBoundaryMiddleware:
@@ -27,11 +40,14 @@ class RequestBoundaryMiddleware:
         app: ASGIApp,
         new_request_id: Callable[[], str],
         early_authenticate: Callable[[Scope], Principal],
+        uploads_enabled: bool = False,
     ) -> None:
         self._app = app
         self._new_request_id = new_request_id
         self._early_authenticate = early_authenticate
+        self._uploads_enabled = uploads_enabled
         self._body_slots = asyncio.Semaphore(MAX_CONCURRENT_BUFFERED_BODIES)
+        self._upload_slots = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -62,6 +78,11 @@ class RequestBoundaryMiddleware:
             send = private_email_send
         has_body = method in {"POST", "PUT", "PATCH"}
         is_versioned_api = path.startswith("/v1/")
+        is_upload = (
+            self._uploads_enabled and method == "POST" and UPLOAD_PATH.fullmatch(path) is not None
+        )
+        limit = UPLOAD_MAX_BYTES if is_upload else MAX_BODY_BYTES
+        too_large = body_limit_message(limit)
         if has_body and is_versioned_api:
             try:
                 state["authenticated_principal"] = self._early_authenticate(scope)
@@ -114,14 +135,18 @@ class RequestBoundaryMiddleware:
                     "Content-Length must be a non-negative integer.",
                 )
                 return
-            if declared_length > MAX_BODY_BYTES:
-                await _boundary_error(send, request_id, "payload_too_large", 413)
+            if declared_length > limit:
+                await _boundary_error(send, request_id, "payload_too_large", 413, too_large)
                 return
 
         consumed = 0
         buffered: deque[Message] = deque()
         body_slot_acquired = False
-        if has_body and is_versioned_api:
+        upload_slot_acquired = False
+        if is_upload:
+            await self._upload_slots.acquire()
+            upload_slot_acquired = True
+        elif has_body and is_versioned_api:
             await self._body_slots.acquire()
             body_slot_acquired = True
             try:
@@ -151,8 +176,8 @@ class RequestBoundaryMiddleware:
             message = await receive()
             if message["type"] == "http.request":
                 consumed += len(message.get("body", b""))
-                if consumed > MAX_BODY_BYTES:
-                    raise PayloadTooLargeError
+                if consumed > limit:
+                    raise PayloadTooLargeError(limit)
             return message
 
         async def identified_send(message: Message) -> None:
@@ -169,10 +194,12 @@ class RequestBoundaryMiddleware:
         except PayloadTooLargeError:
             if response_started:
                 raise
-            await _boundary_error(send, request_id, "payload_too_large", 413)
+            await _boundary_error(send, request_id, "payload_too_large", 413, too_large)
         finally:
             if body_slot_acquired:
                 self._body_slots.release()
+            if upload_slot_acquired:
+                self._upload_slots.release()
 
 
 async def _boundary_error(

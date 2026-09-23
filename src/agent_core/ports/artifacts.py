@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Protocol
 from uuid import UUID
 
-from agent_core.domain.artifacts import ArtifactMetadata, ArtifactOrigin, StoredArtifactRef
+from agent_core.domain.artifacts import (
+    ArtifactMetadata,
+    ArtifactOrigin,
+    AttachmentContent,
+    AttachmentFacts,
+    AttachmentRead,
+    StoredArtifactRef,
+)
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 
@@ -59,3 +66,29 @@ class ArtifactWriterProvider(Protocol):
         run_id: UUID,
         origin: ArtifactOrigin,
     ) -> ArtifactWriter: ...
+
+
+class AttachmentInspector(Protocol):
+    """Classify an upload from its bytes (ADR-0118).
+
+    The result's media type is the detected one; a declared type is kept only
+    when nothing in the bytes contradicts it. Inspection never refuses a file:
+    anything it cannot read is kind `other`.
+    """
+
+    async def inspect(
+        self, content: bytes, *, filename: str, declared_media_type: str
+    ) -> AttachmentFacts: ...
+
+
+class AttachmentResolver(Protocol):
+    """Release attachment bytes to a model adapter for one run (ADR-0118).
+
+    Only an upload of the run's principal in the run's session that has not
+    expired is released; anything else is absent from the result, and the
+    adapter renders it as a marker. Reads never exceed their `max_bytes`.
+    """
+
+    async def resolve(
+        self, reads: Sequence[AttachmentRead], *, run_id: UUID
+    ) -> Mapping[UUID, AttachmentContent]: ...
