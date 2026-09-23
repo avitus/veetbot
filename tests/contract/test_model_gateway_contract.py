@@ -12,7 +12,7 @@ from uuid import UUID
 
 import httpx
 import pytest
-from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError
+from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError, AsyncAnthropic
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIError as OpenAIAPIError
 from openai import APIResponseValidationError as OpenAIAPIResponseValidationError
@@ -230,6 +230,34 @@ def test_openai_responses_sends_the_requested_reasoning_effort() -> None:
     )
 
     assert payload["reasoning"] == {"effort": "high"}
+
+
+async def test_anthropic_sdk_sends_reasoning_effort_over_http() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def handler(request_value: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request_value.content))
+        events = anthropic_text_events("SDK accepted effort")
+        body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text=body)
+
+    async with AsyncAnthropic(
+        api_key="test-key",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        max_retries=0,
+    ) as client:
+        provider = AnthropicMessagesProvider(client=client)
+        turn = await collect_turn(
+            provider.stream(
+                request().model_copy(update={"reasoning_effort": ReasoningEffort.HIGH}),
+                resolved("anthropic"),
+                ATTEMPT,
+            )
+        )
+
+    assert len(requests) == 1
+    assert requests[0]["output_config"] == {"effort": "high"}
+    assert turn.stop_reason is StopReason.END_TURN
 
 
 def test_anthropic_messages_sends_the_requested_reasoning_effort() -> None:

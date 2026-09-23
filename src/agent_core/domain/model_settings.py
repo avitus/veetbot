@@ -20,6 +20,14 @@ MODEL_POLICY_PATTERN = r"^[a-z][a-z0-9_-]*$"
 DEFAULT_CHAT_REASONING_EFFORT = ReasoningEffort.HIGH
 
 
+def default_chat_effort(accepted: tuple[ReasoningEffort, ...]) -> ReasoningEffort | None:
+    """Choose the preferred effort, then the model's first accepted effort."""
+
+    if DEFAULT_CHAT_REASONING_EFFORT in accepted:
+        return DEFAULT_CHAT_REASONING_EFFORT
+    return accepted[0] if accepted else None
+
+
 class ModelChoice(BaseModel):
     """A model policy and the reasoning effort sent with it.
 
@@ -160,11 +168,7 @@ class ModelSettingsView(BaseModel):
             chat_options=tuple(
                 ChatModelOptionView(
                     **option.model_dump(),
-                    default_reasoning_effort=(
-                        DEFAULT_CHAT_REASONING_EFFORT
-                        if DEFAULT_CHAT_REASONING_EFFORT in option.reasoning_efforts
-                        else (option.reasoning_efforts[0] if option.reasoning_efforts else None)
-                    ),
+                    default_reasoning_effort=default_chat_effort(option.reasoning_efforts),
                 )
                 for option in catalog.chat_options
             ),
