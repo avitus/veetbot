@@ -4,6 +4,33 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-23 — People holds who you know or write to
+
+- Production People held 130 provisional people, 128 of them names from
+  email bodies: strangers, pronouns, the owner's own address, and other
+  people's relatives. ADR-0121: a person joins only through an owner action,
+  an owner Chat claim that ties them to the owner, or mail the owner sent.
+  Every other mention links to someone already in People or stays
+  unresolved, and its fact still forms.
+- Correspondence had never run, because every refresh marks the account
+  syncing and projection required ready. It now needs only the account's
+  address. Mail from an unknown sender records an unattached endpoint, and
+  the owner's first reply adds the person with that earlier mail as history.
+  A gap between two holders of an address creates no duplicate, and ending an
+  alias ends every copy of it.
+- Resolution reads each assignment once by exact value, so a frequent
+  correspondent stays matched. Pronouns and the owner's own identities never
+  name a person or reach Chat context. A person the owner creates gets an
+  owner-confirmed name alias.
+- `GET /v1/people` accepts a repeated `state` and `review=true`. The Apple
+  client's People and Pinned collections list active and provisional people,
+  and Needs review holds only people known by a name or role alone.
+- `agent people repair-directory --owner TENANT/PRINCIPAL` previews the
+  one-time cleanup. `--confirm` backfills 90 days of correspondence, adds
+  owner name aliases, and removes people nothing the owner did ties to them.
+  It deletes the facts mail formed only about them, which also resets their
+  threads' generated summaries, and keeps facts the owner stated, unlinked.
+
 ## 2026-09-23 — Files can be dropped into the chat
 
 - ADR-0120: `POST /v1/sessions/{id}/artifacts` uploads one file (at most

@@ -129,3 +129,4 @@ implementation without one.
 - [ADR-0118 — Crash retries exclude durable continuations (Accepted; amends ADR-0004)](0118-crash-retries-exclude-durable-continuations.md)
 - [ADR-0119 — Owner-chosen models and reasoning effort (Accepted)](0119-owner-chosen-models-and-reasoning-effort.md)
 - [ADR-0120 — Files attached to chat messages (Accepted)](0120-chat-attachments.md)
+- [ADR-0121 — People holds who the owner knows or writes to (Accepted; amends ADR-0100 and ADR-0116)](0121-people-holds-who-the-owner-knows-or-writes-to.md)

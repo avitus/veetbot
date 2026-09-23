@@ -2113,7 +2113,9 @@ revision or preview. Source reads additionally require `session.read` or
 `email.read`. All responses carry `Cache-Control: private, no-store`.
 
 The public directory binds relationship/state/pin filters, sort, ceiling, time,
-and both People and belief watermarks into its cursor. Import discovery uses
+and both People and belief watermarks into its cursor. `state` may repeat and
+binds as a sorted set; `review=true` selects Needs review (ADR-0121). An
+unknown state is a `400` request validation error. Import discovery uses
 its own owner-bound cursor and restores an existing job without widening its
 source scope. Static import and operation routes precede dynamic person IDs.
 The `/v1/memories` table is unchanged by People: two reads and the two

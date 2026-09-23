@@ -48,6 +48,11 @@ project:
   # ADR-0118 records the owner-authorized runtime repair on 2026-09-23:
   # normal continuations do not consume crash retries; exhausted queued runs
   # fail visibly and the migration preserves actual lease-expiration history.
+  # ADR-0121 records the owner's non-milestone repair to Milestone 28 on
+  # 2026-09-23: People admits only people the owner knows or writes to, mail
+  # records correspondence whatever the account state, Needs review holds only
+  # unconfirmed name-only people, and `agent people repair-directory` aligns
+  # existing data; the People gate count is unchanged.
   authorized_milestones:
     - 0
     - 1

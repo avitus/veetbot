@@ -192,6 +192,53 @@ cleanup receipt stays visible in the person's detail until those copies finish
 clearing. Existing rejection records retain suppression hashes without the
 deleted subject or statement.
 
+## Directory repair
+
+[ADR-0121](adr/0121-people-holds-who-the-owner-knows-or-writes-to.md) limits
+People to the people the owner knows or writes to. Data formed before it can
+hold strangers named in mail, pronouns, and the owner's own addresses, and no
+correspondence history. Run the one-time repair after deploying it:
+
+```text
+agent people repair-directory --owner TENANT/PRINCIPAL
+agent people repair-directory --owner TENANT/PRINCIPAL --confirm
+```
+
+The first command is a preview and writes nothing. It reports:
+
+- each person the repair would remove, with a reason of `unconfirmed`,
+  `pronoun`, or `self`;
+- the active people who would get an owner-confirmed name alias;
+- how many facts would be deleted or unlinked;
+- how many mail threads would have their generated summaries reset.
+
+The preview is computed before the correspondence backfill, which can only
+keep more people. To keep someone it lists, confirm or pin them in the People
+browser. A listed duplicate of someone you know can be confirmed and then
+merged with Repair identity.
+
+With `--confirm` the repair runs three steps:
+
+1. It projects the headers of retained mail from the last 90 days again, one
+   message per transaction and without model calls. Bulk, excluded,
+   suppressed, and unverifiable mail is skipped and counted.
+2. It adds the owner-confirmed name aliases, recorded as owner assertions in
+   a new People management session.
+3. It removes each listed person that still qualifies, in its own transaction
+   under the owner's mail and People locks.
+
+Removing a person deletes the facts that mail formed only about removed people
+through the governed delete. Each deletion also resets the generated summary
+of the thread the fact came from and excludes that retained passage from
+further formation. Facts you stated remain, unlinked. Mentions and address
+endpoints remain, detached from the person, so a later reply adopts that mail
+as history. An interaction with other people keeps them. The original messages
+remain, no source is suppressed, and each removal appends a content-free
+`people.directory_pruned` event to the repair's session.
+
+The repair refuses to run while a People import is queued or running. A second
+run changes nothing. Rerun it after restoring a snapshot taken before it ran.
+
 ## Historical imports
 
 Name exact source sessions/accounts, inclusive start, exclusive end, exclusions,
