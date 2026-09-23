@@ -26,6 +26,7 @@ from agent_core.domain.email_semantics import (
 )
 from agent_core.domain.email_semantics import (
     EmailSemanticValue,
+    thread_source_key,
 )
 from agent_core.domain.email_semantics import (
     semantic_source_key as semantic_source_key,
@@ -403,6 +404,17 @@ class EmailSemanticFormationService:
             raise ToolTrustRejectedError("email source result has invalid trust or identity")
         return document, event
 
+    async def bulk_indexed(
+        self, uow: RepositoryUnitOfWork, account_id: str, provider_thread_id: str
+    ) -> bool:
+        """Whether the unsubscribe census indexes this thread to a bulk sender (ADR-0116).
+
+        The index key is the account-qualified thread key that source exclusion
+        tombstones already use, so no application module is imported here.
+        """
+        key = thread_source_key(account_id, provider_thread_id)
+        return await uow.email.get(self._principal, "subscription_thread", key) is not None
+
     async def _validate_source(
         self,
         uow: RepositoryUnitOfWork,
@@ -413,6 +425,10 @@ class EmailSemanticFormationService:
         ).hexdigest()
         if await uow.email.get(self._principal, "excluded_source", exclusion_key) is not None:
             raise ConflictError("this email thread was excluded")
+        if await self.bulk_indexed(uow, source.account_id, source.provider_thread_id):
+            # ADR-0116: a thread the unsubscribe census indexes is bulk mail, and bulk
+            # mail registers no source and forms nothing, whoever the caller is.
+            raise ConflictError("bulk email never forms communication memory")
         session = await uow.sessions.get(source.session_id, self._principal)
         bindings = session.metadata.get("email_account_servers", {})
         binding = bindings.get(source.account_id, {}) if isinstance(bindings, dict) else {}

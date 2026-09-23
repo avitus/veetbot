@@ -1370,7 +1370,7 @@ async def test_prompt_not_authz() -> None:
 
 
 def test_scope_grammar() -> None:
-    assert len(PLATFORM_SCOPES) == 38
+    assert len(PLATFORM_SCOPES) == 39  # memory.write joined under ADR-0117
     assert {
         "schedule.read",
         "schedule.write",

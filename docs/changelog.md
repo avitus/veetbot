@@ -4,6 +4,28 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-22 — Bulk mail forms no memory, and flagged memories can be reviewed
+
+- The automatic email refresh had formed People facts about a founder named
+  in a newsletter, from a thread already assessed as low priority and already
+  in the unsubscribe census. ADR-0116: a census-indexed thread or a `bulk`
+  verdict registers no source, forms nothing, and creates no provisional
+  person, in the formation service's source validation so the refresh, the
+  historical import, and any replay meet the same rule; the refresh records a
+  content-free `email.semantic.skipped` event naming the reason. The
+  assessment prompt is unchanged.
+- `agent email exclude-bulk` previews every retained thread the census
+  indexes and, with `--confirm`, excludes each through the existing source
+  exclusion, which erases derived memories and blocks re-formation.
+- Every email-derived memory is committed flagged for review, and nothing could
+  clear the flag or remove a belief from the clients. ADR-0117 adds
+  `DELETE /v1/memories/{id}` and `POST /v1/memories/{id}/review` under a new
+  `memory.write` scope, a `flagged` filter on the list, `agent memory review`,
+  and native actions: a "Needs review" filter, swipe-to-delete with
+  confirmation, and a Review menu with Mark reviewed, Not true, Not relevant
+  here, and Delete. Hard gate 6 now asserts the exact route table.
+- Grant `memory.write` to the owner principal's `AUTH_SCOPES` when deploying.
+
 ## 2026-09-22 — A cleared email failure no longer lingers on the iPad
 
 - One refresh failed on 2026-09-17 at 22:48 UTC. Fifty minutes later the iPad

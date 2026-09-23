@@ -1108,6 +1108,112 @@ import Testing
     }
 
     @Test
+    func testMemoryWritesCarryTheCeilingAndAnIdempotencyKey() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let memoryID = UUID()
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let status = request.httpMethod == "DELETE" ? 204 : 200
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: status,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let body = request.httpMethod == "DELETE" ? "" : """
+                {"id":"\(memoryID.uuidString)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(UUID().uuidString)","source_event_ids":[10],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
+                """
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        try await client.deleteMemory(memoryID, ceiling: memoryBrowsingCeiling, key: "delete-key")
+        let reviewed = try await client.reviewMemory(
+            memoryID, outcome: .notHere, ceiling: memoryBrowsingCeiling, key: "review-key"
+        )
+        #expect(reviewed.id == memoryID)
+
+        let recorded = lock.withLock { requests }
+        #expect(recorded.count == 2)
+        let deletion = try #require(recorded.first)
+        #expect(deletion.httpMethod == "DELETE")
+        #expect(deletion.url?.path == "/v1/memories/\(memoryID.uuidString)")
+        #expect(deletion.value(forHTTPHeaderField: "Idempotency-Key") == "delete-key")
+        let deletionQuery = URLComponents(url: deletion.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(deletionQuery.contains(URLQueryItem(name: "ceiling", value: "restricted")))
+        let review = try #require(recorded.last)
+        #expect(review.httpMethod == "POST")
+        #expect(review.url?.path == "/v1/memories/\(memoryID.uuidString)/review")
+        #expect(review.value(forHTTPHeaderField: "Idempotency-Key") == "review-key")
+        #expect(review.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/json") == true)
+    }
+
+    @Test
+    func testMemoryListFlaggedFilterIsSentOnlyWhenAsked() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"items":[],"next_cursor":null}"#.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        _ = try await client.listMemories(ceiling: memoryBrowsingCeiling)
+        _ = try await client.listMemories(ceiling: memoryBrowsingCeiling, flagged: true)
+
+        let recorded = lock.withLock { requests }
+        let first = URLComponents(url: recorded[0].url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let second = URLComponents(url: recorded[1].url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(!first.contains(where: { $0.name == "flagged" }))
+        #expect(second.contains(URLQueryItem(name: "flagged", value: "true")))
+    }
+
+    @Test
+    func testAMethodNotAllowedOnAMemoryWriteDegradesToChangesUnavailable() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 405, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old-server"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            try await client.deleteMemory(UUID(), ceiling: memoryBrowsingCeiling)
+            Issue.record("expected the write to degrade rather than surface a method error")
+        } catch let error as VeetbotAPIClientError {
+            guard case .memoryChangesUnavailable = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+            #expect(error.errorDescription == "This server does not support memory changes yet.")
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
+    @Test
     func testMemoryDetailNotFoundStaysAPlainAPIError() async throws {
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in

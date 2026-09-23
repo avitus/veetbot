@@ -43,6 +43,7 @@ from agent_core.domain.memory import (
     MemoryExtractionResult,
     MemoryLongevity,
     MemoryRecord,
+    MemoryReviewOutcome,
     MemoryStatus,
     Polarity,
     Portability,
@@ -3892,6 +3893,35 @@ class GovernedMemoryService:
             await erase_belief_copies(uow, self._principal, current, self._clock.now())
             await uow.memories.delete(belief_id, self._principal, tombstone)
             await self._append_event(uow, _source_session(current), None, "memory.deleted", current)
+
+    async def review(self, belief_id: UUID, outcome: MemoryReviewOutcome) -> MemoryRecord:
+        """Apply one owner review outcome to a flagged belief (ADR-0117)."""
+        if outcome is MemoryReviewOutcome.UNTRUE:
+            return await self.reject(belief_id, RejectionKind.UNTRUE)
+        if outcome is MemoryReviewOutcome.NOT_HERE:
+            return await self.reject(belief_id, RejectionKind.NOT_HERE)
+        return await self.acknowledge_review(belief_id)
+
+    async def acknowledge_review(self, belief_id: UUID) -> MemoryRecord:
+        """Clear the review flag and nothing else; the belief takes a fresh position."""
+        async with self._uow_factory() as uow:
+            current = await uow.memories.get(belief_id, self._principal)
+            if not current.flagged_for_review:
+                return current
+            position = await uow.memories.next_position()
+            reviewed = current.model_copy(
+                update={
+                    "flagged_for_review": False,
+                    "store_position": position,
+                    "updated_at": self._clock.now(),
+                },
+                deep=True,
+            )
+            stored = await uow.memories.reinforce(reviewed)
+            await self._append_event(
+                uow, _source_session(current), None, "memory.reviewed", stored, actor_type="user"
+            )
+            return stored
 
     async def reject(
         self,

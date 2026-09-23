@@ -54,5 +54,10 @@ class EmailSemanticProposal(EmailSemanticValue):
     semantic_facts: list[EmailSemanticFact] = Field(default_factory=list, max_length=20)
 
 
+def thread_source_key(account_id: str, provider_thread_id: str) -> str:
+    """The account-qualified thread key that exclusion tombstones and the census index share."""
+    return hashlib.sha256(f"{account_id}:{provider_thread_id}".encode()).hexdigest()
+
+
 def semantic_source_key(account_id: str, thread_id: str, message_id: str) -> str:
     return hashlib.sha256(json.dumps([account_id, thread_id, message_id]).encode()).hexdigest()

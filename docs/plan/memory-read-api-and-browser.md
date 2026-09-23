@@ -52,11 +52,13 @@ Milestone 17 delivers a read surface and the client that consumes it.
 Four things are out of scope, and each is named because a reader who does not
 find it here should find the reason here.
 
-1. **Any write.** No edit, no retraction, no deletion, no confirmation of a
-   flagged conflict, no re-derivation. Corrections stay on the `agent memory`
-   CLI, which routes them through the governed formation service rather than
-   around it. ADR-0070 decision 3 fixes this boundary, and hard gate 6 enforces
-   it structurally rather than by convention.
+1. **Any write beyond review and deletion.** No edit, no replacement text,
+   no re-derivation. ADR-0070 decision 3 kept the router read-only in round
+   one; ADR-0117 superseded that decision with exactly two writes, a delete
+   and a review outcome, both routed through the governed formation service
+   rather than around it (see *Writes* below). Every other correction stays
+   on the `agent memory` CLI, and hard gate 6 enforces the exact route table
+   structurally rather than by convention.
 2. **Recall-trace viewing.** There is a precondition and it is a defect:
    `PostgresTraceStore.for_turn` in
    `src/agent_core/adapters/persistence/memory_repositories.py` selects traces
@@ -100,8 +102,10 @@ retain it — the rule the artifact content route already applies to the other
 route that returns user content.
 
 ```text
-GET /v1/memories                 memory.read   Page[MemoryView]
-GET /v1/memories/{memory_id}     memory.read   MemoryView
+GET    /v1/memories                       memory.read    Page[MemoryView]
+GET    /v1/memories/{memory_id}           memory.read    MemoryView
+DELETE /v1/memories/{memory_id}           memory.write   204
+POST   /v1/memories/{memory_id}/review    memory.write   MemoryView
 ```
 
 ### `GET /v1/memories`
@@ -116,6 +120,8 @@ belief_type  repeatable; BeliefType values
 subject      lowercased (exact, case-insensitive)
 session_id   the source session's identifier
 text         any-term search over subject and statement
+flagged      true selects the review queue, false everything else;
+             absent selects both (ADR-0117)
 ```
 
 `ceiling` has no default. A request that omits it is a validation error, not a
@@ -169,11 +175,37 @@ that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
 (memory-retrieval-and-ranking.md:715-721).
 
+### Writes
+
+ADR-0117 adds the two writes above. Both require the exact scope
+`memory.write`, a bounded `Idempotency-Key` header of at most two hundred
+characters, and the caller's `ceiling`, so a belief above the ceiling, in
+another principal's store, or absent is `not_found` to a write exactly as it
+is to a read. A repeated key replays the recorded result; a reused key with a
+different request is `conflict`. Both responses carry
+`Cache-Control: private, no-store`.
+
+`DELETE /v1/memories/{memory_id}` runs the governed delete: the statement is
+tombstoned so it cannot re-form, People copies are erased, and a
+`memory.deleted` event is appended to the belief's source session.
+
+`POST /v1/memories/{memory_id}/review` takes `{"outcome": ...}` with one of
+three values. `dismiss` clears `flagged_for_review` and nothing else: the
+belief takes a fresh store position, so the next recall delta shows it as
+reviewed, and a `memory.reviewed` event is appended. `untrue` and `not_here`
+are the rejection kinds of the same name in
+[memory-formation-and-consolidation.md](memory-formation-and-consolidation.md):
+the first retires the belief as never true, the second lowers its portability
+to `local`; both leave it flagged and down-weighted, as the correction table
+says. A belief that was true but has changed needs replacement text and stays
+on the People correction path and the CLI. The response is the belief's new
+`MemoryView`.
+
 ### Errors
 
 The closed error-code vocabulary is unchanged
-(http-api-and-streaming.md:111). These routes raise exactly four of its
-members and add no code of their own.
+(http-api-and-streaming.md:111). The read routes raise exactly four of its
+members; the two write routes add `conflict` for a reused idempotency key.
 
 ```text
 400  malformed_request     missing or unknown ceiling, unknown status or
@@ -184,6 +216,8 @@ members and add no code of their own.
 403  authorization_error   a principal without memory.read
 404  not_found             a belief above the ceiling, in another
                            principal's store, or absent
+409  conflict              writes only: an idempotency key reused for a
+                           different request
 ```
 
 A `limit` above 200 is clamped rather than rejected, which is the pagination
@@ -195,7 +229,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1591-1608) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1594-1611) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -329,6 +363,16 @@ the device surface.
   detects a server that needs upgrading, and presents as *this server does not
   support memory browsing yet* rather than as an error. An older server keeps
   working with the browser entry point absent.
+- **Review and deletion (ADR-0117).** A "Needs review" filter asks for the
+  review queue through the `flagged` parameter. A row can be swiped to delete,
+  behind a confirmation, and the detail view carries a Review menu with Mark
+  reviewed, Not true, Not relevant here, and Delete. Each action sends a fresh
+  idempotency key, removes or replaces the row from the server's response, and
+  reloads on a revision conflict. A server that answers not-found or
+  method-not-allowed on a write is presented as *this server does not support
+  memory changes yet*, the way browsing already degrades; a belief that is
+  person-linked shows the person's name as its subject rather than the raw
+  `person:` key.
 - **Rendering.** A row shows the statement as its primary text, subject and
   belief type as secondary text, a text-labeled sensitivity badge, and a
   status tag when the belief's status is not `active`; a belief that is
@@ -442,9 +486,11 @@ enumeration ship together or the corpus disagrees with the code.
    compose with one another; the default status set is the live one; and the
    text filter's results equal those of the shared lexical helpers applied
    directly. Registered as `gate.memory.read_api_filters`, case. **M17.**
-6. **The router is read-only.** Every route mounted under `/v1/memories`
-   declares the GET method and exactly the scope `memory.read`; a route with
-   any other method or any other scope fails the build. Registered as
+6. **The router exposes exactly the documented routes.** Every route mounted
+   under `/v1/memories` is one of the two GET reads declaring exactly the
+   scope `memory.read` or the two writes of ADR-0117 declaring exactly the
+   scope `memory.write` with a required `Idempotency-Key` header and ceiling;
+   any other route, method, or scope fails the build. Registered as
    `gate.memory.read_api_read_only`, structural. **M17.**
 7. **The flag is a real switch.** With `AGENT_MEMORY_API_ENABLED` unset, no
    `/v1/memories` route is registered and none appears in the OpenAPI document,
@@ -466,7 +512,8 @@ enumeration ship together or the corpus disagrees with the code.
     malformed parameters, absent and insufficient credentials, unknown
     identifiers, and above-ceiling reads, every response either succeeds or
     carries one of `malformed_request`, `authentication_error`,
-    `authorization_error`, or `not_found` with its documented status.
+    `authorization_error`, or `not_found` with its documented status; a write
+    may additionally answer `conflict` for a reused idempotency key.
     Registered as `gate.memory.read_api_error_vocabulary`, case. **M17.**
 
 ## Tracked metrics

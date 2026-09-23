@@ -957,3 +957,22 @@ async def memory_erasure_fence_contract(store: MemoryStore) -> None:
 
 async def test_memory_erasure_fence_hides_all_reads_before_cleanup() -> None:
     await memory_erasure_fence_contract(_store())
+
+
+async def test_browse_flagged_filter_selects_the_review_queue() -> None:
+    """The flag selects the review queue, its negation the rest, and none means both (ADR-0117)."""
+
+    store = _store()
+    flagged = memory(belief_id=601).model_copy(update={"flagged_for_review": True})
+    clear = memory(belief_id=602, statement="User prefers tabs").model_copy(
+        update={"subject": "indentation", "store_position": 2}
+    )
+    for record in (flagged, clear):
+        await store.upsert_belief(record)
+
+    queue = await store.browse(browse_query(flagged_for_review=True))
+    assert [record.id for record in queue] == [flagged.id]
+    rest = await store.browse(browse_query(flagged_for_review=False))
+    assert [record.id for record in rest] == [clear.id]
+    everything = await store.browse(browse_query())
+    assert {record.id for record in everything} == {flagged.id, clear.id}

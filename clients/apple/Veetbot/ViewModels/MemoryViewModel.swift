@@ -1,10 +1,12 @@
 import Combine
 import Foundation
 
-/// Browses the calling principal's beliefs over the read-only memory API
-/// (memory-read-api-and-browser.md). The view model holds no memory state of
-/// its own: it re-fetches from the server on every reload and discards its
-/// page cache whenever a filter, the search text, or the connection changes.
+/// Browses the calling principal's beliefs over the memory API
+/// (memory-read-api-and-browser.md) and applies the two writes of ADR-0117,
+/// review and deletion. The view model holds no memory state of its own: it
+/// re-fetches from the server on every reload and discards its page cache
+/// whenever a filter, the search text, or the connection changes; a write
+/// edits the row from the server's own response.
 @MainActor
 public final class MemoryViewModel: ObservableObject {
     @Published public private(set) var items: [MemoryView] = []
@@ -15,6 +17,14 @@ public final class MemoryViewModel: ObservableObject {
     @Published public private(set) var searchText = ""
     @Published public private(set) var statusFilter: MemoryStatusKind?
     @Published public private(set) var typeFilter: MemoryBeliefTypeKind?
+    /// True asks the server for the review queue only (ADR-0117).
+    @Published public private(set) var flaggedOnly = false
+    /// Set when a write answered method-not-allowed: the server browses but
+    /// predates review and deletion.
+    @Published public private(set) var changesUnavailable = false
+    /// The identifier of the row a write is acting on, so the views can
+    /// disable a second action on it until the first settles.
+    @Published public private(set) var pendingActionID: UUID?
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
     private var nextCursor: String?
@@ -100,6 +110,84 @@ public final class MemoryViewModel: ObservableObject {
         Task { [weak self] in await self?.reload() }
     }
 
+    public func setFlaggedOnly(_ flagged: Bool) {
+        guard flaggedOnly != flagged else { return }
+        flaggedOnly = flagged
+        searchDebounceTask?.cancel()
+        Task { [weak self] in await self?.reload() }
+    }
+
+    /// Deletes one belief. On success the row leaves the list; a not-found
+    /// answer means it is already gone and is treated the same way. Returns
+    /// whether the belief is gone.
+    @discardableResult
+    public func delete(_ memory: MemoryView) async -> Bool {
+        guard pendingActionID == nil else { return false }
+        pendingActionID = memory.id
+        defer { pendingActionID = nil }
+        errorMessage = nil
+        guard let api = await makeAPIClient() else {
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return false
+        }
+        do {
+            try await api.deleteMemory(memory.id, ceiling: memoryBrowsingCeiling)
+            items.removeAll { $0.id == memory.id }
+            return true
+        } catch VeetbotAPIClientError.memoryChangesUnavailable {
+            changesUnavailable = true
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return false
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 404 {
+            items.removeAll { $0.id == memory.id }
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error)
+            return false
+        }
+    }
+
+    /// Applies one review outcome. The row is replaced by the server's view of
+    /// the belief; under the review-queue filter a dismissed belief leaves the
+    /// list, and a retired one leaves it under the live default. Returns the
+    /// reviewed belief, or nil when the write did not happen.
+    @discardableResult
+    public func review(_ memory: MemoryView, outcome: MemoryReviewOutcome) async -> MemoryView? {
+        guard pendingActionID == nil else { return nil }
+        pendingActionID = memory.id
+        defer { pendingActionID = nil }
+        errorMessage = nil
+        guard let api = await makeAPIClient() else {
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return nil
+        }
+        do {
+            let reviewed = try await api.reviewMemory(
+                memory.id, outcome: outcome, ceiling: memoryBrowsingCeiling
+            )
+            let stillListed =
+                (!flaggedOnly || reviewed.flaggedForReview)
+                && (statusFilter.map { $0.rawValue == reviewed.status }
+                    ?? (reviewed.status == "active" || reviewed.status == "provisional"))
+            if let index = items.firstIndex(where: { $0.id == memory.id }) {
+                if stillListed { items[index] = reviewed } else { items.remove(at: index) }
+            }
+            return reviewed
+        } catch VeetbotAPIClientError.memoryChangesUnavailable {
+            changesUnavailable = true
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return nil
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 409 {
+            // The belief changed under us; the reload shows what the server holds now.
+            errorMessage = "This memory changed on the server. The list has been refreshed."
+            await reload()
+            return nil
+        } catch {
+            errorMessage = displayMessage(for: error)
+            return nil
+        }
+    }
+
     /// Resets pagination and fetches page one under the current filters.
     /// Only the most recently started reload is allowed to publish its
     /// result: every await below re-checks `reloadRequestID` so a slow
@@ -129,7 +217,8 @@ public final class MemoryViewModel: ObservableObject {
                 ceiling: memoryBrowsingCeiling,
                 statuses: statusFilter.map { [$0] },
                 beliefTypes: typeFilter.map { [$0] },
-                text: normalizedSearchText
+                text: normalizedSearchText,
+                flagged: flaggedOnly ? true : nil
             )
             guard reloadRequestID == requestID else { return }
             unavailable = false
@@ -194,7 +283,8 @@ public final class MemoryViewModel: ObservableObject {
                 cursor: cursor,
                 statuses: statusFilter.map { [$0] },
                 beliefTypes: typeFilter.map { [$0] },
-                text: normalizedSearchText
+                text: normalizedSearchText,
+                flagged: flaggedOnly ? true : nil
             )
             guard reloadRequestID == requestID else { return }
             unavailable = false

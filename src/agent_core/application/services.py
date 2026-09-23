@@ -19,7 +19,7 @@ from agent_core.domain.browser import (
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
-from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
+from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
 from agent_core.domain.people import (
     PeopleErasure,
     PeopleOperation,
@@ -401,10 +401,26 @@ class MemoryReadService(Protocol):
         text: str | None,
         limit: int,
         cursor: str | None,
+        flagged: bool | None = None,
     ) -> Page[MemoryView]: ...
 
     async def get(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
+    ) -> MemoryView: ...
+
+    # The two write routes of ADR-0117; every other memory change stays on the CLI.
+    async def delete(
+        self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity, key: str
+    ) -> None: ...
+
+    async def review(
+        self,
+        principal: Principal,
+        memory_id: UUID,
+        outcome: MemoryReviewOutcome,
+        *,
+        ceiling: Sensitivity,
+        key: str,
     ) -> MemoryView: ...
 
 

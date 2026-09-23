@@ -25,6 +25,12 @@ project:
   # the sidebar groups scheduled sessions by schedule; folders stay chat-only.
   # ADR-0114 records a non-milestone CI change on 2026-09-21: main skips a
   # verification job whose exact source tree already passed it.
+  # ADR-0116 records the owner's non-milestone repair on 2026-09-22: bulk mail
+  # never forms communication memory; the census and the bulk verdict gate
+  # formation and `agent email exclude-bulk` erases what already formed.
+  # ADR-0117 records the owner's non-milestone extension on 2026-09-22: memory
+  # review and deletion over HTTP under memory.write, superseding ADR-0070
+  # decision 3, with the native review actions and the flagged filter.
   # ADR-0115 records the owner's non-milestone runtime repair on 2026-09-21:
   # a tool batch is fitted to the remaining budget, an exhausted tool-call
   # budget owes one synthesis-only turn, and the interactive defaults carry
@@ -596,7 +602,8 @@ milestones:
     adr: docs/adr/0070-milestone-17-memory-read-api-and-browser.md
     gates_registered: 10
     authorized_scope:
-      - read-only GET /v1/memories list and detail routes
+      - read-only GET /v1/memories list and detail routes (ADR-0117 later added
+        DELETE and review writes under memory.write)
       - the exact scope memory.read and the AGENT_MEMORY_API_ENABLED flag
       - an explicit required ceiling on every request, never inferred
       - status, belief type, subject, session, and shared-lexical text filters
@@ -1189,7 +1196,8 @@ milestones:
       - agent persona CLI and the native Apple persona editor
     deferred_scope:
       - automatic promotion at any threshold
-      - belief edit, retraction, or deletion over HTTP (per ADR-0070)
+      - belief edit or replacement over HTTP (per ADR-0070; ADR-0117 admits
+        deletion and review outcomes only)
       - per-agent or per-surface persona variants
       - any change to AgentSpec.instructions
     open_items:

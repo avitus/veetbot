@@ -36,6 +36,7 @@ from agent_core.cli.people import app as people_app
 from agent_core.cli.people import configure as configure_people
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.email import EmailBulkExclusionReport
 from agent_core.domain.errors import (
     ConflictError,
     EvalExpectationError,
@@ -46,7 +47,7 @@ from agent_core.domain.errors import (
     PersonaContentError,
 )
 from agent_core.domain.events import EventEnvelope
-from agent_core.domain.memory import MemoryEdit, Portability, Sensitivity
+from agent_core.domain.memory import MemoryEdit, MemoryReviewOutcome, Portability, Sensitivity
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
 from agent_core.domain.runs import RunStatus
@@ -100,6 +101,7 @@ session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
 approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
+email_app = typer.Typer(name="email", no_args_is_help=True)
 persona_app = typer.Typer(name="persona", no_args_is_help=True)
 surface_app = typer.Typer(name="surface", no_args_is_help=True)
 app.add_typer(run_app)
@@ -107,6 +109,7 @@ app.add_typer(session_app)
 app.add_typer(eval_app)
 app.add_typer(approval_app)
 app.add_typer(memory_app)
+app.add_typer(email_app)
 app.add_typer(persona_app)
 app.add_typer(surface_app)
 
@@ -861,6 +864,33 @@ async def _memory_get(belief_id: UUID) -> Any:
         return await composition.memory.get_memory(belief_id)
 
 
+async def _email_exclude_bulk(confirm: bool) -> EmailBulkExclusionReport:
+    async with build(storage="postgres") as composition:
+        return await composition.services.email.exclude_bulk_sources(
+            composition.principal, confirm=confirm
+        )
+
+
+@email_app.command("exclude-bulk")
+def email_exclude_bulk(
+    confirm: Annotated[
+        bool,
+        typer.Option(
+            "--confirm",
+            help="Exclude every census-indexed thread; without it the pass only previews.",
+        ),
+    ] = False,
+) -> None:
+    """Exclude retained bulk-sender threads and erase what they formed (ADR-0116)."""
+
+    try:
+        result = asyncio.run(_email_exclude_bulk(confirm))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
+
+
 @memory_app.command("get")
 def memory_get(belief_id: UUID) -> None:
     """Inspect one governed memory, including formation and source identifiers."""
@@ -922,6 +952,31 @@ def memory_edit(
                 ),
             )
         )
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(row.model_dump_json())
+
+
+async def _memory_review(belief_id: UUID, outcome: str) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.review(belief_id, MemoryReviewOutcome(outcome))
+
+
+@memory_app.command("review")
+def memory_review(
+    belief_id: UUID,
+    outcome: Annotated[
+        MemoryReviewOutcome,
+        typer.Option(
+            "--outcome", help="dismiss clears the flag; untrue retires; not_here localizes."
+        ),
+    ],
+) -> None:
+    """Apply one review outcome to a flagged belief (ADR-0117)."""
+
+    try:
+        row = asyncio.run(_memory_review(belief_id, outcome.value))
     except (ConfigurationError, NotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

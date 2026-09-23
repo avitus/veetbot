@@ -783,6 +783,8 @@ class PostgresMemoryStore:
             predicates.append(func.lower(MemoryRow.subject) == query.subject.lower())
         if query.session_id is not None:
             predicates.append(MemoryRow.source_session_id == query.session_id)
+        if query.flagged_for_review is not None:
+            predicates.append(MemoryRow.flagged_for_review.is_(query.flagged_for_review))
         terms = lexical_query_terms(query.text)
         if terms:
             # Any-term semantics, matching `query()`: a belief matches when it

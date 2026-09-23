@@ -292,12 +292,17 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling(
             composition.readiness_probe,
         )
         routes = memory_routes(app)
-        assert len(routes) == 2
+        # Two reads and, since ADR-0117, exactly two writes.
+        assert len(routes) == 4
         assert {
             (method, (route.openapi_extra or {})["required_scope"])
             for route in routes
             for method in (route.methods or set())
-        } == {("GET", "memory.read")}
+        } == {
+            ("GET", "memory.read"),
+            ("DELETE", "memory.write"),
+            ("POST", "memory.write"),
+        }
 
 
 async def test_memory_http_surface_is_absent_by_default() -> None:

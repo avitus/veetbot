@@ -3750,7 +3750,10 @@ async def _compose(
             device_ingest=device_ingest_service,
             notifications=notification_inbox,
             surfaces=surface_management,
-            memory=PublicMemoryService(uow_factory=uow_factory),
+            memory=PublicMemoryService(
+                uow_factory=uow_factory,
+                memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
+            ),
             people=people_service,
             persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
             folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),

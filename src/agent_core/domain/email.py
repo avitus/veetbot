@@ -259,6 +259,29 @@ class EmailDraftEdit(EmailValue):
     body: str = Field(max_length=500_000)
 
 
+class EmailBulkExclusionCandidate(EmailValue):
+    """One retained thread the unsubscribe census indexes (ADR-0116)."""
+
+    thread_id: UUID
+    account_id: str
+    subject: str = Field(max_length=998)
+    revision: int = Field(ge=1)
+
+
+class EmailBulkExclusionOutcome(EmailValue):
+    thread_id: UUID
+    status: str
+    reason: str | None = None
+
+
+class EmailBulkExclusionReport(EmailValue):
+    """What the operator pass found and, when confirmed, what it excluded."""
+
+    confirmed: bool
+    candidates: list[EmailBulkExclusionCandidate]
+    excluded: list[EmailBulkExclusionOutcome]
+
+
 class EmailLearningState(EmailValue):
     paused: bool = False
     profile_revision: int = 1

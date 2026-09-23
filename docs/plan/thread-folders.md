@@ -18,7 +18,7 @@ admit the typed-judgment port and the judgment matcher.
 
 A chat conversation is a `sessions` row shared by every surface, and every
 client lists those rows as one flat, activity-ordered history
-(http-api-and-streaming.md:752-756). Nothing groups them. The owner wants
+(http-api-and-streaming.md:755-759). Nothing groups them. The owner wants
 conversations organized into folders, wants the assistant to notice when a
 handful of unfiled conversations belong together and to say so, and wants the
 folders to carry the names the owner gives them. Milestone 29 builds it: flat,
@@ -89,7 +89,7 @@ not find it here should find the reason here.
 conversation history server state and every local history store a cache
 (multi-device-and-surfaces.md:49-53). A folder is a fact about a session the
 same way its title is: `SessionView.title` is server-owned and never a
-client-only value (http-api-and-streaming.md:620-627). Membership therefore
+client-only value (http-api-and-streaming.md:623-630). Membership therefore
 lives beside the session on the server and every client reads it from the
 index, which is what lets a folder created on the Mac appear on the iPhone.
 
@@ -101,7 +101,7 @@ uniqueness rule, a cascade, and a count — so it is a table, not a metadata
 key. Metadata stays opaque, bounded, and untrusted.
 
 **Session metadata never enters a model prompt.** The rule is a security rule
-(http-api-and-streaming.md:662-670): metadata is client input and the shape
+(http-api-and-streaming.md:665-673): metadata is client input and the shape
 an injection takes. The grouping call reads titles, bounded message text, and
 folder names — content the platform already treats as user-authored data
 under a trust label — and reads no metadata key at all.
@@ -164,7 +164,7 @@ session_folder_memberships (
 
 The primary key is the single-parent rule: a session is in at most one
 folder, and a move is an upsert. The first cascade is how ADR-0050's session
-deletion (http-api-and-streaming.md:758-764) leaves no membership behind
+deletion (http-api-and-streaming.md:761-767) leaves no membership behind
 without a new step in the deletion transaction; the second is how deleting a
 folder returns its conversations to the unfiled state in the same statement.
 The denormalized tenant and principal let ownership be a predicate on this

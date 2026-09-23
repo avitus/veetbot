@@ -728,6 +728,13 @@ public enum MemorySensitivityKind: String, Codable, CaseIterable, Sendable {
 /// enum-like fields decode as raw strings with typed known-case accessors
 /// below, so a value this client does not yet know about decodes instead of
 /// throwing (ADR-0049 decision 4).
+/// What the owner decided about a belief flagged for review (ADR-0117).
+public enum MemoryReviewOutcome: String, Codable, CaseIterable, Sendable {
+    case dismiss
+    case untrue
+    case notHere = "not_here"
+}
+
 public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let subject: String
@@ -797,6 +804,20 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public var sensitivityKind: MemorySensitivityKind? {
         MemorySensitivityKind(rawValue: sensitivity)
     }
+
+    /// A person-linked belief carries `person:<uuid>:<name>` as its subject;
+    /// the browser shows the name and links into People rather than showing
+    /// the raw key.
+    public var personLink: (id: UUID, name: String)? {
+        let parts = subject.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == "person", let id = UUID(uuidString: String(parts[1]))
+        else { return nil }
+        let name = String(parts[2]).trimmingCharacters(in: .whitespaces)
+        return (id, name.isEmpty ? subject : name)
+    }
+
+    /// The subject as a row should show it.
+    public var displaySubject: String { personLink?.name ?? subject }
 }
 
 public enum ContentBlock: Codable, Hashable, Sendable {

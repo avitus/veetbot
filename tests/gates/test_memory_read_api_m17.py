@@ -662,12 +662,12 @@ async def test_every_filter_selects_the_documented_set() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_the_router_is_read_only() -> None:
-    """Every mounted `/v1/memories` route is GET and declares exactly `memory.read`.
+async def test_the_router_exposes_exactly_the_documented_routes() -> None:
+    """Two reads with `memory.read`, and exactly the two writes of ADR-0117 with `memory.write`.
 
-    Structural, so a write route added to the router fails the build rather
-    than shipping: ADR-0070 decision 3 keeps every correction on the governed
-    formation service rather than around it.
+    Structural, so an undocumented route, method, or scope added to the
+    router fails the build rather than shipping: every other memory change
+    stays on the governed formation service behind the `agent memory` CLI.
     """
 
     async with build(
@@ -685,26 +685,46 @@ async def test_the_router_is_read_only() -> None:
         )
 
     routes = memory_routes(app)
-    assert {route.path for route in routes} == {"/v1/memories", "/v1/memories/{memory_id}"}
-    for route in routes:
-        methods = set(route.methods or set())
-        # Starlette adds HEAD alongside GET; no other verb may appear.
-        assert methods <= {"GET", "HEAD"}, (route.path, methods)
-        assert "GET" in methods, (route.path, methods)
-        declared = (route.openapi_extra or {}).get("required_scope")
-        assert declared == "memory.read", (route.path, declared)
+    # Starlette adds HEAD alongside GET; it is not a documented method.
+    table = {
+        (route.path, method): (route.openapi_extra or {}).get("required_scope")
+        for route in routes
+        for method in set(route.methods or set()) - {"HEAD"}
+    }
+    assert table == {
+        ("/v1/memories", "GET"): "memory.read",
+        ("/v1/memories/{memory_id}", "GET"): "memory.read",
+        ("/v1/memories/{memory_id}", "DELETE"): "memory.write",
+        ("/v1/memories/{memory_id}/review", "POST"): "memory.write",
+    }
 
-    # The same statement over the published document: the surface advertises
-    # only GET, and every operation on it requires the one exact scope.
+    # The same statement over the published document: every operation on the
+    # surface requires exactly its documented scope, and each write declares
+    # the idempotency header and the ceiling as required parameters.
     document = app.openapi()
     memory_paths = {
-        path: operations
-        for path, operations in document["paths"].items()
-        if path.startswith("/v1/memories")
+        path: item for path, item in document["paths"].items() if path.startswith("/v1/memories")
     }
-    assert set(memory_paths) == {"/v1/memories", "/v1/memories/{memory_id}"}
-    for path, operations in memory_paths.items():
-        assert set(operations) == {"get"}, (path, sorted(operations))
+    published = {
+        (path, method.upper()): operation.get("x-required-scope") or operation.get("required_scope")
+        for path, item in memory_paths.items()
+        for method, operation in item.items()
+    }
+    assert set(published) == set(table)
+    for path, method in (
+        ("/v1/memories/{memory_id}", "delete"),
+        ("/v1/memories/{memory_id}/review", "post"),
+    ):
+        parameters = memory_paths[path][method]["parameters"]
+        assert any(
+            parameter["name"] == "Idempotency-Key"
+            and parameter["in"] == "header"
+            and parameter["required"]
+            for parameter in parameters
+        ), (path, method)
+        assert any(
+            parameter["name"] == "ceiling" and parameter["required"] for parameter in parameters
+        ), (path, method)
 
 
 # ---------------------------------------------------------------------------
@@ -773,9 +793,9 @@ async def test_the_flag_is_a_real_switch() -> None:
     # that is not in the vocabulary is refused, so the acceptance is not
     # vacuous.
     assert set(granted.auth_scopes) - set(PLATFORM_SCOPES) == set()
-    validate_required_scopes({"memory.read"})
+    validate_required_scopes({"memory.read", "memory.write"})
     with pytest.raises(ToolValidationError):
-        validate_required_scopes({"memory.write"})
+        validate_required_scopes({"memory.admin"})
 
 
 # ---------------------------------------------------------------------------

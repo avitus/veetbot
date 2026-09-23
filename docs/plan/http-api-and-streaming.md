@@ -349,7 +349,7 @@ browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
 device.read       device.write       notification.read
-memory.read
+memory.read       memory.write
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow
@@ -502,13 +502,16 @@ DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
 ### The Milestone 17 memory read extension
 
 [memory-read-api-and-browser.md](memory-read-api-and-browser.md) adds two
-read-only routes and one exact scope, `memory.read`, mounted only when
-`AGENT_MEMORY_API_ENABLED` is set. Both are GETs; nothing under `/v1/memories`
-mutates, and a gate walks the router to keep it that way.
+read routes with the exact scope `memory.read` and, since ADR-0117, two
+writes with the exact scope `memory.write`, all mounted only when
+`AGENT_MEMORY_API_ENABLED` is set. The writes require a bounded
+`Idempotency-Key`; a gate walks the router to keep the table exactly this.
 
 ```text
 GET    /v1/memories                                  memory.read
 GET    /v1/memories/{memory_id}                      memory.read
+DELETE /v1/memories/{memory_id}                      memory.write
+POST   /v1/memories/{memory_id}/review               memory.write
 ```
 
 The memory design owns their query parameters, the `MemoryView` projection and
