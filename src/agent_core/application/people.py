@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -260,6 +260,27 @@ class PublicPeopleService:
                 )
                 person = person.model_copy(update={"support_ids": [source.id]})
                 await uow.people.put(person, expected_revision=0)
+                # The owner named this person, so the name identifies them when the
+                # owner mentions them again in chat (ADR-0121).
+                await uow.people.put(
+                    PersonIdentifier(
+                        id=uuid5(NAMESPACE_URL, operation_key + ":created-name"),
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        person_id=person.id,
+                        created_at=self._clock.now(),
+                        updated_at=self._clock.now(),
+                        sensitivity=person.sensitivity,
+                        identifier_kind="name",
+                        namespace="owner",
+                        value=name,
+                        context="owner",
+                        verification="owner_confirmed",
+                        valid_from=self._clock.now(),
+                        support_ids=[source.id],
+                    ),
+                    expected_revision=0,
+                )
                 return person
 
     async def update(
@@ -409,7 +430,66 @@ class PublicPeopleService:
                         alias.model_copy(update={"support_ids": [source.id]}),
                         expected_revision=alias.revision - 1,
                     )
+                if isinstance(request.alias, EndPersonAlias) and alias is not None:
+                    await self._end_assignment_copies(uow, principal, alias)
                 return updated
+
+    async def _end_assignment_copies(
+        self, uow: RepositoryUnitOfWork, principal: Principal, ended: PersonIdentifier
+    ) -> None:
+        """End every other open copy of the assignment the owner ended.
+
+        The profile lists one alias per assignment while correspondence keeps
+        one observed copy per message (ADR-0121); ending only the listed row
+        would leave the address resolving to this person.
+        """
+        if ended.valid_to is None:
+            return
+        value = normalize_identifier(ended.identifier_kind, ended.namespace, ended.value)
+        after: UUID | None = None
+        while True:
+            page = await uow.people.query(
+                PeopleQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    person_id=ended.person_id,
+                    kinds=["identifier"],
+                    identifier_value=value,
+                    assigned="attached",
+                    valid_at=ended.valid_to,
+                    sensitivity_ceiling=Sensitivity.RESTRICTED,
+                    after=after,
+                    limit=100,
+                )
+            )
+            for row in page[:100]:
+                if (
+                    not isinstance(row, PersonIdentifier)
+                    or row.id == ended.id
+                    or row.person_id != ended.person_id
+                    or row.identifier_kind != ended.identifier_kind
+                    or row.namespace != ended.namespace
+                    or row.context != ended.context
+                    or row.valid_to is not None
+                    or row.valid_from >= ended.valid_to
+                    or normalize_identifier(row.identifier_kind, row.namespace, row.value) != value
+                ):
+                    continue
+                await uow.people.put(
+                    row.model_copy(
+                        update={
+                            "valid_to": ended.valid_to,
+                            "revision": row.revision + 1,
+                            "updated_at": max(
+                                self._clock.now(), row.updated_at + timedelta(microseconds=1)
+                            ),
+                        }
+                    ),
+                    expected_revision=row.revision,
+                )
+            if len(page) <= 100:
+                return
+            after = page[99].id
 
     async def get(
         self, principal: Principal, person_id: UUID, *, ceiling: Sensitivity
@@ -421,13 +501,33 @@ class PublicPeopleService:
             if not isinstance(person, Person) or not _safe(person.display_name):
                 raise NotFoundError("person not found")
             profile = PersonProfile(person=person)
+            # Identifiers are read once per distinct assignment below; correspondence
+            # writes one copy per message and those copies must not crowd out
+            # facts or history (ADR-0121).
+            aliases = await uow.people.query(
+                PeopleQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    person_id=person.id,
+                    sensitivity_ceiling=ceiling,
+                    kinds=["identifier"],
+                    distinct_assignments=True,
+                    limit=100,
+                )
+            )
+            profile.aliases.extend(
+                row
+                for row in aliases[:100]
+                if isinstance(row, PersonIdentifier) and _safe(row.model_dump_json())
+            )
+            aliases_truncated = len(aliases) > 100
             query = PeopleQuery(
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
                 person_id=person.id,
                 sensitivity_ceiling=ceiling,
                 limit=100,
-                kinds=["identifier", "memory_link", "relationship", "interaction", "commitment"],
+                kinds=["memory_link", "relationship", "interaction", "commitment"],
             )
             seen_beliefs: set[UUID] = set()
             for _ in range(10):
@@ -473,15 +573,19 @@ class PublicPeopleService:
                 if len(rows) <= 100:
                     break
                 query = query.model_copy(update={"after": rows[99].id})
-            truncated = len(rows) > 100 or (
-                max(
-                    len(profile.aliases),
-                    len(profile.relationships),
-                    len(profile.history),
-                    len(profile.commitments),
-                    len(profile.facts),
+            truncated = (
+                aliases_truncated
+                or len(rows) > 100
+                or (
+                    max(
+                        len(profile.aliases),
+                        len(profile.relationships),
+                        len(profile.history),
+                        len(profile.commitments),
+                        len(profile.facts),
+                    )
+                    > 20
                 )
-                > 20
             )
             profile.history.sort(
                 key=lambda row: (
@@ -534,6 +638,8 @@ class PublicPeopleService:
         pinned: bool | None = None,
         sort: str = "id",
         relationship: PeopleRelationshipFilter | None = None,
+        states: Sequence[str] | None = None,
+        review: bool = False,
     ) -> PeoplePage:
         require_scope(principal, "people.read")
         ceiling = self._ceiling(ceiling)
@@ -541,7 +647,10 @@ class PublicPeopleService:
             normalized = None if not text else normalize_identifier("name", "owner", text)
         except ValueError as exc:
             raise ToolValidationError("invalid People directory search") from exc
-        if state not in {None, "active", "provisional", "merged"}:
+        # People lists active and provisional people together (ADR-0121); the
+        # set is sorted so the same states in any order bind the same cursor.
+        requested = sorted({*(states or ()), *((state,) if state else ())})
+        if not set(requested) <= {"active", "provisional", "merged"}:
             raise ToolValidationError("invalid People directory state")
         if sort not in {"id", "recent"}:
             raise ToolValidationError("invalid People directory sort")
@@ -552,8 +661,9 @@ class PublicPeopleService:
             relationship=relationship,
             text=normalized,
             search_aliases=True,
-            states=[state] if state else None,
+            states=requested or None,
             pinned=pinned,
+            needs_review=review,
             as_of=as_of or self._clock.now(),
             sensitivity_ceiling=ceiling,
             limit=min(max(limit, 1), 100),

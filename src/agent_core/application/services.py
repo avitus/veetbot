@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -20,6 +20,7 @@ from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
+from agent_core.domain.model_settings import ModelChoice, ModelSettingsView
 from agent_core.domain.people import (
     PeopleErasure,
     PeopleOperation,
@@ -165,6 +166,19 @@ class ArtifactService(Protocol):
     async def get(self, principal: Principal, artifact_id: UUID) -> ArtifactView: ...
 
     async def open_content(self, principal: Principal, artifact_id: UUID) -> ArtifactContent: ...
+
+    async def upload(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        *,
+        content: bytes,
+        filename: str,
+        declared_media_type: str,
+        idempotency_key: str | None,
+    ) -> tuple[ArtifactView, bool]:
+        """Store one chat attachment unclaimed; the flag is whether it replayed (ADR-0120)."""
+        ...
 
 
 class BrowserProfileService(Protocol):
@@ -552,7 +566,22 @@ class PeopleService(Protocol):
         pinned: bool | None = None,
         sort: str = "id",
         relationship: PeopleRelationshipFilter | None = None,
+        states: Sequence[str] | None = None,
+        review: bool = False,
     ) -> PeoplePage: ...
+
+
+class ModelSettingsService(Protocol):
+    async def get(self, principal: Principal) -> ModelSettingsView: ...
+
+    async def update(
+        self,
+        principal: Principal,
+        *,
+        expected_version: int,
+        chat: ModelChoice,
+        memory: ModelChoice,
+    ) -> ModelSettingsView: ...
 
 
 class PersonaService(Protocol):

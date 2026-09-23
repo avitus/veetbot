@@ -111,14 +111,14 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:710-726).
+  (email-experience.md:712-728).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
   match. This milestone reuses that mechanism and generalizes its subject
   from one thread to one bounded batch of senders.
 - **The approval floor.** `EXTERNAL_WRITE` and `EXTERNAL_MESSAGE` require
-  approval in the default matrix (policy-and-approvals.md:596-597), and no
+  approval in the default matrix (policy-and-approvals.md:597-598), and no
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection

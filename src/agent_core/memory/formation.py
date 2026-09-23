@@ -3141,6 +3141,38 @@ class GovernedMemoryService:
                 superseded = 0
                 conflicted = 0
                 people_mentions = 0
+                # ADR-0121: a chat mention creates a person only when some claim in
+                # this batch ties that person to the owner, and never for the
+                # owner's own addresses or handles.
+                tied_labels: frozenset[tuple[str, str]] = frozenset()
+                self_references: frozenset[str] = frozenset()
+                if (
+                    self._people_enabled
+                    and self._policy_version == "formation@11"
+                    and not should_retry
+                ):
+                    from agent_core.memory.people_formation import (
+                        owner_references,
+                        owner_tied_labels,
+                    )
+
+                    tied_labels = owner_tied_labels(
+                        [
+                            proposed.people
+                            for proposed, _ in candidates
+                            if proposed.people is not None
+                            and proposed.proposed_scope == scope
+                            and set(proposed.source_event_ids) <= trusted_user_sources
+                        ],
+                        [
+                            interaction
+                            for interaction in extracted.people_interactions
+                            if interaction.source_event_id in trusted_user_sources
+                        ]
+                        if isinstance(extracted, MemoryExtractionResult)
+                        else [],
+                    )
+                    self_references = await owner_references(uow.email, self._principal)
                 for candidate, authority in [] if should_retry else candidates:
                     suppressed = False
                     for sequence in candidate.source_event_ids:
@@ -3229,7 +3261,10 @@ class GovernedMemoryService:
                         and self._policy_version == "formation@11"
                         and candidate.people is not None
                     ):
-                        from agent_core.memory.people_formation import prepare_people
+                        from agent_core.memory.people_formation import (
+                            creatable_keys,
+                            prepare_people,
+                        )
 
                         proposed_people = candidate.people
                         if (
@@ -3247,6 +3282,8 @@ class GovernedMemoryService:
                                 candidate,
                                 admitted_sources,
                                 self._clock.now(),
+                                creatable=creatable_keys(proposed_people, tied_labels),
+                                self_references=self_references,
                             )
                         except ConflictError:
                             rejected += 1
@@ -3434,6 +3471,7 @@ class GovernedMemoryService:
                                 admitted_sources,
                                 self._clock.now(),
                                 scope,
+                                self_references=self_references,
                             )
                         except (ValueError, ToolValidationError, ConflictError):
                             decisions["rejected_people_interaction"] += 1

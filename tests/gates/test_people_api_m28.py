@@ -106,6 +106,81 @@ async def test_people_directory_filters_before_pagination_and_binds_cursor() -> 
             assert confirmed.status_code == 200 and confirmed.json()["state"] == "active"
 
 
+async def test_people_directory_accepts_repeated_states_and_review_filter() -> None:
+    """People lists active and provisional people; Needs review is its own filter (ADR-0121)."""
+    from uuid import UUID
+
+    from agent_core.domain.people import Person, PersonIdentifier
+    from tests.contract.support import NOW
+
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    async with build(
+        settings=replace(memory_settings(), people_enabled=True), storage="memory", principal=owner
+    ) as app:
+        common: PeopleFields = {
+            "tenant_id": owner.tenant_id,
+            "principal_id": owner.principal_id,
+            "created_at": NOW,
+            "updated_at": NOW,
+        }
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+            for index, state, pinned in [
+                (1, "provisional", False),
+                (2, "active", False),
+                (3, "provisional", False),
+                (4, "merged", False),
+                (5, "provisional", True),
+            ]:
+                await uow.people.put(
+                    Person(
+                        id=UUID(int=index),
+                        display_name=f"Person {index}",
+                        state=state,  # type: ignore[arg-type]
+                        merged_into=UUID(int=2) if state == "merged" else None,
+                        pinned=pinned,
+                        **common,
+                    ),
+                    expected_revision=0,
+                )
+            # Someone the owner wrote to is identified by address, not waiting on review.
+            await uow.people.put(
+                PersonIdentifier(
+                    id=UUID(int=30),
+                    person_id=UUID(int=3),
+                    identifier_kind="email",
+                    namespace="owner",
+                    value="person3@example.test",
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        api = create_app(
+            app.services, app.settings, app.principal, app.new_request_id, app.readiness_probe
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api, client=("127.0.0.1", 1234)),
+            base_url="http://localhost",
+        ) as client:
+
+            async def ids(query: str) -> list[str]:
+                response = await client.get(f"/v1/people?ceiling=sensitive&limit=100&{query}")
+                assert response.status_code == 200, response.text
+                return [row["id"] for row in response.json()["items"]]
+
+            assert await ids("state=active&state=provisional") == [
+                str(UUID(int=n)) for n in (1, 2, 3, 5)
+            ]
+            assert await ids("state=active") == [str(UUID(int=2))]
+            assert await ids("review=true") == [str(UUID(int=1))]
+            # An unknown state is a request validation error, like any bad query value.
+            invalid = await client.get("/v1/people?ceiling=sensitive&state=forgotten")
+            assert invalid.status_code == 400
+
+
 async def test_people_import_runs_selected_empty_history_without_advancing_automatic_cursor() -> (
     None
 ):
@@ -163,12 +238,17 @@ async def test_people_import_runs_selected_empty_history_without_advancing_autom
             assert await uow.memories.consolidation_watermark(source.id, owner) == 0
 
 
-async def test_people_import_preserves_failed_source_and_records_provider_cost() -> None:
+@pytest.mark.parametrize("alias_order", ["none", "first", "last"])
+async def test_people_import_preserves_failed_source_and_records_provider_cost(
+    alias_order: str,
+) -> None:
     from datetime import timedelta
+    from uuid import UUID
 
     from agent_core.domain.events import NewEvent
     from agent_core.domain.memory import Sensitivity
     from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+    from agent_core.domain.people import Person, PersonIdentifier
     from agent_core.domain.people_imports import PeopleImportRequest
 
     owner = principal().model_copy(
@@ -190,9 +270,43 @@ async def test_people_import_preserves_failed_source_and_records_provider_cost()
                     event_type="user.message.created",
                     actor_type="principal",
                     actor_id=owner.principal_id,
-                    payload={"content": "I prefer jasmine tea."},
+                    payload={"content": "I prefer jasmine tea with Alex."},
                 )
             )
+        person_ids = []
+        if alias_order != "none":
+            common: PeopleFields = {
+                "tenant_id": owner.tenant_id,
+                "principal_id": owner.principal_id,
+                "created_at": app.clock.now(),
+                "updated_at": app.clock.now(),
+            }
+            person = Person(id=UUID(int=990), display_name="Alex", **common)
+            confirmed = PersonIdentifier(
+                id=UUID(int=900 if alias_order == "first" else 1200),
+                person_id=person.id,
+                identifier_kind="name",
+                namespace="owner",
+                value="Alex",
+                context="owner",
+                verification="owner_confirmed",
+                valid_from=app.clock.now() - timedelta(days=1),
+                **common,
+            )
+            async with app.uow_factory() as uow:
+                await uow.people.put(person, expected_revision=0)
+                await uow.people.put(confirmed, expected_revision=0)
+                for index in range(150):
+                    await uow.people.put(
+                        confirmed.model_copy(
+                            update={
+                                "id": UUID(int=1000 + index),
+                                "verification": "channel_observed",
+                            }
+                        ),
+                        expected_revision=0,
+                    )
+            person_ids = [str(person.id)]
         service = app.services.people
         assert service is not None
         preview_request = PeopleImportRequest.model_validate(
@@ -201,6 +315,7 @@ async def test_people_import_preserves_failed_source_and_records_provider_cost()
                 "session_id": str(source.id),
                 "scope": {
                     "session_ids": [str(source.id)],
+                    "person_ids": person_ids,
                     "since": (app.clock.now() - timedelta(days=1)).isoformat(),
                     "until": (app.clock.now() + timedelta(days=1)).isoformat(),
                     "max_records": 10,
@@ -375,7 +490,14 @@ async def test_people_api_write_read_retry_and_validation() -> None:
                     f"/v1/people/{data['id']}/{section}?ceiling=sensitive"
                 )
                 assert section_response.status_code == 200, section_response.text
-                assert section_response.json()["items"] == []
+                items = section_response.json()["items"]
+                if section == "identity-evidence":
+                    # ADR-0121: the owner-created name is owner-confirmed identity.
+                    assert [(item["kind"], item["label"]) for item in items] == [
+                        ("identifier", "Alex")
+                    ]
+                else:
+                    assert items == []
             assert (
                 await client.get(f"/v1/people/{data['id']}/history?ceiling=sensitive&limit=101")
             ).status_code == 400

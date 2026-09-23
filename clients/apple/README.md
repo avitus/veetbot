@@ -34,10 +34,27 @@ The generated application property list declares
 Keychain protection and implements no non-exempt encryption. Reassess that
 declaration before adding a custom or third-party cryptographic implementation.
 
-The settings surface groups Connection, Website Access, Appearance, and Data &
-Privacy in a scrolling layout. The Connect or Update Connection action sits in
+Files can be attached to a chat message (ADR-0120). On Mac and iPad, drop files
+anywhere on the conversation or on the message field; plain text dropped on the
+field is still inserted as text. The paperclip beside the field opens Files on
+every device and, on iOS, the photo library, which needs no photo permission.
+Each file uploads as soon as it is added and shows its progress; a failed upload
+can be retried or removed, and a message may be attachments alone. Images other
+than small PNG, GIF, and WebP files are re-encoded as JPEG with a 2000-pixel
+long edge before upload, which removes their location metadata. A server
+without the upload route shows each file as not accepted, and an answer to a
+clarifying question stays text: staged files wait for the next message.
+
+The settings surface groups Connection, Models, Website Access, Appearance, and
+Data & Privacy in a scrolling layout. The Connect or Update Connection action sits in
 the Connection card, while device-local text-size and font-style controls save
-automatically and apply immediately throughout the client. On macOS, configured
+automatically and apply immediately throughout the client. The Models card reads
+and writes the server's `/v1/settings/models` resource (scopes `settings.read`
+and `settings.write`): a chat model and reasoning effort, and a memory-formation
+model and effort limited to the combinations the server offers. Each picker change
+saves the whole state at once against the version it read; a concurrent change
+elsewhere reloads the server's values, any other failure reverts the pickers, and
+a server without the resource hides them. On macOS, configured
 clients use a separate settings window that resizes in both dimensions and
 remembers its frame. The main and settings windows persist their sizes and
 positions independently; system text sizing remains the default.

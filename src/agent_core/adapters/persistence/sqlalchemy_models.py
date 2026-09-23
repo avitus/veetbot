@@ -120,6 +120,7 @@ class SessionDeletionArtifactRow(Base):
 class RunRow(Base):
     __tablename__ = "runs"
     __table_args__ = (
+        CheckConstraint("lease_expirations >= 0", name="run_lease_expirations_nonnegative"),
         Index("ix_runs_status_created", "status", "created_at"),
         Index("ix_runs_lease_expires", "lease_expires_at"),
         Index("ix_runs_session_created", "session_id", "created_at"),
@@ -186,6 +187,7 @@ class RunRow(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_epoch: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    lease_expirations: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     priority: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -600,6 +602,15 @@ class ArtifactRow(Base):
             "expires_at",
             postgresql_where=text("origin <> 'trajectory_export' AND expires_at IS NOT NULL"),
         ),
+        Index(
+            "ix_artifacts_upload_ingest_pending",
+            "created_at",
+            postgresql_where=text("(metadata ->> 'auto_ingest') = 'pending'"),
+        ),
+        CheckConstraint(
+            "run_id IS NOT NULL OR origin IN ('upload', 'knowledge_source')",
+            name="run_or_upload",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -608,7 +619,7 @@ class ArtifactRow(Base):
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
     )
-    run_id: Mapped[UUID] = mapped_column(
+    run_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(Text)
@@ -1860,6 +1871,20 @@ class ThreadFolderProposalRow(Base):
     resulting_folder_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ModelSettingsRow(Base):
+    __tablename__ = "model_settings"
+    __table_args__ = (CheckConstraint("version > 0", name="model_settings_version_positive"),)
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_model_policy: Mapped[str] = mapped_column(Text)
+    chat_reasoning_effort: Mapped[str | None] = mapped_column(Text)
+    memory_model_policy: Mapped[str] = mapped_column(Text)
+    memory_reasoning_effort: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class PersonaDocumentRow(Base):

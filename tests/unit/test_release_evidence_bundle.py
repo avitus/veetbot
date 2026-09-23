@@ -43,14 +43,19 @@ from agent_core.evals.memory_distillation import (
 from agent_core.evals.memory_formation import load_corpus as load_formation_corpus
 from agent_core.memory.equivalence import DISTILLATION_SCORER_VERSION
 
-ActivationTuple = tuple[str, str, str, str, str, str, str]
+ActivationTuple = tuple[str, str, str, str, str, str, str, str | None]
 
 
 def _activation_tuple(
     evidence: ProviderExtractionEvaluationEvidence | MemoryDistillationEvidence,
 ) -> ActivationTuple:
-    """The seven fields startup validation matches an artifact against."""
+    """The fields startup validation matches an artifact against.
 
+    Formation@9 evidence also binds the reasoning effort it was evaluated at
+    (ADR-0119); the older provider-assisted artifacts sent none.
+    """
+
+    effort = evidence.reasoning_effort if isinstance(evidence, MemoryDistillationEvidence) else None
     return (
         evidence.extractor_version,
         evidence.formation_policy_version,
@@ -59,6 +64,7 @@ def _activation_tuple(
         evidence.model,
         evidence.policy_profile,
         evidence.policy_version,
+        None if effort is None else effort.value,
     )
 
 
@@ -88,7 +94,8 @@ def test_every_bundled_artifact_parses_through_the_runtime_loader() -> None:
             evidence,
             (ProviderExtractionEvaluationEvidence, MemoryDistillationEvidence),
         )
-        assert all(field for field in _activation_tuple(evidence))
+        # Every identity field is named; only the effort may be absent.
+        assert all(field for field in _activation_tuple(evidence)[:-1])
 
 
 def test_bundled_activation_tuples_are_unique() -> None:

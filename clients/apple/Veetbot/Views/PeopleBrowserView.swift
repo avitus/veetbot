@@ -87,10 +87,18 @@ public struct PeopleBrowserView: View {
                     #endif
                     Toggle("Recent interactions first", isOn: Binding(get: { model.recentFirst }, set: { value in Task { await model.setRecentFirst(value) } }))
                     if model.items.isEmpty && model.errorMessage == nil {
-                        Section {
-                            Label("People you remember", systemImage: "person.2")
-                            Text("People and their history appear here as Veetbot learns about them. You can also add someone.")
-                                .foregroundColor(.secondary)
+                        if model.collection == .review {
+                            Section {
+                                Label("Nothing needs review.", systemImage: "checkmark.circle")
+                                Text("Someone Veetbot knows only by a name or role appears here until you confirm or remove them.")
+                                    .foregroundColor(.secondary)
+                            }
+                        } else {
+                            Section {
+                                Label("People you remember", systemImage: "person.2")
+                                Text("People you know and people you write to appear here. You can also add someone.")
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                     ForEach(model.items) { person in
@@ -102,7 +110,7 @@ public struct PeopleBrowserView: View {
                                     .foregroundColor(person.pinned ? AppTheme.orange : .secondary)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(person.displayName).appFont(.headline)
-                                    if person.state != "active" { Text(person.state == "provisional" ? "Identity needs review" : "Combined identity").appFont(.caption).foregroundColor(.secondary) }
+                                    if person.state == "merged" { Text("Combined identity").appFont(.caption).foregroundColor(.secondary) }
                                 }
                             }.padding(.vertical, 4)
                         }

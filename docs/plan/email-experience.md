@@ -512,8 +512,10 @@ historical import, and any replay meet the same rule; the refresh also
 records a content-free `email.semantic.skipped` event naming the reason, so
 memory diagnostics can explain why nothing formed. Importance assessment is
 unchanged, and the assessment prompt is not revised for this rule. Memories
-that bulk mail already formed leave through source exclusion, which
-`agent email exclude-bulk` applies across every census-indexed retained source.
+that bulk mail already formed leave through governed deletion of each derived
+belief; `agent email exclude-bulk` previews and, with `--confirm`, applies
+source exclusion across every census-indexed retained source, which is a
+coarser operation because it also drops those threads from the mailbox view.
 
 Correspondent and historical Sent evidence remain attributed, inferred,
 sensitivity-governed, and unable to supersede an owner assertion. Current

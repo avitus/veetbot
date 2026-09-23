@@ -6,7 +6,7 @@ from agent_core.domain.errors import ConflictError
 from agent_core.domain.runs import RunStatus
 
 ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
-    RunStatus.QUEUED: frozenset({RunStatus.RUNNING, RunStatus.CANCELLED}),
+    RunStatus.QUEUED: frozenset({RunStatus.RUNNING, RunStatus.CANCELLED, RunStatus.FAILED}),
     RunStatus.RUNNING: frozenset(
         {
             RunStatus.WAITING_FOR_APPROVAL,

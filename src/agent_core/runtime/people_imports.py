@@ -11,7 +11,12 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailImportBudget, EmailRecord
-from agent_core.domain.errors import BudgetExceededError, ConflictError
+from agent_core.domain.errors import (
+    BudgetExceededError,
+    ConflictError,
+    NotFoundError,
+    ToolValidationError,
+)
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
@@ -301,25 +306,12 @@ class ImportSlice:
         await self.service.validate_sources(
             uow, context.principal, job.scope, Sensitivity.RESTRICTED
         )
-        current_identities: dict[UUID, int] = {}
-        for person_id in job.scope.person_ids:
-            person = await uow.people.get(
-                context.principal, person_id, ceiling=Sensitivity.RESTRICTED
+        try:
+            current_identities = await self.service.identity_revisions(
+                uow, context.principal, job.scope.person_ids, Sensitivity.RESTRICTED
             )
-            if person is None:
-                raise ImportStoppedError("import identity is unavailable")
-            current_identities[person.id] = person.revision
-            aliases = await uow.people.query(
-                PeopleQuery(
-                    tenant_id=context.principal.tenant_id,
-                    principal_id=context.principal.principal_id,
-                    kinds=["identifier"],
-                    person_id=person_id,
-                    sensitivity_ceiling=Sensitivity.RESTRICTED,
-                    limit=100,
-                )
-            )
-            current_identities.update({alias.id: alias.revision for alias in aliases})
+        except (NotFoundError, ToolValidationError) as exc:
+            raise ImportStoppedError("import identity is unavailable") from exc
         if current_identities != job.identity_revisions:
             raise ImportStoppedError("import identity selection changed")
         await uow.events.append(
@@ -355,6 +347,7 @@ class ImportSlice:
                     principal_id=owner.principal_id,
                     kinds=["identifier"],
                     person_id=person_id,
+                    distinct_assignments=True,
                     sensitivity_ceiling=Sensitivity.RESTRICTED,
                     limit=100,
                 )

@@ -47,3 +47,18 @@ def test_release_validates_and_restarts_surface_role() -> None:
     assert "AGENT_SURFACE_WORKER_ENABLED" in release
     assert "AGENT_SURFACE_WHATSAPP_ENABLED" in release
     assert "veetbot-surface" in release
+
+
+def test_only_the_attachment_upload_path_accepts_a_larger_body() -> None:
+    """ADR-0120: one regex location raises the limit; the server keeps 1m."""
+
+    nginx = (ROOT / "nginx/veetbot.conf").read_text(encoding="utf-8")
+    api = nginx.split("live/api.veetbot.com/fullchain.pem;", 1)[1].split("\nserver {", 1)[0]
+    assert api.count("client_max_body_size 1m;") == 1
+    assert api.count("client_max_body_size 33m;") == 1
+    upload = api.split('location ~ "^/v1/sessions/[0-9A-Fa-f-]{36}/artifacts$" {', 1)[1]
+    upload = upload.split("\n    }", 1)[0]
+    assert "client_max_body_size 33m;" in upload
+    assert "proxy_pass http://127.0.0.1:8000;" in upload
+    assert "proxy_request_buffering off;" in upload
+    assert nginx.count("client_max_body_size 33m;") == 1

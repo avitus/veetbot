@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:855`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:859`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -358,7 +358,7 @@ Materializing into the artifact store rather than into a table is the whole
 of the decision, and it is made for four properties the store already has
 and a table would have to grow: content addressing by SHA-256, a key
 derived from platform-generated values rather than composed from caller
-input (`sandbox-isolation.md:1103`), an authorized read path that ADR-0028
+input (`sandbox-isolation.md:1105`), an authorized read path that ADR-0028
 already puts in front of both metadata and bytes, and `expires_at` with a
 sweeper behind it. Every one of those is load-bearing for a governed
 export. A second bytes-holding mechanism inside PostgreSQL would be a worse
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1212-1220`) run over every message body,
+   (`bootstrap-and-composition.md:1225-1233`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1225-1227`).
+(`bootstrap-and-composition.md:1238-1240`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -542,7 +542,7 @@ engineering one, named here so that nobody reads "consent-gated" as
 ### Retention, and why promotion is the durable step
 
 An export expires like any other artifact — thirty days by default, per the
-artifact retention this corpus already sets (`sandbox-isolation.md:1167`).
+artifact retention this corpus already sets (`sandbox-isolation.md:1169`).
 It is not special-cased to live longer, and the reason is that the two
 things Section 31.2 wants exports for do not actually want a long-lived
 export.
@@ -568,7 +568,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:1049`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:1062`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s five
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an
@@ -1555,3 +1555,26 @@ decision noted in
   same run id and nothing in the document says which builder made it —
   except `builder_version`, which is exactly the field a caller who has
   already stored the first one will not re-read.
+
+## Crash allowance and ordinary continuations (ADR-0118)
+
+[ADR-0118](../adr/0118-crash-retries-exclude-durable-continuations.md) clarifies
+queue-level retry: `attempts` remains the total claim count, while the new
+nonnegative `lease_expirations` column counts only expired worker executions.
+Input, approval and child-run resumptions neither consume nor reset this crash
+allowance. This supersedes using total claims for `max_attempts` and retry backoff.
+
+The claim predicate requires `lease_expirations < max_attempts`. The locked
+lease reaper increments that counter for an expired running execution only.
+With the unchanged default of three, the first two expirations requeue with
+one- and two-second backoff; the third fails with `max_attempts_exceeded`.
+The bounded reaper also terminalizes already exhausted queued rows, emitting
+`run.failed` in the same transaction. The `QUEUED -> FAILED` edge exists for
+that case, so a claim filter cannot strand a run indefinitely. Waiting runs
+remain excluded; fencing, deadlines, budgets and effect recovery are unchanged.
+
+The additive migration backfills from durable maintenance `run.requeued` and
+lease-exhaustion `run.failed` events, never from total claims. It preserves
+actual crash history and never reopens terminal runs. Existing queued
+continuations with unused crash allowance become claimable with their saved
+answers, checkpoints, tool identities and approval requirements intact.

@@ -81,6 +81,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
+from agent_core.domain.artifacts import auto_ingest_metadata, claimed_upload
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS,
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
@@ -2603,6 +2604,72 @@ class PostgresArtifactRepository:
             )
         )
         return bool(_rowcount(result))
+
+    async def _owned_for_update(self, artifact_id: UUID, principal: Principal) -> ArtifactRow:
+        row = (
+            await self._session.scalars(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return row
+
+    async def claim_upload(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        auto_ingest: bool,
+    ) -> ArtifactRef:
+        row = await self._owned_for_update(artifact_id, principal)
+        if row.session_id != session_id or row.origin not in {"upload", "knowledge_source"}:
+            raise NotFoundError("artifact not found")
+        claimed = claimed_upload(artifact_to_domain(row), run_id=run_id, auto_ingest=auto_ingest)
+        row.run_id = claimed.run_id
+        row.expires_at = claimed.expires_at
+        row.metadata_json = dict(claimed.metadata)
+        await self._session.flush()
+        return claimed
+
+    async def pending_auto_ingest(self, principal: Principal, *, limit: int) -> list[ArtifactRef]:
+        rows = (
+            await self._session.scalars(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.metadata_json["auto_ingest"].astext == "pending",
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .order_by(ArtifactRow.created_at, ArtifactRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return [artifact_to_domain(row) for row in rows]
+
+    async def record_auto_ingest(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        state: str,
+        reason: str | None,
+        attempts: int,
+    ) -> ArtifactRef:
+        row = await self._owned_for_update(artifact_id, principal)
+        row.metadata_json = auto_ingest_metadata(
+            dict(row.metadata_json), state=state, reason=reason, attempts=attempts
+        )
+        await self._session.flush()
+        return artifact_to_domain(row)
 
 
 class PostgresMaintenanceRepository:

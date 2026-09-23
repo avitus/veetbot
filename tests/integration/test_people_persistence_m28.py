@@ -22,8 +22,11 @@ from tests.contract.test_people_store_contract import (
     people_duplicate_source_erasure_contract,
     people_email_erasure_contract,
     people_history_paging_contract,
+    people_identifier_lookup_contract,
     people_interaction_redirect_contract,
+    people_preserving_erase_contract,
     people_recent_directory_contract,
+    people_review_directory_contract,
     people_source_visibility_contract,
     people_store_contract,
     people_transitive_visibility_contract,
@@ -244,6 +247,9 @@ async def test_postgres_people_store_contract() -> None:
             await people_interaction_redirect_contract(
                 PostgresPeopleStore(session, FixedClock(NOW))
             )
+            await people_preserving_erase_contract(PostgresPeopleStore(session, FixedClock(NOW)))
+            await people_identifier_lookup_contract(PostgresPeopleStore(session, FixedClock(NOW)))
+            await people_review_directory_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await session.commit()
     finally:
         await engine.dispose()
@@ -1465,3 +1471,189 @@ async def test_postgres_recall_waits_for_initial_erasure_without_blocking_anothe
         async with app.uow_factory() as uow:
             await uow.sessions.create(session())
         await initial_erasure_contention_contract(app.uow_factory, app.clock, monkeypatch)
+
+
+async def test_postgres_people_directory_repair() -> None:
+    """The repair's queries, deletes and erasure hold on PostgreSQL (ADR-0121)."""
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from agent_core.bootstrap import build
+    from agent_core.domain.email import EmailAccount, EmailRecord
+    from agent_core.domain.errors import NotFoundError
+    from agent_core.domain.memory import BeliefType, MemoryAuthority
+    from agent_core.domain.people import (
+        PeopleEndpoint,
+        PeopleQuery,
+        PeopleSource,
+        PersonIdentifier,
+        PersonMemoryLink,
+        PersonMention,
+        RelationshipAssertion,
+    )
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.support import session
+
+    owner = principal().model_copy(
+        update={
+            "principal_id": f"repair-{uuid4().hex[:12]}",
+            "scopes": {"people.read", "people.write", "session.read", "session.write"},
+        }
+    )
+    settings = replace(database_settings(), people_enabled=True)
+    async with build(settings=settings, storage="postgres", principal=owner) as app:
+        repair = app.people_repair
+        assert repair is not None
+        chat, audit = uuid4(), uuid4()
+        fields: dict[str, Any] = {
+            "tenant_id": owner.tenant_id,
+            "principal_id": owner.principal_id,
+            "created_at": NOW - timedelta(days=10),
+            "updated_at": NOW - timedelta(days=10),
+        }
+        people: dict[str, UUID] = {}
+        beliefs: dict[str, UUID] = {}
+        mail_source, chat_source = uuid4(), uuid4()
+        async with app.uow_factory() as uow:
+            for session_id, metadata in ((chat, {}), (audit, {"purpose": "people-management"})):
+                await uow.sessions.create(
+                    session().model_copy(
+                        update={
+                            "id": session_id,
+                            "principal_id": owner.principal_id,
+                            "metadata": metadata,
+                        }
+                    )
+                )
+            await uow.email.put(
+                EmailRecord(
+                    kind="account",
+                    key="work",
+                    revision=1,
+                    payload=EmailAccount(
+                        id="work",
+                        label="Work",
+                        email_address="owner@example.test",
+                        status="syncing",
+                    ).model_dump(mode="json"),
+                    **fields,
+                ),
+                expected_revision=0,
+            )
+            for source_id, kind in ((mail_source, "email"), (chat_source, "owner")):
+                await uow.people.put(
+                    PeopleSource(
+                        id=source_id,
+                        session_id=chat,
+                        event_sequence=1,
+                        source_kind=kind,  # type: ignore[arg-type]
+                        evidence_at=NOW - timedelta(days=5),
+                        account_id="work" if kind == "email" else None,
+                        thread_id="t-news" if kind == "email" else None,
+                        message_id="m-news" if kind == "email" else None,
+                        source_revision="a" * 64,
+                        **fields,
+                    ),
+                    expected_revision=0,
+                )
+            for label, name, state, source in (
+                ("jensen", "Jensen Huang", "provisional", mail_source),
+                ("pronoun", "you", "provisional", mail_source),
+                ("maya", "Maya", "provisional", chat_source),
+                ("kyrri", "Kyrri", "active", None),
+            ):
+                person = Person(
+                    id=uuid4(),
+                    display_name=name,
+                    state=state,  # type: ignore[arg-type]
+                    support_ids=[source] if source else [],
+                    **fields,
+                )
+                people[label] = person.id
+                await uow.people.put(person, expected_revision=0)
+            await uow.people.put(
+                PersonMention(
+                    id=uuid4(),
+                    source_id=mail_source,
+                    person_id=people["jensen"],
+                    start=0,
+                    end=5,
+                    support_ids=[mail_source],
+                    **fields,
+                ),
+                expected_revision=0,
+            )
+            for label, statement, authority, source in (
+                (
+                    "jensen",
+                    "Jensen Huang leads the keynote.",
+                    MemoryAuthority.INFERRED,
+                    mail_source,
+                ),
+                ("maya", "Maya is my sister.", MemoryAuthority.USER, chat_source),
+            ):
+                record = memory(statement=statement).model_copy(
+                    update={
+                        "id": uuid4(),
+                        "principal_id": owner.principal_id,
+                        "subject": f"person:{people[label]}:{label}",
+                        "belief_type": BeliefType.RELATIONSHIP,
+                        "authority": authority,
+                        "source_session_id": chat,
+                        "store_position": await uow.memories.next_position(),
+                    }
+                )
+                beliefs[label] = record.id
+                await uow.memories.upsert_belief(record)
+                await uow.people.put(
+                    PersonMemoryLink(
+                        id=uuid4(),
+                        person_id=people[label],
+                        belief_id=record.id,
+                        support_ids=[source],
+                        **fields,
+                    ),
+                    expected_revision=0,
+                )
+            await uow.people.put(
+                RelationshipAssertion(
+                    id=uuid4(),
+                    subject=PeopleEndpoint(kind="person", id=people["maya"]),
+                    object=PeopleEndpoint(kind="owner"),
+                    predicate="sibling",
+                    belief_id=beliefs["maya"],
+                    support_ids=[chat_source],
+                    **fields,
+                ),
+                expected_revision=0,
+            )
+        preview = await repair.run(owner, confirm=False)
+        assert {(row.display_name, row.reason) for row in preview.candidates} == {
+            ("Jensen Huang", "unconfirmed"),
+            ("you", "pronoun"),
+        }
+        assert (preview.aliases_added, preview.beliefs_deleted) == (["Kyrri"], 1)
+        report = await repair.run(owner, confirm=True, session_id=audit)
+        assert {row.display_name for row in report.candidates} == {"Jensen Huang", "you"}
+        query = PeopleQuery(
+            tenant_id=owner.tenant_id,
+            principal_id=owner.principal_id,
+            kinds=["person", "mention", "identifier"],
+            sensitivity_ceiling=Sensitivity.RESTRICTED,
+            limit=100,
+        )
+        async with app.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.memories.get(beliefs["jensen"], owner)
+            await uow.memories.get(beliefs["maya"], owner)
+            rows = await uow.people.query(query)
+            assert not await uow.people.source_suppressed(owner, mail_source)
+        assert {row.display_name for row in rows if isinstance(row, Person)} == {"Maya", "Kyrri"}
+        assert [row.person_id for row in rows if isinstance(row, PersonMention)] == [None]
+        assert [
+            (row.person_id, row.value, row.verification)
+            for row in rows
+            if isinstance(row, PersonIdentifier)
+        ] == [(people["kyrri"], "Kyrri", "owner_confirmed")]
+        again = await repair.run(owner, confirm=True, session_id=audit)
+        assert again.candidates == [] and again.aliases_added == []

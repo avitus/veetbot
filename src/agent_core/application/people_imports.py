@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
 from decimal import Decimal
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -28,6 +28,47 @@ from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.views import Page
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+
+
+async def import_identity_revisions(
+    uow: RepositoryUnitOfWork,
+    owner: Principal,
+    person_ids: Sequence[UUID],
+    ceiling: Sensitivity,
+) -> dict[UUID, int]:
+    """The identity revisions a person-scoped import is pinned to.
+
+    Selection reads only owner-confirmed identifiers, so only those pin the
+    import. Correspondence writes an observed identifier for every message the
+    owner exchanges with someone (ADR-0121); those rows neither exceed the
+    snapshot bound nor stop an import that is already selecting that person.
+    """
+    identities: dict[UUID, int] = {}
+    for person_id in person_ids:
+        person = await uow.people.get(owner, person_id, ceiling=ceiling)
+        if not isinstance(person, Person):
+            raise NotFoundError("import person is unavailable")
+        identities[person.id] = person.revision
+        aliases = await uow.people.query(
+            PeopleQuery(
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                kinds=["identifier"],
+                person_id=person_id,
+                distinct_assignments=True,
+                sensitivity_ceiling=ceiling,
+                limit=100,
+            )
+        )
+        confirmed = [
+            alias
+            for alias in aliases
+            if isinstance(alias, PersonIdentifier) and alias.verification == "owner_confirmed"
+        ]
+        if len(aliases) > 100:
+            raise ToolValidationError("import person has too many identifiers")
+        identities.update({alias.id: alias.revision for alias in confirmed})
+    return identities
 
 
 class PeopleImportService:
@@ -142,6 +183,16 @@ class PeopleImportService:
                 next_cursor=next_cursor,
             )
 
+    async def identity_revisions(
+        self,
+        uow: RepositoryUnitOfWork,
+        owner: Principal,
+        person_ids: Sequence[UUID],
+        ceiling: Sensitivity,
+    ) -> dict[UUID, int]:
+        """The identity snapshot a running import is checked against."""
+        return await import_identity_revisions(uow, owner, person_ids, ceiling)
+
     async def validate_sources(
         self,
         uow: RepositoryUnitOfWork,
@@ -174,6 +225,7 @@ class PeopleImportService:
                     principal_id=owner.principal_id,
                     kinds=["identifier"],
                     person_id=person_id,
+                    distinct_assignments=True,
                     sensitivity_ceiling=ceiling,
                     limit=100,
                 )
@@ -235,25 +287,9 @@ class PeopleImportService:
                             request.scope.since <= event.created_at < request.scope.until
                             for event in events
                         )
-                identities: dict[UUID, int] = {}
-                for person_id in request.scope.person_ids:
-                    person = await uow.people.get(owner, person_id, ceiling=ceiling)
-                    if not isinstance(person, Person):
-                        raise NotFoundError("import person is unavailable")
-                    identities[person.id] = person.revision
-                    aliases = await uow.people.query(
-                        PeopleQuery(
-                            tenant_id=owner.tenant_id,
-                            principal_id=owner.principal_id,
-                            kinds=["identifier"],
-                            person_id=person_id,
-                            sensitivity_ceiling=ceiling,
-                            limit=100,
-                        )
-                    )
-                    if len(aliases) > 100:
-                        raise ToolValidationError("import person has too many identifiers")
-                    identities.update({alias.id: alias.revision for alias in aliases})
+                identities = await import_identity_revisions(
+                    uow, owner, request.scope.person_ids, ceiling
+                )
                 job = PeopleImportJob(
                     identity_revisions=identities,
                     id=uuid5(NAMESPACE_URL, replay_key),

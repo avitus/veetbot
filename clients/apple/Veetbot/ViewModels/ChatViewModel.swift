@@ -66,6 +66,40 @@ func nextPageCursor(
     return cursor
 }
 
+/// One file in the composer: staged, uploading, uploaded, or failed (ADR-0120).
+public struct ComposerAttachment: Identifiable, Equatable, Sendable {
+    public enum State: Equatable, Sendable {
+        case uploading(progress: Double)
+        case uploaded(artifactID: UUID, mediaType: String)
+        case failed(message: String)
+    }
+
+    public let id: UUID
+    public let filename: String
+    public let mediaType: String
+    public internal(set) var state: State
+
+    public var isImage: Bool { mediaType.hasPrefix("image/") }
+
+    public var artifactID: UUID? {
+        guard case .uploaded(let artifactID, _) = state else { return nil }
+        return artifactID
+    }
+
+    /// The block a sent message carries; the server decides from the stored bytes
+    /// which uploads are images, so an image block names only a server image.
+    var contentBlock: ContentBlock? {
+        guard case .uploaded(let artifactID, let storedType) = state else { return nil }
+        if ComposerAttachment.imageMediaTypes.contains(storedType) {
+            return .image(artifactID: artifactID, mediaType: storedType, detail: "auto")
+        }
+        return .file(artifactID: artifactID, mediaType: storedType, filename: filename)
+    }
+
+    static let imageMediaTypes: Set<String> = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+    public static let maximumPerMessage = 10
+}
+
 /// Whatever owns the platform's push registration — the application delegate
 /// in the shipping app. A capability the owner switches on has to reach the
 /// server through a fresh registration, and only the delegate may ask the
@@ -78,6 +112,8 @@ public protocol PushRegistrationRequesting: AnyObject {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     @Published public var composerText = ""
+    /// Files waiting to be sent with the next message (ADR-0120).
+    @Published public private(set) var attachments: [ComposerAttachment] = []
     @Published public private(set) var connectionGeneration = UUID()
     @Published public private(set) var isReconfiguring = false
     public var currentAPIClient: VeetbotAPIClient? { api }
@@ -149,7 +185,12 @@ public final class ChatViewModel: ObservableObject {
     private var removedHistorySessionIDs: Set<UUID> = []
     private var deletingHistorySessionIDs: Set<UUID> = []
     private var historyReconciliationID: UUID?
-    private var pendingSubmission: (text: String, key: String)?
+    private var pendingSubmission: (signature: String, key: String)?
+    private var stagedAttachments: [UUID: StagedAttachment] = [:]
+    private var attachmentUploads: [UUID: Task<Void, Never>] = [:]
+    /// Changes whenever the conversation does, so a late upload result is dropped.
+    private var attachmentGeneration = UUID()
+    private var sessionCreation: Task<SessionView, Error>?
     private var pendingNotificationPayload: NotificationPushPayload?
     private var smsInvocations = SmsInvocationQueue()
     private var smsInvocationDeviceID: UUID?
@@ -231,6 +272,7 @@ public final class ChatViewModel: ObservableObject {
         isConfigured = false
         connectionGeneration = UUID()
         composerText = ""
+        clearAttachments()
         await abandonWebsiteAuthenticationCeremony()
         var revokeError: Error?
         if let api {
@@ -724,6 +766,7 @@ public final class ChatViewModel: ObservableObject {
         sessionBusy = false
         loadedApprovalIDs.removeAll()
         pendingSubmission = nil
+        clearAttachments()
         notificationFocus = nil
         notificationNavigationID = nil
         runState.reset()
@@ -737,6 +780,7 @@ public final class ChatViewModel: ObservableObject {
         let requestID = UUID()
         selectionRequestID = requestID
         watchTasks.cancel()
+        if selectedSessionID != entry.sessionID { clearAttachments() }
         selectedSessionID = entry.sessionID
         sessionBusy = false
         loadedApprovalIDs.removeAll()
@@ -948,13 +992,15 @@ public final class ChatViewModel: ObservableObject {
     @discardableResult
     public func send(_ rawText: String) async -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let api else { return false }
+        guard !text.isEmpty || !attachments.isEmpty, let api else { return false }
         guard !isSending else { return false }
 
         if runState.isRunActive {
             if runState.runStatus == .waitingForUser,
                 let prompt = runState.clarifyingQuestion
             {
+                // An answer is text; staged attachments wait for the next message.
+                guard !text.isEmpty else { return false }
                 return await answerQuestion(prompt, answer: text)
             } else {
                 sessionBusy = true
@@ -963,18 +1009,30 @@ public final class ChatViewModel: ObservableObject {
             }
         }
 
+        guard attachmentsReady else {
+            errorMessage = "Wait for the attachments to finish uploading, or remove them."
+            return false
+        }
         isSending = true
         sessionBusy = false
         defer { isSending = false }
+        let sentAttachments = attachments
+        let content: [ContentBlock] =
+            sentAttachments.compactMap(\.contentBlock) + (text.isEmpty ? [] : [.text(text)])
+        let suggestedTitle = text.isEmpty ? (sentAttachments.first?.filename ?? "") : text
+        // The key covers the attachments too: the same words with other files
+        // are a different message, never a replay of the first.
+        let signature = ([text] + sentAttachments.compactMap { $0.artifactID?.uuidString })
+            .joined(separator: "\u{1F}")
         let idempotencyKey: String
-        if let pendingSubmission, pendingSubmission.text == text {
+        if let pendingSubmission, pendingSubmission.signature == signature {
             idempotencyKey = pendingSubmission.key
         } else {
             idempotencyKey = UUID().uuidString.lowercased()
-            pendingSubmission = (text, idempotencyKey)
+            pendingSubmission = (signature, idempotencyKey)
         }
         runState.beginPendingUserMessage(
-            content: [.text(text)],
+            content: content,
             submissionID: idempotencyKey
         )
         do {
@@ -982,23 +1040,20 @@ public final class ChatViewModel: ObservableObject {
             if let selectedSessionID {
                 session = try await api.getSession(selectedSessionID)
             } else {
-                session = try await api.createSession(
-                    browserProfileID: selectedBrowserProfileID
-                )
-                selectedSessionID = session.id
-                try await store(session: session, lastRunID: nil, suggestedTitle: text)
+                session = try await createSelectedSession(suggestedTitle: suggestedTitle)
             }
             let submit = try await api.submitMessage(
                 sessionID: session.id,
-                content: [.text(text)],
+                content: content,
                 idempotencyKey: idempotencyKey
             )
             runState.begin(runID: submit.runID, status: submit.status)
+            removeSentAttachments(sentAttachments)
             do {
                 try await store(
                     session: session,
                     lastRunID: submit.runID,
-                    suggestedTitle: text,
+                    suggestedTitle: suggestedTitle,
                     touchedNow: true
                 )
             } catch {
@@ -1011,6 +1066,8 @@ public final class ChatViewModel: ObservableObject {
             return true
         } catch {
             runState.discardPendingUserMessage(submissionID: idempotencyKey)
+            // The owner moved to another conversation while this one was created.
+            if error is CancellationError { return false }
             if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 apiError.details.reason == "active_run_exists",
@@ -1026,11 +1083,212 @@ public final class ChatViewModel: ObservableObject {
                 } catch {
                     present(error)
                 }
+            } else if let apiError = apiError(from: error),
+                apiError.statusCode == 404,
+                apiError.message == "artifact not found"
+            {
+                // An upload that expired or was removed cannot be sent; the owner
+                // attaches the file again.
+                pendingSubmission = nil
+                markAttachmentsFailed(
+                    sentAttachments,
+                    message: "This file is no longer available. Remove it and attach it again."
+                )
+                present(error)
             } else {
                 present(error)
             }
             return false
         }
+    }
+
+    // MARK: - Attachments (ADR-0120)
+
+    /// Every staged file has finished uploading; a message may carry them now.
+    public var attachmentsReady: Bool {
+        attachments.allSatisfy { $0.artifactID != nil }
+    }
+
+    /// Stage files picked or dropped by URL and start uploading each.
+    public func attach(fileURLs: [URL]) async {
+        for url in fileURLs {
+            guard reserveAttachmentSlot() else { return }
+            do {
+                let staged = try await Task.detached(priority: .userInitiated) {
+                    try AttachmentStaging.stage(fileURL: url)
+                }.value
+                enqueue(staged)
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    /// Stage what a drag or the photo picker carries and start uploading each.
+    public func attach(itemProviders: [NSItemProvider]) async {
+        for provider in itemProviders {
+            guard reserveAttachmentSlot() else { return }
+            do {
+                enqueue(try await AttachmentStaging.stage(itemProvider: provider))
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    public func removeAttachment(_ id: UUID) {
+        attachmentUploads.removeValue(forKey: id)?.cancel()
+        stagedAttachments.removeValue(forKey: id)
+        attachments.removeAll { $0.id == id }
+    }
+
+    public func retryAttachment(_ id: UUID) {
+        guard stagedAttachments[id] != nil,
+            let index = attachments.firstIndex(where: { $0.id == id })
+        else { return }
+        attachments[index].state = .uploading(progress: 0)
+        startUpload(id)
+    }
+
+    private func reserveAttachmentSlot() -> Bool {
+        guard attachments.count < ComposerAttachment.maximumPerMessage else {
+            errorMessage =
+                "A message can carry at most \(ComposerAttachment.maximumPerMessage) attachments."
+            return false
+        }
+        return true
+    }
+
+    private func enqueue(_ staged: StagedAttachment) {
+        guard reserveAttachmentSlot() else { return }
+        let id = UUID()
+        stagedAttachments[id] = staged
+        attachments.append(
+            ComposerAttachment(
+                id: id,
+                filename: staged.filename,
+                mediaType: staged.mediaType,
+                state: .uploading(progress: 0)
+            )
+        )
+        startUpload(id)
+    }
+
+    private func startUpload(_ id: UUID) {
+        guard let api, let staged = stagedAttachments[id] else { return }
+        let generation = attachmentGeneration
+        let reportProgress: @Sendable (Double) -> Void = { [weak self] fraction in
+            Task { @MainActor in
+                self?.updateUploadProgress(id, fraction, generation: generation)
+            }
+        }
+        attachmentUploads[id]?.cancel()
+        attachmentUploads[id] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let sessionID = try await self.uploadSessionID(suggestedTitle: staged.filename)
+                guard self.attachmentGeneration == generation else { return }
+                let artifact = try await api.uploadArtifact(
+                    sessionID: sessionID,
+                    data: staged.data,
+                    filename: staged.filename,
+                    mediaType: staged.mediaType,
+                    // One key per staged file: a retry replays the stored upload.
+                    idempotencyKey: id.uuidString.lowercased(),
+                    progress: reportProgress
+                )
+                guard self.attachmentGeneration == generation else { return }
+                self.setAttachmentState(
+                    id,
+                    .uploaded(artifactID: artifact.id, mediaType: artifact.mediaType)
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.attachmentGeneration == generation else { return }
+                self.setAttachmentState(id, .failed(message: Self.uploadFailureMessage(error)))
+            }
+            self.attachmentUploads[id] = nil
+        }
+    }
+
+    private func updateUploadProgress(_ id: UUID, _ fraction: Double, generation: UUID) {
+        guard attachmentGeneration == generation,
+            let index = attachments.firstIndex(where: { $0.id == id }),
+            case .uploading = attachments[index].state
+        else { return }
+        attachments[index].state = .uploading(progress: fraction)
+    }
+
+    private func setAttachmentState(_ id: UUID, _ state: ComposerAttachment.State) {
+        guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
+        attachments[index].state = state
+    }
+
+    private func removeSentAttachments(_ sent: [ComposerAttachment]) {
+        for attachment in sent {
+            stagedAttachments.removeValue(forKey: attachment.id)
+            attachmentUploads.removeValue(forKey: attachment.id)?.cancel()
+        }
+        let sentIDs = Set(sent.map(\.id))
+        attachments.removeAll { sentIDs.contains($0.id) }
+    }
+
+    private func markAttachmentsFailed(_ failed: [ComposerAttachment], message: String) {
+        for attachment in failed {
+            stagedAttachments.removeValue(forKey: attachment.id)
+            setAttachmentState(attachment.id, .failed(message: message))
+        }
+    }
+
+    private func clearAttachments() {
+        attachmentGeneration = UUID()
+        for task in attachmentUploads.values { task.cancel() }
+        attachmentUploads.removeAll()
+        stagedAttachments.removeAll()
+        attachments.removeAll()
+        sessionCreation?.cancel()
+        sessionCreation = nil
+    }
+
+    /// The conversation an upload belongs to, creating it at most once for
+    /// several files dropped together.
+    private func uploadSessionID(suggestedTitle: String) async throws -> UUID {
+        if let selectedSessionID { return selectedSessionID }
+        return try await createSelectedSession(suggestedTitle: suggestedTitle).id
+    }
+
+    private func createSelectedSession(suggestedTitle: String) async throws -> SessionView {
+        if let sessionCreation { return try await sessionCreation.value }
+        guard let api else { throw HTTPTransportError.notConfigured }
+        let generation = attachmentGeneration
+        let browserProfileID = selectedBrowserProfileID
+        let creation = Task { try await api.createSession(browserProfileID: browserProfileID) }
+        sessionCreation = creation
+        let session: SessionView
+        do {
+            session = try await creation.value
+        } catch {
+            if sessionCreation == creation { sessionCreation = nil }
+            throw error
+        }
+        guard attachmentGeneration == generation else { throw CancellationError() }
+        if sessionCreation == creation {
+            sessionCreation = nil
+            selectedSessionID = session.id
+            try await store(session: session, lastRunID: nil, suggestedTitle: suggestedTitle)
+        }
+        return session
+    }
+
+    private static func uploadFailureMessage(_ error: Error) -> String {
+        if let attachmentError = error as? VeetbotAPIClientError {
+            return attachmentError.localizedDescription
+        }
+        if case HTTPTransportError.api(let apiError) = error, apiError.statusCode == 413 {
+            return "This file is larger than the server accepts."
+        }
+        return (error as? LocalizedError)?.errorDescription ?? "The upload failed."
     }
 
     @discardableResult
@@ -1469,6 +1727,7 @@ public final class ChatViewModel: ObservableObject {
         connectionGeneration = UUID()
         await artifactCache.removeAll()
         pendingSubmission = nil
+        clearAttachments()
         let transport = HTTPTransport(
             configuration: configuration,
             tokenStore: tokenStore,

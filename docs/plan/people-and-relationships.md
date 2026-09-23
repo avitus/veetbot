@@ -56,7 +56,7 @@ All names and situations in this document are fictional examples.
 
 | Owner input or task | Required behavior |
 | --- | --- |
-| “My sister Maya is starting a bakery with her partner Jules.” | Represent Maya and Jules separately; link the owner to Maya, Maya to Jules, and both people to the supported bakery context. Each claim has its own evidence. |
+| “My sister Maya is starting a bakery with her partner Jules.” | Add Maya, tied to the owner, with the supported bakery context. Jules is not tied to the owner, so the partner claim keeps its own evidence with Jules as an unresolved mention until the owner writes to Jules, meets them, or states a tie (ADR-0121). |
 | “My other sister, Nora, is visiting.” | Create a distinct person. Do not overwrite Maya or resolve every “my sister” to one person. |
 | “Help me reply to Maya.” | Retrieve the relevant relationship, recent correspondence, and open commitments within the existing context budget. |
 | “What did we decide last time?” | Search that person's interaction history across eligible sessions and communications; distinguish the last recorded exchange from the last possible real-world interaction. |
@@ -229,11 +229,11 @@ may normalize without accepting fragments, and name hyphens/apostrophes remain
 part of the name. Provider-local evidence keys cannot claim the reserved `owner`
 endpoint. Names, titles, domains, shared contacts, semantic similarity, and an LLM score
 alone cannot merge people. A display name copied from an email is not verified
-identity. A new personal address may create a provisional identity; role
-mailboxes, mailing lists, automated senders, and shared phones remain contact
-endpoints until evidence supports a person. The same contact endpoint may have
-sequential assignments; a reassigned work address must not inherit the former
-employee's relationships.
+identity. A personal address the owner has written to creates a provisional
+identity; an address that has only written to the owner, role mailboxes,
+mailing lists, automated senders, and shared phones remain contact endpoints
+(ADR-0121). The same contact endpoint may have sequential assignments; a
+reassigned work address must not inherit the former employee's relationships.
 
 Normalize conservatively: Unicode normalization and case-folded names for
 search; provider-aware address normalization without universal dot or plus-tag
@@ -245,6 +245,46 @@ people can have a stable provisional identity and gain a name later. Multiple
 daughters remain distinct; pronouns bind only when source-local participant
 context resolves them. Otherwise retain the unresolved mention and useful
 unambiguous facts without guessing its identity.
+
+### Who joins People
+
+People holds the people the owner knows and the people the owner writes to
+([ADR-0121](../adr/0121-people-holds-who-the-owner-knows-or-writes-to.md)).
+A person joins only from evidence the owner produced:
+
+1. **Owner action:** create, confirm, pin, rename, or correct.
+2. **An owner Chat claim tying them to the owner:** a relationship or
+   commitment whose other endpoint is the owner, or a reported meeting whose
+   text establishes owner participation ("I", "me", "we", "us").
+3. **Mail the owner sent:** a named To or Cc recipient that is not a role
+   mailbox, a pronoun, or one of the owner's own names or addresses.
+
+Every other mention links to an existing person when resolution matches and
+otherwise stays an unresolved mention; its fact still forms. Pronouns and the
+owner's own addresses, handles, and From names never create, match, or select
+a person for context.
+
+Mail from an unknown sender records one unattached address endpoint and no
+history. The owner's first reply to that address adds the person and adopts
+the earlier mail as received history, a bounded number per message. Mail
+processed after the reply attaches to that person only when one person has
+ever held the address and the owner never ended the assignment. A person is
+created only when no assignment of the address is live at or after the
+message, so a gap between two holders creates no duplicate. Ending an alias
+ends every observed copy of that assignment.
+
+Resolution reads exact normalized values, one row per distinct assignment, so
+per-message copies and longer names cannot crowd out a match. An address or
+number the owner states in Chat identifies that person for mail and texts, and
+a person the owner creates gets an owner-confirmed name alias. Assignment
+deduplication retains distinct ended and live periods. Import admission and
+source selection use the same distinct assignments as identity snapshots.
+
+Cross-claim admission uses only owner-asserted sources in the requested scope;
+an untrusted or foreign-scope claim cannot supply another claim's owner tie.
+Possessives alone ("My sister met Jules") do not establish owner participation.
+Unresolved endpoints do not bypass commitment source and terminal-state
+validation; the atomic fact can remain without a People projection.
 
 ### Merge and split
 
@@ -347,8 +387,8 @@ observed communications have visibly different attribution.
 
 | Source | Admission and attribution |
 | --- | --- |
-| Owner Chat and authenticated paired-surface messages | Owner assertions under existing identity and formation gates. “Maya told me…” remains an owner report of Maya's statement, not direct evidence of its truth. |
-| First-party Gmail received/Sent evidence | Existing account-qualified contracts, exact message spans, sender/recipient roles, quoted/forwarded attribution, and semantic-policy activation. Sent placement alone does not prove personal authorship. Bulk mail is not a source: a thread the unsubscribe census indexes, or one the assessment marks `bulk`, registers no source, forms nothing, projects no correspondence, and creates no provisional person (ADR-0116). |
+| Owner Chat and authenticated paired-surface messages | Owner assertions under existing identity and formation gates. “Maya told me…” remains an owner report of Maya's statement, not direct evidence of its truth. A named person joins People only when the claim ties them to the owner (ADR-0121). |
+| First-party Gmail received/Sent evidence | Existing account-qualified contracts, exact message spans, sender/recipient roles, quoted/forwarded attribution, and semantic-policy activation. Sent placement alone does not prove personal authorship. Bulk mail is not a source: a thread the unsubscribe census indexes, or one the assessment marks `bulk`, registers no source, forms nothing, projects no correspondence, and creates no provisional person (ADR-0116). Mail forms facts, not identities: a name in a message body links to someone already in People or stays an unresolved mention, and correspondence adds only the named recipients of mail the owner sent (ADR-0121). |
 | Device SMS | Existing admitted receipt/channel metadata. Rich body-derived facts require a separately evaluated amendment to the current metadata-only memory adapter; do not duplicate the SMS body into another event. |
 | Existing memories and integrated episodes | Deterministic indexing of valid support; re-extraction of old source text only through the explicit bounded replay/import contract. Summaries are not new independent evidence. |
 | Calendar, contacts, arbitrary web/MCP, public callers, assistant output | No new admission. Milestone 27 call-derived memory remains excluded. Generated drafts and Veetbot's own person summaries never corroborate themselves. |
@@ -497,8 +537,11 @@ connection; People is not a separate agent or persona.
 
 The list supports name/alias search, owner pins, relationship filters, and
 recent interaction sorting. Pins express importance and do not refresh factual
-evidence. Keep ambiguous/unnamed mentions discoverable in a bounded review
-section rather than flooding the default directory with every passing name.
+evidence. The default People collection lists active and provisional people:
+everyone admitted is known to the owner or written to. **Needs review** lists
+provisional, unpinned people with no owner-confirmed or channel-observed
+identifier, such as a person known only as “My brother”; a correspondent
+identified by address never lands there (ADR-0121).
 
 Person detail has five sections:
 
@@ -530,7 +573,7 @@ on their implemented checks and the master switch.
 
 | Method and route | Scope | Contract |
 | --- | --- | --- |
-| `GET /v1/people` | `people.read` | Search/list; relationship/state filters; keyset pagination. |
+| `GET /v1/people` | `people.read` | Search/list; relationship filter, repeatable `state` filter, and `review=true` for Needs review (ADR-0121); keyset pagination. |
 | `GET /v1/people/{id}` | `people.read` | Revisioned profile, coverage, permitted aliases, and bounded section summaries. |
 | `GET /v1/people/{id}/relationships` | `people.read` | Paginated directed links with `as_of` and `known_at`. |
 | `GET /v1/people/{id}/history` | `people.read` | Paginated timeline; time/channel/kind filters, unknown-date bucket, and coverage. |

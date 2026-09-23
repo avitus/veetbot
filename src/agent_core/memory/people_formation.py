@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TypedDict
 from uuid import UUID, uuid5
 
+from agent_core.application.people_self import owner_references as owner_references
 from agent_core.domain.agents import Principal
 from agent_core.domain.email_semantics import EmailSemanticSource
 from agent_core.domain.errors import ConflictError, ToolValidationError
@@ -37,6 +38,8 @@ from agent_core.domain.people import (
     PersonMemoryLink,
     PersonMention,
     RelationshipAssertion,
+    is_non_person_reference,
+    is_self_reference,
     normalize_identifier,
 )
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
@@ -74,6 +77,94 @@ class PreparedPeople:
     source_ids: tuple[UUID, ...]
     candidate: MemoryCandidate
     subject: str
+    # ADR-0121: a mention can be left without a person for two reasons. An
+    # ambiguous one might be any of several people, so links from the same
+    # claim are held back. A withheld one names someone outside People (a
+    # stranger, a pronoun, the owner), which says nothing about the others.
+    ambiguous: frozenset[str] = frozenset()
+    withheld: frozenset[str] = frozenset()
+
+    def resolves(self, key: str) -> bool:
+        """Whether a claim endpoint names the owner or a resolved person or organization."""
+        return key == "owner" or self.people.get(key) is not None
+
+
+# First-person evidence that the owner took part in a reported meeting.
+_FIRST_PERSON = re.compile(r"\b(?:i|me|we|us)\b", re.IGNORECASE)
+
+
+def owner_tied_keys(claim: PeopleClaim) -> frozenset[str]:
+    """Mention keys a claim ties to the owner: relationship or commitment endpoints.
+
+    A referent mention ("she") carries its anchor along, so the named person is
+    the one admitted.
+    """
+    tied: set[str] = set()
+    for pair in (
+        (claim.relationship.subject_key, claim.relationship.object_key)
+        if claim.relationship
+        else (),
+        (claim.commitment.debtor_key, claim.commitment.beneficiary_key) if claim.commitment else (),
+    ):
+        if pair and "owner" in pair:
+            tied.update(key for key in pair if key != "owner")
+    by_key = {mention.key: mention for mention in claim.mentions}
+    for key in list(tied):
+        mention = by_key.get(key)
+        if mention is not None and mention.referent_key:
+            tied.add(mention.referent_key)
+    return frozenset(key for key in tied if key in by_key)
+
+
+def _label(kind: str, namespace: str, value: str) -> tuple[str, str] | None:
+    try:
+        return kind, normalize_identifier(kind, namespace, value)
+    except ValueError:
+        return None
+
+
+def owner_tied_labels(
+    claims: list[PeopleClaim], interactions: list[InteractionEvidence]
+) -> frozenset[tuple[str, str]]:
+    """Labels the owner tied to themself anywhere in one formation batch (ADR-0121).
+
+    A person is admitted once, by any claim in the batch that ties them to the
+    owner, so "Maya's partner is Jules" links Maya whether or not it is
+    processed before "Maya is my sister".
+    """
+    labels: set[tuple[str, str]] = set()
+    for claim in claims:
+        tied = owner_tied_keys(claim)
+        for mention in claim.mentions:
+            if mention.key in tied and (
+                label := _label(
+                    mention.identifier_kind, mention.namespace, mention.identifier_value
+                )
+            ):
+                labels.add(label)
+    for interaction in interactions:
+        if _FIRST_PERSON.search(interaction.text) is None:
+            continue
+        for mention in interaction.mentions:
+            if mention.key in interaction.participant_keys and (
+                label := _label(
+                    mention.identifier_kind, mention.namespace, mention.identifier_value
+                )
+            ):
+                labels.add(label)
+    return frozenset(labels)
+
+
+def creatable_keys(
+    claim: PeopleClaim, tied_labels: frozenset[tuple[str, str]] = frozenset()
+) -> frozenset[str]:
+    """The mention keys of one claim that may create a person."""
+    keys = set(owner_tied_keys(claim))
+    for mention in claim.mentions:
+        label = _label(mention.identifier_kind, mention.namespace, mention.identifier_value)
+        if label is not None and label in tied_labels:
+            keys.add(mention.key)
+    return frozenset(keys)
 
 
 def _admitted_source(source: FormationSource, email: EmailSemanticSource | None) -> bool:
@@ -137,7 +228,16 @@ async def prepare_people(
     now: datetime,
     *,
     email: EmailSemanticSource | None = None,
+    creatable: frozenset[str] = frozenset(),
+    self_references: frozenset[str] = frozenset(),
 ) -> PreparedPeople:
+    """Ground a claim's mentions in People without inventing anyone (ADR-0121).
+
+    Only keys in ``creatable`` may create a person; every other mention links to
+    an existing person when resolution matches and otherwise stays a mention
+    without one. Pronouns and the owner's own addresses and handles never create
+    or match a person.
+    """
     proposal = candidate.people
     if proposal is None:
         raise ToolValidationError("People proposal is missing")
@@ -148,6 +248,8 @@ async def prepare_people(
     records: dict[UUID, PeopleRecord] = {}
     people: dict[str, UUID | None] = {}
     support: set[UUID] = set()
+    ambiguous: set[str] = set()
+    withheld: set[str] = set()
     for mention in proposal.mentions:
         source = sources.get(mention.source_event_id)
         if (
@@ -195,6 +297,8 @@ async def prepare_people(
         if isinstance(existing, PersonMention):
             # Persisted owner repair takes precedence over a fresh extraction.
             people[mention.key] = existing.person_id
+            if existing.person_id is None:
+                withheld.add(mention.key)
             continue
         if mention.referent_key is not None:
             anchors = [
@@ -204,11 +308,12 @@ async def prepare_people(
                 and item.end <= mention.start
                 and item.referent_key is None
             ]
-            person_id = (
-                people.get(mention.referent_key)
-                if len(anchors) == 1 and anchors[0].key == mention.referent_key
-                else None
-            )
+            unique_anchor = len(anchors) == 1 and anchors[0].key == mention.referent_key
+            person_id = people.get(mention.referent_key) if unique_anchor else None
+            if person_id is None:
+                (withheld if unique_anchor and mention.referent_key in withheld else ambiguous).add(
+                    mention.key
+                )
         else:
             # Labels are matched to the span without regard to case, but only the
             # span's own characters are ever persisted.
@@ -224,6 +329,25 @@ async def prepare_people(
                 # An unnamed relative or role ("My brother") is displayed by its own
                 # source span; a paraphrase such as "User's brother" never names it.
                 display_name = mention.text
+            if (
+                is_non_person_reference(mention.text)
+                or is_non_person_reference(identifier_value)
+                or is_self_reference(mention.identifier_kind, identifier_value, self_references)
+            ):
+                # A pronoun or the owner's own address is never a person of its own.
+                people[mention.key] = None
+                withheld.add(mention.key)
+                records[mid] = PersonMention(
+                    id=mid,
+                    source_id=sid,
+                    person_id=None,
+                    start=mention.start,
+                    end=mention.end,
+                    role=mention.role,
+                    support_ids=[sid],
+                    **common,
+                )
+                continue
             # A contextual label the source does not state ("User's mother" for
             # "My mom") is dropped rather than refusing the whole mention.
             stated_context = (
@@ -259,7 +383,16 @@ async def prepare_people(
             ]
             if len(local) == 1 and mention.identifier_kind != "role":
                 person_id = local[0].person_id
-            if resolved.status == "unresolved" and person_id is None:
+            if resolved.status == "ambiguous" and person_id is None:
+                ambiguous.add(mention.key)
+            if (
+                resolved.status == "unresolved"
+                and person_id is None
+                and mention.key not in creatable
+            ):
+                # Someone the owner is not tied to stays a mention (ADR-0121).
+                withheld.add(mention.key)
+            elif resolved.status == "unresolved" and person_id is None:
                 person_id = uuid5(sid, f"person:{mention.start}:{mention.end}")
                 if await store.is_erased(principal, person_id):
                     raise ConflictError("People identity was erased")
@@ -346,6 +479,7 @@ async def prepare_people(
         ]
         if len(candidates) > 100 or len(exact) > 1:
             people[organization.key] = None
+            ambiguous.add(organization.key)
         elif exact:
             people[organization.key] = exact[0].id
         else:
@@ -364,46 +498,57 @@ async def prepare_people(
     )
     # Stable identity augments the conflict key; a shared display name does not.
     subject = f"person:{identity_key}:{candidate.subject}"[:512]
-    if all(value is not None for value in people.values()):
 
-        def endpoint(key: str) -> PeopleEndpoint:
-            return (
-                PeopleEndpoint(kind="owner")
-                if key == "owner"
-                else PeopleEndpoint(
-                    kind="organization" if key in organization_keys else "person", id=people[key]
-                )
-            )
+    def resolves(key: str) -> bool:
+        return key == "owner" or people.get(key) is not None
 
-        common_validation: _Validation = {
-            "id": UUID(int=0),
-            "tenant_id": principal.tenant_id,
-            "principal_id": principal.principal_id,
-            "created_at": now,
-            "updated_at": now,
-            "support_ids": list(support),
-            "belief_id": UUID(int=0),
-            "sensitivity": Sensitivity.SENSITIVE,
-        }
-        if proposal.relationship:
-            relation = proposal.relationship
-            RelationshipAssertion(
-                subject=endpoint(relation.subject_key),
-                object=endpoint(relation.object_key),
-                predicate=relation.predicate,
-                qualifier=relation.qualifier,
-                valid_from=relation.valid_from,
-                valid_to=relation.valid_to,
-                precision=relation.precision,
-                source_timezone=relation.source_timezone,
-                **common_validation,
+    def endpoint(key: str) -> PeopleEndpoint:
+        return (
+            PeopleEndpoint(kind="owner")
+            if key == "owner"
+            else PeopleEndpoint(
+                kind="organization" if key in organization_keys else "person", id=people[key]
             )
-        if proposal.commitment:
-            commitment = proposal.commitment
-            if commitment.source_event_id not in candidate.source_event_ids:
-                raise ToolValidationError("commitment state requires its own admitted evidence")
-            evidence = sources[commitment.source_event_id]
-            validate_commitment_state(commitment.state, evidence.text)
+        )
+
+    common_validation: _Validation = {
+        "id": UUID(int=0),
+        "tenant_id": principal.tenant_id,
+        "principal_id": principal.principal_id,
+        "created_at": now,
+        "updated_at": now,
+        "support_ids": list(support),
+        "belief_id": UUID(int=0),
+        "sensitivity": Sensitivity.SENSITIVE,
+    }
+    relation_ready = proposal.relationship is not None and all(
+        resolves(key)
+        for key in (proposal.relationship.subject_key, proposal.relationship.object_key)
+    )
+    commitment_ready = proposal.commitment is not None and all(
+        resolves(key)
+        for key in (proposal.commitment.debtor_key, proposal.commitment.beneficiary_key)
+    )
+    if proposal.relationship and relation_ready:
+        relation = proposal.relationship
+        RelationshipAssertion(
+            subject=endpoint(relation.subject_key),
+            object=endpoint(relation.object_key),
+            predicate=relation.predicate,
+            qualifier=relation.qualifier,
+            valid_from=relation.valid_from,
+            valid_to=relation.valid_to,
+            precision=relation.precision,
+            source_timezone=relation.source_timezone,
+            **common_validation,
+        )
+    if proposal.commitment:
+        commitment = proposal.commitment
+        if commitment.source_event_id not in candidate.source_event_ids:
+            raise ToolValidationError("commitment state requires its own admitted evidence")
+        evidence = sources[commitment.source_event_id]
+        validate_commitment_state(commitment.state, evidence.text)
+        if commitment_ready:
             PeopleCommitment(
                 debtor=endpoint(commitment.debtor_key),
                 beneficiary=endpoint(commitment.beneficiary_key),
@@ -418,7 +563,13 @@ async def prepare_people(
                 **common_validation,
             )
     return PreparedPeople(
-        tuple(records.values()), people, tuple(sorted(support)), candidate, subject
+        tuple(records.values()),
+        people,
+        tuple(sorted(support)),
+        candidate,
+        subject,
+        ambiguous=frozenset(ambiguous),
+        withheld=frozenset(withheld),
     )
 
 
@@ -433,7 +584,8 @@ def direct_owner_kinship(prepared: PreparedPeople, belief: MemoryRecord) -> bool
         and relationship.predicate in {"parent", "child", "sibling", "relative"}
         and "owner" in {relationship.subject_key, relationship.object_key}
         and relationship.valid_to is None
-        and all(value is not None for value in prepared.people.values())
+        and prepared.resolves(relationship.subject_key)
+        and prepared.resolves(relationship.object_key)
     )
 
 
@@ -455,12 +607,17 @@ async def persist_people(
         "sensitivity": belief.sensitivity,
         "support_ids": list(prepared.source_ids),
     }
-    unresolved = any(value is None for value in prepared.people.values())
+    # Only ambiguity puts a claim's links in doubt; a withheld stranger does not.
+    unresolved = bool(prepared.ambiguous)
     for mention in proposal.mentions:
         person_id = prepared.people[mention.key]
         if person_id is None:
             continue
         link_id = uuid5(belief.id, f"{person_id}:{mention.role}")
+        # The directory repair may have erased this derived row; a belief formed
+        # again must neither revive nor fail on it.
+        if await store.is_erased(principal, link_id):
+            continue
         if await store.get(principal, link_id, ceiling=Sensitivity.RESTRICTED) is None:
             await store.put(
                 PersonMemoryLink(
@@ -487,9 +644,16 @@ async def persist_people(
         )
 
     relationship = proposal.relationship
-    if relationship is not None and not unresolved:
+    if (
+        relationship is not None
+        and prepared.resolves(relationship.subject_key)
+        and prepared.resolves(relationship.object_key)
+        and not {relationship.subject_key, relationship.object_key} & prepared.ambiguous
+    ):
         rid = uuid5(belief.id, "relationship")
-        if await store.get(principal, rid, ceiling=Sensitivity.RESTRICTED) is None:
+        if await store.is_erased(principal, rid):
+            pass
+        elif await store.get(principal, rid, ceiling=Sensitivity.RESTRICTED) is None:
             await store.put(
                 RelationshipAssertion(
                     id=rid,
@@ -507,7 +671,12 @@ async def persist_people(
                 expected_revision=0,
             )
     commitment = proposal.commitment
-    if commitment is not None and not unresolved:
+    if (
+        commitment is not None
+        and prepared.resolves(commitment.debtor_key)
+        and prepared.resolves(commitment.beneficiary_key)
+        and not {commitment.debtor_key, commitment.beneficiary_key} & prepared.ambiguous
+    ):
         sid = next(
             (
                 row.id
@@ -524,7 +693,9 @@ async def persist_people(
                 else source_id(principal, belief.source_session_id, commitment.source_event_id)
             )
         cid = uuid5(belief.id, "commitment")
-        if await store.get(principal, cid, ceiling=Sensitivity.RESTRICTED) is None:
+        if await store.is_erased(principal, cid):
+            pass
+        elif await store.get(principal, cid, ceiling=Sensitivity.RESTRICTED) is None:
             await store.put(
                 PeopleCommitment(
                     id=cid,
@@ -561,6 +732,8 @@ async def persist_interaction(
     sources: dict[int, FormationSource],
     now: datetime,
     scope: str,
+    *,
+    self_references: frozenset[str] = frozenset(),
 ) -> None:
     source = sources.get(proposal.source_event_id)
     if (
@@ -586,7 +759,22 @@ async def persist_interaction(
             organizations=[], mentions=proposal.mentions, relationship=None, commitment=None
         ),
     )
-    prepared = await prepare_people(store, principal, candidate, sources, now)
+    # A reported meeting admits its participants only when the owner took part
+    # (ADR-0121): "I met Maya" adds Maya, "Maya met Jules" adds no one.
+    creatable = (
+        frozenset(proposal.participant_keys)
+        if _FIRST_PERSON.search(proposal.text) is not None
+        else frozenset()
+    )
+    prepared = await prepare_people(
+        store,
+        principal,
+        candidate,
+        sources,
+        now,
+        creatable=creatable,
+        self_references=self_references,
+    )
     participant_ids = {
         person for key in proposal.participant_keys if (person := prepared.people[key]) is not None
     }
@@ -617,5 +805,7 @@ async def persist_interaction(
         participants=participants,
     )
     await persist_identity_evidence(store, principal, prepared)
+    if await store.is_erased(principal, iid):
+        return
     if await store.get(principal, iid, ceiling=Sensitivity.RESTRICTED) is None:
         await store.put(interaction, expected_revision=0)

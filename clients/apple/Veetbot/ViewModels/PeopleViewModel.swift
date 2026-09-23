@@ -8,7 +8,10 @@ public enum PeopleAvailability: Equatable, Sendable { case available, disabled, 
 public enum PeopleCollection: String, CaseIterable, Identifiable, Sendable {
     case people = "People", pinned = "Pinned", review = "Needs review", all = "All identities"
     public var id: String { rawValue }
-    var state: String? { self == .review ? "provisional" : self == .all ? nil : "active" }
+    /// People holds everyone the owner knows or writes to, confirmed or not;
+    /// Needs review is the server's own filter (ADR-0121).
+    var states: [String] { self == .people || self == .pinned ? ["active", "provisional"] : [] }
+    var review: Bool { self == .review }
     var pinnedOnly: Bool? { self == .pinned ? true : nil }
 }
 
@@ -118,7 +121,7 @@ public final class PeopleViewModel: ObservableObject {
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, state: collection.state, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
+            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
             var seen: Set<UUID> = []
@@ -144,7 +147,7 @@ public final class PeopleViewModel: ObservableObject {
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), cursor: cursor, asOf: asOf, state: collection.state, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
+            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), cursor: cursor, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
             var seen = Set(items.map(\.id))

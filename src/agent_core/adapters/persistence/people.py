@@ -263,6 +263,21 @@ class InMemoryPeopleStore:
                     )
                 ):
                     alias_matches.add(alias.person_id)
+        review_excluded: set[UUID] = set()
+        if query.needs_review:
+            for key in self._records:
+                if key[:2] != (owner.tenant_id, owner.principal_id):
+                    continue
+                alias = await self.get(
+                    owner, key[2], ceiling=query.sensitivity_ceiling, known_at=query.known_at
+                )
+                if (
+                    isinstance(alias, PersonIdentifier)
+                    and alias.person_id is not None
+                    and alias.verification in {"owner_confirmed", "channel_observed"}
+                ):
+                    review_excluded.add(alias.person_id)
+        distinct_seen: set[tuple[object, ...]] = set()
         recent: dict[UUID, datetime] = {}
         if query.sort == "recent":
             for key in self._records:
@@ -306,6 +321,32 @@ class InMemoryPeopleStore:
             if query.relationship is not None and record.id not in relationship_matches:
                 continue
             if query.states is not None and getattr(record, "state", None) not in query.states:
+                continue
+            if query.identifier_value is not None and (
+                _name(record).lower() != query.identifier_value.lower()
+            ):
+                continue
+            if query.assigned != "any":
+                if not isinstance(record, PersonIdentifier):
+                    if query.assigned == "unattached":
+                        continue
+                elif (record.person_id is None) != (query.assigned == "unattached"):
+                    continue
+            if (
+                query.valid_at is not None
+                and isinstance(record, PersonIdentifier)
+                and (
+                    record.valid_from > query.valid_at
+                    or (record.valid_to is not None and record.valid_to <= query.valid_at)
+                )
+            ):
+                continue
+            if query.needs_review and (
+                not isinstance(record, Person)
+                or record.state != "provisional"
+                or record.pinned
+                or record.id in review_excluded
+            ):
                 continue
             if query.pinned is not None and getattr(record, "pinned", None) is not query.pinned:
                 continue
@@ -404,6 +445,26 @@ class InMemoryPeopleStore:
                     or (occurred == query.after_event_at and record.id <= query.after)
                 ):
                     continue
+            if query.distinct_assignments:
+                # Records arrive in identifier order, so the lowest id of each
+                # assignment is kept, matching PostgreSQL's DISTINCT ON.
+                assignment: tuple[object, ...] = (
+                    (
+                        "identifier",
+                        record.person_id,
+                        record.identifier_kind,
+                        record.namespace,
+                        record.context,
+                        record.verification,
+                        record.valid_to,
+                        _name(record).lower(),
+                    )
+                    if isinstance(record, PersonIdentifier)
+                    else (record.kind, record.id)
+                )
+                if assignment in distinct_seen:
+                    continue
+                distinct_seen.add(assignment)
             results.append(record)
         if query.sort == "history":
             results.sort(
@@ -474,8 +535,14 @@ class InMemoryPeopleStore:
                 break
         return any(key[:2] == owner and key in self._records for key in self._erased)
 
-    async def erase(self, principal: Principal, record_ids: Sequence[UUID]) -> int:
-        return self.erase_locked(principal, record_ids)
+    async def erase(
+        self,
+        principal: Principal,
+        record_ids: Sequence[UUID],
+        *,
+        preserve_independent: bool = False,
+    ) -> int:
+        return self.erase_locked(principal, record_ids, preserve_independent=preserve_independent)
 
     def erase_locked(
         self,
@@ -914,6 +981,55 @@ class PostgresPeopleStore:
             )
         if query.states is not None:
             statement = statement.where(PeopleRevisionRow.payload["state"].astext.in_(query.states))
+        if query.identifier_value is not None:
+            statement = statement.where(
+                func.lower(PeopleRevisionRow.search_text) == query.identifier_value.lower()
+            )
+        is_identifier = PeopleRevisionRow.kind == "identifier"
+        attached = PeopleRevisionRow.payload["person_id"].astext.is_not(None)
+        if query.assigned == "attached":
+            statement = statement.where(or_(~is_identifier, attached))
+        elif query.assigned == "unattached":
+            statement = statement.where(is_identifier, ~attached)
+        if query.valid_at is not None:
+            statement = statement.where(
+                or_(
+                    ~is_identifier,
+                    and_(
+                        cast(
+                            PeopleRevisionRow.payload["valid_from"].astext, DateTime(timezone=True)
+                        )
+                        <= query.valid_at,
+                        or_(
+                            PeopleRevisionRow.payload["valid_to"].astext.is_(None),
+                            cast(
+                                PeopleRevisionRow.payload["valid_to"].astext,
+                                DateTime(timezone=True),
+                            )
+                            > query.valid_at,
+                        ),
+                    ),
+                )
+            )
+        if query.needs_review:
+            verified = self._query(owner, query.sensitivity_ceiling, query.known_at).subquery(
+                "verified_aliases"
+            )
+            statement = statement.where(
+                PeopleRevisionRow.kind == "person",
+                PeopleRevisionRow.payload["state"].astext == "provisional",
+                PeopleRevisionRow.payload["pinned"].astext == "false",
+                ~exists(
+                    select(1).where(
+                        verified.c.kind == "identifier",
+                        verified.c.payload["person_id"].astext
+                        == cast(PeopleRevisionRow.entity_id, Text),
+                        verified.c.payload["verification"].astext.in_(
+                            ["owner_confirmed", "channel_observed"]
+                        ),
+                    )
+                ),
+            )
         if not query.include_superseded:
             statement = statement.where(PeopleRevisionRow.payload["superseded_by"].astext.is_(None))
         if query.pinned is not None:
@@ -1087,6 +1203,34 @@ class PostgresPeopleStore:
                     )
                 )
             ordering = [at.desc(), PeopleRevisionRow.entity_id]
+        if query.distinct_assignments:
+            # One row per assignment: per-message identifier copies of one
+            # address collapse to their lowest id, as the in-memory store does.
+            keys = [
+                PeopleRevisionRow.kind,
+                case(
+                    (is_identifier, PeopleRevisionRow.payload["person_id"].astext),
+                    else_=cast(PeopleRevisionRow.entity_id, Text),
+                ),
+                PeopleRevisionRow.payload["identifier_kind"].astext,
+                PeopleRevisionRow.payload["namespace"].astext,
+                PeopleRevisionRow.payload["context"].astext,
+                PeopleRevisionRow.payload["verification"].astext,
+                PeopleRevisionRow.payload["valid_to"].astext,
+                func.lower(PeopleRevisionRow.search_text),
+            ]
+            distinct = (
+                statement.distinct(*keys)
+                .order_by(*keys, PeopleRevisionRow.entity_id)
+                .subquery("distinct_assignments")
+            )
+            row_alias = aliased(PeopleRevisionRow, distinct)
+            rows = (
+                await self._session.execute(
+                    select(row_alias).order_by(row_alias.entity_id).limit(query.limit + 1)
+                )
+            ).scalars()
+            return [PEOPLE_RECORD.validate_python(row.payload) for row in rows]
         rows = (
             await self._session.execute(statement.order_by(*ordering).limit(query.limit + 1))
         ).scalars()
@@ -1238,8 +1382,14 @@ class PostgresPeopleStore:
             )
             return (await self._session.execute(pending.limit(1))).first() is not None
 
-    async def erase(self, principal: Principal, record_ids: Sequence[UUID]) -> int:
-        return await self._erase(principal, record_ids)
+    async def erase(
+        self,
+        principal: Principal,
+        record_ids: Sequence[UUID],
+        *,
+        preserve_independent: bool = False,
+    ) -> int:
+        return await self._erase(principal, record_ids, preserve_independent=preserve_independent)
 
     async def _erase(
         self,

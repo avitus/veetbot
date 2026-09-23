@@ -1,6 +1,6 @@
 """Composition seams for People formation, recall, and import orchestration."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -97,6 +97,14 @@ class PeopleImportControl(Protocol):
         scope: PeopleImportScope,
         ceiling: Sensitivity,
     ) -> None: ...
+
+    async def identity_revisions(
+        self,
+        uow: RepositoryUnitOfWork,
+        owner: Principal,
+        person_ids: Sequence[UUID],
+        ceiling: Sensitivity,
+    ) -> dict[UUID, int]: ...
 
     async def enqueue(
         self,

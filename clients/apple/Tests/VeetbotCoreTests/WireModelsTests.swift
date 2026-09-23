@@ -114,6 +114,23 @@ import Testing
         #expect(reason == .unknown("future_failure"))
     }
 
+    /// A fact about someone not in People keeps the name it was stated with
+    /// (ADR-0121); the unresolved identity key is never shown.
+    @Test(arguments: [
+        ("person:unresolved:00000000-0000-0000-0000-000000000201,00000000-0000-0000-0000-000000000202:Alex preference", "Alex preference", false),
+        ("person:00000000-0000-0000-0000-000000000203:Maya", "Maya", true),
+        ("the user", "the user", false),
+    ])
+    func testPersonSubjectsDisplayTheirName(subject: String, shown: String, linked: Bool) throws {
+        let data = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"\#(subject)","statement":"A fact.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.5,"corroboration_count":1,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[1],"formation_run_id":"00000000-0000-0000-0000-000000000104","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
+                .utf8
+        )
+        let memory = try JSONDecoder.server.decode(MemoryView.self, from: data)
+        #expect(memory.displaySubject == shown)
+        #expect((memory.personLink != nil) == linked)
+    }
+
     @Test
     func testMemoryViewDecodesTheFullExposureListAndToleratesAnUnknownStatus() throws {
         let data = Data(
@@ -297,5 +314,73 @@ import Testing
         let id = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000000f1"))
         let filed = try JSONEncoder.server.encode(SetSessionFolderBody(folderID: id))
         #expect(String(decoding: filed, as: UTF8.self) == #"{"folder_id":"\#(id.uuidString)"}"#)
+    }
+
+    @Test
+    func testModelSettingsDecodeTheServerShapeAndTolerateUnknownKeys() throws {
+        let data = Data(
+            #"""
+            {"version":3,"future_top_level":{"x":1},
+             "chat":{"model_policy":"astra","reasoning_effort":"high","future":true},
+             "memory":{"model_policy":"balanced","reasoning_effort":null},
+             "chat_options":[
+               {"model_policy":"astra","display_name":"GPT-6 Astra","provider":"openai","model":"gpt-6-astra","reasoning_efforts":["low","medium","high","xhigh","max"],"default_reasoning_effort":"high","pricing":{"input":"1"}},
+               {"model_policy":"local","display_name":"Local model","provider":"local","model":"llama","reasoning_efforts":[],"default_reasoning_effort":null}
+             ],
+             "memory_options":[
+               {"model_policy":"balanced","display_name":"GPT-5.6 Sol","provider":"openai","model":"gpt-5.6-sol","reasoning_effort":null,"evaluated_at":"2026-09-20"},
+               {"model_policy":"astra","display_name":"GPT-6 Astra","provider":"openai","model":"gpt-6-astra","reasoning_effort":"medium"}
+             ]}
+            """#.utf8
+        )
+
+        let settings = try JSONDecoder.server.decode(ModelSettingsView.self, from: data)
+
+        #expect(settings.version == 3)
+        #expect(settings.chat == ModelChoice(modelPolicy: "astra", reasoningEffort: .high))
+        #expect(settings.memory == ModelChoice(modelPolicy: "balanced", reasoningEffort: nil))
+        #expect(settings.chatOptions.map(\.modelPolicy) == ["astra", "local"])
+        #expect(settings.chatOptions[0].displayName == "GPT-6 Astra")
+        #expect(settings.chatOptions[0].provider == "openai")
+        #expect(settings.chatOptions[0].model == "gpt-6-astra")
+        #expect(settings.chatOptions[0].reasoningEfforts == [.low, .medium, .high, .xhigh, .max])
+        #expect(settings.chatOptions[0].defaultReasoningEffort == .high)
+        #expect(settings.chatOptions[1].reasoningEfforts.isEmpty)
+        #expect(settings.chatOptions[1].defaultReasoningEffort == nil)
+        #expect(settings.memoryOptions.map(\.modelPolicy) == ["balanced", "astra"])
+        #expect(settings.memoryOptions[0].reasoningEffort == nil)
+        #expect(settings.memoryOptions[1].reasoningEffort == .medium)
+    }
+
+    @Test
+    func testModelSettingsUpdateBodyEncodesEveryEffortExplicitly() throws {
+        let body = UpdateModelSettingsBody(
+            expectedVersion: 0,
+            chat: ModelChoice(modelPolicy: "local", reasoningEffort: nil),
+            memory: ModelChoice(modelPolicy: "astra", reasoningEffort: .medium)
+        )
+
+        let encoded = try JSONEncoder.server.encode(body)
+
+        #expect(
+            String(decoding: encoded, as: UTF8.self)
+                == #"{"chat":{"model_policy":"local","reasoning_effort":null},"expected_version":0,"memory":{"model_policy":"astra","reasoning_effort":"medium"}}"#
+        )
+    }
+
+    @Test
+    func testReasoningEffortsCarryOwnerFacingLabels() throws {
+        #expect(ReasoningEffort.low.displayName == "Low")
+        #expect(ReasoningEffort.medium.displayName == "Medium")
+        #expect(ReasoningEffort.high.displayName == "High")
+        #expect(ReasoningEffort.xhigh.displayName == "Extra high")
+        #expect(ReasoningEffort.max.displayName == "Max")
+        #expect(ReasoningEffort.displayName(for: nil) == "Default")
+        #expect(ReasoningEffort.displayName(for: .xhigh) == "Extra high")
+        let unknown = try JSONDecoder.server.decode(
+            ModelChoice.self, from: Data(#"{"model_policy":"astra","reasoning_effort":"turbo"}"#.utf8)
+        )
+        #expect(unknown.reasoningEffort?.rawValue == "turbo")
+        #expect(unknown.reasoningEffort?.displayName == "Turbo")
     }
 }

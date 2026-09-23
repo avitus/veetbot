@@ -912,3 +912,225 @@ async def test_owner_identity_evidence_reads_the_original_owner_assertion() -> N
         owner, person.id, person.support_ids[0], ceiling=Sensitivity.SENSITIVE
     )
     assert evidence.model_dump()["owner_assertion"] == "Owner created person: Maya"
+
+
+async def test_profile_lists_each_alias_once() -> None:
+    """Per-message copies of one alias appear once and cannot crowd out history."""
+    from uuid import uuid4
+
+    from agent_core.domain.people import (
+        InteractionParticipant,
+        PeopleInteraction,
+        Person,
+        PersonIdentifier,
+    )
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Frequent Correspondent", **common)
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+        for _ in range(1200):
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="email",
+                    namespace="owner",
+                    value="frequent@example.test",
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        await uow.people.put(
+            PeopleInteraction(
+                id=uuid4(),
+                channel="email",
+                interaction_kind="exchange",
+                attribution="observed",
+                direction="outgoing",
+                summary="Sent email",
+                occurred_at=NOW,
+                participants=[InteractionParticipant(person_id=person.id, role="recipient")],
+                **common,
+            ),
+            expected_revision=0,
+        )
+    profile = await service.get(owner, person.id, ceiling=Sensitivity.RESTRICTED)
+    assert [alias.value for alias in profile.aliases] == ["frequent@example.test"]
+    assert len(profile.history) == 1
+
+
+async def test_ending_an_alias_ends_every_observed_copy_of_that_assignment() -> None:
+    """The profile shows one alias per assignment, so ending it ends every copy (ADR-0121)."""
+    from datetime import timedelta
+    from uuid import uuid4
+
+    from agent_core.domain.people import Person, PersonIdentifier
+    from agent_core.domain.people_views import EndPersonAlias
+    from agent_core.memory.people import resolve_identity
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Alex Rivera", **common)
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+        # Correspondence writes one observed copy of the address per message.
+        for value, days in (
+            ("alex@example.test", 30),
+            ("alex@example.test", 20),
+            ("alex@example.test", 10),
+            ("alex@home.test", 30),
+        ):
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="email",
+                    namespace="owner",
+                    value=value,
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW - timedelta(days=days),
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    profile = await service.get(owner, person.id, ceiling=Sensitivity.SENSITIVE)
+    [shown] = [alias for alias in profile.aliases if alias.value == "alex@example.test"]
+    await service.update(
+        owner,
+        person.id,
+        UpdatePerson(
+            session_id=session().id,
+            expected_revision=person.revision,
+            alias=EndPersonAlias(
+                operation="end",
+                identifier_id=shown.id,
+                expected_revision=shown.revision,
+                valid_to=clock.now(),
+            ),
+        ),
+        key="end-work-address",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    clock.advance(timedelta(seconds=1))
+    async with factory() as uow:
+        for value, status in (("alex@example.test", "unresolved"), ("alex@home.test", "matched")):
+            resolved = await resolve_identity(
+                uow.people,
+                owner,
+                kind="email",
+                namespace="owner",
+                value=value,
+                context="owner",
+                at=clock.now(),
+                ceiling=Sensitivity.SENSITIVE,
+            )
+            assert resolved.status == status, value
+
+
+async def test_review_directory_binds_its_cursor() -> None:
+    from uuid import UUID
+
+    from agent_core.domain.people import Person
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    async with factory() as uow:
+        for index in (1, 2):
+            await uow.people.put(
+                Person(id=UUID(int=index), display_name=f"Person {index}", **common),
+                expected_revision=0,
+            )
+    first = await service.list(owner, ceiling=Sensitivity.SENSITIVE, review=True, limit=1)
+    assert [person.id for person in first.items] == [UUID(int=1)]
+    assert first.next_cursor is not None
+    second = await service.list(
+        owner, ceiling=Sensitivity.SENSITIVE, review=True, limit=1, cursor=first.next_cursor
+    )
+    assert [person.id for person in second.items] == [UUID(int=2)]
+    with pytest.raises(ConflictError):
+        await service.list(owner, ceiling=Sensitivity.SENSITIVE, limit=1, cursor=first.next_cursor)
+    # The same states in another order are the same directory.
+    both = await service.list(
+        owner, ceiling=Sensitivity.SENSITIVE, states=["provisional", "active"], limit=1
+    )
+    assert both.next_cursor is not None
+    again = await service.list(
+        owner,
+        ceiling=Sensitivity.SENSITIVE,
+        states=["active", "provisional"],
+        limit=1,
+        cursor=both.next_cursor,
+    )
+    assert [person.id for person in again.items] == [UUID(int=2)]
+
+
+async def test_owner_created_person_gets_an_owner_confirmed_name_alias() -> None:
+    """A person the owner adds is found again when the owner names them in chat (ADR-0121)."""
+    from agent_core.domain.people import PeopleQuery, PersonIdentifier
+    from agent_core.memory.people import resolve_identity
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    person = await service.create(
+        owner,
+        CreatePerson(session_id=session().id, display_name="Kyrri"),
+        key="create-kyrri",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        aliases = await uow.people.query(
+            PeopleQuery(
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                kinds=["identifier"],
+                person_id=person.id,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+            )
+        )
+        resolved = await resolve_identity(
+            uow.people,
+            owner,
+            kind="name",
+            namespace="owner",
+            value="kyrri",
+            context="owner",
+            at=clock.now(),
+            ceiling=Sensitivity.RESTRICTED,
+        )
+    assert [
+        (a.identifier_kind, a.value, a.verification)
+        for a in aliases
+        if isinstance(a, PersonIdentifier)
+    ] == [("name", "Kyrri", "owner_confirmed")]
+    assert (resolved.status, resolved.person_ids) == ("matched", [person.id])

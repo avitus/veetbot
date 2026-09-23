@@ -2,11 +2,14 @@ import Foundation
 
 /// People always carries the native viewing ceiling; the server clamps it to the surface.
 extension VeetbotAPIClient {
-    public func listPeople(text: String? = nil, cursor: String? = nil, asOf: Date? = nil, state: String? = nil, pinned: Bool? = nil, sort: String = "id", relationship: String? = nil) async throws -> Page<PersonView> {
+    /// Repeated `state` values list several states; `review` asks for the
+    /// server's Needs review filter (ADR-0121).
+    public func listPeople(text: String? = nil, cursor: String? = nil, asOf: Date? = nil, states: [String] = [], review: Bool = false, pinned: Bool? = nil, sort: String = "id", relationship: String? = nil) async throws -> Page<PersonView> {
         var query = peopleQuery
         query.append(URLQueryItem(name: "limit", value: "50"))
         query.append(URLQueryItem(name: "sort", value: sort))
-        if let state { query.append(URLQueryItem(name: "state", value: state)) }
+        query.append(contentsOf: states.map { URLQueryItem(name: "state", value: $0) })
+        if review { query.append(URLQueryItem(name: "review", value: "true")) }
         if let relationship { query.append(URLQueryItem(name: "relationship", value: relationship)) }
         if let pinned { query.append(URLQueryItem(name: "pinned", value: pinned ? "true" : "false")) }
         if let text, !text.isEmpty { query.append(URLQueryItem(name: "text", value: text)) }

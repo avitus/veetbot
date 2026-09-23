@@ -37,9 +37,18 @@ class PersonaContentError(AgentCoreError):
     patterns, oversize entries, or provenance the caller may not mint."""
 
 
+class ModelSettingsChoiceError(AgentCoreError):
+    """A model-settings save named a model or effort that is not offered."""
+
+
 class FolderNameError(AgentCoreError):
     """A folder name was refused before persistence: empty, over-length,
     control characters, or content failing the secret or injection scans."""
+
+
+class AttachmentValidationError(AgentCoreError):
+    """A chat attachment or an attachment reference broke one boundary rule
+    (ADR-0120): its name, media type, key, size, kind, or count."""
 
 
 class ScheduleValidationError(AgentCoreError):

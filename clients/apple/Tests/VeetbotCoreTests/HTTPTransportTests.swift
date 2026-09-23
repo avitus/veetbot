@@ -1465,6 +1465,112 @@ import Testing
     }
 
     @Test
+    func testModelSettingsDegradeWhenTheServerPredatesThem() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let client = try makeClient(token: "valid")
+        let chat = ModelChoice(modelPolicy: "astra", reasoningEffort: .high)
+        let memory = ModelChoice(modelPolicy: "balanced", reasoningEffort: nil)
+        for statusCode in [404, 405] {
+            stubStatus(
+                statusCode,
+                body: #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"old"}}"#
+            )
+            do {
+                _ = try await client.getModelSettings()
+                Issue.record("expected the model settings read to degrade on \(statusCode)")
+            } catch let error as VeetbotAPIClientError {
+                guard case .modelSettingsUnavailable = error else {
+                    Issue.record("unexpected compatibility error: \(error)")
+                    return
+                }
+                #expect(error.errorDescription == "This server doesn't support model settings yet.")
+            }
+            do {
+                _ = try await client.updateModelSettings(
+                    expectedVersion: 0, chat: chat, memory: memory
+                )
+                Issue.record("expected the model settings write to degrade on \(statusCode)")
+            } catch let error as VeetbotAPIClientError {
+                guard case .modelSettingsUnavailable = error else {
+                    Issue.record("unexpected compatibility error: \(error)")
+                    return
+                }
+            }
+        }
+    }
+
+    @Test
+    func testModelSettingsWritesKeepConflictValidationAndScopeErrors() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let client = try makeClient(token: "valid")
+        let chat = ModelChoice(modelPolicy: "fable", reasoningEffort: .xhigh)
+        let memory = ModelChoice(modelPolicy: "astra", reasoningEffort: .medium)
+
+        stubStatus(
+            409,
+            body: #"{"error":{"code":"conflict","message":"model settings expected version 3 but head is 4","details":{},"request_id":"r"}}"#
+        )
+        do {
+            _ = try await client.updateModelSettings(expectedVersion: 3, chat: chat, memory: memory)
+            Issue.record("expected a conflict")
+        } catch let HTTPTransportError.api(error) {
+            #expect(error.code == .conflict)
+            #expect(error.statusCode == 409)
+        }
+
+        stubStatus(
+            400,
+            body: #"{"error":{"code":"malformed_request","message":"memory choice is not offered","details":{},"request_id":"r"}}"#
+        )
+        do {
+            _ = try await client.updateModelSettings(expectedVersion: 3, chat: chat, memory: memory)
+            Issue.record("expected a validation failure")
+        } catch let HTTPTransportError.api(error) {
+            #expect(error.code == .malformedRequest)
+            #expect(error.message == "memory choice is not offered")
+        }
+
+        stubStatus(
+            403,
+            body: #"{"error":{"code":"authorization_error","message":"missing scope settings.write","details":{},"request_id":"r"}}"#
+        )
+        do {
+            _ = try await client.getModelSettings()
+            Issue.record("expected an authorization failure")
+        } catch HTTPTransportError.authorizationDenied(let error) {
+            #expect(error.statusCode == 403)
+        }
+    }
+
+    @Test
+    func testModelSettingsWriteIsAPutOfTheWholeState() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let recorder = WebsiteLoginRequestRecorder()
+        StubURLProtocol.handler = { request in
+            recorder.record(request)
+            let response = try #require(
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            let body = #"{"version":4,"chat":{"model_policy":"fable","reasoning_effort":"xhigh"},"memory":{"model_policy":"balanced","reasoning_effort":null},"chat_options":[],"memory_options":[]}"#
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        let updated = try await client.updateModelSettings(
+            expectedVersion: 3,
+            chat: ModelChoice(modelPolicy: "fable", reasoningEffort: .xhigh),
+            memory: ModelChoice(modelPolicy: "balanced", reasoningEffort: nil)
+        )
+
+        #expect(updated.version == 4)
+        let sent = try #require(recorder.matching(method: "PUT", path: "/v1/settings/models").first)
+        #expect(
+            sent.body.map { String(decoding: $0, as: UTF8.self) }
+                == #"{"chat":{"model_policy":"fable","reasoning_effort":"xhigh"},"expected_version":3,"memory":{"model_policy":"balanced","reasoning_effort":null}}"#
+        )
+    }
+
+    @Test
     func testFolderMutationsKeepTheirAPIErrors() async throws {
         defer { StubURLProtocol.handler = nil }
         stubStatus(

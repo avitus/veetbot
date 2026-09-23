@@ -104,10 +104,16 @@ async def test_commitment_formation_retains_supported_calendar_precision() -> No
     assert public.due_at is not None and public.due_at.isoformat() == "2026-08-01T00:00:00-07:00"
 
 
-async def test_owner_formation_creates_grounded_people_and_directional_link() -> None:
+async def test_owner_formation_links_known_people_with_a_directional_relationship() -> None:
+    """Statements about people the owner knows link them, directionally and idempotently.
+
+    ADR-0121: naming someone without tying them to the owner no longer creates
+    them, so Maya and Jules are people the owner already knows here.
+    """
     from datetime import timedelta
 
     clock, factory = await memory_uow_factory()
+    known = await _seed_known(factory, "Maya", "Jules")
     text = "Maya introduced Jules."
     sequence = await user_event(factory, text)
     mentions = [
@@ -175,6 +181,7 @@ async def test_owner_formation_creates_grounded_people_and_directional_link() ->
     async with factory() as uow:
         people = {r.display_name: r for r in await uow.people.query(query) if isinstance(r, Person)}
         assert set(people) == {"Maya", "Jules"}
+        assert {person.id for person in people.values()} == {p.id for p in known.values()}
         relationships = await uow.people.query(query.model_copy(update={"kinds": ["relationship"]}))
         assert len(relationships) == 1
         relation = relationships[0]
@@ -1014,6 +1021,8 @@ async def test_affiliation_uses_organization_endpoint_and_preserves_source() -> 
     from agent_core.domain.people_extraction import OrganizationEvidence
 
     clock, factory = await memory_uow_factory()
+    # ADR-0121: an affiliation links a person the owner already knows.
+    await _seed_known(factory, "Maya")
     content = "Maya works at Acme."
     sequence = await user_event(factory, content)
     claim = PeopleClaim(
@@ -1250,3 +1259,583 @@ async def test_episode_extraction_honors_erasure_before_and_during_provider(
     async with factory() as uow:
         assert await uow.episodes.for_session(SESSION_ID, principal()) == []
     assert calls == ([] if erase_before else ["episode_integration"])
+
+
+# ---------------------------------------------------------------------------
+# ADR-0121: People holds people the owner knows or interacts with.
+# ---------------------------------------------------------------------------
+
+
+class ManyExtractor:
+    name = "people-fixture@1"
+
+    def __init__(self, candidates: list[MemoryCandidate]) -> None:
+        self.candidates = candidates
+
+    async def extract(self, events: Any, **kwargs: Any) -> list[MemoryCandidate]:
+        return list(self.candidates)
+
+
+def _mention(
+    text: str,
+    sequence: int,
+    span: str,
+    key: str,
+    *,
+    kind: str = "name",
+    value: str | None = None,
+    role: str = "subject",
+    referent: str | None = None,
+    occurrence: int = 0,
+) -> PersonEvidence:
+    start = -1
+    for _ in range(occurrence + 1):
+        start = text.index(span, start + 1)
+    return PersonEvidence(
+        key=key,
+        source_event_id=sequence,
+        start=start,
+        end=start + len(span),
+        text=span,
+        display_name=span,
+        identifier_kind=kind,  # type: ignore[arg-type]
+        identifier_value=value or span,
+        namespace="owner",
+        context="",
+        role=role,  # type: ignore[arg-type]
+        referent_key=referent,
+    )
+
+
+def _claim_candidate(
+    text: str,
+    sequence: int,
+    mentions: list[PersonEvidence],
+    *,
+    subject: str,
+    relationship: tuple[str, str, str] | None = None,
+) -> MemoryCandidate:
+    return MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP if relationship else BeliefType.FACT,
+        subject=subject,
+        statement=text,
+        source_event_ids=[sequence],
+        model_confidence=0.9,
+        proposed_scope="user",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+        claim_kind=(MemoryClaimKind.RELATIONSHIP if relationship else MemoryClaimKind.PROJECT_FACT),
+        people=PeopleClaim(
+            organizations=[],
+            mentions=mentions,
+            relationship=None
+            if relationship is None
+            else RelationshipProposal(
+                subject_key=relationship[0],
+                object_key=relationship[1],
+                predicate=relationship[2],  # type: ignore[arg-type]
+                qualifier="",
+                valid_from=None,
+                valid_to=None,
+                precision="unknown",
+                source_timezone=None,
+            ),
+            commitment=None,
+        ),
+    )
+
+
+def _people_query(kinds: list[str]) -> PeopleQuery:
+    return PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        kinds=kinds,
+    )
+
+
+async def _seed_known(factory: Any, *names: str) -> dict[str, Person]:
+    from uuid import uuid4
+
+    from agent_core.domain.people import PersonIdentifier
+    from tests.contract.support import NOW
+
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    known = {}
+    async with factory() as uow:
+        for name in names:
+            person = Person(id=uuid4(), display_name=name, state="active", **common)
+            await uow.people.put(person, expected_revision=0)
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="name",
+                    namespace="owner",
+                    value=name,
+                    context="owner",
+                    verification="owner_confirmed",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+            known[name] = person
+    return known
+
+
+async def test_chat_mentions_without_an_owner_tie_link_existing_people_only() -> None:
+    """Naming someone without tying them to the owner creates no one (ADR-0121)."""
+    clock, factory = await memory_uow_factory()
+    text = "Maya introduced Jules."
+    sequence = await user_event(factory, text)
+    candidate = _claim_candidate(
+        text,
+        sequence,
+        [
+            _mention(text, sequence, "Maya", "maya", role="object"),
+            _mention(text, sequence, "Jules", "jules"),
+        ],
+        subject="introduction",
+        relationship=("jules", "maya", "introduced_by"),
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=ManyExtractor([candidate]),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    async with factory() as uow:
+        assert await uow.people.query(_people_query(["person", "relationship"])) == []
+
+    # Once the owner knows both people, the same kind of statement links them.
+    clock2, factory2 = await memory_uow_factory()
+    known = await _seed_known(factory2, "Maya", "Jules")
+    sequence2 = await user_event(factory2, text)
+    service2 = GovernedMemoryService(
+        factory2,
+        clock2,
+        ids(),
+        principal(),
+        extractor=ManyExtractor(
+            [
+                _claim_candidate(
+                    text,
+                    sequence2,
+                    [
+                        _mention(text, sequence2, "Maya", "maya", role="object"),
+                        _mention(text, sequence2, "Jules", "jules"),
+                    ],
+                    subject="introduction",
+                    relationship=("jules", "maya", "introduced_by"),
+                )
+            ]
+        ),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    await service2.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    async with factory2() as uow:
+        people = [
+            r for r in await uow.people.query(_people_query(["person"])) if isinstance(r, Person)
+        ]
+        assert {person.id for person in people} == {known["Maya"].id, known["Jules"].id}
+        [relation] = await uow.people.query(_people_query(["relationship"]))
+        assert isinstance(relation, RelationshipAssertion)
+        assert (relation.subject.id, relation.object.id) == (known["Jules"].id, known["Maya"].id)
+
+
+async def test_owner_tie_creates_only_its_endpoint_and_keeps_the_relationship() -> None:
+    """'My sister Maya ... her partner Jules' adds Maya, keeps her tie, and adds no Jules."""
+    clock, factory = await memory_uow_factory()
+    text = "My sister Maya is starting a bakery with her partner Jules."
+    sequence = await user_event(factory, text)
+    partner = _claim_candidate(
+        text,
+        sequence,
+        [
+            _mention(text, sequence, "Maya", "maya"),
+            _mention(text, sequence, "Jules", "jules", role="object"),
+        ],
+        subject="Maya partner",
+        relationship=("maya", "jules", "partner"),
+    )
+    sister = _claim_candidate(
+        text,
+        sequence,
+        [_mention(text, sequence, "Maya", "maya")],
+        subject="Maya",
+        relationship=("maya", "owner", "sibling"),
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        # The untied claim comes first: the tie is recognized across the batch.
+        extractor=ManyExtractor([partner, sister]),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert len(result.beliefs) == 2
+    async with factory() as uow:
+        people = [
+            r for r in await uow.people.query(_people_query(["person"])) if isinstance(r, Person)
+        ]
+        assert [person.display_name for person in people] == ["Maya"]
+        [relation] = await uow.people.query(_people_query(["relationship"]))
+        assert isinstance(relation, RelationshipAssertion)
+        assert relation.predicate == "sibling" and relation.object.kind == "owner"
+        links = [
+            row
+            for row in await uow.people.query(_people_query(["memory_link"]))
+            if isinstance(row, PersonMemoryLink)
+        ]
+        assert {link.belief_id for link in links} == {belief.id for belief in result.beliefs}
+        assert all(link.person_id == people[0].id and not link.unresolved for link in links)
+        kinship = next(
+            b for b in result.beliefs if b.statement == text and b.subject.endswith(":Maya")
+        )
+        stored = await uow.memories.get(kinship.id, principal())
+        assert stored.lifecycle_policy_version == "people-lifecycle@1"
+
+
+async def test_pronouns_and_owner_self_references_never_create_or_link() -> None:
+    """'You', the owner's own address, and handles are never people; 'she' still binds."""
+    from agent_core.domain.email import EmailAccount, EmailRecord
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await uow.email.put(
+            EmailRecord(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                kind="account",
+                key="personal",
+                revision=1,
+                payload=EmailAccount(
+                    id="personal",
+                    label="Personal",
+                    email_address="Avitus@Example.test",
+                    status="syncing",
+                ).model_dump(mode="json"),
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+            expected_revision=0,
+        )
+    text = (
+        "You are my friend. avitus@example.test is my brother. avitus is my cousin. "
+        "My sister Maya said she is moving."
+    )
+    sequence = await user_event(factory, text)
+    candidates = [
+        _claim_candidate(
+            text,
+            sequence,
+            [_mention(text, sequence, "You", "you")],
+            subject="friend",
+            relationship=("you", "owner", "friend"),
+        ),
+        _claim_candidate(
+            text,
+            sequence,
+            [_mention(text, sequence, "avitus@example.test", "address", kind="email")],
+            subject="brother",
+            relationship=("address", "owner", "sibling"),
+        ),
+        _claim_candidate(
+            text,
+            sequence,
+            [_mention(text, sequence, "avitus", "handle", kind="handle", occurrence=1)],
+            subject="cousin",
+            relationship=("handle", "owner", "relative"),
+        ),
+        _claim_candidate(
+            text,
+            sequence,
+            [
+                _mention(text, sequence, "Maya", "maya"),
+                _mention(text, sequence, "she", "she", referent="maya"),
+            ],
+            subject="Maya",
+            relationship=("maya", "owner", "sibling"),
+        ),
+    ]
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=ManyExtractor(candidates),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert len(result.beliefs) == 4, "every statement still forms as a belief"
+    async with factory() as uow:
+        people = [
+            r for r in await uow.people.query(_people_query(["person"])) if isinstance(r, Person)
+        ]
+        assert [person.display_name for person in people] == ["Maya"]
+        from agent_core.domain.people import PersonMention
+
+        mentions = [
+            row
+            for row in await uow.people.query(_people_query(["mention"]))
+            if isinstance(row, PersonMention)
+        ]
+        she = next(m for m in mentions if m.start == text.index(" she ") + 1)
+        assert she.person_id == people[0].id
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "Nora met Sam for coffee.",
+        "My sister Nora met Sam for coffee.",
+        "Our sister Nora met Sam for coffee.",
+    ],
+)
+async def test_reported_meeting_creates_first_person_participants_only(other: str) -> None:
+    """'I met Maya' adds Maya; 'Nora met Sam' adds no one; bystanders are never added."""
+    from agent_core.domain.memory import MemoryExtractionResult
+    from agent_core.domain.people import PeopleInteraction
+    from agent_core.domain.people_extraction import InteractionEvidence
+
+    clock, factory = await memory_uow_factory()
+    met = "I met Maya for lunch while Jules waited outside."
+    first = await user_event(factory, met)
+    second = await user_event(factory, other)
+    interactions = [
+        InteractionEvidence(
+            source_event_id=first,
+            text=met,
+            summary=met,
+            interaction_kind="meeting",
+            occurred_at=None,
+            precision="unknown",
+            source_timezone=None,
+            mentions=[
+                _mention(met, first, "Maya", "maya", role="mentioned"),
+                _mention(met, first, "Jules", "jules", role="mentioned"),
+            ],
+            participant_keys=["maya"],
+        ),
+        InteractionEvidence(
+            source_event_id=second,
+            text=other,
+            summary=other,
+            interaction_kind="meeting",
+            occurred_at=None,
+            precision="unknown",
+            source_timezone=None,
+            mentions=[
+                _mention(other, second, "Nora", "nora", role="mentioned"),
+                _mention(other, second, "Sam", "sam", role="mentioned"),
+            ],
+            participant_keys=["nora", "sam"],
+        ),
+    ]
+
+    class InteractionExtractor:
+        name = "interaction-fixture@1"
+
+        async def extract(self, events: Any, **kwargs: Any) -> MemoryExtractionResult:
+            return MemoryExtractionResult([], people_interactions=interactions)
+
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=InteractionExtractor(),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    async with factory() as uow:
+        people = [
+            r for r in await uow.people.query(_people_query(["person"])) if isinstance(r, Person)
+        ]
+        assert [person.display_name for person in people] == ["Maya"]
+        [history] = await uow.people.query(_people_query(["interaction"]))
+        assert isinstance(history, PeopleInteraction)
+        assert [p.person_id for p in history.participants] == [people[0].id]
+
+
+async def test_reinforced_belief_skips_projection_rows_erased_by_repair() -> None:
+    """A belief formed again after the repair erased its People rows neither fails nor revives."""
+    clock, factory = await memory_uow_factory()
+    text = "My mom, Cheryl, lives in Redwood City."
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="Cheryl",
+        display_name="Cheryl",
+        identifier_kind="name",
+        identifier_value="Cheryl",
+        context="",
+        predicate="parent",
+        qualifier="mother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=ManyExtractor([candidate]),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    async with factory() as uow:
+        erased = [
+            row.id for row in await uow.people.query(_people_query(["relationship", "memory_link"]))
+        ]
+        assert len(erased) == 2
+        await uow.people.erase(principal(), erased, preserve_independent=True)
+    result = await service.run(
+        trigger="idle", scope="user", session_id=SESSION_ID, since_watermark=0
+    )
+    assert result.run.decision_counts.get("rejected_people_evidence", 0) == 0
+    async with factory() as uow:
+        assert await uow.people.query(_people_query(["relationship", "memory_link"])) == []
+
+
+@pytest.mark.parametrize("tie_source", ["wrong_scope", "assistant_claim", "assistant_interaction"])
+async def test_untrusted_owner_tie_cannot_admit_a_chat_mention(tie_source: str) -> None:
+    from agent_core.domain.events import NewEvent
+    from agent_core.domain.memory import MemoryExtractionResult
+    from agent_core.domain.people_extraction import InteractionEvidence
+
+    clock, factory = await memory_uow_factory()
+    text = "Maya likes coffee."
+    sequence = await user_event(factory, text)
+    claim = _claim_candidate(
+        text, sequence, [_mention(text, sequence, "Maya", "maya")], subject="coffee"
+    )
+    tie_text = "I met Maya, my sister."
+    if tie_source == "wrong_scope":
+        tie_sequence = await user_event(factory, tie_text)
+    else:
+        async with factory() as uow:
+            event = await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="assistant.message.completed",
+                    actor_type="assistant",
+                    payload={"content": tie_text},
+                )
+            )
+        tie_sequence = event.sequence
+    tie = _claim_candidate(
+        tie_text,
+        tie_sequence,
+        [_mention(tie_text, tie_sequence, "Maya", "maya")],
+        subject="sister",
+        relationship=("maya", "owner", "sibling"),
+    )
+    if tie_source == "wrong_scope":
+        tie = tie.model_copy(update={"proposed_scope": "another-project"})
+    interactions = []
+    candidates = [claim, tie]
+    if tie_source == "assistant_interaction":
+        candidates = [claim]
+        interactions = [
+            InteractionEvidence(
+                source_event_id=tie_sequence,
+                text=tie_text,
+                summary=tie_text,
+                interaction_kind="meeting",
+                occurred_at=None,
+                precision="unknown",
+                source_timezone=None,
+                mentions=[_mention(tie_text, tie_sequence, "Maya", "maya")],
+                participant_keys=["maya"],
+            )
+        ]
+
+    class MixedExtractor:
+        name = "mixed-owner-ties@1"
+
+        async def extract(self, events: Any, **kwargs: Any) -> MemoryExtractionResult:
+            return MemoryExtractionResult(candidates, people_interactions=interactions)
+
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=MixedExtractor(),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert any(belief.statement == text for belief in result.beliefs)
+    async with factory() as uow:
+        assert await uow.people.query(_people_query(["person"])) == []
+
+
+@pytest.mark.parametrize("invalid", ["terminal_text", "source"])
+async def test_unresolved_commitment_still_requires_admitted_state_evidence(invalid: str) -> None:
+    from agent_core.domain.people_extraction import CommitmentProposal
+
+    clock, factory = await memory_uow_factory()
+    text = "Maya drafted an agenda for Jules but has not sent it."
+    sequence = await user_event(factory, text)
+    candidate = _claim_candidate(
+        text,
+        sequence,
+        [
+            _mention(text, sequence, "Maya", "maya"),
+            _mention(text, sequence, "Jules", "jules", role="object"),
+        ],
+        subject="agenda",
+    )
+    assert candidate.people is not None
+    candidate = candidate.model_copy(
+        update={
+            "people": candidate.people.model_copy(
+                update={
+                    "commitment": CommitmentProposal(
+                        debtor_key="maya",
+                        beneficiary_key="jules",
+                        state="completed" if invalid == "terminal_text" else "proposed",
+                        source_event_id=sequence if invalid == "terminal_text" else sequence + 100,
+                        due_at=None,
+                        due_precision="unknown",
+                        source_timezone=None,
+                    )
+                }
+            )
+        }
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    assert result.run.decision_counts.get("rejected_people_evidence", 0) == 1
+    async with factory() as uow:
+        assert await uow.people.query(_people_query(["person", "commitment"])) == []

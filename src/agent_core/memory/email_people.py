@@ -19,6 +19,7 @@ from agent_core.domain.errors import (
     ToolTrustRejectedError,
     ToolValidationError,
 )
+from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
     MemoryAuthority,
     MemoryCandidate,
@@ -40,6 +41,7 @@ from agent_core.memory.people_correspondence import project_correspondence
 from agent_core.memory.people_formation import (
     PreparedPeople,
     email_source_id,
+    owner_references,
     persist_people,
     prepare_people,
 )
@@ -104,6 +106,70 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         """Recover the next retained passage and verify it against immutable source events."""
         if self._import_window is None or not self.enabled:
             raise ConflictError("historical email capture is unavailable")
+        passages = self._retained_passages(record)
+        offsets = sorted(int(key) for key in passages if str(key).isdigit())
+        offset = next((key for key in offsets if after_offset is None or key > after_offset), None)
+        if offset is None:
+            return None
+        source = self._pending_source(record, offset)
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
+            await self._admit_import(uow, source)
+            current = await uow.email.get(self._principal, record.kind, record.key)
+            if current is None or current.payload.get("excluded"):
+                raise ConflictError("email import source was excluded")
+            if await self.bulk_source(uow, source.account_id, source.provider_thread_id):
+                # ADR-0116: a retained passage from bulk mail, by census or by the
+                # persisted verdict, is skipped and counted as excluded, not analyzed.
+                return None
+            source, _header, _event = await self._verify_passage(uow, source, passages)
+            if await uow.people.source_suppressed(
+                self._principal, email_source_id(self._principal, source)
+            ):
+                raise ConflictError("People email source was erased")
+            return source
+
+    async def reproject_correspondence(self, record: EmailRecord) -> bool:
+        """Project one retained message's headers into People again; no model is called.
+
+        The directory repair (ADR-0121) uses this for mail registered while
+        correspondence could not run. It returns False for bulk, excluded or
+        suppressed mail, and raises for mail that no longer verifies.
+        """
+        if not self.enabled:
+            return False
+        try:
+            passages = self._retained_passages(record)
+        except ToolTrustRejectedError:
+            return False
+        offsets = sorted(int(key) for key in passages if str(key).isdigit())
+        if not offsets:
+            return False
+        source = self._pending_source(record, offsets[0])
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
+            current = await uow.email.get(self._principal, record.kind, record.key)
+            if current is None or current.payload.get("excluded"):
+                return False
+            if await self.bulk_source(uow, source.account_id, source.provider_thread_id):
+                return False
+            source, header, event = await self._verify_passage(uow, source, passages)
+            if await uow.people.source_suppressed(
+                self._principal, email_source_id(self._principal, source)
+            ):
+                return False
+            await project_correspondence(
+                uow, self._principal, source, header, event, self._clock.now()
+            )
+            return True
+
+    def _retained_passages(self, record: EmailRecord) -> dict[str, object]:
         if (
             record.tenant_id != self._principal.tenant_id
             or record.principal_id != self._principal.principal_id
@@ -111,26 +177,28 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             or record.payload.get("excluded")
         ):
             raise ToolTrustRejectedError("email import source is unavailable")
-        payload = record.payload
-        passages = payload.get("passages")
-        occurrences = payload.get("occurrences")
-        if not isinstance(passages, dict) or not isinstance(occurrences, list):
+        passages = record.payload.get("passages")
+        if not isinstance(passages, dict) or not isinstance(
+            record.payload.get("occurrences"), list
+        ):
             raise ToolTrustRejectedError("email import lacks retained passage provenance")
-        offsets = sorted(int(key) for key in passages if str(key).isdigit())
-        offset = next((key for key in offsets if after_offset is None or key > after_offset), None)
-        if offset is None:
-            return None
+        return passages
+
+    def _pending_source(self, record: EmailRecord, offset: int) -> EmailSemanticSource:
+        """The passage's provenance before its original events are read and verified."""
+        payload = record.payload
+        occurrences = payload.get("occurrences")
         occurrence = next(
             (
                 item
-                for item in occurrences
+                for item in (occurrences if isinstance(occurrences, list) else [])
                 if isinstance(item, dict) and item.get("body_offset") == offset
             ),
             None,
         )
         if occurrence is None:
             raise ToolTrustRejectedError("email import passage lacks its original event")
-        source = EmailSemanticSource.model_validate(
+        return EmailSemanticSource.model_validate(
             {
                 "account_id": payload.get("account_id"),
                 "provider_thread_id": payload.get("provider_thread_id"),
@@ -146,63 +214,54 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 "sender": "pending verification",
             }
         )
-        async with (
-            self._uow_factory() as uow,
-            uow.email.lock(self._principal),
-            uow.people.lock(self._principal),
-        ):
-            await self._admit_import(uow, source)
-            current = await uow.email.get(self._principal, record.kind, record.key)
-            if current is None or current.payload.get("excluded"):
-                raise ConflictError("email import source was excluded")
-            if await self.bulk_source(uow, source.account_id, source.provider_thread_id):
-                # ADR-0116: a retained passage from bulk mail, by census or by the
-                # persisted verdict, is skipped and counted as excluded, not analyzed.
-                return None
-            body, _ = await self._read_document(
-                uow, source, source.source_event_sequence, source.tool_name
+
+    async def _verify_passage(
+        self,
+        uow: RepositoryUnitOfWork,
+        source: EmailSemanticSource,
+        passages: dict[str, object],
+    ) -> tuple[EmailSemanticSource, dict[str, object], EventEnvelope]:
+        """Read the original events and return the verified source, header and header event."""
+        body, event = await self._read_document(
+            uow, source, source.source_event_sequence, source.tool_name
+        )
+        header = body
+        if source.tool_name.endswith(".get_message_body"):
+            if source.header_event_sequence is None:
+                raise ToolTrustRejectedError("email import lacks original headers")
+            header, event = await self._read_document(
+                uow,
+                source,
+                source.header_event_sequence,
+                source.tool_name.rsplit(".", 1)[0] + ".get_thread_page",
+                session_id=source.header_session_id,
             )
-            header = body
-            if source.tool_name.endswith(".get_message_body"):
-                if source.header_event_sequence is None:
-                    raise ToolTrustRejectedError("email import lacks original headers")
-                header, _ = await self._read_document(
-                    uow,
-                    source,
-                    source.header_event_sequence,
-                    source.tool_name.rsplit(".", 1)[0] + ".get_thread_page",
-                    session_id=source.header_session_id,
-                )
-            messages = header.get("messages")
-            matches = (
-                [
-                    item
-                    for item in messages
-                    if isinstance(item, dict) and item.get("id") == source.message_id
-                ]
-                if isinstance(messages, list)
-                else []
-            )
-            if len(matches) != 1:
-                raise ToolTrustRejectedError("email import header is missing or ambiguous")
-            message = matches[0]
-            source = EmailSemanticSource.model_validate(
-                {
-                    **source.model_dump(),
-                    "sender": message.get("from"),
-                    "body": body.get("body")
-                    if source.tool_name.endswith(".get_message_body")
-                    else message.get("body"),
-                }
-            )
-            await self._validate_source(uow, source)
-            if hashlib.sha256(source.body.encode()).hexdigest() != passages[str(offset)]:
-                raise ToolTrustRejectedError("email import passage fingerprint changed")
-            if await uow.people.source_suppressed(
-                self._principal, email_source_id(self._principal, source)
-            ):
-                raise ConflictError("People email source was erased")
-            return source
+        messages = header.get("messages")
+        matches = (
+            [
+                item
+                for item in messages
+                if isinstance(item, dict) and item.get("id") == source.message_id
+            ]
+            if isinstance(messages, list)
+            else []
+        )
+        if len(matches) != 1:
+            raise ToolTrustRejectedError("email import header is missing or ambiguous")
+        message = matches[0]
+        source = EmailSemanticSource.model_validate(
+            {
+                **source.model_dump(),
+                "sender": message.get("from"),
+                "body": body.get("body")
+                if source.tool_name.endswith(".get_message_body")
+                else message.get("body"),
+            }
+        )
+        await self._validate_source(uow, source)
+        if hashlib.sha256(source.body.encode()).hexdigest() != passages[str(source.body_offset)]:
+            raise ToolTrustRejectedError("email import passage fingerprint changed")
+        return source, message, event
 
     async def retain_source(
         self, source: EmailSemanticSource, *, run: Run, lease: WorkerLease | None
@@ -267,6 +326,56 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 await project_correspondence(
                     uow, self._principal, source, header, event, self._clock.now()
                 )
+
+    async def _prepare_fact_people(
+        self,
+        uow: RepositoryUnitOfWork,
+        fact: EmailPeopleFact,
+        source: EmailSemanticSource,
+        event: EventEnvelope,
+        admitted: FormationSource,
+        scope: str,
+        self_references: frozenset[str],
+    ) -> PreparedPeople:
+        """Ground one fact's People evidence; mail never creates a person (ADR-0121)."""
+        assert fact.people is not None
+        if source.body.count(fact.quote) != 1:
+            raise ToolValidationError("People email quote is ambiguous within this passage")
+        offset = source.body.index(fact.quote)
+        payload = fact.people.model_dump()
+        for mention in [*payload["mentions"], *payload["organizations"]]:
+            mention.update(
+                source_event_id=event.sequence,
+                start=mention["start"] + offset,
+                end=mention["end"] + offset,
+            )
+        if payload["commitment"] is not None:
+            payload["commitment"]["source_event_id"] = event.sequence
+        candidate = MemoryCandidate(
+            belief_type=fact.belief_type,
+            subject=fact.subject,
+            statement=fact.quote,
+            source_event_ids=[event.sequence],
+            model_confidence=0.4,
+            proposed_scope=scope,
+            proposed_portability=Portability.CONTEXTUAL,
+            sensitivity_guess=Sensitivity.SENSITIVE,
+            derivation=MemoryDerivation.HYPOTHESIS,
+            longevity=MemoryLongevity.TENTATIVE,
+            people=PeopleClaim.model_validate(payload),
+        )
+        # Names in a message body link only to people already in People; the
+        # owner's own correspondence, not a mention, is what adds someone.
+        return await prepare_people(
+            uow.people,
+            self._principal,
+            candidate,
+            {event.sequence: admitted},
+            self._clock.now(),
+            email=source,
+            creatable=frozenset(),
+            self_references=self_references,
+        )
 
     async def form(
         self,
@@ -345,6 +454,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 text=source.body,
             )
             prepared: list[tuple[EmailSemanticFact, PreparedPeople | None]] = []
+            self_references = await owner_references(uow.email, self._principal)
             for proposed in facts:
                 fact = (
                     EmailPeopleFact.model_validate(proposed.model_dump())
@@ -359,41 +469,17 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     raise ToolValidationError("semantic email fact lacks exact source grounding")
                 linked = None
                 if isinstance(fact, EmailPeopleFact) and fact.people is not None:
-                    if source.body.count(fact.quote) != 1:
-                        raise ToolValidationError(
-                            "People email quote is ambiguous within this passage"
+                    try:
+                        linked = await self._prepare_fact_people(
+                            uow, fact, source, event, admitted, scope, self_references
                         )
-                    offset = source.body.index(fact.quote)
-                    payload = fact.people.model_dump()
-                    for mention in [*payload["mentions"], *payload["organizations"]]:
-                        mention.update(
-                            source_event_id=event.sequence,
-                            start=mention["start"] + offset,
-                            end=mention["end"] + offset,
-                        )
-                    if payload["commitment"] is not None:
-                        payload["commitment"]["source_event_id"] = event.sequence
-                    candidate = MemoryCandidate(
-                        belief_type=fact.belief_type,
-                        subject=fact.subject,
-                        statement=fact.quote,
-                        source_event_ids=[event.sequence],
-                        model_confidence=0.4,
-                        proposed_scope=scope,
-                        proposed_portability=Portability.CONTEXTUAL,
-                        sensitivity_guess=Sensitivity.SENSITIVE,
-                        derivation=MemoryDerivation.HYPOTHESIS,
-                        longevity=MemoryLongevity.TENTATIVE,
-                        people=PeopleClaim.model_validate(payload),
-                    )
-                    linked = await prepare_people(
-                        uow.people,
-                        self._principal,
-                        candidate,
-                        {event.sequence: admitted},
-                        self._clock.now(),
-                        email=source,
-                    )
+                    except (ValueError, ToolValidationError):
+                        # Unsupported People evidence drops the link, never the fact,
+                        # as chat formation already does.
+                        linked = None
+                    except ConflictError:
+                        # An erased source or identity rejects only this fact.
+                        continue
                 prepared.append((fact, linked))
             prior_facts = registered.payload.get("facts", {})
             fact_ids = dict(prior_facts) if isinstance(prior_facts, dict) else {}

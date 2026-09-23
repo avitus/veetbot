@@ -15,7 +15,11 @@ from uuid import UUID
 
 import typer
 
-from agent_core.application.services import PeopleErasureOperations, PeopleService
+from agent_core.application.services import (
+    PeopleErasureOperations,
+    PeopleService,
+    SessionService,
+)
 from agent_core.config import ConfigurationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import (
@@ -36,18 +40,31 @@ from agent_core.domain.people_public import (
 from agent_core.domain.people_views import (
     PeopleForgetRequest,
     PeopleIdentityRequest,
+    PeopleRepairReport,
     PeopleSectionQuery,
 )
+
+
+class _DirectoryRepair(Protocol):
+    async def run(
+        self, principal: Principal, *, confirm: bool, session_id: UUID | None = None
+    ) -> PeopleRepairReport: ...
 
 
 class _PeopleServices(Protocol):
     @property
     def people(self) -> PeopleService | None: ...
 
+    @property
+    def sessions(self) -> SessionService: ...
+
 
 class _Composition(Protocol):
     @property
     def people_erasure(self) -> PeopleErasureOperations: ...
+
+    @property
+    def people_repair(self) -> _DirectoryRepair | None: ...
 
     @property
     def principal(self) -> Principal: ...
@@ -174,6 +191,37 @@ def link_existing(
 ) -> None:
     """Link one bounded page of existing owner beliefs; repeat using its returned cursor."""
     emit(link_legacy(owner, limit, cursor))
+
+
+async def repair_directory_report(owner: str, confirm: bool) -> object:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        repair = composition.people_repair
+        if repair is None:
+            raise NotFoundError("People is disabled")
+        session_id = None
+        if confirm:
+            # The audit trail and the owner-confirmed aliases live in a People
+            # management session, which the conversation list hides.
+            session = await composition.services.sessions.create(
+                principal, "general", {"purpose": "people-management"}
+            )
+            session_id = session.id
+        report = await repair.run(principal, confirm=confirm, session_id=session_id)
+        return report.model_dump(mode="json")
+
+
+@app.command("repair-directory")
+def repair_directory(
+    owner: Owner,
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Apply the repair. Without it, only preview.")
+    ] = False,
+) -> None:
+    """Keep only people you know or write to (ADR-0121); previews unless --confirm."""
+    emit(repair_directory_report(owner, confirm))
 
 
 @app.command("get")

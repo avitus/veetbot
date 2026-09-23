@@ -55,3 +55,50 @@ def test_reservation_includes_worst_case_input_output_and_separate_reasoning() -
     )
     with pytest.raises(ImportStoppedError, match="pricing"):
         reservation_cost(request, model.model_copy(update={"pricing": ModelPricing()}))
+
+
+async def test_scoped_import_survives_new_observed_identifiers() -> None:
+    """Only owner-confirmed identities pin a scoped import (ADR-0121).
+
+    Correspondence now records who the owner writes to, one identifier per
+    message. Those rows must neither exceed the snapshot bound nor stop an
+    import that selects the person by the owner's confirmed identifiers.
+    """
+    from uuid import uuid4
+
+    from agent_core.application.people_imports import import_identity_revisions
+    from agent_core.domain.memory import Sensitivity
+    from agent_core.domain.people import Person, PersonIdentifier
+    from tests.contract.support import NOW, memory_uow_factory, principal
+
+    _, factory = await memory_uow_factory()
+    owner = principal()
+    common = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Alex", **common)  # type: ignore[arg-type]
+    confirmed = PersonIdentifier(
+        id=uuid4(),
+        person_id=person.id,
+        identifier_kind="email",
+        namespace="owner",
+        value="alex@example.test",
+        context="owner",
+        verification="owner_confirmed",
+        valid_from=NOW,
+        **common,  # type: ignore[arg-type]
+    )
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+        await uow.people.put(confirmed, expected_revision=0)
+        before = await import_identity_revisions(uow, owner, [person.id], Sensitivity.RESTRICTED)
+        for _ in range(150):
+            await uow.people.put(
+                confirmed.model_copy(update={"id": uuid4(), "verification": "channel_observed"}),
+                expected_revision=0,
+            )
+        after = await import_identity_revisions(uow, owner, [person.id], Sensitivity.RESTRICTED)
+    assert before == after == {person.id: 1, confirmed.id: 1}

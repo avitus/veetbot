@@ -109,10 +109,15 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         cursor: Annotated[str | None, Query(max_length=2048)] = None,
         as_of: AwareDatetime | None = None,
-        state: Literal["active", "provisional", "merged"] | None = None,
+        # Repeat state to list several; People is active plus provisional (ADR-0121).
+        state: Annotated[
+            list[Literal["active", "provisional", "merged"]] | None, Query(max_length=3)
+        ] = None,
         pinned: bool | None = None,
         sort: Literal["id", "recent"] = "id",
         relationship: PeopleRelationshipFilter | None = None,
+        # Provisional, unpinned people with no confirmed or observed identifier.
+        review: bool = False,
     ) -> PeoplePage:
         return await service.list(
             authenticated,
@@ -121,10 +126,11 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
             limit=limit,
             cursor=cursor,
             as_of=as_of,
-            state=state,
+            states=state,
             pinned=pinned,
             sort=sort,
             relationship=relationship,
+            review=review,
         )
 
     @router.post(
