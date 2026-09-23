@@ -311,8 +311,9 @@ async def test_email_people_satisfies_shared_authority_contract_and_keeps_older_
         ({"from": "Owner <owner@example.test>", "to": "Alex <alex@example.test>"}, None),
     ],
 )
+@pytest.mark.parametrize("status", ["ready", "syncing", "unavailable"])
 async def test_email_headers_link_confirmed_sender_to_observed_history(
-    headers: dict[str, Any], direction: str | None
+    headers: dict[str, Any], direction: str | None, status: str
 ) -> None:
     from uuid import uuid4
 
@@ -331,8 +332,12 @@ async def test_email_headers_link_confirmed_sender_to_observed_history(
         "updated_at": NOW,
     }
     person = Person(id=uuid4(), display_name="Alex", **common)
+    # A refresh marks the account syncing before it registers mail (ADR-0118).
     account = EmailAccount(
-        id="work", label="Work", email_address="owner@example.test", status="ready"
+        id="work",
+        label="Work",
+        email_address="owner@example.test",
+        status=status,  # type: ignore[arg-type]
     )
     async with factory() as uow:
         await uow.email.put(
@@ -455,6 +460,34 @@ async def test_old_email_requires_an_explicit_date_window_and_active_import_guar
     assert result[0].valid_from == source.sent_at
 
 
+async def _seed_confirmed_alex(uow: Any, since: Any) -> Person:
+    from uuid import uuid4
+
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Alex", state="active", **common)
+    await uow.people.put(person, expected_revision=0)
+    await uow.people.put(
+        PersonIdentifier(
+            id=uuid4(),
+            person_id=person.id,
+            identifier_kind="email",
+            namespace="owner",
+            value="alex@example.test",
+            context="owner",
+            verification="owner_confirmed",
+            valid_from=since,
+            **common,
+        ),
+        expected_revision=0,
+    )
+    return person
+
+
 @pytest.mark.parametrize("existing_source", ["none", "source", "partial"])
 async def test_same_delivered_email_keeps_one_interaction_with_both_account_sources(
     existing_source: str,
@@ -491,6 +524,8 @@ async def test_same_delivered_email_keeps_one_interaction_with_both_account_sour
                 ),
                 expected_revision=0,
             )
+        # Only a known sender has received-mail history (ADR-0118).
+        await _seed_confirmed_alex(uow, source.sent_at)
         if existing_source == "source":
             await uow.people.put(
                 PeopleSource(
@@ -540,7 +575,13 @@ async def test_same_delivered_email_keeps_one_interaction_with_both_account_sour
         assert len(rows) == 1 and len(rows[0].support_ids) == 1
 
 
-async def test_other_verified_owner_mailbox_is_not_created_as_a_person() -> None:
+@pytest.mark.parametrize(
+    "work_status, personal_status",
+    [("ready", "ready"), ("ready", "unavailable"), ("syncing", "syncing")],
+)
+async def test_other_verified_owner_mailbox_is_not_created_as_a_person(
+    work_status: str, personal_status: str
+) -> None:
     import json
 
     from agent_core.domain.email import EmailAccount, EmailRecord
@@ -556,7 +597,10 @@ async def test_other_verified_owner_mailbox_is_not_created_as_a_person() -> None
     async with factory() as uow:
         event = (await uow.events.list_after(source.session_id, 0, principal()))[0]
         header = json.loads(event.payload["result_item"]["content"][0]["text"])["messages"][0]
-        for name, address in [("work", "work@example.test"), ("personal", "personal@example.test")]:
+        for name, address, status in [
+            ("work", "work@example.test", work_status),
+            ("personal", "personal@example.test", personal_status),
+        ]:
             await uow.email.put(
                 EmailRecord(
                     tenant_id=principal().tenant_id,
@@ -567,7 +611,10 @@ async def test_other_verified_owner_mailbox_is_not_created_as_a_person() -> None
                     created_at=NOW,
                     updated_at=NOW,
                     payload=EmailAccount(
-                        id=name, label=name, email_address=address, status="ready"
+                        id=name,
+                        label=name,
+                        email_address=address,
+                        status=status,  # type: ignore[arg-type]
                     ).model_dump(mode="json"),
                 ),
                 expected_revision=0,
@@ -719,3 +766,401 @@ async def test_unsupported_email_people_label_keeps_the_passage_facts() -> None:
     )
     [belief] = await service.form(source, [_colleague_fact(source, maya_label="Maya Brook")])
     assert belief.consolidation_policy_version == "email-semantic@2"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0118: correspondence records the people the owner writes to.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_account(
+    factory: Any, *, status: str = "syncing", address: str = "owner@example.test"
+) -> None:
+    from agent_core.domain.email import EmailAccount, EmailRecord
+
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    account = EmailAccount(id="work", label="Work", email_address=address, status=status)  # type: ignore[arg-type]
+    async with factory() as uow:
+        await uow.email.put(
+            EmailRecord(
+                kind="account",
+                key="work",
+                revision=1,
+                payload=account.model_dump(mode="json"),
+                **common,
+            ),
+            expected_revision=0,
+        )
+
+
+async def _mail(
+    factory: Any,
+    *,
+    message_id: str,
+    sender: str,
+    to: str | None = None,
+    labels: list[str] | None = None,
+    days_ago: float = 3,
+    thread_id: str = "t-mail",
+    body: str = "Thanks for the update on the board materials.",
+) -> Any:
+    """Append one first-party thread read to the mailbox session and return its source."""
+    import json
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    from agent_core.domain.email_semantics import EmailSemanticSource
+    from agent_core.domain.events import NewEvent
+    from agent_core.domain.messages import TextPart, ToolResultItem
+    from agent_core.domain.policies import TrustLevel
+
+    sent_at = (NOW - timedelta(days=days_ago)).replace(microsecond=0)
+    message: dict[str, object] = {
+        "id": message_id,
+        "thread_id": thread_id,
+        "from": sender,
+        "body": body,
+        "body_complete": True,
+        "headers_complete": True,
+        "internal_date": str(int(sent_at.timestamp() * 1000)),
+        "label_ids": labels or ["INBOX"],
+    }
+    if to is not None:
+        message["to"] = to
+    async with factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=UUID(int=410),
+                run_id=None,
+                event_type="tool.call.completed",
+                actor_type="runtime",
+                payload={
+                    "name": "mcp.gmail_work_read.get_thread_page",
+                    "result_item": ToolResultItem(
+                        call_id=f"call-{message_id}",
+                        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                        content=[
+                            TextPart(
+                                text=json.dumps({"thread_id": thread_id, "messages": [message]})
+                            )
+                        ],
+                    ).model_dump(mode="json"),
+                },
+            )
+        )
+    return EmailSemanticSource(
+        account_id="work",
+        provider_thread_id=thread_id,
+        message_id=message_id,
+        session_id=UUID(int=410),
+        source_event_sequence=event.sequence,
+        tool_name="mcp.gmail_work_read.get_thread_page",
+        sender=sender,
+        body=body,
+        sent_at=datetime.fromtimestamp(int(str(message["internal_date"])) / 1000, tz=UTC),
+    )
+
+
+def _all(kinds: list[str]) -> PeopleQuery:
+    return PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        kinds=kinds,
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        limit=100,
+    )
+
+
+async def _correspondence_stack() -> tuple[Any, EmailPeopleFormationService]:
+    factory, legacy, _source, _fact, _ = await semantic_stack(age=30)
+    service = EmailPeopleFormationService(
+        factory, legacy._clock, ids(), principal(), provider="fake", model="scripted"
+    )
+    return factory, service
+
+
+OWNER = "Owner Name <owner@example.test>"
+ALEX = "Alex Rivera <alex@example.test>"
+
+
+@pytest.mark.parametrize("status", ["syncing", "unavailable"])
+async def test_correspondence_projects_regardless_of_account_status(status: str) -> None:
+    from agent_core.domain.people import PeopleInteraction
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status=status)
+    await service.register_source(
+        await _mail(factory, message_id="m-sent", sender=OWNER, to=ALEX, labels=["SENT"])
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(_all(["person"])) if isinstance(r, Person)]
+        assert [person.display_name for person in people] == ["Alex Rivera"]
+        [history] = await uow.people.query(_all(["interaction"]))
+    assert isinstance(history, PeopleInteraction) and history.direction == "outgoing"
+
+
+async def test_unknown_sender_gets_an_unattached_endpoint_but_no_person_or_history() -> None:
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory)
+    await service.register_source(await _mail(factory, message_id="m-in", sender=ALEX))
+    async with factory() as uow:
+        assert await uow.people.query(_all(["person", "interaction"])) == []
+        identifiers = await uow.people.query(_all(["identifier"]))
+    assert [(i.value, i.person_id) for i in identifiers if isinstance(i, PersonIdentifier)] == [
+        ("alex@example.test", None)
+    ]
+
+
+async def test_first_reply_creates_the_person_and_adopts_earlier_received_mail() -> None:
+    from agent_core.domain.people import PeopleInteraction
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory)
+    for index, days in enumerate((5, 4)):
+        await service.register_source(
+            await _mail(factory, message_id=f"m-in-{index}", sender=ALEX, days_ago=days)
+        )
+    reply = await _mail(
+        factory, message_id="m-reply", sender=OWNER, to=ALEX, labels=["SENT"], days_ago=3
+    )
+    await service.register_source(reply)
+    await service.register_source(reply)
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(_all(["person"])) if isinstance(r, Person)]
+        assert [person.display_name for person in people] == ["Alex Rivera"]
+        history = [
+            r
+            for r in await uow.people.query(_all(["interaction"]))
+            if isinstance(r, PeopleInteraction)
+        ]
+        identifiers = [
+            r
+            for r in await uow.people.query(_all(["identifier"]))
+            if isinstance(r, PersonIdentifier)
+        ]
+    assert sorted(row.direction for row in history) == ["incoming", "incoming", "outgoing"]
+    assert all(p.person_id == people[0].id for row in history for p in row.participants)
+    assert all(row.person_id == people[0].id for row in identifiers)
+
+
+async def test_out_of_order_mail_attaches_to_the_existing_person_without_duplicates() -> None:
+    from agent_core.domain.people import PeopleInteraction
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory)
+    # The refresh walks history newest first: the reply arrives before older mail.
+    await service.register_source(
+        await _mail(
+            factory, message_id="m-reply", sender=OWNER, to=ALEX, labels=["SENT"], days_ago=1
+        )
+    )
+    await service.register_source(await _mail(factory, message_id="m-in", sender=ALEX, days_ago=4))
+    await service.register_source(
+        await _mail(
+            factory, message_id="m-old-sent", sender=OWNER, to=ALEX, labels=["SENT"], days_ago=6
+        )
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(_all(["person"])) if isinstance(r, Person)]
+        history = [
+            r
+            for r in await uow.people.query(_all(["interaction"]))
+            if isinstance(r, PeopleInteraction)
+        ]
+    assert [person.display_name for person in people] == ["Alex Rivera"]
+    assert sorted(row.direction for row in history) == ["incoming", "outgoing", "outgoing"]
+
+
+async def _seed_holders(factory: Any, *holders: tuple[str, float, float | None]) -> list[Person]:
+    """Owner-confirmed holders of alex@example.test: (name, from days ago, to days ago)."""
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    people = []
+    async with factory() as uow:
+        for name, start, end in holders:
+            person = Person(id=uuid4(), display_name=name, state="active", **common)
+            await uow.people.put(person, expected_revision=0)
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="email",
+                    namespace="owner",
+                    value="alex@example.test",
+                    context="owner",
+                    verification="owner_confirmed",
+                    valid_from=NOW - timedelta(days=start),
+                    valid_to=None if end is None else NOW - timedelta(days=end),
+                    **common,
+                ),
+                expected_revision=0,
+            )
+            people.append(person)
+    return people
+
+
+async def test_ended_owner_assignment_blocks_backdated_attachment() -> None:
+    """A reassigned address never pulls older mail onto its current holder."""
+    from agent_core.domain.people import PeopleInteraction
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status="ready")
+    _former, current = await _seed_holders(
+        factory, ("Former holder", 20, 8), ("Alex Rivera", 2, None)
+    )
+    await service.register_source(await _mail(factory, message_id="m-gap", sender=ALEX, days_ago=5))
+    async with factory() as uow:
+        assert await uow.people.query(_all(["interaction"])) == []
+    # Later mail from the current holder records its own history and adopts nothing.
+    await service.register_source(await _mail(factory, message_id="m-now", sender=ALEX, days_ago=1))
+    async with factory() as uow:
+        history = [
+            r
+            for r in await uow.people.query(_all(["interaction"]))
+            if isinstance(r, PeopleInteraction)
+        ]
+        gap = [
+            r
+            for r in await uow.people.query(_all(["identifier"]))
+            if isinstance(r, PersonIdentifier)
+            and r.verification == "channel_observed"
+            and r.person_id is None
+        ]
+    assert [[p.person_id for p in row.participants] for row in history] == [[current.id]]
+    assert len(gap) == 1
+
+
+async def test_mail_the_owner_sent_during_an_assignment_gap_creates_no_duplicate() -> None:
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status="ready")
+    await _seed_holders(factory, ("Former holder", 20, 8), ("Alex Rivera", 2, None))
+    await service.register_source(
+        await _mail(factory, message_id="m-gap", sender=OWNER, to=ALEX, labels=["SENT"], days_ago=5)
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(_all(["person"])) if isinstance(r, Person)]
+        assert sorted(person.display_name for person in people) == ["Alex Rivera", "Former holder"]
+        assert await uow.people.query(_all(["interaction"])) == []
+
+
+async def test_writing_to_a_released_address_adds_its_new_holder() -> None:
+    """Ending an assignment frees the address for whoever the owner writes to next."""
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status="ready")
+    await _seed_holders(factory, ("Former holder", 20, 8))
+    await service.register_source(
+        await _mail(
+            factory,
+            message_id="m-new",
+            sender=OWNER,
+            to="Sam Lee <alex@example.test>",
+            labels=["SENT"],
+            days_ago=1,
+        )
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(_all(["person"])) if isinstance(r, Person)]
+    assert sorted(person.display_name for person in people) == ["Former holder", "Sam Lee"]
+
+
+async def test_late_copy_of_older_mail_keeps_an_ended_assignment_ended() -> None:
+    from agent_core.memory.people import resolve_identity
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status="ready")
+    [former] = await _seed_holders(factory, ("Former holder", 20, 2))
+    await service.register_source(await _mail(factory, message_id="m-old", sender=ALEX, days_ago=5))
+    async with factory() as uow:
+        copies = [
+            r
+            for r in await uow.people.query(_all(["identifier"]))
+            if isinstance(r, PersonIdentifier) and r.verification == "channel_observed"
+        ]
+        resolved = await resolve_identity(
+            uow.people,
+            principal(),
+            kind="email",
+            namespace="owner",
+            value="alex@example.test",
+            context="owner",
+            at=NOW,
+            ceiling=Sensitivity.SENSITIVE,
+        )
+    assert [(row.person_id, row.valid_to) for row in copies] == [
+        (former.id, NOW - timedelta(days=2))
+    ]
+    assert resolved.status == "unresolved"
+
+
+async def test_heavy_correspondent_keeps_matching_after_many_messages() -> None:
+    from agent_core.domain.people import PeopleInteraction
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory)
+    await service.register_source(
+        await _mail(
+            factory, message_id="m-first-reply", sender=OWNER, to=ALEX, labels=["SENT"], days_ago=20
+        )
+    )
+    for index in range(105):
+        await service.register_source(
+            await _mail(factory, message_id=f"m-{index}", sender=ALEX, days_ago=10 - index / 20)
+        )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(_all(["person"])) if isinstance(r, Person)]
+        assert [person.display_name for person in people] == ["Alex Rivera"]
+        history: list[PeopleInteraction] = []
+        after = None
+        while True:
+            page = await uow.people.query(_all(["interaction"]).model_copy(update={"after": after}))
+            history.extend(row for row in page[:100] if isinstance(row, PeopleInteraction))
+            if len(page) <= 100:
+                break
+            after = page[99].id
+    assert len(history) == 106
+
+
+async def test_role_nameless_and_owner_named_recipients_create_no_person() -> None:
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status="ready")
+    await service.register_source(
+        await _mail(
+            factory,
+            message_id="m-sent",
+            sender=OWNER,
+            to=(
+                "Support <support@vendor.test>, bob@example.test, "
+                "Owner Name <owner.other@example.test>"
+            ),
+            labels=["SENT"],
+        )
+    )
+    async with factory() as uow:
+        assert await uow.people.query(_all(["person", "identifier", "interaction"])) == []
+
+
+async def test_erased_correspondence_ids_skip_without_aborting_registration() -> None:
+    from agent_core.domain.email_semantics import semantic_source_key
+
+    factory, service = await _correspondence_stack()
+    await _seed_account(factory, status="ready")
+    reply = await _mail(factory, message_id="m-reply", sender=OWNER, to=ALEX, labels=["SENT"])
+    await service.register_source(reply)
+    async with factory() as uow:
+        erased = [row.id for row in await uow.people.query(_all(["interaction"]))]
+        await uow.people.erase(principal(), erased, preserve_independent=True)
+    later = await _mail(factory, message_id="m-reply-copy", sender=OWNER, to=ALEX, labels=["SENT"])
+    await service.register_source(reply)
+    await service.register_source(later)
+    async with factory() as uow:
+        key = semantic_source_key("work", later.provider_thread_id, later.message_id)
+        assert await uow.email.get(principal(), "semantic_source", key) is not None

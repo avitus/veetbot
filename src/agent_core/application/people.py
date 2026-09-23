@@ -430,7 +430,66 @@ class PublicPeopleService:
                         alias.model_copy(update={"support_ids": [source.id]}),
                         expected_revision=alias.revision - 1,
                     )
+                if isinstance(request.alias, EndPersonAlias) and alias is not None:
+                    await self._end_assignment_copies(uow, principal, alias)
                 return updated
+
+    async def _end_assignment_copies(
+        self, uow: RepositoryUnitOfWork, principal: Principal, ended: PersonIdentifier
+    ) -> None:
+        """End every other open copy of the assignment the owner ended.
+
+        The profile lists one alias per assignment while correspondence keeps
+        one observed copy per message (ADR-0118); ending only the listed row
+        would leave the address resolving to this person.
+        """
+        if ended.valid_to is None:
+            return
+        value = normalize_identifier(ended.identifier_kind, ended.namespace, ended.value)
+        after: UUID | None = None
+        while True:
+            page = await uow.people.query(
+                PeopleQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    person_id=ended.person_id,
+                    kinds=["identifier"],
+                    identifier_value=value,
+                    assigned="attached",
+                    valid_at=ended.valid_to,
+                    sensitivity_ceiling=Sensitivity.RESTRICTED,
+                    after=after,
+                    limit=100,
+                )
+            )
+            for row in page[:100]:
+                if (
+                    not isinstance(row, PersonIdentifier)
+                    or row.id == ended.id
+                    or row.person_id != ended.person_id
+                    or row.identifier_kind != ended.identifier_kind
+                    or row.namespace != ended.namespace
+                    or row.context != ended.context
+                    or row.valid_to is not None
+                    or row.valid_from >= ended.valid_to
+                    or normalize_identifier(row.identifier_kind, row.namespace, row.value) != value
+                ):
+                    continue
+                await uow.people.put(
+                    row.model_copy(
+                        update={
+                            "valid_to": ended.valid_to,
+                            "revision": row.revision + 1,
+                            "updated_at": max(
+                                self._clock.now(), row.updated_at + timedelta(microseconds=1)
+                            ),
+                        }
+                    ),
+                    expected_revision=row.revision,
+                )
+            if len(page) <= 100:
+                return
+            after = page[99].id
 
     async def get(
         self, principal: Principal, person_id: UUID, *, ceiling: Sensitivity

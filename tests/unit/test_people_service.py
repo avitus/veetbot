@@ -972,6 +972,83 @@ async def test_profile_lists_each_alias_once() -> None:
     assert len(profile.history) == 1
 
 
+async def test_ending_an_alias_ends_every_observed_copy_of_that_assignment() -> None:
+    """The profile shows one alias per assignment, so ending it ends every copy (ADR-0118)."""
+    from datetime import timedelta
+    from uuid import uuid4
+
+    from agent_core.domain.people import Person, PersonIdentifier
+    from agent_core.domain.people_views import EndPersonAlias
+    from agent_core.memory.people import resolve_identity
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    service = PublicPeopleService(factory, clock)
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Alex Rivera", **common)
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+        # Correspondence writes one observed copy of the address per message.
+        for value, days in (
+            ("alex@example.test", 30),
+            ("alex@example.test", 20),
+            ("alex@example.test", 10),
+            ("alex@home.test", 30),
+        ):
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="email",
+                    namespace="owner",
+                    value=value,
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW - timedelta(days=days),
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    profile = await service.get(owner, person.id, ceiling=Sensitivity.SENSITIVE)
+    [shown] = [alias for alias in profile.aliases if alias.value == "alex@example.test"]
+    await service.update(
+        owner,
+        person.id,
+        UpdatePerson(
+            session_id=session().id,
+            expected_revision=person.revision,
+            alias=EndPersonAlias(
+                operation="end",
+                identifier_id=shown.id,
+                expected_revision=shown.revision,
+                valid_to=clock.now(),
+            ),
+        ),
+        key="end-work-address",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    clock.advance(timedelta(seconds=1))
+    async with factory() as uow:
+        for value, status in (("alex@example.test", "unresolved"), ("alex@home.test", "matched")):
+            resolved = await resolve_identity(
+                uow.people,
+                owner,
+                kind="email",
+                namespace="owner",
+                value=value,
+                context="owner",
+                at=clock.now(),
+                ceiling=Sensitivity.SENSITIVE,
+            )
+            assert resolved.status == status, value
+
+
 async def test_owner_created_person_gets_an_owner_confirmed_name_alias() -> None:
     """A person the owner adds is found again when the owner names them in chat (ADR-0118)."""
     from agent_core.domain.people import PeopleQuery, PersonIdentifier

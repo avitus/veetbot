@@ -1,6 +1,7 @@
 """Email comparison replays the real assessor and retains source attribution."""
 
 import json
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -52,6 +53,13 @@ async def test_email_comparison_uses_production_assessment_without_gold_labels(
                     "actor": "third_party",
                     "text": "Alex once liked coffee.",
                 },
+                # The owner's earlier reply is what adds Alex to People (ADR-0118).
+                {
+                    "session": "c",
+                    "occurred_at": (NOW - timedelta(days=1)).replace(microsecond=0).isoformat(),
+                    "actor": "owner",
+                    "text": "Thanks Alex, see you Friday.",
+                },
             ],
             "mentions": [
                 {
@@ -74,6 +82,13 @@ async def test_email_comparison_uses_production_assessment_without_gold_labels(
                 {
                     "sender": "Alex <alex@example.test>",
                     "subject": "Old preferences",
+                    "needs_reply": False,
+                },
+                {
+                    "sender": "Owner <owner@example.test>",
+                    "to": ["Alex <alex@example.test>"],
+                    "subject": "Re: Preferences",
+                    "labels": ["SENT"],
                     "needs_reply": False,
                 },
             ],
@@ -129,8 +144,26 @@ async def test_email_comparison_uses_production_assessment_without_gold_labels(
         ]
     else:
         assessment["semantic_facts"] = [fact]
+    reply: dict[str, Any] = {
+        "summary": "The owner replied to Alex.",
+        "reason": "A reply the owner sent.",
+        "topics": [],
+        "content_importance": 0.1,
+        "relationship_importance": 0,
+        "urgency": 0,
+        "needs_reply": False,
+        "bulk": False,
+        "supported_evidence": ["Thanks Alex, see you Friday."],
+        "people_facts" if policy == "email-semantic@2" else "semantic_facts": [],
+    }
     fake = FakeModelProvider(
-        FakeModelScript(turns=[ScriptedTurn(text=json.dumps(assessment))]), FixedClock(NOW)
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(text=json.dumps(reply)),
+                ScriptedTurn(text=json.dumps(assessment)),
+            ]
+        ),
+        FixedClock(NOW),
     )
     provider = BudgetedProvider(fake, EvaluationBudget(Decimal(1), tmp_path / "cost.jsonl"))
     actual = await evaluate_email_case(
@@ -143,15 +176,16 @@ async def test_email_comparison_uses_production_assessment_without_gold_labels(
         provider=provider,
         resolved=ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
     )
-    assert actual.people.provider_calls == actual.assessment_calls == 1
+    assert actual.people.provider_calls == actual.assessment_calls == 2
     assert actual.failed_runs == actual.automatic_older_mail_capture == 0
-    assert len(actual.assessments) == 1 and actual.assessments[0].event == 0
+    assert [item.event for item in actual.assessments] == [2, 0]
     serialized = "\n".join(request.model_dump_json() for request in fake.requests)
     assert "GOLD_ONLY_IDENTITY" not in serialized and "once liked coffee" not in serialized
     assert "Current assessment time:" in serialized and "Alex prefers tea" in serialized
     assert all(request.tools == [] for request in fake.requests)
     if policy == "email-semantic@2":
         assert len(actual.people.facts) == len(actual.people.mentions) == 1
+        assert actual.people.mentions[0].person_id is not None
         assert actual.people.facts[0].evidence_events == [0]
         assert actual.people.facts[0].predicate == "preference"
         assert actual.people.facts[0].authority is not None

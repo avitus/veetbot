@@ -987,6 +987,26 @@ async def people_identifier_lookup_contract(store: PeopleStore) -> None:
             break
         after = page[99].id
     assert seen == unattached_ids
+    # Ending an assignment pages through every open copy one person holds.
+    copies: set[object] = set()
+    after = None
+    while True:
+        page = await store.query(
+            base.model_copy(
+                update={
+                    "person_id": frequent.id,
+                    "assigned": "attached",
+                    "valid_at": NOW,
+                    "after": after,
+                }
+            )
+        )
+        assert all(isinstance(row, PersonIdentifier) for row in page)
+        copies.update(row.id for row in page[:100])
+        if len(page) <= 100:
+            break
+        after = page[99].id
+    assert len(copies) == 150
 
 
 async def test_memory_people_identifier_lookup_contract() -> None:

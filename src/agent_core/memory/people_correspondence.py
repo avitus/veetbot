@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.utils import getaddresses
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -19,14 +20,21 @@ from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import (
     InteractionParticipant,
     PeopleInteraction,
+    PeopleQuery,
     PeopleSource,
     Person,
     PersonIdentifier,
+    is_non_person_reference,
     normalize_identifier,
 )
 from agent_core.memory.people import resolve_identity
 from agent_core.memory.people_formation import _Common, email_source_id
 from agent_core.ports.persistence import RepositoryUnitOfWork
+
+# The most unattached endpoints a first reply adopts into a person's history,
+# and the most any later message from them adopts.
+_ADOPTION_LIMIT = 256
+_ADOPTION_STEP = 32
 
 _ROLE_MAILBOX = re.compile(
     r"^(?:no[._-]?reply|support|info|hello|sales|help|billing|team|contact|admin|notifications?|news|newsletter|office|jobs|careers)(?:[+._-].*)?$",
@@ -90,6 +98,238 @@ def _interaction_id(principal: Principal, exchange: list[str]) -> UUID:
     )
 
 
+@dataclass(frozen=True)
+class _Correspondent:
+    """What one address in one message may attach to (ADR-0118)."""
+
+    person_id: UUID | None = None
+    # No assignment of the address is live at or after the message, so a new
+    # person holding it from then on cannot overlap an existing holder.
+    creatable: bool = False
+    # Exactly one person has ever held the address and the owner never ended
+    # it, so unattached mail from the address is that person's.
+    adoptable: bool = False
+    # A copy written for a message inside an ended assignment ends with it.
+    ends: datetime | None = None
+
+
+def _sole_holder(held: list[PersonIdentifier], person_id: UUID) -> bool:
+    return bool(held) and all(row.person_id == person_id and row.valid_to is None for row in held)
+
+
+async def _correspondent(
+    uow: RepositoryUnitOfWork,
+    principal: Principal,
+    address: str,
+    sent_at: datetime,
+    now: datetime,
+) -> _Correspondent:
+    """The person an address belonged to when the mail was sent.
+
+    The history walk reads newest mail first, so a person created from a reply
+    holds the address only from that reply onward. Older mail attaches to the
+    same person only when exactly one person has ever held the address and the
+    owner never ended that assignment; otherwise it stays unattached rather
+    than inventing a duplicate.
+    """
+    rows = await uow.people.query(
+        PeopleQuery(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            kinds=["identifier"],
+            identifier_value=address,
+            assigned="attached",
+            distinct_assignments=True,
+            sensitivity_ceiling=Sensitivity.RESTRICTED,
+            limit=100,
+        )
+    )
+    truncated = len(rows) > 100
+    held = [
+        row
+        for row in rows[:100]
+        if isinstance(row, PersonIdentifier)
+        and row.person_id is not None
+        and row.identifier_kind == "email"
+        and normalize_identifier("email", row.namespace, row.value) == address
+    ]
+    match = await resolve_identity(
+        uow.people,
+        principal,
+        kind="email",
+        namespace="owner",
+        value=address,
+        context="owner",
+        at=sent_at,
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    if match.status == "ambiguous":
+        return _Correspondent()
+    if match.status == "matched":
+        person_id = match.person_ids[0]
+        ends = min(
+            (
+                row.valid_to
+                for row in held
+                if row.person_id == person_id
+                and row.valid_to is not None
+                and row.valid_to > sent_at
+            ),
+            default=None,
+        )
+        return _Correspondent(
+            person_id, adoptable=not truncated and _sole_holder(held, person_id), ends=ends
+        )
+    if truncated:
+        return _Correspondent()
+    later = await resolve_identity(
+        uow.people,
+        principal,
+        kind="email",
+        namespace="owner",
+        value=address,
+        context="owner",
+        at=now,
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    if later.status == "matched" and _sole_holder(held, later.person_ids[0]):
+        return _Correspondent(later.person_ids[0], adoptable=True)
+    if all(row.valid_to is not None and row.valid_to <= sent_at for row in held):
+        return _Correspondent(creatable=True, adoptable=not held)
+    return _Correspondent()
+
+
+async def _adopt_received_history(
+    uow: RepositoryUnitOfWork,
+    principal: Principal,
+    person_id: UUID,
+    address: str,
+    now: datetime,
+    common: _Common,
+    *,
+    limit: int,
+) -> None:
+    """Attach a person's unattached address endpoints and record that mail as received.
+
+    Every unattached email endpoint is a sender's (outgoing recipients who are
+    not added leave nothing behind), so each adopted endpoint is a message the
+    owner received from this person before adding them. Each projection adopts
+    a bounded number; later mail from the person adopts the rest.
+    """
+    after: UUID | None = None
+    budget = limit
+    while budget > 0:
+        rows = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["identifier"],
+                identifier_value=address,
+                assigned="unattached",
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                after=after,
+                limit=100,
+            )
+        )
+        for row in rows[:100]:
+            if budget <= 0:
+                return
+            if (
+                not isinstance(row, PersonIdentifier)
+                or row.identifier_kind != "email"
+                or row.namespace != "owner"
+                or row.context != "owner"
+                or normalize_identifier("email", "owner", row.value) != address
+            ):
+                continue
+            sources = [
+                source
+                for source_id in row.support_ids
+                if isinstance(
+                    source := await uow.people.get(
+                        principal, source_id, ceiling=Sensitivity.RESTRICTED
+                    ),
+                    PeopleSource,
+                )
+                and source.source_kind == "email"
+                and not await uow.people.source_suppressed(principal, source.id)
+            ]
+            if len(sources) != len(row.support_ids):
+                continue
+            await uow.people.put(
+                row.model_copy(
+                    update={
+                        "person_id": person_id,
+                        "revision": row.revision + 1,
+                        "updated_at": max(now, row.updated_at + timedelta(microseconds=1)),
+                    }
+                ),
+                expected_revision=row.revision,
+            )
+            budget -= 1
+            for source in sources:
+                await _record_received(uow, principal, person_id, source, now, common)
+        if len(rows) <= 100:
+            return
+        after = rows[99].id
+
+
+async def _record_received(
+    uow: RepositoryUnitOfWork,
+    principal: Principal,
+    person_id: UUID,
+    source: PeopleSource,
+    now: datetime,
+    common: _Common,
+) -> None:
+    exchange = (
+        ["delivered-message@1", source.copy_group]
+        if source.copy_group
+        else [str(source.account_id), str(source.thread_id), str(source.message_id)]
+    )
+    interaction_id = _interaction_id(principal, exchange)
+    if await uow.people.is_erased(principal, interaction_id):
+        return
+    current = await uow.people.get(principal, interaction_id, ceiling=Sensitivity.RESTRICTED)
+    sender = InteractionParticipant(person_id=person_id, role="sender")
+    if current is None:
+        await uow.people.put(
+            PeopleInteraction(
+                id=interaction_id,
+                channel="email",
+                interaction_kind="exchange",
+                attribution="observed",
+                direction="incoming",
+                summary="Received email",
+                occurred_at=source.evidence_at,
+                precision="instant",
+                participants=[sender],
+                support_ids=[source.id],
+                **common,
+            ),
+            expected_revision=0,
+        )
+        return
+    if not isinstance(current, PeopleInteraction):
+        return
+    participants = current.participants
+    if (sender.person_id, sender.role) not in {(p.person_id, p.role) for p in participants}:
+        participants = [*participants, sender]
+    support_ids = list(dict.fromkeys([*current.support_ids, source.id]))[:256]
+    if participants != current.participants or support_ids != current.support_ids:
+        await uow.people.put(
+            current.model_copy(
+                update={
+                    "participants": participants,
+                    "support_ids": support_ids,
+                    "revision": current.revision + 1,
+                    "updated_at": max(now, current.updated_at + timedelta(microseconds=1)),
+                }
+            ),
+            expected_revision=current.revision,
+        )
+
+
 async def project_correspondence(
     uow: RepositoryUnitOfWork,
     principal: Principal,
@@ -103,7 +343,9 @@ async def project_correspondence(
     if account_row is None:
         return
     account = EmailAccount.model_validate(account_row.payload)
-    if account.status != "ready" or not account.email_address:
+    # The account's own address is all direction needs; a syncing or unavailable
+    # account still belongs to the owner (ADR-0118).
+    if not account.email_address:
         return
     # A copy delivered to the work account can have been sent from the owner's
     # verified personal address. Neither address is a third-party correspondent.
@@ -113,15 +355,17 @@ async def project_correspondence(
     owned: set[str] = set()
     for row in accounts:
         verified = EmailAccount.model_validate(row.payload)
-        if verified.status == "ready":
-            owned.update(
-                address
-                for _, address in _addresses([verified.email_address, *verified.verified_addresses])
-            )
+        owned.update(
+            address.casefold()
+            for _, address in _addresses([verified.email_address, *verified.verified_addresses])
+        )
     senders = _addresses(source.sender)
     if len(senders) != 1:
         return
-    outgoing = senders[0][1] in owned
+    outgoing = senders[0][1].casefold() in owned
+    # The owner's display name on their own mail; a recipient shown with the
+    # same name is another of the owner's addresses, not someone they know.
+    owner_name = " ".join(senders[0][0].casefold().split()) if outgoing else ""
     labels = header.get("label_ids")
     if isinstance(labels, list) and "DRAFT" in labels:
         return
@@ -130,7 +374,9 @@ async def project_correspondence(
     contacts = (
         (_addresses(header.get("to")) + _addresses(header.get("cc"))) if outgoing else senders
     )
-    contacts = [(name, address) for name, address in contacts if address not in owned][:32]
+    contacts = [(name, address) for name, address in contacts if address.casefold() not in owned][
+        :32
+    ]
     if not contacts:
         return
     sid = email_source_id(principal, source)
@@ -187,60 +433,47 @@ async def project_correspondence(
     for name, address in contacts:
         if contains_secret_material(name) or contains_injection_pattern(name):
             continue
-        match = await resolve_identity(
-            uow.people,
-            principal,
-            kind="email",
-            namespace="owner",
-            value=address,
-            context="owner",
-            at=source.sent_at,
-            ceiling=Sensitivity.SENSITIVE,
-        )
-        person_id = match.person_ids[0] if match.status == "matched" else None
+        found = await _correspondent(uow, principal, address, source.sent_at, now)
+        person_id = found.person_id
+        created = False
         if (
-            match.status == "unresolved"
+            person_id is None
+            and found.creatable
+            and outgoing
             and name
             and not _ROLE_MAILBOX.fullmatch(address.split("@", 1)[0])
+            and not is_non_person_reference(name)
+            and " ".join(name.casefold().split()) != owner_name
         ):
-            # A new address may seed a provisional person; a header name never merges identities.
-            person_id = uuid5(sid, "correspondent:" + address)
-            if await uow.people.is_erased(principal, person_id):
-                raise ConflictError("People correspondent was erased")
-            if await uow.people.get(principal, person_id, ceiling=Sensitivity.RESTRICTED) is None:
-                await uow.people.put(
-                    Person(
-                        id=person_id,
-                        display_name=name[:200],
-                        state="provisional",
-                        support_ids=[sid],
-                        **common,
-                    ),
-                    expected_revision=0,
-                )
-        if person_id is not None:
-            person = await uow.people.get(principal, person_id, ceiling=Sensitivity.RESTRICTED)
-            if (
-                isinstance(person, Person)
-                and person.state == "provisional"
-                and person.display_name == name
-                and sid not in person.support_ids
-                and len(person.support_ids) < 256
-            ):
-                await uow.people.put(
-                    person.model_copy(
-                        update={
-                            "revision": person.revision + 1,
-                            "updated_at": max(now, person.updated_at + timedelta(microseconds=1)),
-                            "support_ids": [*person.support_ids, sid],
-                        }
-                    ),
-                    expected_revision=person.revision,
-                )
+            # ADR-0118: the owner writing to someone is what adds them to People.
+            # A header name alone never merges identities.
+            candidate_id = uuid5(sid, "correspondent:" + address)
+            if not await uow.people.is_erased(principal, candidate_id):
+                person_id = candidate_id
+                if (
+                    await uow.people.get(principal, person_id, ceiling=Sensitivity.RESTRICTED)
+                    is None
+                ):
+                    await uow.people.put(
+                        Person(
+                            id=person_id,
+                            display_name=name[:200],
+                            state="provisional",
+                            support_ids=[sid],
+                            **common,
+                        ),
+                        expected_revision=0,
+                    )
+                    created = True
+        if person_id is None and outgoing:
+            # An unknown recipient the owner is not adding leaves nothing behind,
+            # so every unattached address endpoint is a sender's.
+            continue
         alias_id = uuid5(sid, "email:" + address)
         if await uow.people.is_erased(principal, alias_id):
-            raise ConflictError("People contact was erased")
-        if await uow.people.get(principal, alias_id, ceiling=Sensitivity.RESTRICTED) is None:
+            # The repair or an erasure removed this row; skip it, never fail the source.
+            pass
+        elif await uow.people.get(principal, alias_id, ceiling=Sensitivity.RESTRICTED) is None:
             await uow.people.put(
                 PersonIdentifier(
                     id=alias_id,
@@ -251,6 +484,7 @@ async def project_correspondence(
                     context="owner",
                     verification="channel_observed",
                     valid_from=source.sent_at,
+                    valid_to=found.ends if person_id is not None else None,
                     support_ids=[sid],
                     **common,
                 ),
@@ -258,9 +492,22 @@ async def project_correspondence(
             )
         if person_id is None:
             continue
+        if found.adoptable:
+            # Mail received before the owner first wrote to this person joins their history.
+            await _adopt_received_history(
+                uow,
+                principal,
+                person_id,
+                address,
+                now,
+                common,
+                limit=_ADOPTION_LIMIT if created else _ADOPTION_STEP,
+            )
         if name:
             name_id = uuid5(sid, "name:" + address)
-            if await uow.people.get(principal, name_id, ceiling=Sensitivity.RESTRICTED) is None:
+            if await uow.people.is_erased(principal, name_id):
+                pass
+            elif await uow.people.get(principal, name_id, ceiling=Sensitivity.RESTRICTED) is None:
                 await uow.people.put(
                     PersonIdentifier(
                         id=name_id,
@@ -284,7 +531,7 @@ async def project_correspondence(
         return
     interaction_id = _interaction_id(principal, exchange)
     if await uow.people.is_erased(principal, interaction_id):
-        raise ConflictError("People email history was erased")
+        return
     current = await uow.people.get(principal, interaction_id, ceiling=Sensitivity.RESTRICTED)
     legacy_id = _interaction_id(principal, _exchange_identity(source, {}))
     legacy = (
