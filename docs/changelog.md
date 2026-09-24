@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-23 — Chat can list calls again
+
+- Email unsubscribe added two configured tools, so the owner's roster reached
+  twenty-eight of Chat's thirty slots. Name order then left
+  `mcp.bland_read.list_calls` and every Gmail tool out: Chat could place a
+  call but not list them, and nothing said why.
+- ADR-0124 takes `workspace.list_files` out of the default agent's roster. The
+  workspace lives for one worker claim, so a model knows what it wrote there;
+  the tool stays registered. All three calling tools fit, at 7,058 of 9,000
+  tokens. New chats get the change; existing chats keep their roster.
+- `workspace.read_text` answers a directory path with "That path is a
+  directory." instead of naming a tool the model may not have.
+- The production-shaped roster gate now enables email unsubscribe, the flag
+  it missed.
+
 ## 2026-09-23 — People holds who you know or write to
 
 - Production People held 130 provisional people, 128 of them names from

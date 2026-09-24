@@ -1055,6 +1055,12 @@ writes `notes.md`, requests an approval, and reads `notes.md` back
 after the resume gets `no_such_path`, and the only place that outcome
 can be prevented is the description it read before it wrote.
 
+The same lifetime is why the default agent does not advertise
+`workspace.list_files` (ADR-0124). Within one claim a model knows what
+it wrote, and a sandbox command that creates files can print its own
+listing. The tool stays registered, and an explicit `enabled_tools`
+list may still name it.
+
 ### Text, encoding, and what makes a file binary
 
 All three are text tools. Two say so in their names and the third
@@ -1369,7 +1375,7 @@ tool.not_found.no_such_path
 tool.invalid_arguments.not_text
   Not a UTF-8 text file. This tool reads text only.
 tool.invalid_arguments.not_a_file
-  That path is a directory. Use workspace.list_files.
+  That path is a directory.
 tool.invalid_arguments.not_a_directory
   That path is a file. Use workspace.read_text.
 ```
@@ -1386,10 +1392,12 @@ tempting alternative, but `OUTPUT_INVALID` is the tool blaming its own
 output for the caller's choice of file. The path is the argument, and
 the argument named something this tool does not read.
 
-The two directory codes name the tool to use instead. That is the same
+`not_a_directory` names the tool to use instead. That is the same
 tradeoff `math.calculate` makes in the other direction: the message
 carries the remedy and never the input, and a sibling tool's name is
-remedy rather than input.
+remedy rather than input. `not_a_file` names none: the default agent
+no longer advertises `workspace.list_files` (ADR-0124), and a message
+that names a tool the model was not offered costs a refused call.
 
 ## `demo.external_write`
 

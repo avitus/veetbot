@@ -3,6 +3,8 @@
 - Status: Proposed
 - Date: 2026-09-17
 - Related: ADR-0030, ADR-0071, ADR-0097 (calling, whose tools this restored)
+- Amended by: ADR-0124 (2026-09-23), after email unsubscribe took two of the
+  four discovered slots
 - Detailed design: `docs/plan/context-engine.md`
 
 ## Context

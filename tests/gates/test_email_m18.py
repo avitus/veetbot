@@ -1255,7 +1255,9 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
 
     assert terminal.status is RunStatus.COMPLETED
     assert plan is not None
-    assert len(plan.tool_specs) == 29
+    # Twenty configured tools and the account's eight Gmail tools; the default
+    # agent no longer advertises workspace.list_files (ADR-0124).
+    assert len(plan.tool_specs) == 28
     assert {
         "mcp.gmail_read.search_threads",
         "mcp.gmail_write.modify_labels",
@@ -1336,7 +1338,6 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
         "system.current_time",
         "workspace.read_text",
         "workspace.write_text",
-        "workspace.list_files",
         "schedule.update",
         "people.search",
         "people.context",

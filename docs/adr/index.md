@@ -130,3 +130,4 @@ implementation without one.
 - [ADR-0119 — Owner-chosen models and reasoning effort (Accepted)](0119-owner-chosen-models-and-reasoning-effort.md)
 - [ADR-0120 — Files attached to chat messages (Accepted)](0120-chat-attachments.md)
 - [ADR-0121 — People holds who the owner knows or writes to (Accepted; amends ADR-0100 and ADR-0116)](0121-people-holds-who-the-owner-knows-or-writes-to.md)
+- [ADR-0124 — Chat's default roster drops workspace.list_files so the calling tools fit (Accepted; amends ADR-0105)](0124-chat-roster-drops-workspace-list-files.md)

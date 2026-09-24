@@ -282,6 +282,16 @@ carries an item cap for the same reason and is capped at twenty;
 [skills.md](skills.md) argues that number and the 6,000-token body class beside
 it, which never yields because a third `skill.load` fails instead.
 
+The item cap then bound in production. Email unsubscribe brought the owner's
+configured roster to twenty-eight tools, and name order left
+`mcp.bland_read.list_calls` outside the thirty.
+[ADR-0124](../adr/0124-chat-roster-drops-workspace-list-files.md) takes
+`workspace.list_files` out of the default agent's roster, which leaves exactly
+three discovered slots for the calling tools. A configured tool past the
+thirtieth slot is cut as silently as a discovered one, so the production-shaped
+roster gate enables every flag that production enables and that changes the
+default roster, and gains each new one when production activates it.
+
 After authorization and session-environment filtering, tools explicitly named in
 `AgentSpec.enabled_tools` receive slots first, in first-occurrence order. Discovered
 tools fill the remaining slots in name order when their complete definitions fit
