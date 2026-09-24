@@ -45,6 +45,12 @@ long edge before upload, which removes their location metadata. A server
 without the upload route shows each file as not accepted, and an answer to a
 clarifying question stays text: staged files wait for the next message.
 
+A file the agent exports arrives as a button under its answer and opens the
+artifact viewer with a preview and Download (ADR-0122). Every finished message
+has Copy, which writes formatted text (RTF and HTML, plus plain text without
+Markdown symbols), and Select Text, which opens the message in a native text view
+where any range can be selected.
+
 The settings surface groups Connection, Models, Website Access, Appearance, and
 Data & Privacy in a scrolling layout. The Connect or Update Connection action sits in
 the Connection card, while device-local text-size and font-style controls save

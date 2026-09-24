@@ -131,6 +131,7 @@ async def _complete_reply(context: RunContext, message: AssistantMessage) -> Ass
     must see the same content.
     """
 
+    reply = message
     async with context.uow_factory() as uow:
         exported = reply_attachments(
             await uow.artifacts.list_for_run(context.run.id, context.principal)
@@ -150,22 +151,22 @@ async def _complete_reply(context: RunContext, message: AssistantMessage) -> Ass
                 },
                 deep=True,
             )
-            conversation = context.checkpoint.conversation
-            for index, item in enumerate(conversation):
-                if item is message:
-                    conversation[index] = reply
-            message = reply
         await uow.events.append(
             NewEvent(
                 session_id=context.run.session_id,
                 run_id=context.run.id,
                 event_type="assistant.message.completed",
                 actor_type="runtime",
-                payload={"message": message.model_dump(mode="json")},
+                payload={"message": reply.model_dump(mode="json")},
             ),
             lease=context.lease,
         )
-    return message
+    # Only a committed reply replaces the turn's copy in the checkpoint.
+    conversation = context.checkpoint.conversation
+    for index, item in enumerate(conversation):
+        if item is message:
+            conversation[index] = reply
+    return reply
 
 
 def _record_open_question(

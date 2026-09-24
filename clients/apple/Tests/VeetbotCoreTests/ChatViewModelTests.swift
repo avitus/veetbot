@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Testing
 import UserNotifications
@@ -1766,6 +1767,45 @@ import UserNotifications
         #expect(grouped.folders.first?.entries.map(\.title) == ["Filed"])
         #expect(model.suggestedFolders.map(\.headline) == ["New folder “Lisbon Trip”"])
         #expect(model.suggestedFolders.first?.memberTitles == ["Loose"])
+    }
+
+    /// The sidebar sync runs every 30 seconds. An unchanged server must not
+    /// republish history or folders, which would redraw the open conversation
+    /// (and could reset a selection in progress) each time.
+    @Test
+    func testAnUnchangedSyncPublishesNoHistoryOrFolderChange() async throws {
+        let model = try configuredModel { request in
+            switch request.url?.path {
+            case "/v1/sessions":
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case "/v1/folders":
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case "/v1/folders/proposals":
+                return try response(
+                    for: request, statusCode: 200,
+                    body: "{\"items\":[\(proposalJSON(state: "proposed"))],\"next_cursor\":null}"
+                )
+            default:
+                Issue.record("Unexpected request \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        await model.synchronizeHistory()
+        var publications: [String] = []
+        let subscriptions = [
+            model.$history.dropFirst().sink { _ in publications.append("history") },
+            model.$folders.dropFirst().sink { _ in publications.append("folders") },
+            model.$folderProposals.dropFirst().sink { _ in publications.append("proposals") },
+            model.$foldersAvailable.dropFirst().sink { _ in publications.append("available") },
+        ]
+
+        await model.synchronizeHistory()
+
+        #expect(publications == [])
+        #expect(model.foldersAvailable)
+        #expect(model.folders.map(\.name) == ["Travel", "Work"])
+        withExtendedLifetime(subscriptions) {}
     }
 
     @Test

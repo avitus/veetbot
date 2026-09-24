@@ -4,6 +4,26 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-23 — Files reach you on the reply, and replies can be copied
+
+- A file the agent made never reached the owner: `artifact.export` stored it,
+  but the model saw an empty result and the reply was text only. ADR-0122:
+  every file a run exports now appears as a button under its answer, in the
+  app you already have, and stays for as long as the conversation.
+- `artifact.export@2.0.0` also takes text directly (plain text, Markdown, CSV,
+  or JSON, up to 1 MiB), so "put that in a file" is one call with no approval
+  prompt. No policy file changed; version 1.0.0 stays for pinned sessions.
+- The workspace tools and the default instructions now say the workspace is
+  discarded when a run finishes or pauses and that a file is attached only when
+  `artifact.export` succeeded.
+- The Apple app adds Copy and Select Text under every finished message. Copy
+  writes the whole message as formatted text for Mail, Notes, or Gmail, with
+  a plain-text version free of Markdown symbols; Select Text opens a native
+  text view where any range can be selected. The artifact viewer opens at a
+  reading width on the Mac, and the sidebar sync no longer redraws an
+  unchanged conversation every 30 seconds.
+- The terminal client adds `/download ARTIFACT_ID [PATH]`.
+
 ## 2026-09-23 — People holds who you know or write to
 
 - Production People held 130 provisional people, 128 of them names from

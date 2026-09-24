@@ -47,6 +47,19 @@ public struct ArtifactViewerView: View {
                 }
             }
         }
+        #if os(macOS)
+        // macOS opens a sheet at its minimum width unless the frame says otherwise;
+        // a file preview needs the reading width the other sheets use.
+        .sheetFrame(
+            minWidth: 320,
+            macMinWidth: 680,
+            idealWidth: 760,
+            maxWidth: .infinity,
+            minHeight: 420,
+            idealHeight: 640,
+            maxHeight: .infinity
+        )
+        #endif
         .task {
             do {
                 artifact = try await model.loadArtifact(artifactID)

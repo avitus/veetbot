@@ -823,6 +823,34 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["chat.people"].isHittable)
     }
 
+    /// ADR-0122: a finished answer can be copied whole or opened for selection.
+    func testFinishedAnswerOffersCopyAndSelectText() {
+        #if os(macOS)
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #endif
+        app.launch()
+        app.activate()
+        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
+
+        let copy = app.buttons["chat.message.copy.event-2"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 5))
+        XCTAssertEqual(copy.label, "Copy message")
+        XCTAssertTrue(app.buttons["chat.message.copy.event-1"].exists)
+        let select = app.buttons["chat.message.select.event-2"]
+        XCTAssertTrue(select.exists)
+
+        activate(select)
+        let text = app.descendants(matching: .any)["chat.message.selection.text"]
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertEqual(text.value as? String, "Historical answer loaded")
+        activate(app.buttons["chat.message.selection.done"])
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testPeopleForgetExplainsSourceRetentionAndPendingCleanup() {
         #if os(macOS)
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"

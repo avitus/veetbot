@@ -701,9 +701,7 @@ public final class ChatViewModel: ObservableObject {
     ) async {
         guard supported else {
             // An older server, or an empty index: nothing to ask for.
-            foldersAvailable = false
-            folders = []
-            folderProposals = []
+            publishFolderSurface(folders: [], proposals: [], available: false)
             return
         }
         do {
@@ -718,19 +716,32 @@ public final class ChatViewModel: ObservableObject {
             } while cursor != nil
             let proposals = try await api.listFolderProposals().items
             guard historyReconciliationID == reconciliationID else { return }
-            folders = loaded.sorted(by: GroupedConversationHistory.folderOrder)
-            folderProposals = proposals
-            foldersAvailable = true
+            publishFolderSurface(
+                folders: loaded.sorted(by: GroupedConversationHistory.folderOrder),
+                proposals: proposals,
+                available: true
+            )
         } catch let error as VeetbotAPIClientError {
             guard case .foldersUnavailable = error,
                 historyReconciliationID == reconciliationID
             else { return }
-            foldersAvailable = false
-            folders = []
-            folderProposals = []
+            publishFolderSurface(folders: [], proposals: [], available: false)
         } catch {
             // Any other failure keeps the previous folder state.
         }
+    }
+
+    /// The sidebar sync runs every 30 seconds. Publishing unchanged values would
+    /// redraw the sidebar and the open conversation each time, so only changes
+    /// are published. The folders are in place before the surface appears and
+    /// are cleared only after it has gone.
+    private func publishFolderSurface(
+        folders newFolders: [FolderView], proposals: [FolderProposalView], available: Bool
+    ) {
+        if !available, foldersAvailable { foldersAvailable = false }
+        if folders != newFolders { folders = newFolders }
+        if folderProposals != proposals { folderProposals = proposals }
+        if available, !foldersAvailable { foldersAvailable = true }
     }
 
     private func resetFolderState() {
@@ -974,7 +985,9 @@ public final class ChatViewModel: ObservableObject {
         }
         let reconciledHistory = try await historyStore.list()
         guard historyReconciliationID == reconciliationID else { return }
-        history = reconciledHistory
+        if history != reconciledHistory {
+            history = reconciledHistory
+        }
         if prunedHistory {
             await artifactCache.removeAll()
         }

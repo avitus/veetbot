@@ -26,6 +26,7 @@ public struct ChatView: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
+    @State private var textSelection: MessageTextSelection?
     @State private var showingPeople = false
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
@@ -58,9 +59,13 @@ public struct ChatView: View {
                         ForEach(state.activityTimeline) { item in
                             switch item {
                             case .message(let message):
-                                TimelineBubble(item: message) { artifactID in
-                                    artifactSelection = ArtifactSelection(id: artifactID)
-                                }
+                                TimelineBubble(
+                                    item: message,
+                                    openArtifact: { artifactID in
+                                        artifactSelection = ArtifactSelection(id: artifactID)
+                                    },
+                                    selectText: { textSelection = $0 }
+                                )
                             case .tool(let activity):
                                 ToolActivityCard(
                                     activity: activity,
@@ -187,6 +192,11 @@ public struct ChatView: View {
         }
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)
+        }
+        // One sheet for every message, held here so it survives the lazy
+        // stack unloading the row that opened it.
+        .sheet(item: $textSelection) { selection in
+            MessageTextSheet(selection: selection)
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showingPeople) {
@@ -422,8 +432,24 @@ private struct RunFailureCard: View {
 private struct TimelineBubble: View {
     let item: TimelineItem
     let openArtifact: (UUID) -> Void
+    let selectText: (MessageTextSelection) -> Void
 
     var body: some View {
+        VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
+            bubble
+            if item.offersMessageActions {
+                MessageActionBar(
+                    messageID: item.id,
+                    role: item.role,
+                    markdown: item.copyableMarkdown,
+                    selectText: selectText
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+    }
+
+    private var bubble: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(item.content.enumerated()), id: \.offset) { _, block in
                 switch block {
@@ -447,7 +473,6 @@ private struct TimelineBubble: View {
             }
         }
         .frame(maxWidth: item.role == .user ? 680 : .infinity, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
     }
 
     private func artifactButton(_ label: String, id: UUID) -> some View {
