@@ -127,12 +127,12 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Seventeen more model-callable tools are declared at build time by other
+Twenty-eight more model-callable tools are declared at build time by other
 specifications:
 
 ```text
 tool                          kind        declared by
-----------------------------  ----------  -------------------
+----------------------------  ----------  ------------------------
 conversation.ask_user         control     tool-system
 delegate.run                  control     tool-system
 context.update_working_state  control     context-engine
@@ -145,15 +145,28 @@ knowledge.ingest              capability  knowledge-documents
 knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
+browser.navigate              capability  browser-automation
+browser.observe               capability  browser-automation
+browser.act                   capability  browser-automation
 schedule.create               capability  scheduling
 schedule.list                 capability  scheduling
+schedule.update               capability  scheduling
 schedule.pause                capability  scheduling
 schedule.resume               capability  scheduling
 schedule.cancel               capability  scheduling
+email.context                 capability  email-experience
+email.feedback                capability  email-experience
+email.subscriptions           capability  email-unsubscribe
+email.unsubscribe             capability  email-unsubscribe
+people.search                 capability  people-and-relationships
+people.context                capability  people-and-relationships
+people.history                capability  people-and-relationships
 ```
 
-Twenty-five model-callable tools in total, and this document's roster is
-eight of them. The rule that keeps both numbers right is
+Thirty-six model-callable builtin tools in total, and this document's roster
+is eight of them. Tools a paired device contributes are not builtins: they
+register in the reserved `device` domain when the device attaches. The rule
+that keeps both numbers right is
 [knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
 here because a reader who finds it only there has already been
 confused: *"Subject specifications declare their own tools ... so this
@@ -165,9 +178,11 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other seventeen, `skill.manage`, `web.search`,
-`web.fetch`, and the five `schedule.*` tools are fully classified in their subject
-specifications;
+nothing else.** Of the other twenty-eight, `skill.manage`, `web.search`,
+`web.fetch`, the three `browser.*` tools, and the six `schedule.*` tools are
+fully classified in their subject specifications, and the four `email.*` and
+three `people.*` tools in this document's Milestone 26, 28, and 31 sections
+below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
 `skill.load` carries three. The three remaining control tools inherit
 `side_effect: NONE` and `target_kind: in_process` from the
@@ -182,25 +197,25 @@ one. Whoever builds a tool on that list supplies its classification
 with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
-roster.** Its subject is the twenty-four checked-in, complete builtin tool
-identities (plus historical versions of `memory.remember`, `skill.load`, and
-`artifact.export`):
-`math.calculate`, `conversation.ask_user`, `system.current_time`, the three
-`workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
+roster.** Its subject is every builtin the composition root registers, and
+that is a function of the deployment. Sixteen identities are always
+registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
+the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
-`skill.load`, `skill.manage`, the two `knowledge.*` tools, the two `web.*`
-tools, and the five `schedule.*` tools. Step 6 validates every registered version of
-those twenty-four identities.
-`delegate.run` is the
-twenty-fifth model-callable tool declared by the corpus.
-[tool-system.md](tool-system.md) deferred its implementation with the
+`skill.load`, and the two `knowledge.*` tools. The other twenty register only
+with their flag or provider: `skill.manage` with skill authoring, the two
+`web.*` and three `browser.*` tools with their providers, `delegate.run` with
+`AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
+and worker, the three `people.*` tools with People, `email.context` and
+`email.feedback` with Email mode, and `email.subscriptions` and
+`email.unsubscribe` with email unsubscribe. Historical versions of
+`memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, and
+`delegate.run` register beside their current versions, and step 6 validates
+every registered version.
+[tool-system.md](tool-system.md) deferred `delegate.run` with the
 general-purpose-subagent extension, and Milestone 13 supplied it:
 [subagents-and-delegation.md](subagents-and-delegation.md) is its checked-in
-specification, a control tool in the `delegate` domain gated behind
-`AGENT_DELEGATION_ENABLED`. The composition root registers it only when that
-flag is on, so a default deployment still validates twenty-four identities in
-step 6 while a delegation-enabled one validates `delegate.run` as the
-twenty-fifth. Step 3, domain membership,
+specification, a control tool in the `delegate` domain. Step 3, domain membership,
 already passes for every registered tool because the partition table in
 [tool-system.md](tool-system.md) lists their builtin domains, `delegate`
 among them.
@@ -351,7 +366,10 @@ otherwise have to guess whether they were considered.
     condition anyway.** Exporting the same path twice within a run must
     return the same `ArtifactRef` rather than creating a second one.
     That is a requirement on the Milestone 6 design, not an observation
-    about it, and it is what makes the class honest.
+    about it, and it is what makes the class honest. The run-bound
+    artifact writer enforces it: when the run already holds a live
+    artifact with the same origin, name, media type, and content, it
+    returns that artifact's reference and stores nothing.
 5.  **`allow_parallel` is `yes` only for the four read-only tools.** The
     two Milestone 1 tools are pure; the two workspace readers observe a
     filesystem that nothing in the same step is writing, because a step
@@ -1641,9 +1659,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; twenty-five model-callable tools are
-    declared at build time across the corpus, and seventeen of them belong
-    to other specifications. Resolved by naming those seventeen here,
+    is what this document designs; thirty-six model-callable builtin tools
+    are declared at build time across the corpus, and twenty-eight of them
+    belong to other specifications. Resolved by naming those twenty-eight here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not

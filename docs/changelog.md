@@ -23,6 +23,8 @@ title: Changelog
   reading width on the Mac, and the sidebar sync no longer redraws an
   unchanged conversation every 30 seconds.
 - The terminal client adds `/download ARTIFACT_ID [PATH]`.
+- Exporting the same file twice in one run now returns the first artifact
+  instead of storing a copy, as `builtin-tools.md` always required.
 
 ## 2026-09-23 — Chat can list calls again
 

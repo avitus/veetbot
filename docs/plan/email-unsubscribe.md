@@ -122,8 +122,8 @@ not find it here should find the reason here.
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
-  (sandbox-isolation.md:813-818): resolve once, refuse any non-public
-  address, dial the address that was checked (sandbox-isolation.md:865-884).
+  (sandbox-isolation.md:816-821): resolve once, refuse any non-public
+  address, dial the address that was checked (sandbox-isolation.md:868-887).
   ADR-0098 already runs a dedicated public-HTTPS transport through it for the
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
@@ -365,7 +365,7 @@ the arguments an approval of the destination.
 **Classification.** `IDEMPOTENT` is the honest class and not a convenience:
 the request is a constant, and sending it twice leaves the recipient exactly
 as unsubscribed as sending it once. Recovery may therefore re-execute
-(tool-system.md:662-671), which matters because an unsubscribe has no
+(tool-system.md:664-673), which matters because an unsubscribe has no
 read-back that could reconcile an unknown outcome. Per-target outcomes are
 persisted as each completes, so a re-execution skips targets already
 accepted rather than dialling them again.
@@ -437,7 +437,7 @@ separately auditable:
    all-numeric final label, none of the `.internal`, `.local`, `.localhost`,
    `.home`, or `.lan` suffixes.
 4. One resolution at the proxy. **Every** resolved address must be public
-   under the non-configurable denylist (sandbox-isolation.md:886-900) —
+   under the non-configurable denylist (sandbox-isolation.md:889-903) —
    private, loopback, link-local and metadata, carrier-grade NAT, unique
    local, and IPv4-mapped forms are refused, and one bad address refuses the
    connection.

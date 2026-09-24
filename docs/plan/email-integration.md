@@ -266,14 +266,14 @@ Nothing here runs with networking disabled, and the specification says which
 process is which rather than leaving it to be inferred. The Milestone 8
 adapter spawns a stdio server as an ordinary child process of the worker, and
 [tool-system.md](tool-system.md) states the consequence
-(tool-system.md:1011-1013): a stdio child inherits the worker's network
+(tool-system.md:1015-1017): a stdio child inherits the worker's network
 position, which in this platform is a privileged one, which is why stdio
 servers are operator-configured only. The restriction that applies to the
 worker is that the worker itself dials nothing on a `gmail_*` call; the child
 does, and neither egress enforcement point reaches the child. The sandbox
 proxy governs a network namespace no MCP child is placed in, and the worker's
 outbound guard checks URLs the platform itself dials
-(sandbox-isolation.md:809-818); `gmail_mcp` opens its own sockets, which that
+(sandbox-isolation.md:812-821); `gmail_mcp` opens its own sockets, which that
 guard never sees. An `env`-scheme command line is not a network allowlist —
 it fixes who chose the binary, not where the binary may connect — and this
 document claims no more for it than that.
@@ -383,17 +383,17 @@ request has been dispatched, and the corpus already owns the machinery that
 says so. The executor watermarks every call whose side effect is not `NONE`
 before the tool implementation runs — the conservative rule
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
-`mark_effect_sent` implements (tool-system.md:656-659) — so `effect_sent_at`
+`mark_effect_sent` implements (tool-system.md:658-661) — so `effect_sent_at`
 is set on every write and send before its request leaves the worker, and the
 recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
-`UNCERTAIN` (tool-system.md:671). A rate limit, a 5xx, or a lost response
+`UNCERTAIN` (tool-system.md:673). A rate limit, a 5xx, or a lost response
 observed after dispatch is therefore reported by the server as the
 undetermined-outcome code, resolves to the platform's `uncertain` outcome with
-`tool.outcome_unknown` and `retryable: false` (tool-system.md:810-814), and is
+`tool.outcome_unknown` and `retryable: false` (tool-system.md:814-818), and is
 blocked from being proposed again in the run by the unified breaker's
-threshold-of-one row (tool-system.md:853). This is the rule
+threshold-of-one row (tool-system.md:857). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:1831-1833) and the one
+after the watermark (tool-system.md:1835-1837) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:622-626), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an

@@ -200,10 +200,14 @@ async def test_the_same_file_exported_twice_is_attached_once(tmp_path: Path) -> 
         run_id = await composition.runs.submit("Give me the report as a file.")
         run = await composition.runs.wait_terminal(run_id)
         events = await composition.runs.events(run_id)
+        async with composition.uow_factory() as uow:
+            artifacts = await uow.artifacts.list_for_run(run_id, composition.principal)
 
     assert run.status is RunStatus.COMPLETED, run.failure
+    # The repeated export is the same artifact, so the reply names it once.
+    [artifact] = artifacts
     reply = _payload(events, "assistant.message.completed")["message"]
-    assert len(_files(reply)) == 1
+    assert [part["artifact_id"] for part in _files(reply)] == [str(artifact.id)]
 
 
 async def test_a_run_that_exports_nothing_keeps_a_text_only_reply(tmp_path: Path) -> None:

@@ -476,14 +476,17 @@ The lifecycle, precisely:
 2. **Held** across steps within a lease, so a run that writes a file
    in one step reads it in the next. This is the common case and it
    works.
-3. **Held across a short hold.** A run waiting for an approval keeps
-   its sandbox for up to `approval_hold_seconds`, which
-   [tool-system.md](tool-system.md) sets at 300 for the orchestration
-   bridge and which is the same number here. The wall clock keeps
-   running against `expires_at` during a hold; a hold does not extend
-   a sandbox's life.
-4. **Released** when the hold exceeds that, when the run reaches a
-   terminal state, or when the lease is lost. The sandbox is
+3. **Held across a bridge hold.** A script whose bridged tool call waits
+   for an approval keeps its sandbox for up to `approval_hold_seconds`,
+   which [tool-system.md](tool-system.md) sets at 300 for the
+   orchestration bridge, because the run has not suspended: it is still
+   inside the step. The wall clock keeps running against `expires_at`
+   during a hold; a hold does not extend a sandbox's life. A direct tool
+   call that needs an approval suspends the run at once, and suspension
+   ends the claim.
+4. **Released** at the end of every claim — when the run suspends, when
+   a bridge hold exceeds its limit and the run suspends, when the run
+   reaches a terminal state, or when the lease is lost. The sandbox is
    destroyed and the workspace goes with it.
 5. **Fresh on resume.** A run that resumes finds no workspace and
    provisions a new one on its next sandbox-targeted call.
@@ -1704,7 +1707,7 @@ build failure.
 Two process-local transports run through the same proxy code under one rule
 that is not the operator allowlist: `CONNECT` only, port 443 only, a public
 hostname shape, one resolution with every resolved address checked against
-the non-configurable denylist (sandbox-isolation.md:886-900), and a dial to
+the non-configurable denylist (sandbox-isolation.md:889-903), and a dial to
 the checked address. [ADR-0098](../adr/0098-automatic-browser-site-resources.md)
 introduced the first for browser page resources.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds the second for

@@ -97,8 +97,10 @@ SwiftUI selection never crosses from one to the next.
   made in such a run is visible in the app's copy of the conversation.
 - A delegated child run's files are attached to the child's reply, which its parent
   receives as a tool result, not to the parent's reply.
-- A run that exports the same path twice still creates two artifacts
-  (`builtin-tools.md` expects one); the reply attaches one of them.
+- The run-bound writer now keeps `builtin-tools.md`'s identity rule: a run
+  that writes the same origin, name, type, and content twice gets the first
+  artifact back instead of a second one. The reply's own de-duplication by name
+  and content still covers artifacts created before this rule.
 
 ## Alternatives considered
 

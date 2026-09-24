@@ -354,7 +354,9 @@ The first segment is the **domain**, and domains are partitioned:
 | `skill` `memory` `schedule` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `web` | builtin, external data | build time |
-| `email` | builtin, cached Email experience | build time, Email mode flag |
+| `browser` | builtin, external data | build time, browser provider |
+| `email` | builtin, cached Email experience | build time, Email mode or unsubscribe flag |
+| `people` | builtin, People memory | build time, People flag |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 
@@ -755,10 +757,12 @@ last line is `FAILED: 3 tests` is unreadable if only its first 8 KB survives.
 - `truncated = true`, `output_bytes`, and `artifact_id` are recorded on the
   invocation. Truncation is a metric, not an implementation detail; a tenant
   whose results are truncated constantly is paying for output nobody reads.
-- The artifact inherits the result's trust label and is tenant-scoped. Fetching
-  it back — which the model may do through `artifact.export` or a workspace
-  read — returns it inside its envelope with its label intact, which is the
-  same guarantee the context engine gives for elided untrusted spans.
+- The artifact inherits the result's trust label and is tenant-scoped. No
+  model-callable tool reads an artifact back: `artifact.export` moves bytes into
+  the store rather than out of it, and the `workspace.*` readers see only the
+  run's workspace. The elided span therefore never re-enters context outside
+  its envelope; a client reads the whole capture through the owner-scoped
+  artifact routes.
 
 Section 8.1's `maximum_output_bytes` is per-tool. The registry additionally
 enforces a global ceiling from configuration, and a `ToolSpec` declaring more

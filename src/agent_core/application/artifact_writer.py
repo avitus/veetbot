@@ -7,10 +7,11 @@ import hashlib
 import logging
 import tempfile
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import ArtifactMetadata, ArtifactOrigin, StoredArtifactRef
 from agent_core.domain.errors import ArtifactIntegrityError
 from agent_core.domain.policies import TrustLevel
@@ -61,6 +62,35 @@ class BoundArtifactWriter:
         self._retention_days = retention_days
         self._maximum_bytes = maximum_bytes
 
+    async def _same_in_run(
+        self, filename: str, media_type: str, sha256: str, now: datetime
+    ) -> StoredArtifactRef | None:
+        """The run's live artifact with this origin, name, type, and content, if any.
+
+        builtin-tools.md requires the same export within a run to return the same
+        `ArtifactRef` rather than a second one; the rule holds for every
+        run-bound writer, so a repeated capture is stored once as well.
+        """
+
+        owner = Principal(tenant_id=self._tenant_id, principal_id=self._principal_id)
+        async with self._uow_factory() as uow:
+            artifacts = await uow.artifacts.list_for_run(self._run_id, owner)
+        for artifact in artifacts:
+            if (
+                artifact.origin == self._origin.value
+                and artifact.name == filename
+                and artifact.media_type == media_type
+                and artifact.sha256 == sha256
+                and (artifact.expires_at is None or artifact.expires_at > now)
+            ):
+                return StoredArtifactRef(
+                    artifact_id=artifact.id,
+                    sha256=artifact.sha256,
+                    size_bytes=artifact.size_bytes,
+                    media_type=artifact.media_type,
+                )
+        return None
+
     async def create(
         self,
         stream: AsyncIterator[bytes],
@@ -78,8 +108,11 @@ class BoundArtifactWriter:
                     raise ArtifactIntegrityError("artifact exceeds the configured size cap")
                 await asyncio.to_thread(spool.write, chunk)
             await asyncio.to_thread(spool.seek, 0)
-            artifact_id = self._ids.new_id()
             now = self._clock.now()
+            existing = await self._same_in_run(filename, media_type, digest.hexdigest(), now)
+            if existing is not None:
+                return existing
+            artifact_id = self._ids.new_id()
             expires_at = now + timedelta(days=self._retention_days)
             metadata = ArtifactMetadata(
                 artifact_id=artifact_id,
