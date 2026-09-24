@@ -247,4 +247,5 @@ nav:
       - ADR-0120 Files attached to chat messages: adr/0120-chat-attachments.md
       - ADR-0121 People holds who the owner knows or writes to: adr/0121-people-holds-who-the-owner-knows-or-writes-to.md
       - ADR-0122 Files the agent exports reach the owner on its reply: adr/0122-exported-files-reach-the-owner-on-the-reply.md
+      - ADR-0124 Chat's default roster drops workspace.list_files so the calling tools fit: adr/0124-chat-roster-drops-workspace-list-files.md
   - Changelog: changelog.md

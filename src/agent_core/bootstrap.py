@@ -4687,7 +4687,8 @@ async def build(
         "system.current_time",
         "workspace.read_text",
         "workspace.write_text",
-        "workspace.list_files",
+        # workspace.list_files stays registered but gives its slot to the
+        # calling tools: the workspace lives for one claim (ADR-0124).
         *(
             []
             if web_search_enabled or web_fetch_enabled or browser_enabled

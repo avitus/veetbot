@@ -57,6 +57,10 @@ project:
   # file a run exports rides on its reply and lives with the conversation,
   # artifact.export@2.0.0 also takes text without approval or a policy change,
   # and the native client copies formatted replies and selects any range.
+  # ADR-0124 records the owner's non-milestone repair on 2026-09-23: the
+  # default agent stops advertising workspace.list_files so Chat's thirty-item
+  # roster fits all three calling tools with email unsubscribe on (amends
+  # ADR-0105); the call gate enables every roster-changing production flag.
   authorized_milestones:
     - 0
     - 1

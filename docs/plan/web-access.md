@@ -145,8 +145,8 @@ and Firecrawl, `X-API-Key` for Keenable. Secrets do not enter tool arguments,
 results, events, configuration documents, or model context. A capability with
 no allocation is absent from the registry and default advertisement.
 
-The bootstrap fallback agent remains within the context plan's immutable
-6,000-token tool-definition cap. When either web capability is selected, that
+The bootstrap fallback agent remains within the context plan's 9,000-token
+tool-definition cap (ADR-0105). When either web capability is selected, that
 fallback omits the test-only `demo.external_write` tool; when both are selected,
 it also omits the specialized `knowledge.ingest` writer. Persisted or explicitly
 supplied `AgentSpec.enabled_tools` lists remain authoritative and are not
