@@ -625,6 +625,20 @@ def test_api_client_never_overwrites_an_existing_file(tmp_path: Path) -> None:
     assert (tmp_path / "report.txt").read_bytes() == b"keep me"
 
 
+def test_api_client_reports_an_unwritable_destination_as_a_client_error(tmp_path: Path) -> None:
+    opener = FakeOpener([_artifact_metadata("report.txt", 3), FakeResponse(b"new")])
+    client = ApiClient("https://agent.example", opener=opener)
+    missing = tmp_path / "missing" / "report.txt"
+
+    with pytest.raises(ClientError, match=r"cannot write .*report\.txt"):
+        client.download_artifact("artifact-1", missing)
+
+    assert not missing.parent.exists()
+    assert [request.full_url for request in opener.requests] == [
+        "https://agent.example/v1/artifacts/artifact-1"
+    ]
+
+
 def test_api_client_discards_a_download_longer_than_its_metadata(tmp_path: Path) -> None:
     opener = FakeOpener([_artifact_metadata("report.txt", 3), FakeResponse(b"too long")])
     client = ApiClient("https://agent.example", opener=opener)

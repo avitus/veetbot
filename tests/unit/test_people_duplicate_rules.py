@@ -9,6 +9,7 @@ from agent_core.domain.people_duplicates import (
     Standing,
     family_surnames,
     merge_direction,
+    name_key,
     name_match,
     name_tokens,
     shares_family_name,
@@ -36,6 +37,9 @@ from tests.contract.support import NOW
 def test_name_agreement(left: str, right: str, reason: str | None) -> None:
     assert name_match([name_tokens(left)], [name_tokens(right)]) == reason
     assert name_match([name_tokens(right)], [name_tokens(left)]) == reason
+    if reason is not None:
+        # The duplicate pass compares only names that share a key.
+        assert name_key(name_tokens(left)) == name_key(name_tokens(right))
 
 
 def test_the_strongest_agreement_across_aliases_wins() -> None:

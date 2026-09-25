@@ -133,6 +133,7 @@ async def test_postgres_reply_retention_matches_the_repository_contract(tmp_path
         exported = await create(ArtifactOrigin.SANDBOX_EXPORT, "chart.txt")
         written = await create(ArtifactOrigin.MODEL_OUTPUT, "notes.txt")
         captured = await create(ArtifactOrigin.TOOL_OUTPUT, "capture.json")
+        pending = await create(ArtifactOrigin.SANDBOX_EXPORT, "pending.txt")
 
         async with composition.uow_factory() as uow:
             retained = await uow.artifacts.retain_for_reply(
@@ -141,7 +142,7 @@ async def test_postgres_reply_retention_matches_the_repository_contract(tmp_path
         with pytest.raises(NotFoundError):
             async with composition.uow_factory() as uow:
                 await uow.artifacts.retain_for_reply(
-                    [exported, captured], composition.principal, run_id=run_id
+                    [pending, captured], composition.principal, run_id=run_id
                 )
         async with composition.uow_factory() as uow:
             stored = {
@@ -153,3 +154,5 @@ async def test_postgres_reply_retention_matches_the_repository_contract(tmp_path
     assert stored[exported].expires_at is None
     assert stored[written].expires_at is None
     assert stored[captured].expires_at is not None
+    # A refused request retains nothing, not even the eligible export it named.
+    assert stored[pending].expires_at is not None

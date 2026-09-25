@@ -286,10 +286,11 @@ leaves the ninety-day window leaves the count. When a newer message from the
 sender carries the header, evidence moves to it, because a newer token is the
 one most likely to still work.
 
-**Verification** fills the evidence block. It runs last in a refresh slice,
-after synchronization, assessment, and drafting, and only with the tool and
-step headroom the slice has left, so it can never starve the work Milestone
-26 defined. Within that headroom the task calls `get_unsubscribe` for at most
+**Verification** fills the evidence block. It runs in a refresh slice after
+synchronization, assessment, and drafting, and only with the tool and step
+headroom the slice has left, so it can never starve the work Milestone 26
+defined. It runs before the correspondence summaries of ADR-0126, so their
+backlog cannot starve it. Within that headroom the task calls `get_unsubscribe` for at most
 twenty-five subscriptions per account whose evidence is new or unverified,
 highest volume first, and stores the result; it stops quietly when the
 headroom or the read server runs out. An unverified subscription shows as

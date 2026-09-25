@@ -417,6 +417,8 @@ class ApiClient:
             file = target.open("xb")
         except FileExistsError as exc:
             raise ClientError(f"{target} already exists; choose another path") from exc
+        except OSError as exc:
+            raise ClientError(f"cannot write {target}: {exc.strerror or exc}") from exc
         written = 0
         try:
             with file, self._open(request) as response:

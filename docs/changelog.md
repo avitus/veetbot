@@ -64,7 +64,7 @@ title: Changelog
   the owner had written to them. ADR-0125: a label that is an address, or
   that names a group, department, organization or service, never becomes or
   matches a person. Rerunning `agent people repair-directory` removes the
-  existing ones.
+  existing ones, except any you renamed or confirmed an address for yourself.
 - Duplicates such as "Erin Vitus" beside "Erin" now resolve in two ways. An
   address you gave one person, which a correspondent also holds, merges that
   correspondent automatically, and the survivor's page offers an undo. A

@@ -59,6 +59,16 @@ def name_match(
     return best
 
 
+def name_key(tokens: tuple[str, ...]) -> str:
+    """A key two names share whenever they can agree.
+
+    Every agreement needs equal first words, or a nickname of at least
+    `_NICKNAME_MINIMUM` letters that starts the other first word, so comparing
+    only names with equal keys finds every match.
+    """
+    return tokens[0][:_NICKNAME_MINIMUM]
+
+
 def _agreement(left: tuple[str, ...], right: tuple[str, ...]) -> NameReason | None:
     if not left or not right:
         return None

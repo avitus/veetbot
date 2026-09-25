@@ -37,7 +37,8 @@ uncertainty.
    words that are also common surnames, such as "Mailer" or "Bank". More role
    mailbox local parts are recognized. The directory repair of ADR-0121
    removes existing entries like these with the reason `group`, whatever
-   their history.
+   their mail or Chat history. Only the owner's own words keep one: an
+   identifier the owner confirmed, or an owner edit such as a rename.
 2. **Decisive evidence merges without asking.** An address, number or handle
    the owner gave one person is decisive when a provisional, unpinned person
    created from correspondence also holds it as an observed endpoint. The

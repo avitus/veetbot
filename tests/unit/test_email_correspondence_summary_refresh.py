@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from typing import Any
 
+import pytest
+
 from agent_core.bootstrap import build
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
@@ -15,6 +17,8 @@ from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.people import PeopleInteraction, PeopleQuery
 from agent_core.domain.runs import RunStatus
+from agent_core.runtime import email_tasks
+from tests.gates import test_email_unsubscribe_m31 as m31
 from tests.gates.test_email_m18 import _email_settings
 from tests.gates.test_email_runtime_m26 import _mailbox_factory, _profile
 
@@ -200,3 +204,23 @@ async def test_a_failed_summary_call_ends_the_stage_but_not_the_refresh() -> Non
     # Nothing was recorded, so the next refresh tries this exchange again.
     assert interaction.summary_provenance is None
     assert summarized == []
+
+
+async def test_a_summary_backlog_never_starves_subscription_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Summaries use what the slice leaves after verification (ADR-0126, Milestone 31)."""
+    mailbox, transport = m31.Mailbox(), m31.Transport()
+    m31._shop(mailbox)
+
+    async def spend_the_slice(self: Any) -> None:
+        # A continuing backlog of summaries uses every step the slice has left.
+        run = self.context.run
+        run.step_count = run.limits.max_steps - 2
+
+    monkeypatch.setattr(email_tasks._TaskIO, "_summarize_correspondence", spend_the_slice)
+    async with m31._app(mailbox, transport) as app:
+        await m31._refresh(app)
+        [row] = await m31._rows(app)
+    assert mailbox.named("get_unsubscribe") == [{"message_id": "shop-m0"}]
+    assert row["verified"] is True
