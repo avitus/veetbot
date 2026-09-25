@@ -78,7 +78,9 @@ uncertainty.
    pair under `people.write` with an idempotency key.
 8. **Storage.** Suggestions are a new People record kind, `merge_suggestion`,
    referencing both identities, so erasing either person erases them.
-   Migration `524f16dfc8f9` admits the kind.
+   Migration `524f16dfc8f9` admits the kind. Its downgrade drops open and
+   withdrawn suggestions, which the next pass proposes again, and refuses
+   while any suggestion the owner answered remains.
 9. **No new hard gate.** The evidence is unit, contract, PostgreSQL and native
    tests. Gate P01 is unchanged; this decision keeps names from merging anyone.
 
