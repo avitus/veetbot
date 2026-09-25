@@ -83,6 +83,8 @@ class PeopleContextResult(PeopleValue):
 class HistoryEmailReference(PeopleValue):
     account_id: str = Field(max_length=100)
     message_id: str = Field(max_length=1024)
+    # The Gmail thread, for the account's Gmail read tools.
+    provider_thread_id: str = Field(max_length=1024)
     # Email mode's cached conversation, for email.context; null once it is gone.
     thread_id: UUID | None
 

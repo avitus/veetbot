@@ -1275,6 +1275,7 @@ class PublicPeopleService:
                     return HistoryEmailReference(
                         account_id=source.account_id,
                         message_id=source.message_id,
+                        provider_thread_id=source.thread_id,
                         thread_id=await _email_thread_id(uow, principal, source),
                     )
         return None

@@ -3,7 +3,7 @@
 - Status: Accepted (authorized by the repository owner, 2026-09-25)
 - Date: 2026-09-25
 - Related: ADR-0090, ADR-0096, ADR-0100, ADR-0101, ADR-0116, ADR-0117,
-  ADR-0121, ADR-0124
+  ADR-0121, ADR-0123, ADR-0124, ADR-0125
 - Amends: ADR-0121 (what a correspondence record holds);
   `docs/plan/people-and-relationships.md` (generated prose on interactions)
 - Detailed design: `docs/plan/people-and-relationships.md`,
@@ -22,8 +22,9 @@ why:
 - **Chat cannot follow the record to the message.** `people.history` exposes
   only opaque People source ids. The People evidence route resolves such an id
   to an Email thread, but no Chat tool does. `email.context` needs that thread
-  id, and it reads only the thirty-day body cache. The Gmail tools do not fit
-  in Chat's thirty-item roster (ADR-0124).
+  id, and it reads only the thirty-day body cache. At the time, the Gmail
+  tools did not fit in Chat's thirty-item roster (ADR-0124). ADR-0123, accepted
+  the same day, now defers them into reach.
 - **Facts from the message would have expired anyway.** Email-derived facts
   expire thirty days after the message was sent (ADR-0090). For this message
   that was twelve minutes before the question. None existed in any state.
@@ -79,9 +80,10 @@ exchange, and access to the original email when it is needed later.
        generated again.
 4. **Chat reads the original email through People history.**
    `people.history@1.1.0` adds two things:
-   - Each email item names its message: the account, the message id and, while
-     Email mode still caches the conversation, the thread id `email.context`
-     accepts. Only an owner with `email.read` sees these identifiers.
+   - Each email item names its message: the account, the message id, the
+     Gmail thread for the account's Gmail read tools and, while Email mode
+     still caches the conversation, the thread id `email.context` accepts. Only
+     an owner with `email.read` sees these identifiers.
    - `source_id`, one of an item's source ids, returns that message's original
      text. The result holds the sender, the recipients, the date, the subject,
      and at most 8,000 characters of the retained text, paged by `offset`.
@@ -138,9 +140,13 @@ exchange, and access to the original email when it is needed later.
 - **Store summaries as memories.** More than a thousand dated summaries would
   crowd ordinary recall and the review queue. History is shown only when a
   person is in focus.
-- **Refetch from Gmail on demand.** This needs a new governed operation kind
-  and asynchronous waiting inside a Chat tool, and the Gmail tools do not fit
-  in Chat's roster.
+- **Refetch from Gmail on demand as the only route.** A governed refetch
+  operation would need a new task kind and asynchronous waiting inside a Chat
+  tool. ADR-0123 lets Chat call the Gmail read tools itself, and each history
+  item now names the Gmail thread for them. A live read still costs a provider
+  call and a model step, and it fails once the owner deletes the message in
+  Gmail. The retained copy answers at once and is the view the People evidence
+  contract describes, so both routes remain.
 - **Let `email.context` read the retained copy.** That changes the Email
   cache contract that the Milestone 26 privacy gates rely on.
 - **A separate People record kind for summaries.** It needs a migration and

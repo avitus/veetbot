@@ -66,7 +66,12 @@ async def test_an_email_item_names_its_message_and_the_cached_thread() -> None:
     result = await tool.execute({"person_id": str(alex.id)}, context)
     assert result.structured is not None
     [item] = result.structured["items"]
-    assert item["email"] == {"account_id": "work", "message_id": "m-sent", "thread_id": None}
+    assert item["email"] == {
+        "account_id": "work",
+        "message_id": "m-sent",
+        "provider_thread_id": "t-mail",
+        "thread_id": None,
+    }
     assert tool.spec.output_schema is not None
     jsonschema.validate(result.structured, tool.spec.output_schema)
 
