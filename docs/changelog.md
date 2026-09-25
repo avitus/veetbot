@@ -4,6 +4,27 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — New chats stop starting every MCP server before they answer
+
+- Measured over 80 production Chat turns, the first message of a new chat
+  waited 11 s at the median before its first model request, almost all of it
+  starting the Gmail and calling servers two at a time. Follow-up messages
+  waited 0.4 s. ADR-0131: the API and the interactive worker now remember each
+  server's last discovery, a new chat pins that catalog without starting
+  anything, and a server starts on the first call of one of its tools. Both
+  processes warm the memory in the background when they start, so the first
+  chat after a release is fast too.
+- Tools stay pinned per chat as before. A server whose tools changed since it
+  was remembered answers the changed tool with `tool.withdrawn`, and the next
+  chat pins the new catalog. Typed Email work still starts its servers at once.
+- Timing is recorded where it was missing. Each model attempt now records its
+  duration, time to first event, time to first text, retries and usage, and
+  each MCP handshake its duration.
+- `agent run latency [--days N] [--json]` prints recent Chat latency from the
+  event log: turn phases, first and follow-up setup, per-model timing and cache
+  use, per-tool and per-server durations, and queue waits. It prints no
+  message, argument or title content.
+
 ## 2026-09-25 — Every person you choose opens, on a redesigned profile
 
 - On the Mac, Memory's People collection opened the first person you chose

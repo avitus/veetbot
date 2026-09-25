@@ -1335,13 +1335,14 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Fifteen more belong to subsystems this document does not touch. They are
+Sixteen more belong to subsystems this document does not touch. They are
 listed here for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
 ```text
 # event                      introduced by
 mcp.server.connected         tool-system.md, ADR-0021
+mcp.server.pinned            tool-system.md, ADR-0131
 mcp.server.disconnected      tool-system.md, ADR-0021
 mcp.server.reauthenticated   tool-system.md, ADR-0021
 mcp.catalog.changed          tool-system.md, ADR-0021
@@ -1358,11 +1359,11 @@ memory.recalled              memory-retrieval-and-ranking.md
 knowledge.document.ingested  knowledge-documents.md
 ```
 
-Twenty-four in Section 6.8 plus these twenty-nine is the whole vocabulary
-of session-scoped events: fifty-three persisted event types, not one of
+Twenty-four in Section 6.8 plus these thirty is the whole vocabulary
+of session-scoped events: fifty-four persisted event types, not one of
 them introduced here.
 
-Two of the fifteen were declared after this consolidation was written and
+Two of the sixteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same
 tool-system table as the seven that were taken;
 `knowledge.document.ingested` arrived with the knowledge spec. Both are

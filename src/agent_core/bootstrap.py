@@ -108,6 +108,7 @@ from agent_core.adapters.persistence.device_channel import (
 )
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
+from agent_core.adapters.persistence.latency_report import chat_latency_report
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -510,6 +511,7 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.latency import ChatLatencyReport
 from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
@@ -725,6 +727,15 @@ class Composition:
     judgment_provider: JudgmentProvider | None = None
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
+    # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
+    latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
+
+    def start_mcp_discovery_warmup(self) -> asyncio.Task[None]:
+        """Remember this tenant's MCP catalogs in the background (ADR-0131).
+
+        Only the API and the interactive worker call this; serving never waits for it.
+        """
+        return self.mcp.start_discovery_warmup((self.principal.tenant_id,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -2312,6 +2323,11 @@ async def _compose(
         raise ConfigurationError("MCP idle timeout must be numeric")
     if idle_timeout <= 0:
         raise ConfigurationError("MCP idle timeout must be positive")
+    discovery_reuse = mcp_config.get("discovery_reuse_seconds")
+    if not isinstance(discovery_reuse, (int, float)) or isinstance(discovery_reuse, bool):
+        raise ConfigurationError("MCP discovery reuse must be numeric")
+    if discovery_reuse <= 0:
+        raise ConfigurationError("MCP discovery reuse must be positive")
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -3057,6 +3073,7 @@ async def _compose(
             ids,
             connect_timeout_seconds=float(connect_timeout),
             idle_timeout_seconds=float(idle_timeout),
+            discovery_reuse_seconds=float(discovery_reuse),
             call_interceptor=None if call_service is None else call_service.invoke,
         )
         skill_catalogs = SkillCatalogService(
@@ -5118,7 +5135,19 @@ async def build(
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
         )
-        composition = replace(composition, attachment_resolver=attachment_resolver)
+        composition = replace(
+            composition,
+            attachment_resolver=attachment_resolver,
+            latency_report=(
+                None
+                if engine is None
+                else partial(
+                    chat_latency_report,
+                    create_session_factory(engine),
+                    tenant_id=effective_principal.tenant_id,
+                )
+            ),
+        )
         yield composition
     finally:
         if composition is not None:

@@ -88,6 +88,8 @@ async def test_completed_runs_release_real_sdk_transports_without_accumulation()
         sequential_ids=True,
     ) as composition:
         for index in range(3):
+            # Forget remembered catalogs (ADR-0131) so every session starts real transports.
+            composition.mcp._discoveries.clear()
             run_id = await composition.runs.submit("Return a short greeting.")
             run = await composition.runs.get(run_id)
             assert run.status is RunStatus.COMPLETED

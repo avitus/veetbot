@@ -36,6 +36,8 @@ from agent_core.domain.messages import (
     ImageReferencePart,
     ModelAttempt,
     ModelCapabilities,
+    ModelCompletedEvent,
+    ModelEvent,
     ModelFailedEvent,
     ModelLimits,
     ModelPricing,
@@ -671,23 +673,53 @@ async def test_preoutput_transient_stream_error_retries_across_api_modes(
         else chat_text_events("recovered")
     )
     source = ScriptedRawSource([failure_stream, success_stream])
-    if provider_name == "openai":
-        provider: ModelProvider = OpenAIResponsesProvider(event_source=source)
-    elif provider_name == "anthropic":
-        provider = AnthropicMessagesProvider(event_source=source)
-    else:
-        provider = ChatCompletionsProvider(
-            base_url="http://127.0.0.1:11434/v1",
-            event_source=source,
-        )
+    provider = _raw_provider(provider_name, source)
+    completed: list[ModelCompletedEvent] = []
+
+    async def observed() -> AsyncIterator[ModelEvent]:
+        async for event in provider.stream(request(), resolved(provider_name), ATTEMPT):
+            if isinstance(event, ModelCompletedEvent):
+                completed.append(event)
+            yield event
 
     try:
-        turn = await collect_turn(provider.stream(request(), resolved(provider_name), ATTEMPT))
+        turn = await collect_turn(observed())
     finally:
         await provider.close()
 
     assert turn.assistant_messages[0].content == [TextPart(text="recovered")]
     assert len(source.requests) == 2
+    # The retry before output is reported with the terminal event (ADR-0131).
+    assert [event.internal_retry_count for event in completed] == [1]
+
+
+@pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])
+async def test_an_attempt_without_retries_reports_none(provider_name: str) -> None:
+    success_stream = (
+        openai_text_events("first try")
+        if provider_name == "openai"
+        else anthropic_text_events("first try")
+        if provider_name == "anthropic"
+        else chat_text_events("first try")
+    )
+    provider = _raw_provider(provider_name, ScriptedRawSource([success_stream]))
+    try:
+        events = [
+            event async for event in provider.stream(request(), resolved(provider_name), ATTEMPT)
+        ]
+    finally:
+        await provider.close()
+
+    completed = [event for event in events if isinstance(event, ModelCompletedEvent)]
+    assert [event.internal_retry_count for event in completed] == [0]
+
+
+def _raw_provider(provider_name: str, source: ScriptedRawSource) -> ModelProvider:
+    if provider_name == "openai":
+        return OpenAIResponsesProvider(event_source=source)
+    if provider_name == "anthropic":
+        return AnthropicMessagesProvider(event_source=source)
+    return ChatCompletionsProvider(base_url="http://127.0.0.1:11434/v1", event_source=source)
 
 
 @pytest.mark.parametrize(

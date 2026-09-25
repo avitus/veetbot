@@ -313,6 +313,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "mcp.connect_timeout_seconds",
             "mcp.request_timeout_seconds",
             "mcp.idle_timeout_seconds",
+            "mcp.discovery_reuse_seconds",
             "mcp.description_maximum_bytes",
             "mcp.schema_maximum_depth",
             "mcp.schema_maximum_bytes",

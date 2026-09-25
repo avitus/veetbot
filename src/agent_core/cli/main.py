@@ -11,6 +11,7 @@ import signal
 import socket
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
@@ -58,9 +59,10 @@ from agent_core.domain.views import (
     StreamFrame,
     TextContentBlock,
 )
+from agent_core.observability.latency import ChatLatencyReport, render_latency_report
 from agent_core.ports.dispatch import WorkerService
 
-RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
+RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export", "latency"})
 DEFAULT_RUN_WAIT_TIMEOUT_SECONDS = 300.0
 EVENT_READ_TIMEOUT_SECONDS = 30.0
 API_BIND_HOST = "127.0.0.1"
@@ -641,6 +643,36 @@ def run_export(
     typer.echo(artifact.model_dump_json() if json_output else str(artifact.id))
 
 
+async def _latency_report(days: int) -> ChatLatencyReport | None:
+    async with build(storage="postgres") as composition:
+        if composition.latency_report is None:
+            return None
+        return await composition.latency_report(composition.clock.now() - timedelta(days=days))
+
+
+@run_app.command("latency")
+def run_latency(
+    days: Annotated[
+        int,
+        typer.Option("--days", min=1, max=90, help="Report Chat turns from the last N days."),
+    ] = 7,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print the whole report as JSON.")
+    ] = False,
+) -> None:
+    """Report recent Chat latency from the event log, as aggregates only (ADR-0131)."""
+
+    try:
+        report = asyncio.run(_latency_report(days))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    if report is None:
+        typer.echo("the latency report reads the PostgreSQL event log", err=True)
+        raise typer.Exit(1)
+    typer.echo(report.model_dump_json(indent=2) if json_output else render_latency_report(report))
+
+
 async def _create_session() -> UUID:
     async with build(storage="postgres") as composition:
         session = await composition.services.sessions.create(
@@ -743,6 +775,8 @@ async def _serve_worker(role: WorkerRole) -> None:
         worker_id = f"{socket.gethostname()}:{os.getpid()}"
         service: WorkerService
         if role in {WorkerRole.WORKER, WorkerRole.INTERACTIVE}:
+            # This worker pins Chat catalogs; remember them before the first chat (ADR-0131).
+            composition.start_mcp_discovery_warmup()
             service = composition.worker_factory(worker_id)
         elif role is WorkerRole.ASYNC:
             service = composition.async_worker_factory(worker_id)
@@ -796,6 +830,8 @@ def worker_command(
 
 async def _serve_api() -> None:
     async with build(storage="postgres", service_logging=True) as composition:
+        # Chat creation pins MCP catalogs here too; serving never waits (ADR-0131).
+        composition.start_mcp_discovery_warmup()
         api = create_app(
             composition.services,
             composition.settings,

@@ -86,6 +86,8 @@ async def test_queued_stdio_preserves_http_progress_and_releases_cancelled_capac
         ) as composition,
     ):
         for cancel in (True, False):
+            # The first pass remembers the HTTP catalog (ADR-0131); admission is live here.
+            composition.mcp._discoveries.clear()
             preparation = asyncio.create_task(
                 composition.mcp.prepare(uuid4(), composition.principal)
             )

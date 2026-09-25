@@ -1076,7 +1076,9 @@ without discarding the pinned catalog or the once-per-session authentication
 ladder. The next call reconnects with freshly resolved credentials and compares
 discovery with the original pin: added tools stay unadvertised, and removed or
 changed declarations return `tool.withdrawn`. Reconnection does not reset a
-terminal unavailability decision. Shutdown drains in-progress preparation and
+terminal unavailability decision. Every handshake, this one included, emits
+`mcp.server.connected` with its duration and replaces the runtime's remembered
+discovery of that server; a failed one forgets it (ADR-0131). Shutdown drains in-progress preparation and
 closes every transport through its SDK owner task.
 
 ### Authentication, and what the reference resolves to
@@ -1248,6 +1250,20 @@ Discovery runs at session open, before the context plan is built, because the
 context engine pins the tool set and the pin must include MCP tools or they
 cannot be advertised. For each configured server: connect, `initialize`,
 `tools/list`, map, register, hash.
+
+A full catalog preparation may pin the runtime's last live discovery of the
+same server configuration instead of connecting (ADR-0131). The memory belongs
+to one API or worker process and is keyed by the whole configuration. An
+operator-configured stdio server's discovery is reused for the life of the
+process, because its catalog ships with the release and a release restarts the
+process. A tenant HTTP server's discovery is reused for at most
+`mcp.discovery_reuse_seconds`. Preparation that names its servers, as typed
+Email work below does, is always live. A reused pin records the same catalog rows,
+registrations, conflict and rejection events as a live pin, and emits
+`mcp.server.pinned` in place of `mcp.server.connected`. Its server starts on the
+first call of one of its tools, through the reconnection comparison above. The
+API and the interactive worker warm the memory in the background when they
+start; the warm-up connects, discovers and closes, and records nothing.
 
 Typed Email work is the one exception (ADR-0104). Its model requests carry no
 tools. An operational Email session's plan therefore pins none, and planning it
@@ -1710,7 +1726,8 @@ session:
 
 | Event | When | Carries |
 | --- | --- | --- |
-| `mcp.server.connected` | handshake done | server, transport, tools |
+| `mcp.server.connected` | handshake done | server, transport, tools, duration_ms |
+| `mcp.server.pinned` | remembered discovery pinned | server, transport, tools |
 | `mcp.server.disconnected` | close or failure | server, reason_code |
 | `mcp.server.reauthenticated` | ladder step 2 | server, scheme, outcome |
 | `mcp.catalog.changed` | list differs | server, old and new hash |

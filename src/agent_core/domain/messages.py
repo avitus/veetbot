@@ -406,6 +406,8 @@ class ModelCompletedEvent(ModelEventBase):
     turn: ModelTurn
     stop_reason: StopReason
     stop_sequence: str | None = None
+    # Adapter-level retries made before any output (model-gateway.md, ADR-0131).
+    internal_retry_count: int = Field(default=0, ge=0)
 
 
 class ModelFailedEvent(ModelEventBase):

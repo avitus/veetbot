@@ -19,6 +19,7 @@ from agent_core.adapters.models.common import (
     should_retry_failure_event,
     text_content,
     user_segments,
+    with_internal_retries,
 )
 from agent_core.adapters.models.registry import CHAT_COMPLETIONS_CAPABILITY_CEILING
 from agent_core.domain.messages import (
@@ -239,7 +240,7 @@ class ChatCompletionsProvider:
                             retry_stream = True
                             break
                         emitted_count = event.sequence + 1
-                        yield event
+                        yield with_internal_retries(event, internal_attempt)
                 if retry_stream:
                     continue
                 return

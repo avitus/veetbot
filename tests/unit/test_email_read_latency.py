@@ -370,6 +370,9 @@ async def assert_reads_continue_during_admission(
     thread, _ = await _seed_draft(app)
     thread = await _unbind_thread_session(app, thread)
     following = await _next_thread(app, thread)
+    # Seeding remembered every catalog (ADR-0131); forget it so admission's
+    # discovery is live and slow, which is what the owner lock must not wait on.
+    app.mcp._discoveries.clear()
     held.hold()
     work = asyncio.create_task(_admit(app, kind, thread))
     try:
@@ -430,6 +433,8 @@ async def test_unused_prepared_thread_session_is_released(kind: str) -> None:
         thread, _ = await _seed_draft(app)
         thread = await _unbind_thread_session(app, thread)
         earlier = await _thread_sessions(app, thread)
+        # Forget remembered catalogs (ADR-0131) so the losing admission discovers live.
+        app.mcp._discoveries.clear()
         held.hold(calls=1)
         work = asyncio.create_task(_admit(app, kind, thread))
         try:

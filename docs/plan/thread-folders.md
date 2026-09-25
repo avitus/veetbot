@@ -122,7 +122,7 @@ source, and records an audited deterministic fallback on any failure
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance
-worker under an advisory lock (runtime-loop.md:1445), each on its own timer
+worker under an advisory lock (runtime-loop.md:1446), each on its own timer
 when it is slow. The proposal pass is one more sweep.
 
 ## The domain model
@@ -554,7 +554,7 @@ moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none
 of them differs between two deployments of the same revision
-(bootstrap-and-composition.md:338-340). `folders/profiles.yaml` ships:
+(bootstrap-and-composition.md:339-341). `folders/profiles.yaml` ships:
 
 ```yaml
 schema_version: 1
@@ -576,7 +576,7 @@ the two judgment knobs ship with the matcher. `judgment_match_threshold` is
 above 0.5 and at most 1, so at most one option of a question can clear it.
 One environment key, `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and
 the pass together, defaults off, and appears in `.env.example` in the same
-change (bootstrap-and-composition.md:525-530). The matcher additionally needs
+change (bootstrap-and-composition.md:526-531). The matcher additionally needs
 the `JUDGMENT_PROVIDER` selector [typed-judgment.md](typed-judgment.md)
 defines; with the knob on and no provider composed, the pass uses the inner
 grouper alone and says so once in the log.
