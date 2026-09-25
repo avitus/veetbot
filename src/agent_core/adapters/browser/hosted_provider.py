@@ -6,11 +6,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    MAXIMUM_BROWSER_LEASE_SECONDS,
     BrowserAction,
     BrowserActionConsequence,
     BrowserActionContext,
@@ -31,6 +32,19 @@ ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
 ProfileSelector = Callable[[ToolExecutionContext], Awaitable[UUID]]
 
 
+def _run_attempt_horizon(context: ToolExecutionContext, now: datetime) -> datetime:
+    """The deadline a lease owned by this call's run attempt may request.
+
+    `context.deadline_at` bounds only the current tool call; a lease bounded by
+    it would expire before the next call and replace the page the run opened.
+    """
+
+    horizon = now + timedelta(seconds=MAXIMUM_BROWSER_LEASE_SECONDS)
+    if context.run_deadline_at is not None:
+        horizon = min(horizon, context.run_deadline_at)
+    return max(horizon, context.deadline_at)
+
+
 @dataclass
 class _SessionBinding:
     profile_id: UUID
@@ -49,6 +63,7 @@ class HostedBrowserProvider:
         allowed_origins: tuple[str, ...],
         profiles: ProfileLoader,
         sessions: BrowserSessionControlPlane,
+        now: Callable[[], datetime],
     ) -> None:
         normalized = tuple(normalize_browser_origin(origin) for origin in allowed_origins)
         if not normalized or len(set(normalized)) != len(normalized):
@@ -58,6 +73,7 @@ class HostedBrowserProvider:
         self._allowed_origins = normalized
         self._profiles = profiles
         self._sessions = sessions
+        self._now = now
         self._lease: BrowserLease | None = None
         self._lease_scope: tuple[UUID, int] | None = None
         self._sequence = 0
@@ -84,6 +100,8 @@ class HostedBrowserProvider:
                 ) from exc
             await self._require_ready_profile(profile)
             scope = (context.run_id, context.attempt_number)
+            # One lease serves every call of a run attempt while it outlives the
+            # call; an expired lease is replaced, never renewed.
             if (
                 self._lease is not None
                 and self._lease_scope == scope
@@ -98,7 +116,7 @@ class HostedBrowserProvider:
                 profile.provider_ref,
                 run_id=context.run_id,
                 attempt_number=context.attempt_number,
-                deadline_at=context.deadline_at,
+                deadline_at=_run_attempt_horizon(context, self._now()),
             )
             self._lease_scope = scope
             self._sequence = 0
@@ -149,6 +167,13 @@ class HostedBrowserProvider:
                 revision=observation.revision,
                 ref=element.ref,
             )
+
+    async def release_run(self, run_id: UUID) -> None:
+        """Close, and so seal, the lease an ended run held; leave any other run's."""
+
+        async with self._lock:
+            if self._lease_scope is not None and self._lease_scope[0] == run_id:
+                await self._close_locked()
 
     async def close(self) -> None:
         async with self._lock:
@@ -256,12 +281,14 @@ class SessionBoundHostedBrowserProvider:
                         allowed_origins=profile.allowed_origins,
                         profiles=self._profiles,
                         sessions=self._sessions,
+                        now=self._now,
                     ),
-                    deadline_at=context.deadline_at,
+                    deadline_at=_run_attempt_horizon(context, now),
                 )
                 self._bindings[context.session_id] = binding
             else:
-                binding.deadline_at = max(binding.deadline_at, context.deadline_at)
+                # Another session's call must not close a lease this run still holds.
+                binding.deadline_at = max(binding.deadline_at, _run_attempt_horizon(context, now))
 
         for provider in providers_to_close:
             await provider.close()
@@ -283,6 +310,12 @@ class SessionBoundHostedBrowserProvider:
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         return await self._required_provider().action_context(action)
+
+    async def release_run(self, run_id: UUID) -> None:
+        async with self._lock:
+            providers = [binding.provider for binding in self._bindings.values()]
+        for provider in providers:
+            await provider.release_run(run_id)
 
     async def close(self) -> None:
         async with self._lock:

@@ -264,6 +264,10 @@ class BrowserProfileView(BaseModel):
     last_used_at: datetime | None = None
 
 
+# The hosted service caps every run-attempt lease at fifteen minutes.
+MAXIMUM_BROWSER_LEASE_SECONDS = 15 * 60
+
+
 class BrowserLease(BaseModel):
     """Secret orchestration-side handle for one isolated service lease."""
 

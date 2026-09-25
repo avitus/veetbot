@@ -21,6 +21,7 @@ from agent_core.browser_control_plane.models import (
 from agent_core.browser_control_plane.ports import EncryptedProfileStore
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    MAXIMUM_BROWSER_LEASE_SECONDS,
     BrowserAction,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
@@ -33,7 +34,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.errors import ConflictError
 
-MAXIMUM_LEASE_SECONDS = 15 * 60
+MAXIMUM_LEASE_SECONDS = MAXIMUM_BROWSER_LEASE_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 
 

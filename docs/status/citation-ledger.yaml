@@ -16,7 +16,7 @@ citations:
   - cite: "docs/plan/email-experience.md#docs/plan/event-log-and-persistence.md:664"
     excerpt: "| Interactive | 0 | A user is waiting on this turn | Seconds"
     digest: "4b1df335443d0c4a"
-  - cite: "docs/plan/email-integration.md#docs/plan/browser-automation.md:622-626"
+  - cite: "docs/plan/email-integration.md#docs/plan/browser-automation.md:626-630"
     excerpt: "Browser mutation uses the existing effect-sent boundary. Onc"
     digest: "43076826d2dad9ad"
   - cite: "docs/plan/email-integration.md#docs/plan/operational-hardening.md:321-325"

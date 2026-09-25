@@ -395,7 +395,7 @@ threshold-of-one row (tool-system.md:858). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
 after the watermark (tool-system.md:1870-1872) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
-(browser-automation.md:622-626), generalized from those two cases to every
+(browser-automation.md:626-630), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
 amendment to [tool-system.md](tool-system.md) in the change that implements
 it, keyed on the declared idempotency class rather than on any `gmail_*` name,

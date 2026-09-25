@@ -521,7 +521,7 @@ from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.artifacts import AttachmentResolver
-from agent_core.ports.browser import BrowserProvider
+from agent_core.ports.browser import BrowserProvider, release_browser_run
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from agent_core.ports.browser_sessions import (
     BrowserAuthenticationControlPlane,
@@ -3380,6 +3380,16 @@ async def _compose(
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
+            if browser_provider is not None:
+                # A run waiting for approval keeps its page; an ended one seals it
+                # and frees the profile for the next run or login ceremony.
+                try:
+                    async with uow_factory() as uow:
+                        ended = await uow.runs.get(run_id, principal)
+                    if ended.status in TERMINAL_RUN_STATUSES:
+                        await release_browser_run(browser_provider, run_id)
+                except Exception:
+                    logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
                 await schedule_accountant.account(run_id)
             except Exception:
@@ -4312,6 +4322,7 @@ def _browser_provider(
                 allowed_origins=allowed_origins,
                 profiles=load_profile,
                 sessions=sessions,
+                now=now,
             )
 
         async def select_session_profile(context: ToolExecutionContext) -> UUID:

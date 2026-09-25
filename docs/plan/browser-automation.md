@@ -381,7 +381,11 @@ principal, provider reference, run id, attempt number, and deadline. None is a
 model tool argument. Acquisition returns a random opaque lease reference to the
 provider adapter, never to the model. The service permits at most one live
 mutable lease for a profile, caps the deadline at fifteen minutes, and treats a
-service restart as invalidating every outstanding lease.
+service restart as invalidating every outstanding lease. The requested deadline
+is the run attempt's, never one tool call's: the run deadline when the run has
+one, otherwise the cap. Later calls of the attempt, including one resumed after
+an approval, reuse the lease while it outlives the call; an expired lease is
+replaced, not renewed.
 
 Every navigate, observe, and act request authenticates the service caller and
 revalidates the complete lease tuple, expiry, revocation fence, allowed origins,

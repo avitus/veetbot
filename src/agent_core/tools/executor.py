@@ -1176,6 +1176,7 @@ class ToolPipeline:
             lease_epoch=0 if lease is None else lease.lease_epoch,
             idempotency_key=key,
             deadline_at=deadline,
+            run_deadline_at=run.deadline_at,
             timeout_seconds=effective_timeout,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(

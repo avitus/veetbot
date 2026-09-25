@@ -127,6 +127,10 @@ class ToolExecutionContext:
     origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
     argument_trust: dict[str, TrustLevel] = field(default_factory=dict)
     run_kind: str = "interactive"
+    # The pinned run's own deadline, if any. `deadline_at` bounds one call; a
+    # resource the whole run attempt holds, such as a hosted browser lease, is
+    # bounded by this instead. Trusted runtime state, never a model argument.
+    run_deadline_at: datetime | None = None
 
 
 class ToolOutcomeStatus(StrEnum):
