@@ -237,6 +237,17 @@ request. The window is a provider cache marker, not prompt text: it is outside
 `prefix_sha256`, it changes no byte the model reads, and a plan persisted
 before it gains the window when loaded, without rotating its epoch.
 
+The plan also chooses how long the provider keeps each entry (ADR-0132). Both
+prefix breakpoints carry one TTL, fixed when the plan is built. A scheduled
+occurrence gets the one-hour TTL, because its single autonomous run waits on
+children, slow tools and the async queue. Every other session gets the default,
+delegated children included. The history window keeps the default in every
+session: its markers move every step, so a one-hour write there would pay the
+premium on each request, and a shorter entry after a longer one is the order
+the provider requires. The TTL is not prefix identity either. It never rotates
+an epoch, and a plan built before ADR-0132 keeps the default until it rotates
+for another reason.
+
 ### The persona row
 
 Milestone 22 adds one Region A row between the agent instructions and the tool

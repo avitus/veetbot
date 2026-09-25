@@ -846,6 +846,61 @@ async def test_context_planner_selects_the_session_snapshot_profile(
     assert plan.budget.retrieved_context_tokens == expected_tokens + 2_000
 
 
+@pytest.mark.parametrize(
+    ("metadata", "expected_ttl"),
+    [
+        ({}, "default"),
+        ({"schedule_id": str(UUID(int=711))}, "1h"),
+        ({"run_kind": "delegated"}, "default"),
+        ({"email_operational": True}, "default"),
+    ],
+)
+async def test_context_planner_sets_the_cache_ttl_from_the_session_shape(
+    metadata: dict[str, object],
+    expected_ttl: str,
+) -> None:
+    """Only a scheduled occurrence is a long agentic loop (ADR-0132)."""
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    plan = await planner.plan(
+        session().model_copy(update={"metadata": metadata}), agent(), principal(), model
+    )
+    reloaded = await planner.current(session().id)
+
+    assert [item.boundary for item in plan.cache_breakpoints] == [
+        "after_system",
+        "after_tools",
+        "after_history_prefix",
+    ]
+    # One TTL across the frozen prefix and the default after it keep Anthropic's
+    # longer-before-shorter rule; the history window moves every step.
+    assert [item.ttl for item in plan.cache_breakpoints] == [expected_ttl, expected_ttl, "default"]
+    assert reloaded is not None and reloaded.cache_breakpoints == plan.cache_breakpoints
+
+
 async def test_context_planner_excludes_affirmed_beliefs_from_the_snapshot() -> None:
     clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(

@@ -48,6 +48,8 @@ PRICING_FIELDS = frozenset(
         "effective_at",
     }
 )
+# ADR-0132: a model whose provider offers the one-hour cache TTL prices its write.
+OPTIONAL_PRICING_FIELDS = frozenset({"cache_write_1h_per_mtok"})
 PROFILE_VALIDATION_RULES = frozenset(
     {
         "schema_version",
@@ -223,13 +225,13 @@ def _validate_url(path: Path, value: str) -> None:
 
 
 def _pricing(path: Path, raw: dict[str, Any]) -> ModelPricing:
-    if set(raw) != PRICING_FIELDS:
+    if not PRICING_FIELDS <= set(raw) <= PRICING_FIELDS | OPTIONAL_PRICING_FIELDS:
         _fail(path, "models[].pricing", "all pricing fields are required and unknown keys fail")
     for field_name in ("input_per_mtok", "cached_input_per_mtok", "output_per_mtok"):
         if not isinstance(raw[field_name], str):
             _fail(path, f"pricing.{field_name}", "pricing amounts must be decimal strings")
-    for field_name in ("cache_write_per_mtok", "reasoning_per_mtok"):
-        value = raw[field_name]
+    for field_name in ("cache_write_per_mtok", "cache_write_1h_per_mtok", "reasoning_per_mtok"):
+        value = raw.get(field_name)
         if value is not None and not isinstance(value, str):
             _fail(
                 path,
@@ -264,6 +266,11 @@ def _pricing(path: Path, raw: dict[str, Any]) -> ModelPricing:
                 None
                 if raw["cache_write_per_mtok"] is None
                 else Decimal(raw["cache_write_per_mtok"])
+            ),
+            cache_write_1h_per_mtok=(
+                None
+                if raw.get("cache_write_1h_per_mtok") is None
+                else Decimal(raw["cache_write_1h_per_mtok"])
             ),
             output_per_mtok=Decimal(raw["output_per_mtok"]),
             reasoning_per_mtok=(

@@ -28,7 +28,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
-from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
+from agent_core.domain.messages import CacheBreakpoint, CacheTtl, ResolvedModel
 from agent_core.domain.persona import render_persona
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunKind
@@ -61,6 +61,7 @@ CACHE_BREAKPOINTS = (
     CacheBreakpoint(boundary="after_tools"),
     CacheBreakpoint(boundary="after_history_prefix"),
 )
+_PREFIX_BOUNDARIES = frozenset({"after_system", "after_tools"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
 _SKILL_LOAD_TOOL_NAME = "skill.load"
@@ -114,6 +115,34 @@ def _discovered_rank(tool: ToolSpec) -> tuple[int, str, str]:
         0 if tool.side_effect in _READ_SIDE_EFFECTS else 1,
         tool.server_id or tool.device_id or "",
         tool.name,
+    )
+
+
+def _cache_ttl(session: Session) -> CacheTtl:
+    """A scheduled occurrence is the long agentic loop that caches for an hour (ADR-0132).
+
+    A read refreshes a five-minute entry for free, so the one-hour write pays only
+    across a gap of five to sixty minutes between calls. An occurrence is one
+    autonomous run whose calls wait on children, slow tools and the async queue.
+    A delegated child is a short loop in a session that ends with it, and an
+    interactive session takes the default (Section 10.1).
+    """
+    if session.metadata.get(SESSION_RUN_KIND_METADATA_KEY) == RunKind.DELEGATED.value:
+        return "default"
+    return "1h" if SESSION_SCHEDULE_ID_METADATA_KEY in session.metadata else "default"
+
+
+def _cache_breakpoints(session: Session) -> tuple[CacheBreakpoint, ...]:
+    """The frozen prefix takes the session's TTL; the history window keeps the default.
+
+    One TTL across the prefix, and the default after it, keeps every longer-lived
+    entry ahead of every shorter one. The window moves every step, so a one-hour
+    write there would pay the premium on each call.
+    """
+    ttl = _cache_ttl(session)
+    return tuple(
+        item.model_copy(update={"ttl": ttl} if item.boundary in _PREFIX_BOUNDARIES else {})
+        for item in CACHE_BREAKPOINTS
     )
 
 
@@ -660,7 +689,7 @@ class EventContextPlanner:
             persona_version=persona_version,
             skill_pins=() if catalog is None else catalog.pins,
             skill_catalog=catalog_metadata,
-            cache_breakpoints=tuple(item.model_copy() for item in CACHE_BREAKPOINTS),
+            cache_breakpoints=_cache_breakpoints(session),
             policy_version=self._policy_version,
             builder_version=BUILDER_VERSION,
             budget=budget,

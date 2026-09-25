@@ -173,6 +173,8 @@ class ModelUsage(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     cached_input_tokens: int = Field(default=0, ge=0)
     cache_write_input_tokens: int = Field(default=0, ge=0)
+    # The part of cache_write_input_tokens written with the one-hour TTL.
+    cache_write_1h_input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
     cost: Decimal = Decimal("0")
@@ -264,10 +266,15 @@ class ModelAttempt(BaseModel):
     started_at: datetime
 
 
+# "1h" asks the provider to keep a cached prefix for an hour; the context engine
+# chooses it per session shape (ADR-0132).
+type CacheTtl = Literal["default", "1h"]
+
+
 class CacheBreakpoint(BaseModel):
     boundary: str
     min_tokens: int = 1024
-    ttl: str = "default"
+    ttl: CacheTtl = "default"
     # A request's history breakpoint names the index, in its conversation, of the
     # last item the cached prefix includes; None marks the conversation's final block.
     through_item: int | None = Field(default=None, ge=0)
@@ -342,6 +349,7 @@ class ModelPricing(BaseModel):
     input_per_mtok: Decimal = Field(default=Decimal("0"), ge=0)
     cached_input_per_mtok: Decimal = Field(default=Decimal("0"), ge=0)
     cache_write_per_mtok: Decimal | None = Field(default=None, ge=0)
+    cache_write_1h_per_mtok: Decimal | None = Field(default=None, ge=0)
     output_per_mtok: Decimal = Field(default=Decimal("0"), ge=0)
     reasoning_per_mtok: Decimal | None = Field(default=None, ge=0)
     reasoning_priced_separately: bool = False

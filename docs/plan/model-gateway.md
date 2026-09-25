@@ -251,6 +251,7 @@ class ModelUsage(BaseModel):
     input_tokens: int
     cached_input_tokens: int         # read from cache; billed lower
     cache_write_input_tokens: int    # 10.2's "fifth class"
+    cache_write_1h_input_tokens: int # its one-hour-TTL part (ADR-0132)
     output_tokens: int
     reasoning_tokens: int | None     # None = not separately reported
     cost: Decimal
@@ -275,6 +276,14 @@ class". Section 6.5's `RunUsage` gains the same field, because a class that is
 tracked per call and dropped per run is not tracked. This is the one place this
 document adds a field to a type the plan defines, and it is adding the field
 the plan asks for in a different section.
+
+`cache_write_1h_input_tokens` is the part of `cache_write_input_tokens` written
+with the one-hour TTL, which Anthropic reports as
+`usage.cache_creation.ephemeral_1h_input_tokens`. It is priced at
+`cache_write_1h_per_mtok` and the rest of the writes at `cache_write_per_mtok`.
+It classifies within the fifth class rather than adding a sixth, so `RunUsage`
+gains no field: the run's cost carries the price, and `model.response.completed`
+carries the split.
 
 `reasoning_tokens` is `int | None`, and `None` is load-bearing. OpenAI reports
 `output_tokens_details.reasoning_tokens` separately. Anthropic includes thinking
@@ -609,7 +618,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:999-1001`). The gateway translates those hints into
+(`context-engine.md:1010-1012`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -650,10 +659,31 @@ TTL selection follows Section 10.1's guidance: a long agentic loop that will
 issue many calls against the same prefix requests the one-hour TTL, an
 interactive session takes the default. The `ContextPlan` carries the choice
 because the context engine knows the session shape; the gateway does not.
+ADR-0132 names the shape. A read refreshes a five-minute entry for free, so the
+one-hour write, at twice the base input price against 1.25 times, pays only
+across a gap of five to sixty minutes between requests that share the prefix.
+A scheduled occurrence is the loop that has such gaps. It is one autonomous run
+in a dedicated session, and it waits on delegated children, slow tools, the
+async queue and owner approvals. Its plan gives both prefix breakpoints the
+one-hour TTL. Delegated children and every interactive shape take the default.
+Run length alone is not a criterion, because calls that start less than five
+minutes apart keep the default entry warm however many there are.
+
+The Anthropic adapter writes a one-hour hint as `{"type": "ephemeral",
+"ttl": "1h"}` and a default hint without `ttl`. The Messages API renders tools,
+then system, then messages, and rejects an entry with a longer TTL after one
+with a shorter TTL. So, walking that order from the end, each placed breakpoint
+takes the longest TTL placed at or after it. An earlier breakpoint caches a
+prefix of every later one, so reuse the context engine expects of the larger
+prefix is reuse of the smaller; the adapter lengthens, and never shortens, a
+requested TTL. It sends the one-hour TTL only when the resolved pricing carries
+`cache_write_1h_per_mtok`, and otherwise the default, so every write it causes
+has a price. The history window's markers take the default in every session:
+they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:977-979` and the
+The cached-prefix ratio is defined in `context-engine.md:988-990` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -672,7 +702,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:296`
+native tool calling, how much output to reserve. `context-engine.md:307`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -731,7 +761,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:262's second half
+    default_output_reserve: int  # context-engine.md:273's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```
@@ -740,7 +770,8 @@ class ModelLimits(BaseModel):
 class ModelPricing(BaseModel):
     input_per_mtok: Decimal
     cached_input_per_mtok: Decimal
-    cache_write_per_mtok: Decimal | None
+    cache_write_per_mtok: Decimal | None     # five-minute TTL
+    cache_write_1h_per_mtok: Decimal | None  # one-hour TTL (ADR-0132)
     output_per_mtok: Decimal
     reasoning_per_mtok: Decimal | None
     reasoning_priced_separately: bool
@@ -969,6 +1000,9 @@ ADR-0119 adds two optional per-model keys, `display_name` and
 `reasoning_efforts`, the latter the closed `ReasoningEffort` levels the
 provider accepts for that model, and one optional key to `policies.yaml`,
 `selectable_chat_policies`, the chat models the owner may choose between.
+ADR-0132 adds one optional pricing key, `cache_write_1h_per_mtok`, the
+one-hour cache write price, a decimal string or null like
+`cache_write_per_mtok`.
 
 Three of those rows are worth defending.
 
@@ -1548,7 +1582,7 @@ the same accepted levels, and effort is not part of the pin.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:539-543` requires that a
+be answerable by a tool result; `context-engine.md:550-554` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
