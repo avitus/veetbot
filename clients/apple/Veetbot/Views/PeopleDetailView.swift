@@ -38,6 +38,37 @@ public struct PeopleDetailView: View {
                     Button("Repair identity…") { showingIdentity = true }
                     Button("Forget person…", role: .destructive) { Task { await model.previewForget(sessionID: sessionID) } }
                 }.disabled(model.isSaving || model.requiresRefresh || model.canRetrySave)
+                // Last in the list, so no asserted row moves on the iPad (ADR-0125).
+                if !profile.mergeSuggestions.isEmpty {
+                    Section("Possible duplicate") {
+                        ForEach(profile.mergeSuggestions) { suggestion in
+                            let other = suggestion.other(than: profile.person.id)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("May be the same person as \(other.displayName)")
+                                Text(suggestion.explanation).appFont(.caption).foregroundColor(.secondary)
+                                HStack {
+                                    Button("Merge") { Task { await model.resolveSuggestion(suggestion, decision: "merge", sessionID: sessionID) } }
+                                    Button("Not the same") { Task { await model.resolveSuggestion(suggestion, decision: "separate", sessionID: sessionID) } }
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .accessibilityIdentifier("people.detail.suggestion.\(suggestion.id.uuidString)")
+                        }
+                    }.disabled(model.isSaving || model.requiresRefresh || model.canRetrySave)
+                }
+                if !profile.automaticMerges.isEmpty {
+                    Section("Merged automatically") {
+                        ForEach(profile.automaticMerges) { merge in
+                            HStack {
+                                Text("Merged with \(merge.merged.displayName)")
+                                Spacer()
+                                Button("Preview undo") { Task { await model.undoAutomaticMerge(merge, sessionID: sessionID) } }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("Preview undoing the merge with \(merge.merged.displayName)")
+                            }
+                        }
+                    }.disabled(model.isSaving || model.requiresRefresh || model.canRetrySave)
+                }
             } else if model.isLoading { ProgressView("Loading person…") }
             if let error = model.errorMessage {
                 Section {

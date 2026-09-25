@@ -262,7 +262,9 @@ A person joins only from evidence the owner produced:
 Every other mention links to an existing person when resolution matches and
 otherwise stays an unresolved mention; its fact still forms. Pronouns and the
 owner's own addresses, handles, and From names never create, match, or select
-a person for context.
+a person for context. Neither does a label that is itself an address or names
+a group, department, organization or automated service, such as “Investment
+Team”, “Partners” or “API Verification” (ADR-0125).
 
 Mail from an unknown sender records one unattached address endpoint and no
 history. The owner's first reply to that address adds the person and adopts
@@ -304,6 +306,22 @@ later conflicting edits require a fresh preview, not a blind undo.
 Automatic resolution can attach new evidence to an established identity under
 the rules above. Merging two established people always requires an explicit
 owner decision. Ordinary memory formation continues autonomously.
+
+A duplicate pass merges only on decisive evidence
+([ADR-0125](../adr/0125-duplicate-people-merge-on-decisive-evidence.md)). An
+address, number or handle the owner gave one person may also be held, as an
+observed endpoint, by a provisional person created from correspondence. That
+correspondent merges into the owner's person without asking, through the
+same revision-checked operation, marked automatic and listed on the
+survivor's profile with an undo. Weaker evidence becomes a merge suggestion
+the owner confirms or dismisses: agreeing full names, a first name or
+nickname that starts another's name, or an address only correspondents
+share. A first name matching several people is suggested only for the one
+sharing the owner's family name. A dismissed suggestion, an undone merge, or a
+split keeps that pair apart for good. The weaker identity merges into the
+stronger: confirmed, pinned, owner-stated, more history, then older. The pass
+runs every 15 minutes in maintenance and on demand as
+`agent people dedupe`.
 
 ## 6. Relationships, time, and commitments
 
@@ -541,7 +559,10 @@ evidence. The default People collection lists active and provisional people:
 everyone admitted is known to the owner or written to. **Needs review** lists
 provisional, unpinned people with no owner-confirmed or channel-observed
 identifier, such as a person known only as “My brother”; a correspondent
-identified by address never lands there (ADR-0121).
+identified by address never lands there (ADR-0121). Needs review also lists
+possible duplicates, each with Merge and Not the same, and a person's detail
+asks about its own and lists merges made without asking, with an undo
+(ADR-0125).
 
 Person detail has five sections:
 
@@ -584,6 +605,8 @@ on their implemented checks and the master switch.
 | `PATCH /v1/people/{id}` | `people.write` | Label, alias assignment, or owner pin; expected revision and typed operation. |
 | `POST /v1/people/{id}/corrections` | `people.write` | Person-linked claim correction, changed fact, rejection, or supported affirmation through governed memory. |
 | `POST /v1/people/identity-operations` | `people.write` | Preview/apply merge, split, or compatible undo with exact affected revisions. |
+| `GET /v1/people/merge-suggestions` | `people.read` | Open possible duplicates with both identities and the reason; bounded pagination (ADR-0125). |
+| `POST /v1/people/merge-suggestions/{id}` | `people.write` | Merge the pair or keep it apart for good; `expected_revision` and `Idempotency-Key`. |
 | `POST /v1/people/{id}/forget` | `people.write` | Explicit derived-memory removal plan and idempotent application with a receipt. |
 | `GET /v1/people/operations/{id}` | `people.read` | Owner-bound operation/erasure receipt and completion state, including after the person is no longer readable; no deleted content. |
 | `POST /v1/people/imports` | `people.write` plus source read scopes | Explicit scoped import request, date range, exclusions, and finite budget. |

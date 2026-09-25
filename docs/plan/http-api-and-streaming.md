@@ -2111,7 +2111,8 @@ provider call ID before private reconciliation. See [bland-calling.md](bland-cal
 ## Milestone 28 People routes
 
 [people-and-relationships.md](people-and-relationships.md#http-routes) owns the
-seventeen People routes and their closed request/response contracts. They are
+nineteen People routes and their closed request/response contracts. ADR-0125
+added the two merge-suggestion routes. They are
 absent unless `AGENT_PEOPLE_ENABLED=1`. Reads require `people.read`; writes
 require `people.write`, a bounded `Idempotency-Key`, and the documented exact
 revision or preview. Source reads additionally require `session.read` or

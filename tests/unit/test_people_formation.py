@@ -1676,6 +1676,54 @@ async def test_reported_meeting_creates_first_person_participants_only(other: st
         assert [p.person_id for p in history.participants] == [people[0].id]
 
 
+async def test_group_named_meeting_participant_creates_no_person() -> None:
+    """A team the owner met is not a person; the person met alongside it is (ADR-0125)."""
+    from agent_core.domain.memory import MemoryExtractionResult
+    from agent_core.domain.people_extraction import InteractionEvidence
+
+    clock, factory = await memory_uow_factory()
+    met = "I met the Investment Team and Dana today."
+    sequence = await user_event(factory, met)
+    interactions = [
+        InteractionEvidence(
+            source_event_id=sequence,
+            text=met,
+            summary=met,
+            interaction_kind="meeting",
+            occurred_at=None,
+            precision="unknown",
+            source_timezone=None,
+            mentions=[
+                _mention(met, sequence, "Investment Team", "team", role="mentioned"),
+                _mention(met, sequence, "Dana", "dana", role="mentioned"),
+            ],
+            participant_keys=["team", "dana"],
+        )
+    ]
+
+    class InteractionExtractor:
+        name = "interaction-fixture@1"
+
+        async def extract(self, events: Any, **kwargs: Any) -> MemoryExtractionResult:
+            return MemoryExtractionResult([], people_interactions=interactions)
+
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=InteractionExtractor(),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    async with factory() as uow:
+        people = [
+            r for r in await uow.people.query(_people_query(["person"])) if isinstance(r, Person)
+        ]
+    assert [person.display_name for person in people] == ["Dana"]
+
+
 async def test_reinforced_belief_skips_projection_rows_erased_by_repair() -> None:
     """A belief formed again after the repair erased its People rows neither fails nor revives."""
     clock, factory = await memory_uow_factory()

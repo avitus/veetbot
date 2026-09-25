@@ -233,6 +233,7 @@ class PeopleIdentityService:
         expected_revisions: dict[UUID, int],
         ceiling: Sensitivity,
         existing_uow: RepositoryUnitOfWork | None = None,
+        automatic: bool = False,
     ) -> PeopleOperation:
         require_scope(principal, "people.write")
         if source_id == target_id or set(expected_revisions) != {source_id, target_id}:
@@ -267,7 +268,7 @@ class PeopleIdentityService:
                     )
                     for r in rows
                 ],
-            )
+            ).model_copy(update={"automatic": automatic})
             await uow.people.put(operation, expected_revision=0)
             return operation
 

@@ -133,3 +133,4 @@ implementation without one.
 - [ADR-0122 — Files the agent exports reach the owner on its reply (Accepted)](0122-exported-files-reach-the-owner-on-the-reply.md)
 - [ADR-0123 — Chat defers tools past its item cap instead of dropping them (Accepted; amends ADR-0105 and ADR-0124)](0123-deferred-tools-past-the-item-cap.md)
 - [ADR-0124 — Chat's default roster drops workspace.list_files so the calling tools fit (Accepted; amends ADR-0105)](0124-chat-roster-drops-workspace-list-files.md)
+- [ADR-0125 — Duplicate people merge on decisive evidence and are otherwise suggested (Accepted; amends ADR-0100 and ADR-0121)](0125-duplicate-people-merge-on-decisive-evidence.md)

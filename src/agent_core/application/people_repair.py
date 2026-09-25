@@ -48,6 +48,7 @@ from agent_core.domain.people import (
     PersonMemoryLink,
     PersonMention,
     RelationshipAssertion,
+    is_group_or_service_name,
     is_non_person_reference,
     is_self_reference,
     normalize_identifier,
@@ -70,7 +71,7 @@ _CONFIRMED_NOTE = (
     "deleted; facts you stated remain, unlinked. No message or source was deleted."
 )
 
-Reason = Literal["unconfirmed", "pronoun", "self"]
+Reason = Literal["unconfirmed", "pronoun", "self", "group"]
 
 
 class BeliefDeletion(Protocol):
@@ -326,6 +327,9 @@ class PeopleDirectoryRepair:
             for row in identifiers
         ):
             return "self"
+        # A team, a service, or an address mistaken for a person (ADR-0125).
+        if is_group_or_service_name(person.display_name):
+            return "group"
         if any(row.verification == "owner_confirmed" for row in identifiers):
             return None
         if await self._owner_asserted(uow, principal, person.support_ids, scan):

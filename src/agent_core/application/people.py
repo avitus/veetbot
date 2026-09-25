@@ -11,6 +11,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.people_belief_erasure import belief_erasure_id
+from agent_core.application.people_duplicates import PeopleDeduplicator
 from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import ASSIGNABLE_KINDS, PeopleIdentityService
 from agent_core.application.people_imports import PeopleImportService
@@ -25,6 +26,7 @@ from agent_core.domain.people import (
     PeopleCommitment,
     PeopleErasure,
     PeopleInteraction,
+    PeopleMergeSuggestion,
     PeopleOperation,
     PeopleQuery,
     PeopleRecord,
@@ -46,12 +48,16 @@ from agent_core.domain.people_imports import (
 )
 from agent_core.domain.people_views import (
     AddPersonAlias,
+    AutomaticMergeDetail,
     CreatePerson,
     EndPersonAlias,
     IdentityEvidenceView,
     LegacyPeopleLinkResult,
+    MergeSuggestionDetail,
+    MergeSuggestionPage,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
+    PeopleDedupeReport,
     PeopleErasureView,
     PeopleEvidenceView,
     PeopleForgetRequest,
@@ -60,6 +66,7 @@ from agent_core.domain.people_views import (
     PeopleSectionPage,
     PeopleSectionQuery,
     PersonProfile,
+    ResolveMergeSuggestion,
     UpdatePerson,
 )
 from agent_core.domain.views import MemoryView, Page
@@ -96,6 +103,7 @@ class PublicPeopleService:
         erasure: PeopleErasureService | None = None,
         legacy_linker: Callable[[Principal, int, str | None], Awaitable[LegacyPeopleLinkResult]]
         | None = None,
+        duplicates: PeopleDeduplicator | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -104,6 +112,7 @@ class PublicPeopleService:
         self._memory_for = memory_for
         self._erasure = erasure
         self._legacy_linker = legacy_linker
+        self._duplicates = duplicates
         self.imports = PeopleImportService(uow_factory, clock)
 
     async def link_existing(
@@ -611,8 +620,11 @@ class PublicPeopleService:
                     related.display_name
                 ):
                     profile.related_labels[related.id] = related.display_name
+            suggestions, automatic = await self._merge_sections(uow, principal, person, ceiling)
             return profile.model_copy(
                 update={
+                    "merge_suggestions": suggestions,
+                    "automatic_merges": automatic,
                     "aliases": profile.aliases[:20],
                     "relationships": profile.relationships[:20],
                     "history": profile.history[:20],
@@ -624,6 +636,170 @@ class PublicPeopleService:
                     "truncated": truncated,
                 }
             )
+
+    async def _merge_sections(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        person: Person,
+        ceiling: Sensitivity,
+    ) -> tuple[list[MergeSuggestionDetail], list[AutomaticMergeDetail]]:
+        """Open duplicate questions about this person, and merges into them to undo."""
+        rows = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["merge_suggestion", "operation"],
+                person_id=person.id,
+                sensitivity_ceiling=ceiling,
+                limit=100,
+            )
+        )
+        suggestions = []
+        for row in rows[:100]:
+            if isinstance(row, PeopleMergeSuggestion) and row.state == "open":
+                detail = await self._suggestion_detail(uow, principal, row, ceiling)
+                if detail is not None:
+                    suggestions.append(detail)
+        undone = {
+            row.undo_of
+            for row in rows[:100]
+            if isinstance(row, PeopleOperation)
+            and row.operation == "undo"
+            and row.state == "completed"
+        }
+        automatic = []
+        for row in rows[:100]:
+            if (
+                isinstance(row, PeopleOperation)
+                and row.automatic
+                and row.operation == "merge"
+                and row.state == "completed"
+                and row.id not in undone
+                and row.person_ids[-1] == person.id
+            ):
+                merged = await uow.people.get(principal, row.person_ids[0], ceiling=ceiling)
+                if isinstance(merged, Person) and _safe(merged.display_name):
+                    automatic.append(
+                        AutomaticMergeDetail(
+                            operation_id=row.id,
+                            revision=row.revision,
+                            merged=merged,
+                            merged_at=row.updated_at,
+                        )
+                    )
+        return suggestions[:20], automatic[:20]
+
+    async def _suggestion_detail(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        suggestion: PeopleMergeSuggestion,
+        ceiling: Sensitivity,
+    ) -> MergeSuggestionDetail | None:
+        people = [
+            await uow.people.get(principal, person_id, ceiling=ceiling)
+            for person_id in (suggestion.source_id, suggestion.target_id)
+        ]
+        source, target = people
+        if not (
+            isinstance(source, Person)
+            and isinstance(target, Person)
+            and _safe(source.display_name)
+            and _safe(target.display_name)
+        ):
+            return None
+        return MergeSuggestionDetail(
+            id=suggestion.id,
+            revision=suggestion.revision,
+            source=source,
+            target=target,
+            reason=suggestion.reason,
+            family_name=suggestion.family_name,
+            state=suggestion.state,
+            created_at=suggestion.created_at,
+            updated_at=suggestion.updated_at,
+        )
+
+    async def merge_suggestions(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> MergeSuggestionPage:
+        """Open possible duplicates, oldest identity pair first (ADR-0125)."""
+        require_scope(principal, "people.read")
+        ceiling = self._ceiling(ceiling)
+        after: UUID | None = None
+        if cursor is not None:
+            try:
+                if len(cursor) > 2048:
+                    raise ValueError("cursor too long")
+                after = UUID(json.loads(base64.urlsafe_b64decode(cursor.encode()))["after"])
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ConflictError("People cursor is invalid; restart the list") from exc
+        limit = min(max(limit, 1), 100)
+        items: list[MergeSuggestionDetail] = []
+        more = False
+        query = PeopleQuery(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            kinds=["merge_suggestion"],
+            sensitivity_ceiling=ceiling,
+            after=after,
+            limit=100,
+        )
+        async with self._uow_factory() as uow:
+            while not more:
+                page = await uow.people.query(query)
+                for row in page[:100]:
+                    if not isinstance(row, PeopleMergeSuggestion) or row.state != "open":
+                        continue
+                    if len(items) == limit:
+                        more = True
+                        break
+                    detail = await self._suggestion_detail(uow, principal, row, ceiling)
+                    if detail is not None:
+                        items.append(detail)
+                if len(page) <= 100:
+                    break
+                query = query.model_copy(update={"after": page[99].id})
+        next_cursor = (
+            base64.urlsafe_b64encode(json.dumps({"after": str(items[-1].id)}).encode()).decode()
+            if more and items
+            else None
+        )
+        return MergeSuggestionPage(items=items, next_cursor=next_cursor)
+
+    async def resolve_merge_suggestion(
+        self,
+        principal: Principal,
+        suggestion_id: UUID,
+        request: ResolveMergeSuggestion,
+        *,
+        key: str,
+        ceiling: Sensitivity,
+    ) -> MergeSuggestionDetail:
+        """Merge the pair, or keep them apart for good."""
+        if self._duplicates is None:
+            raise NotFoundError("merge suggestion not found")
+        ceiling = self._ceiling(ceiling)
+        decided = await self._duplicates.resolve(
+            principal, suggestion_id, request, key=key, ceiling=ceiling
+        )
+        async with self._uow_factory() as uow:
+            detail = await self._suggestion_detail(uow, principal, decided, ceiling)
+        if detail is None:
+            raise NotFoundError("merge suggestion not found")
+        return detail
+
+    async def dedupe(self, principal: Principal, *, apply: bool) -> PeopleDedupeReport:
+        """Merge decisive duplicates and ask about the rest; `apply` false only reports."""
+        if self._duplicates is None:
+            raise NotFoundError("People duplicate handling is unavailable")
+        return await self._duplicates.run(principal, apply=apply)
 
     async def list(
         self,

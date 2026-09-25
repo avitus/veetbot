@@ -131,6 +131,21 @@ import Testing
         #expect((memory.personLink != nil) == linked)
     }
 
+    /// Profiles from servers without duplicate handling still decode (ADR-0125).
+    @Test
+    func testPersonProfileDecodesWithAndWithoutDuplicateSections() throws {
+        let person = #"{"id":"00000000-0000-0000-0000-000000000301","revision":1,"display_name":"Erin","state":"active","pinned":false,"sensitivity":"sensitive","support_ids":[]}"#
+        let base = #"{"person":"# + person + #","aliases":[],"relationships":[],"history":[],"commitments":[],"facts":[],"fact_revisions":{},"truncated":false,"coverage":"Recorded evidence only""#
+        let older = try JSONDecoder.server.decode(PersonProfileView.self, from: Data((base + "}").utf8))
+        #expect(older.mergeSuggestions.isEmpty && older.automaticMerges.isEmpty)
+        let merged = #"{"operation_id":"00000000-0000-0000-0000-000000000302","revision":2,"merged":"# + person + #","merged_at":"2026-09-24T12:00:00Z"}"#
+        let newer = try JSONDecoder.server.decode(
+            PersonProfileView.self,
+            from: Data((base + #","merge_suggestions":[],"automatic_merges":["# + merged + "]}").utf8)
+        )
+        #expect(newer.automaticMerges.map(\.operationID.uuidString) == ["00000000-0000-0000-0000-000000000302"])
+    }
+
     @Test
     func testMemoryViewDecodesTheFullExposureListAndToleratesAnUnknownStatus() throws {
         let data = Data(

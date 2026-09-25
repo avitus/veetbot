@@ -153,6 +153,47 @@ private func peopleDateLabel(_ date: Date?, precision: String, sourceTimezone: S
     return formatter.string(from: date)
 }
 
+/// A possible duplicate the owner merges or keeps apart (ADR-0125).
+public struct PeopleMergeSuggestionView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let revision: Int
+    public let source: PersonView
+    public let target: PersonView
+    public let reason: String
+    public let familyName: Bool
+    public let state: String
+    enum CodingKeys: String, CodingKey {
+        case id, revision, source, target, reason, state
+        case familyName = "family_name"
+    }
+    /// Why these may be one person, in the words the owner sees.
+    public var explanation: String {
+        switch reason {
+        case "same_name": return "Same name"
+        case "first_name": return familyName ? "Same first name and your family name" : "Same first name"
+        case "nickname": return familyName ? "Possible nickname and your family name" : "Possible nickname"
+        case "same_address": return "Same email address"
+        default: return "Possibly the same person"
+        }
+    }
+    /// The identity in the pair other than `personID`.
+    public func other(than personID: UUID) -> PersonView { source.id == personID ? target : source }
+}
+
+/// A merge made without asking, which the owner can undo (ADR-0125).
+public struct PeopleAutomaticMergeView: Codable, Equatable, Identifiable, Sendable {
+    public let operationID: UUID
+    public let revision: Int
+    public let merged: PersonView
+    public let mergedAt: Date
+    public var id: UUID { operationID }
+    enum CodingKeys: String, CodingKey {
+        case revision, merged
+        case operationID = "operation_id"
+        case mergedAt = "merged_at"
+    }
+}
+
 public struct PersonProfileView: Codable, Equatable, Sendable {
     public let person: PersonView
     public let aliases: [PersonAliasView]
@@ -164,11 +205,18 @@ public struct PersonProfileView: Codable, Equatable, Sendable {
     public let relatedLabels: [String: String]?
     public let truncated: Bool
     public let coverage: String
+    // Absent from servers that predate duplicate handling.
+    private let mergeSuggestionRows: [PeopleMergeSuggestionView]?
+    private let automaticMergeRows: [PeopleAutomaticMergeView]?
     enum CodingKeys: String, CodingKey {
         case person, aliases, relationships, history, commitments, facts, truncated, coverage
         case factRevisions = "fact_revisions"
         case relatedLabels = "related_labels"
+        case mergeSuggestionRows = "merge_suggestions"
+        case automaticMergeRows = "automatic_merges"
     }
+    public var mergeSuggestions: [PeopleMergeSuggestionView] { mergeSuggestionRows ?? [] }
+    public var automaticMerges: [PeopleAutomaticMergeView] { automaticMergeRows ?? [] }
     public func factRevision(_ id: UUID) -> Int? { factRevisions[id.uuidString.lowercased()] }
 }
 
