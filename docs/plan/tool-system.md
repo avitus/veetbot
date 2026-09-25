@@ -350,7 +350,7 @@ The first segment is the **domain**, and domains are partitioned:
 | --- | --- | --- |
 | `system` `math` `workspace` `sandbox` `artifact` | builtin | build time |
 | `demo` `delegate` | builtin | build time |
-| `conversation` `context` | builtin, control | build time |
+| `conversation` `context` `tool` | builtin, control | build time |
 | `skill` `memory` `schedule` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `web` | builtin, external data | build time |
@@ -360,7 +360,8 @@ The first segment is the **domain**, and domains are partitioned:
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 
-The control annotation is on the two domains that hold nothing else.
+The control annotation is on the three domains that hold nothing else; `tool`
+holds only `tool.call` (ADR-0123).
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
 `schedule` holds `schedule.create` plus Milestone 23's summary-only
@@ -919,10 +920,10 @@ than fails.
 
 ## Control tools
 
-Four of the tool names the plan uses act on the run rather than on the world:
-`conversation.ask_user` (Section 27.3), `delegate.run` (Section 26),
-`context.update_working_state` (context-engine.md), and `skill.load`
-(skills.md). `ToolSpec` as defined in Section 8.1 cannot describe them,
+Five of the tool names the platform uses act on the run rather than on the
+world: `conversation.ask_user` (Section 27.3), `delegate.run` (Section 26),
+`context.update_working_state` (context-engine.md), `skill.load`
+(skills.md), and `tool.call` (ADR-0123). `ToolSpec` as defined in Section 8.1 cannot describe them,
 because every field on it presumes an outward-facing action: `side_effect`
 classifies an effect on an external system, `idempotency` describes whether
 repeating it is safe *out there*, and `required_scopes` names permissions on
@@ -944,6 +945,23 @@ know that the question was already asked.
 | `delegate.run` | control | spawn child run | on child terminal |
 | `context.update_working_state` | control | working-state write | immediate |
 | `skill.load` | control | load a skill into the turn | immediate |
+| `tool.call` | control | none of its own; unwrapped into the deferred tool it names | that tool's |
+
+`tool.call` reaches a tool from the deferred tool index
+([context-engine.md](context-engine.md)): pinned for the session and
+authorized like any other, but advertised by a one-line entry rather than a
+definition. It never executes. The pipeline unwraps it before step 1: the
+arguments `{name, arguments}` are validated against its own schema, the named
+tool must be in the run's pinned set and must not itself be a control tool,
+and the call continues as that tool with the model's call id. Every later
+step, event, approval and invocation row therefore carries the deferred tool's
+own name, and the result still answers the `tool.call` the provider replays. A
+malformed wrapper fails with `tool.arguments_invalid`, and a name the run does
+not offer is denied with `tool.not_found.not_offered`, both under
+`tool.call`'s name. Invalid arguments for the named tool return that tool's
+input schema, because its definition never reached the provider. The
+parallel-batch check unwraps the same way, so a batch's parallelism is decided
+by the tools it actually runs.
 
 `context.compact` is not on this list, and it is worth saying why, because
 the name does appear in the corpus. It is a span:
@@ -2029,8 +2047,9 @@ evidence that the surface is the same one.
     `tool.auth_unsupported`, for the reason sampling and roots are declined
     at negotiation: there is no consent surface, and a half-working one is
     worse than a refusal.
-25. The control-tool set is four, and it is `conversation.ask_user`,
-    `delegate.run`, `context.update_working_state`, and `skill.load`.
+25. The control-tool set is five, and it is `conversation.ask_user`,
+    `delegate.run`, `context.update_working_state`, `skill.load`, and
+    `tool.call`; ADR-0123 added the fifth.
     `context.compact` was a row naming a span rather than a tool, and
     `skill_manage` is a capability tool for the reason given above. The set
     stays closed at build time, and every member is now derivable from the

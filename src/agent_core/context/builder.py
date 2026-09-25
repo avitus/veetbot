@@ -290,8 +290,11 @@ class BudgetedContextBuilder:
             plan.skill_catalog,
             plan.memory_snapshot,
             persona=plan.persona_text,
+            deferred_tools=plan.deferred_tool_specs,
         )
-        actual_prefix_hash = hashlib.sha256(prefix_bytes(prefix, plan.tool_specs)).hexdigest()
+        actual_prefix_hash = hashlib.sha256(
+            prefix_bytes(prefix, plan.tool_specs, plan.deferred_tool_specs)
+        ).hexdigest()
         if actual_prefix_hash != plan.prefix_sha256:
             raise ContextOverflow("the frozen context prefix no longer matches its plan")
 

@@ -20,6 +20,8 @@ from agent_core.domain.people_imports import (
 )
 from agent_core.domain.people_public import (
     IdentityOperationView,
+    MergeSuggestionPageView,
+    MergeSuggestionView,
     OperationView,
     PeoplePageView,
     PeopleSectionPageView,
@@ -28,6 +30,8 @@ from agent_core.domain.people_public import (
 )
 from agent_core.domain.people_views import (
     CreatePerson,
+    MergeSuggestionDetail,
+    MergeSuggestionPage,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
     PeopleErasureView,
@@ -38,6 +42,7 @@ from agent_core.domain.people_views import (
     PeopleSectionPage,
     PeopleSectionQuery,
     PersonProfile,
+    ResolveMergeSuggestion,
     UpdatePerson,
 )
 from agent_core.domain.views import Page
@@ -157,6 +162,40 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
     ) -> PeopleOperation:
         return await service.identity_operation(
             authenticated, body, key=idempotency_key, ceiling=ceiling
+        )
+
+    # Static People paths are registered before `/v1/people/{person_id}`.
+    @router.get(
+        "/v1/people/merge-suggestions",
+        response_model=MergeSuggestionPageView,
+        openapi_extra={"required_scope": "people.read"},
+    )
+    async def merge_suggestions(
+        authenticated: Annotated[Principal, secured("people.read")],
+        ceiling: Sensitivity,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        cursor: Annotated[str | None, Query(max_length=2048)] = None,
+    ) -> MergeSuggestionPage:
+        """Open possible duplicates the owner can merge or keep apart (ADR-0125)."""
+        return await service.merge_suggestions(
+            authenticated, ceiling=ceiling, limit=limit, cursor=cursor
+        )
+
+    @router.post(
+        "/v1/people/merge-suggestions/{suggestion_id}",
+        response_model=MergeSuggestionView,
+        openapi_extra={"required_scope": "people.write"},
+    )
+    async def resolve_merge_suggestion(
+        suggestion_id: UUID,
+        body: ResolveMergeSuggestion,
+        authenticated: Annotated[Principal, secured("people.write")],
+        ceiling: Sensitivity,
+        idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
+    ) -> MergeSuggestionDetail:
+        """Merge the pair, or keep them apart so they are never suggested again."""
+        return await service.resolve_merge_suggestion(
+            authenticated, suggestion_id, body, key=idempotency_key, ceiling=ceiling
         )
 
     @router.get(

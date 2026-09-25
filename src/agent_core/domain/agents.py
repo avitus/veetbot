@@ -11,6 +11,11 @@ from pydantic import BaseModel, Field
 
 from agent_core.domain.runs import RunLimits
 
+# ADR-0123: configured tools this agent offers through the deferred tool index
+# rather than as full definitions. Listed in agent metadata so the agent's
+# content-addressed version covers it.
+DEFERRED_TOOLS_METADATA_KEY = "deferred_tools"
+
 
 class AgentSpec(BaseModel):
     """A versioned agent configuration; behavior is composed, not subclassed."""

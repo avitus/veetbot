@@ -41,6 +41,7 @@ BUILTIN_DOMAINS = frozenset(
         "web",
         "browser",
         "schedule",
+        "tool",
     }
 )
 RESERVED_DOMAINS = frozenset({"mcp", "device"})
@@ -51,6 +52,7 @@ CONTROL_TOOL_NAMES = frozenset(
         "delegate.run",
         "context.update_working_state",
         "skill.load",
+        "tool.call",
     }
 )
 

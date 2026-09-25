@@ -199,11 +199,13 @@ class MaintenanceWorker:
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
         sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
+        sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
         terminal_schedule_sweep_interval_seconds: float = 3600,
         folder_proposal_interval_seconds: float = 900,
+        people_duplicate_interval_seconds: float = 900,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -225,6 +227,7 @@ class MaintenanceWorker:
         self._sweep_terminal_schedules = sweep_terminal_schedules
         self._sweep_folder_proposals = sweep_folder_proposals
         self._sweep_upload_ingests = sweep_upload_ingests
+        self._sweep_people_duplicates = sweep_people_duplicates
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
@@ -235,6 +238,8 @@ class MaintenanceWorker:
             raise ValueError("terminal schedule sweep interval must be positive")
         if folder_proposal_interval_seconds <= 0:
             raise ValueError("folder proposal interval must be positive")
+        if people_duplicate_interval_seconds <= 0:
+            raise ValueError("people duplicate interval must be positive")
         self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
         self._last_artifact_orphan_sweep_at: datetime | None = None
         # Readers withhold expired bodies themselves, so this mailbox-wide sweep
@@ -252,6 +257,9 @@ class MaintenanceWorker:
         # Folder proposals are a slow sweep on their own timer, like decay.
         self._folder_proposal_interval = timedelta(seconds=folder_proposal_interval_seconds)
         self._last_folder_proposal_sweep_at: datetime | None = None
+        # Duplicate People are merged or suggested on their own slow timer (ADR-0125).
+        self._people_duplicate_interval = timedelta(seconds=people_duplicate_interval_seconds)
+        self._last_people_duplicate_sweep_at: datetime | None = None
         self._stopping = False
 
     def stop(self) -> None:
@@ -373,6 +381,17 @@ class MaintenanceWorker:
                 await self._sweep_people_erasures()
             except Exception:
                 logger.exception("People erasure retry failed")
+        people_duplicate_sweep_due = (
+            self._last_people_duplicate_sweep_at is None
+            or self._clock.now() - self._last_people_duplicate_sweep_at
+            >= self._people_duplicate_interval
+        )
+        if self._sweep_people_duplicates is not None and people_duplicate_sweep_due:
+            self._last_people_duplicate_sweep_at = self._clock.now()
+            try:
+                await self._sweep_people_duplicates()
+            except Exception:
+                logger.exception("People duplicate sweep failed")
         terminal_schedule_sweep_due = (
             self._last_terminal_schedule_sweep_at is None
             or self._clock.now() - self._last_terminal_schedule_sweep_at

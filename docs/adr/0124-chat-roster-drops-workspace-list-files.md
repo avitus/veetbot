@@ -6,6 +6,8 @@
   engineering plan
 - Amends: ADR-0105 (the gate it promised, and the default agent's configured
   roster)
+- Amended by: ADR-0123 (2026-09-25), which defers tools past the item cap, so
+  a new configured tool no longer cuts the calling tools
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/builtin-tools.md`
 
 ## Context

@@ -38,6 +38,7 @@ from agent_core.domain.people import (
     PersonMemoryLink,
     PersonMention,
     RelationshipAssertion,
+    is_group_or_service_name,
     is_non_person_reference,
     is_self_reference,
     normalize_identifier,
@@ -332,9 +333,11 @@ async def prepare_people(
             if (
                 is_non_person_reference(mention.text)
                 or is_non_person_reference(identifier_value)
+                or is_group_or_service_name(mention.text)
                 or is_self_reference(mention.identifier_kind, identifier_value, self_references)
             ):
-                # A pronoun or the owner's own address is never a person of its own.
+                # A pronoun, a group or service, or the owner's own address is never
+                # a person of its own (ADR-0121, ADR-0125).
                 people[mention.key] = None
                 withheld.add(mention.key)
                 records[mid] = PersonMention(

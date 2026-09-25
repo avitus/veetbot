@@ -855,7 +855,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:258): the delta is issued for what the
+context engine caps (context-engine.md:263): the delta is issued for what the
 base block left of that budget and is not issued at all when the base block
 spent it, so a session with a frozen snapshot cannot carry twice the recall a
 session without one may. Only the base and delta blocks are droppable under

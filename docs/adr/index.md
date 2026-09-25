@@ -131,5 +131,7 @@ implementation without one.
 - [ADR-0120 — Files attached to chat messages (Accepted)](0120-chat-attachments.md)
 - [ADR-0121 — People holds who the owner knows or writes to (Accepted; amends ADR-0100 and ADR-0116)](0121-people-holds-who-the-owner-knows-or-writes-to.md)
 - [ADR-0122 — Files the agent exports reach the owner on its reply (Accepted)](0122-exported-files-reach-the-owner-on-the-reply.md)
+- [ADR-0123 — Chat defers tools past its item cap instead of dropping them (Accepted; amends ADR-0105 and ADR-0124)](0123-deferred-tools-past-the-item-cap.md)
 - [ADR-0124 — Chat's default roster drops workspace.list_files so the calling tools fit (Accepted; amends ADR-0105)](0124-chat-roster-drops-workspace-list-files.md)
+- [ADR-0125 — Duplicate people merge on decisive evidence and are otherwise suggested (Accepted; amends ADR-0100 and ADR-0121)](0125-duplicate-people-merge-on-decisive-evidence.md)
 - [ADR-0126 — Email correspondence carries a short summary, and Chat can read the original (Accepted; amends ADR-0121)](0126-correspondence-summaries-and-original-email.md)

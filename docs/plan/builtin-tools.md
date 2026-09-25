@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Twenty-eight more model-callable tools are declared at build time by other
+Twenty-nine more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -137,6 +137,7 @@ conversation.ask_user         control     tool-system
 delegate.run                  control     tool-system
 context.update_working_state  control     context-engine
 skill.load                    control     skills
+tool.call                     control     tool-system
 skill.manage                  capability  skills
 memory.remember               capability  memory-formation
 memory.search                 capability  memory-retrieval
@@ -163,7 +164,7 @@ people.context                capability  people-and-relationships
 people.history                capability  people-and-relationships
 ```
 
-Thirty-six model-callable builtin tools in total, and this document's roster
+Thirty-seven model-callable builtin tools in total, and this document's roster
 is eight of them. Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
@@ -178,13 +179,13 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other twenty-eight, `skill.manage`, `web.search`,
+nothing else.** Of the other twenty-nine, `skill.manage`, `web.search`,
 `web.fetch`, the three `browser.*` tools, and the six `schedule.*` tools are
 fully classified in their subject specifications, and the four `email.*` and
 three `people.*` tools in this document's Milestone 26, 28, and 31 sections
 below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
-`skill.load` carries three. The three remaining control tools inherit
+`skill.load` carries three. The four remaining control tools inherit
 `side_effect: NONE` and `target_kind: in_process` from the
 registration constraint on their kind and declare nothing else. Of the
 five memory and knowledge tools, `memory.search`,
@@ -198,11 +199,11 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Sixteen identities are always
+that is a function of the deployment. Seventeen identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
-`skill.load`, and the two `knowledge.*` tools. The other twenty register only
+`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other twenty register only
 with their flag or provider: `skill.manage` with skill authoring, the two
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
@@ -1659,9 +1660,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; thirty-six model-callable builtin tools
-    are declared at build time across the corpus, and twenty-eight of them
-    belong to other specifications. Resolved by naming those twenty-eight here,
+    is what this document designs; thirty-seven model-callable builtin tools
+    are declared at build time across the corpus, and twenty-nine of them
+    belong to other specifications. Resolved by naming those twenty-nine here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not

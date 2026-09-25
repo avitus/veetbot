@@ -269,6 +269,7 @@ from agent_core.application.notification_producer import NotificationProducer
 from agent_core.application.notification_worker import NotificationWorker
 from agent_core.application.people import PublicPeopleService, RetainedEmailReader
 from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
+from agent_core.application.people_duplicates import PeopleDeduplicator
 from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import PeopleIdentityService
 from agent_core.application.people_repair import PeopleDirectoryRepair
@@ -382,7 +383,12 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
-from agent_core.domain.agents import AgentSpec, Principal, content_addressed_agent_version
+from agent_core.domain.agents import (
+    DEFERRED_TOOLS_METADATA_KEY,
+    AgentSpec,
+    Principal,
+    content_addressed_agent_version,
+)
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
@@ -585,7 +591,11 @@ from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
 from agent_core.tools.schedule_lifecycle import (
+    SCHEDULE_CANCEL_TOOL_NAME,
     SCHEDULE_LIFECYCLE_TOOL_NAMES,
+    SCHEDULE_PAUSE_TOOL_NAME,
+    SCHEDULE_RESUME_TOOL_NAME,
+    SCHEDULE_UPDATE_TOOL_NAME,
     LegacyScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -599,6 +609,7 @@ from agent_core.tools.skill_load import (
     SkillLoadTool,
 )
 from agent_core.tools.skill_manage import SkillManageTool
+from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME, ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
@@ -607,6 +618,20 @@ from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
 logger = logging.getLogger(__name__)
 LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
+
+
+def _duplicate_sweep(
+    duplicates: PeopleDeduplicator | None, principal: Principal
+) -> Callable[[], Awaitable[int]] | None:
+    """The maintenance pass that merges decisive duplicates and asks about the rest."""
+    if duplicates is None or "people.write" not in principal.scopes:
+        return None
+
+    async def sweep() -> int:
+        report = await duplicates.run(principal, apply=True)
+        return len(report.merges) + len(report.suggestions) + report.withdrawn
+
+    return sweep
 
 
 def _correspondence_reprojector(
@@ -2342,6 +2367,7 @@ async def _compose(
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
+    registry.register(ToolCallTool())
     registry.register(CurrentTimeTool(clock))
     registry.register(WorkspaceReadTextTool())
     registry.register(WorkspaceWriteTextTool())
@@ -2901,11 +2927,16 @@ async def _compose(
         registry.register(PeopleMemoryRememberTool(memory_service))
     registry.register(MemorySearchTool(memory_retriever))
     people_erasure = PeopleErasureService(uow_factory, clock)
+    people_identity = PeopleIdentityService(uow_factory, clock, ids)
+    people_duplicates = (
+        PeopleDeduplicator(uow_factory, clock, people_identity) if settings.people_enabled else None
+    )
     people_service = (
         PublicPeopleService(
             uow_factory,
             clock,
-            identity=PeopleIdentityService(uow_factory, clock, ids),
+            identity=people_identity,
+            duplicates=people_duplicates,
             erasure=people_erasure,
             memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             legacy_linker=lambda owner, limit, cursor: link_existing_beliefs(
@@ -4077,6 +4108,7 @@ async def _compose(
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
+                    sweep_people_duplicates=_duplicate_sweep(people_duplicates, principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
@@ -4721,6 +4753,7 @@ async def build(
         "artifact.export",
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
+        TOOL_CALL_TOOL_NAME,
         "memory.remember",
         "memory.search",
         "memory.recall_episodes",
@@ -4758,6 +4791,21 @@ async def build(
             else []
         ),
     ]
+    # ADR-0123: management tools that change or clean up existing state are
+    # never the first step of a request, so they are offered through the
+    # deferred tool index and leave their definition slots to other tools.
+    default_deferred_tools = [
+        name
+        for name in (
+            SCHEDULE_UPDATE_TOOL_NAME,
+            SCHEDULE_PAUSE_TOOL_NAME,
+            SCHEDULE_RESUME_TOOL_NAME,
+            SCHEDULE_CANCEL_TOOL_NAME,
+            SUBSCRIPTIONS_TOOL_NAME,
+            UNSUBSCRIBE_TOOL_NAME,
+        )
+        if name in default_enabled_tools
+    ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
         version=(
@@ -4772,6 +4820,11 @@ async def build(
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits or _run_limits_from_defaults(run_defaults),
+        metadata=(
+            {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
+            if enabled_tools is None and default_deferred_tools
+            else {}
+        ),
     )
     if storage == "postgres":
         agent = agent.model_copy(

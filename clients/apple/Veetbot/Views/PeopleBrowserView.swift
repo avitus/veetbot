@@ -86,7 +86,27 @@ public struct PeopleBrowserView: View {
                     } label: { filterLabel("Relationship with you", value: model.relationship.label) }
                     #endif
                     Toggle("Recent interactions first", isOn: Binding(get: { model.recentFirst }, set: { value in Task { await model.setRecentFirst(value) } }))
-                    if model.items.isEmpty && model.errorMessage == nil {
+                    if model.collection == .review && !model.suggestions.isEmpty {
+                        // Only Needs review shows this, so no asserted People row moves (ADR-0125).
+                        Section("Possible duplicates") {
+                            ForEach(model.suggestions) { suggestion in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("\(suggestion.source.displayName) and \(suggestion.target.displayName)").appFont(.headline)
+                                    Text(suggestion.explanation).appFont(.caption).foregroundColor(.secondary)
+                                    HStack {
+                                        Button("Merge") { Task { await model.resolveSuggestion(suggestion, decision: "merge") } }
+                                            .accessibilityLabel("Merge \(suggestion.source.displayName) into \(suggestion.target.displayName)")
+                                        Button("Not the same") { Task { await model.resolveSuggestion(suggestion, decision: "separate") } }
+                                            .accessibilityLabel("\(suggestion.source.displayName) and \(suggestion.target.displayName) are different people")
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                                .padding(.vertical, 4)
+                                .accessibilityIdentifier("people.suggestion.\(suggestion.id.uuidString)")
+                            }
+                        }
+                    }
+                    if model.items.isEmpty && model.errorMessage == nil && (model.collection != .review || model.suggestions.isEmpty) {
                         if model.collection == .review {
                             Section {
                                 Label("Nothing needs review.", systemImage: "checkmark.circle")

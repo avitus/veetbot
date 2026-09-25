@@ -86,6 +86,34 @@ class CommitmentView(EntityView):
     unresolved: bool
 
 
+class MergeSuggestionView(Projection):
+    """A possible duplicate the owner can merge or keep apart (ADR-0125)."""
+
+    id: UUID
+    revision: int
+    source: PersonView
+    target: PersonView
+    reason: Literal["same_name", "first_name", "nickname", "same_address"]
+    family_name: bool
+    state: Literal["open", "merged", "separated", "withdrawn"]
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+
+
+class MergeSuggestionPageView(Projection):
+    items: list[MergeSuggestionView]
+    next_cursor: str | None
+
+
+class AutomaticMergeView(Projection):
+    """A merge applied without asking; undo it through identity operations."""
+
+    operation_id: UUID
+    revision: int
+    merged: PersonView
+    merged_at: AwareDatetime
+
+
 class PersonProfileView(Projection):
     person: PersonView
     aliases: list[IdentifierView]
@@ -95,6 +123,8 @@ class PersonProfileView(Projection):
     facts: list[MemoryView]
     fact_revisions: dict[UUID, int]
     related_labels: dict[UUID, str]
+    merge_suggestions: list[MergeSuggestionView] = Field(default_factory=list)
+    automatic_merges: list[AutomaticMergeView] = Field(default_factory=list)
     truncated: bool
     coverage: str
 
@@ -124,6 +154,7 @@ class IdentityOperationView(Projection):
     id: UUID
     revision: int
     operation: Literal["merge", "split", "undo", "forget"]
+    automatic: bool = False
     state: Literal["preview", "completed", "cleanup_pending", "cancelled"]
     person_ids: list[UUID]
     expected_revisions: dict[UUID, int]

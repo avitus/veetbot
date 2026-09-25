@@ -27,6 +27,7 @@ class ContextClass(StrEnum):
     AGENT_INSTRUCTIONS = "agent_instructions"
     PERSONA = "persona"
     TOOL_DEFINITIONS = "tool_definitions"
+    DEFERRED_TOOL_INDEX = "deferred_tool_index"
     SKILL_CATALOG = "skill_catalog"
     MEMORY_SNAPSHOT = "memory_snapshot"
     COMPACTED_SUMMARY = "compacted_summary"
@@ -45,6 +46,7 @@ REGION_ASSIGNMENTS: dict[ContextClass, ContextRegion] = {
     ContextClass.AGENT_INSTRUCTIONS: ContextRegion.PREFIX,
     ContextClass.PERSONA: ContextRegion.PREFIX,
     ContextClass.TOOL_DEFINITIONS: ContextRegion.PREFIX,
+    ContextClass.DEFERRED_TOOL_INDEX: ContextRegion.PREFIX,
     ContextClass.SKILL_CATALOG: ContextRegion.PREFIX,
     ContextClass.MEMORY_SNAPSHOT: ContextRegion.PREFIX,
     ContextClass.COMPACTED_SUMMARY: ContextRegion.BODY,
@@ -117,12 +119,27 @@ class ContextPlan(BaseModel):
     builder_version: str
     budget: ContextBudget
     created_at: datetime
+    # ADR-0123: tools pinned for the session but offered through the deferred
+    # tool index instead of a full definition, and candidates that fit neither.
+    # Defaults keep every persisted pre-ADR-0123 plan event validating unchanged.
+    deferred_tool_names: tuple[str, ...] = ()
+    deferred_tool_specs: tuple[ToolSpec, ...] = ()
+    skipped_tool_names: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def tools_match_names(self) -> ContextPlan:
         if tuple(spec.name for spec in self.tool_specs) != self.tool_names:
             raise ValueError("context plan tool names do not match its pinned specifications")
+        if tuple(spec.name for spec in self.deferred_tool_specs) != self.deferred_tool_names:
+            raise ValueError("context plan deferred names do not match their specifications")
+        if set(self.deferred_tool_names) & set(self.tool_names):
+            raise ValueError("a context plan tool is either defined or deferred, not both")
         return self
+
+    @property
+    def pinned_tool_specs(self) -> tuple[ToolSpec, ...]:
+        """Every tool the session may call: defined tools, then deferred ones."""
+        return (*self.tool_specs, *self.deferred_tool_specs)
 
 
 class ContextPressure(BaseModel):

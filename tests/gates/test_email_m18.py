@@ -1255,15 +1255,23 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
 
     assert terminal.status is RunStatus.COMPLETED
     assert plan is not None
-    # Twenty configured tools and the account's eight Gmail tools; the default
-    # agent no longer advertises workspace.list_files (ADR-0124).
-    assert len(plan.tool_specs) == 28
+    # Sixteen configured tools, tool.call and the account's eight Gmail tools.
+    # The default agent no longer advertises workspace.list_files (ADR-0124)
+    # and offers its four schedule management tools through the deferred tool
+    # index (ADR-0123).
+    assert len(plan.tool_specs) == 25
+    assert set(plan.deferred_tool_names) == {
+        "schedule.update",
+        "schedule.pause",
+        "schedule.resume",
+        "schedule.cancel",
+    }
     assert {
         "mcp.gmail_read.search_threads",
         "mcp.gmail_write.modify_labels",
         "mcp.gmail_send.send_message",
         "schedule.create",
-        "schedule.update",
+        "tool.call",
         "web.search",
         "web.fetch",
     }.issubset(plan.tool_names)
@@ -1342,7 +1350,8 @@ async def test_two_mailboxes_do_not_displace_enabled_web_and_workspace_tools(
         "people.search",
         "people.context",
         "people.history",
-    }.issubset(plan.tool_names)
+    }.issubset({*plan.tool_names, *plan.deferred_tool_names})
+    assert plan.skipped_tool_names == ()
     assert len(plan.tool_specs) <= 30
     assert plan.tool_names == tuple(sorted(plan.tool_names))
     if email_mode:
