@@ -63,7 +63,7 @@ import Foundation
     private var auditSessionID: UUID?
     private var previewKind: WriteKind?
     private var pending: PendingWrite?
-    private enum WriteKind { case update, correction, identity, forget }
+    private enum WriteKind: Equatable { case update, correction, identity, forget, suggestion(UUID) }
     private struct PendingWrite {
         let kind: WriteKind
         let body: [String: JSONValue]
@@ -266,6 +266,20 @@ import Foundation
             "expected_revision": .number(Double(receipt.revision))], sessionID: sessionID)
     }
 
+    /// Previews undoing a merge made without asking; the preview applies like any other (ADR-0125).
+    public func undoAutomaticMerge(_ merge: PeopleAutomaticMergeView, sessionID: UUID?) async {
+        guard isConnectionValid else { return }
+        await submit(.identity, body: ["operation": .string("undo"), "operation_id": .string(merge.operationID.uuidString),
+            "expected_revision": .number(Double(merge.revision))], sessionID: sessionID)
+    }
+
+    /// Merges a possible duplicate, or keeps the pair apart for good.
+    public func resolveSuggestion(_ suggestion: PeopleMergeSuggestionView, decision: String, sessionID: UUID?) async {
+        guard isConnectionValid else { return }
+        await submit(.suggestion(suggestion.id), body: ["decision": .string(decision),
+            "expected_revision": .number(Double(suggestion.revision))], sessionID: sessionID)
+    }
+
     public func cancelPreview() { preview = nil; previewKind = nil }
 
     public func refreshReceipt() async {
@@ -322,6 +336,8 @@ import Foundation
                 let result = try await write.api.correctPerson(personID, body: write.body, key: write.key)
                 guard isConnectionValid else { return }
                 if let erasure = result.erasure { receipt = erasure }
+            case .suggestion(let suggestionID):
+                _ = try await write.api.resolveMergeSuggestion(suggestionID, body: write.body, key: write.key)
             case .identity, .forget:
                 let result = try await (write.kind == .identity
                     ? write.api.identityOperation(body: write.body, key: write.key)

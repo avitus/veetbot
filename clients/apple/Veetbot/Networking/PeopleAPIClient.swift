@@ -52,6 +52,17 @@ extension VeetbotAPIClient {
     public func identityOperation(body: [String: JSONValue], key: String) async throws -> PeopleOperationView {
         try await transport.send(peopleWrite(path: "/v1/people/identity-operations", body: body, key: key))
     }
+    /// Open possible duplicates (ADR-0125).
+    public func listMergeSuggestions(cursor: String? = nil) async throws -> Page<PeopleMergeSuggestionView> {
+        var query = peopleQuery
+        query.append(URLQueryItem(name: "limit", value: "50"))
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(TransportRequest(method: .get, path: "/v1/people/merge-suggestions", queryItems: query))
+    }
+    /// Merges the pair, or keeps them apart for good.
+    public func resolveMergeSuggestion(_ id: UUID, body: [String: JSONValue], key: String) async throws -> PeopleMergeSuggestionView {
+        try await transport.send(peopleWrite(path: "/v1/people/merge-suggestions/\(id.uuidString)", body: body, key: key))
+    }
     public func forgetPerson(_ id: UUID, body: [String: JSONValue], key: String) async throws -> PeopleOperationView {
         try await transport.send(peopleWrite(path: "/v1/people/\(id.uuidString)/forget", body: body, key: key))
     }

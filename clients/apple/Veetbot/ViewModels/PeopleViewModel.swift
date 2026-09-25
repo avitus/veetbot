@@ -43,6 +43,8 @@ public final class PeopleViewModel: ObservableObject {
     @Published public private(set) var collection: PeopleCollection
     @Published public private(set) var recentFirst = false
     @Published public private(set) var relationship: PeopleRelationshipFilter = .all
+    /// Possible duplicates shown with Needs review (ADR-0125).
+    @Published public private(set) var suggestions: [PeopleMergeSuggestionView] = []
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
@@ -51,6 +53,7 @@ public final class PeopleViewModel: ObservableObject {
     private var failedPage = false
     private var listRequest = UUID()
     private var searchTask: Task<Void, Never>?
+    private var suggestionSessionID: UUID?
     private let asOf: Date?
 
     public init(searchText: String = "", asOf: Date? = nil, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }) {
@@ -64,7 +67,7 @@ public final class PeopleViewModel: ObservableObject {
     }
     private func invalidateConnection() {
         isConnectionValid = false; listRequest = UUID(); searchTask?.cancel(); searchTask = nil
-        items = []; searchText = ""; nextCursor = nil; seenCursors = []
+        items = []; suggestions = []; suggestionSessionID = nil; searchText = ""; nextCursor = nil; seenCursors = []
         isLoading = false; isLoadingMore = false; errorMessage = nil
     }
     deinit { searchTask?.cancel() }
@@ -75,6 +78,33 @@ public final class PeopleViewModel: ObservableObject {
         collection = value
         items = []; nextCursor = nil
         await reload()
+    }
+
+    /// Merges a possible duplicate, or keeps the pair apart for good (ADR-0125).
+    public func resolveSuggestion(_ suggestion: PeopleMergeSuggestionView, decision: String) async {
+        guard isConnectionValid else { return }
+        do {
+            guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
+            let session: UUID
+            if let existing = suggestionSessionID { session = existing } else {
+                session = try await api.createSession(metadata: ["purpose": .string("people-management")]).id
+                suggestionSessionID = session
+            }
+            guard isConnectionValid else { return }
+            _ = try await api.resolveMergeSuggestion(suggestion.id, body: [
+                "session_id": .string(session.uuidString),
+                "expected_revision": .number(Double(suggestion.revision)),
+                "decision": .string(decision),
+            ], key: UUID().uuidString)
+            guard isConnectionValid else { return }
+            suggestions.removeAll { $0.id == suggestion.id }
+            errorMessage = nil
+            await reload()
+        } catch {
+            guard isConnectionValid else { return }
+            errorMessage = error.localizedDescription
+            await reload()
+        }
     }
 
     public func selectRelationship(_ value: PeopleRelationshipFilter) async {
@@ -122,8 +152,12 @@ public final class PeopleViewModel: ObservableObject {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
             let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
+            // A server without duplicate handling answers with an error; Needs review
+            // then simply shows no duplicate questions.
+            let duplicates = collection.review ? ((try? await api.listMergeSuggestions())?.items ?? []) : []
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
+            suggestions = duplicates
             var seen: Set<UUID> = []
             items = page.items.filter { seen.insert($0.id).inserted }
             seenCursors = []
