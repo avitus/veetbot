@@ -1101,3 +1101,58 @@ async def people_review_directory_contract(store: PeopleStore) -> None:
 
 async def test_memory_people_review_directory_contract() -> None:
     await people_review_directory_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+async def people_merge_suggestion_contract(store: PeopleStore) -> None:
+    """A possible duplicate is stored, found from either person, and erased with them."""
+    from agent_core.domain.people import PeopleMergeSuggestion, PeopleOperation, PeopleQuery
+
+    owner = principal()
+    common = _admission_fields()
+    erin = Person(id=uuid4(), display_name="Erin", state="active", **common)
+    written = Person(id=uuid4(), display_name="Erin Vitus", **common)
+    for row in (erin, written):
+        await store.put(row, expected_revision=0)
+    suggestion = PeopleMergeSuggestion(
+        id=uuid4(),
+        source_id=written.id,
+        target_id=erin.id,
+        reason="first_name",
+        family_name=True,
+        **common,
+    )
+    await store.put(suggestion, expected_revision=0)
+    merged = PeopleOperation(
+        id=uuid4(),
+        operation="merge",
+        state="completed",
+        automatic=True,
+        person_ids=[written.id, erin.id],
+        expires_at=NOW,
+        request_hash="d" * 64,
+        **common,
+    )
+    await store.put(merged, expected_revision=0)
+    query = PeopleQuery(
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        kinds=["merge_suggestion", "operation"],
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        limit=100,
+    )
+    for person in (erin, written):
+        rows = await store.query(query.model_copy(update={"person_id": person.id}))
+        assert {row.id for row in rows} == {suggestion.id, merged.id}
+    stored = await store.get(owner, merged.id, ceiling=Sensitivity.RESTRICTED)
+    assert isinstance(stored, PeopleOperation) and stored.automatic
+    separated = suggestion.model_copy(
+        update={"state": "separated", "revision": 2, "updated_at": NOW + timedelta(seconds=1)}
+    )
+    await store.put(separated, expected_revision=1)
+    await store.erase(owner, [written.id], preserve_independent=True)
+    assert await store.get(owner, suggestion.id, ceiling=Sensitivity.RESTRICTED) is None
+    assert await store.get(owner, erin.id, ceiling=Sensitivity.RESTRICTED) is not None
+
+
+async def test_memory_people_merge_suggestion_contract() -> None:
+    await people_merge_suggestion_contract(InMemoryPeopleStore(FixedClock(NOW)))

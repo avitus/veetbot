@@ -24,6 +24,7 @@ from tests.contract.test_people_store_contract import (
     people_history_paging_contract,
     people_identifier_lookup_contract,
     people_interaction_redirect_contract,
+    people_merge_suggestion_contract,
     people_preserving_erase_contract,
     people_recent_directory_contract,
     people_review_directory_contract,
@@ -250,6 +251,7 @@ async def test_postgres_people_store_contract() -> None:
             await people_preserving_erase_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_identifier_lookup_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_review_directory_contract(PostgresPeopleStore(session, FixedClock(NOW)))
+            await people_merge_suggestion_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await session.commit()
     finally:
         await engine.dispose()
@@ -1657,3 +1659,90 @@ async def test_postgres_people_directory_repair() -> None:
         ] == [(people["kyrri"], "Kyrri", "owner_confirmed")]
         again = await repair.run(owner, confirm=True, session_id=audit)
         assert again.candidates == [] and again.aliases_added == []
+
+
+async def test_postgres_people_duplicate_pass() -> None:
+    """Automatic merges, suggestions and the owner's answer hold on PostgreSQL (ADR-0125)."""
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from agent_core.bootstrap import build
+    from agent_core.domain.people import PeopleMergeSuggestion, PeopleQuery, PersonIdentifier
+    from agent_core.domain.people_views import ResolveMergeSuggestion
+    from tests.contract.support import session
+
+    owner = principal().model_copy(
+        update={
+            "principal_id": f"dedupe-{uuid4().hex[:12]}",
+            "scopes": {"people.read", "people.write"},
+        }
+    )
+    settings = replace(database_settings(), people_enabled=True)
+    async with build(settings=settings, storage="postgres", principal=owner) as app:
+        service = app.services.people
+        assert service is not None
+        audit = uuid4()
+        fields: dict[str, Any] = {
+            "tenant_id": owner.tenant_id,
+            "principal_id": owner.principal_id,
+            "created_at": NOW - timedelta(days=10),
+            "updated_at": NOW - timedelta(days=10),
+        }
+        people: dict[str, UUID] = {}
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(
+                session().model_copy(update={"id": audit, "principal_id": owner.principal_id})
+            )
+            for label, name, state, address, verification in (
+                ("erin", "Erin", "active", "erin@home.test", "owner_confirmed"),
+                ("written", "Erin Vitus", "provisional", "erin@home.test", "channel_observed"),
+                ("sabina", "Sabina Smith", "provisional", "sabina@home.test", "channel_observed"),
+                ("work", "Sabina Smith", "provisional", "sabina@work.test", "channel_observed"),
+            ):
+                person = Person(id=uuid4(), display_name=name, state=state, **fields)  # type: ignore[arg-type]
+                people[label] = person.id
+                await uow.people.put(person, expected_revision=0)
+                await uow.people.put(
+                    PersonIdentifier(
+                        id=uuid4(),
+                        person_id=person.id,
+                        identifier_kind="email",
+                        namespace="owner",
+                        value=address,
+                        context="owner",
+                        verification=verification,  # type: ignore[arg-type]
+                        valid_from=NOW - timedelta(days=10),
+                        **fields,
+                    ),
+                    expected_revision=0,
+                )
+        report = await service.dedupe(owner, apply=True)
+        assert [(row.source_id, row.target_id) for row in report.merges] == [
+            (people["written"], people["erin"])
+        ]
+        [suggested] = report.suggestions
+        assert {suggested.source_id, suggested.target_id} == {people["sabina"], people["work"]}
+        query = PeopleQuery(
+            tenant_id=owner.tenant_id,
+            principal_id=owner.principal_id,
+            kinds=["merge_suggestion"],
+            sensitivity_ceiling=Sensitivity.RESTRICTED,
+            limit=100,
+        )
+        async with app.uow_factory() as uow:
+            [suggestion] = await uow.people.query(query)
+        assert isinstance(suggestion, PeopleMergeSuggestion)
+        profile = await service.get(owner, people["erin"], ceiling=Sensitivity.SENSITIVE)
+        assert [row.merged.display_name for row in profile.automatic_merges] == ["Erin Vitus"]
+        decided = await service.resolve_merge_suggestion(
+            owner,
+            suggestion.id,
+            ResolveMergeSuggestion(
+                session_id=audit, expected_revision=suggestion.revision, decision="separate"
+            ),
+            key="separate",
+            ceiling=Sensitivity.SENSITIVE,
+        )
+        assert decided.state == "separated"
+        again = await service.dedupe(owner, apply=True)
+        assert again.merges == [] and again.suggestions == []

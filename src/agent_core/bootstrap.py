@@ -269,6 +269,7 @@ from agent_core.application.notification_producer import NotificationProducer
 from agent_core.application.notification_worker import NotificationWorker
 from agent_core.application.people import PublicPeopleService
 from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
+from agent_core.application.people_duplicates import PeopleDeduplicator
 from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import PeopleIdentityService
 from agent_core.application.people_repair import PeopleDirectoryRepair
@@ -602,6 +603,20 @@ from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
 logger = logging.getLogger(__name__)
 LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
+
+
+def _duplicate_sweep(
+    duplicates: PeopleDeduplicator | None, principal: Principal
+) -> Callable[[], Awaitable[int]] | None:
+    """The maintenance pass that merges decisive duplicates and asks about the rest."""
+    if duplicates is None or "people.write" not in principal.scopes:
+        return None
+
+    async def sweep() -> int:
+        report = await duplicates.run(principal, apply=True)
+        return len(report.merges) + len(report.suggestions) + report.withdrawn
+
+    return sweep
 
 
 def _correspondence_reprojector(
@@ -2881,11 +2896,16 @@ async def _compose(
         registry.register(PeopleMemoryRememberTool(memory_service))
     registry.register(MemorySearchTool(memory_retriever))
     people_erasure = PeopleErasureService(uow_factory, clock)
+    people_identity = PeopleIdentityService(uow_factory, clock, ids)
+    people_duplicates = (
+        PeopleDeduplicator(uow_factory, clock, people_identity) if settings.people_enabled else None
+    )
     people_service = (
         PublicPeopleService(
             uow_factory,
             clock,
-            identity=PeopleIdentityService(uow_factory, clock, ids),
+            identity=people_identity,
+            duplicates=people_duplicates,
             erasure=people_erasure,
             memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             legacy_linker=lambda owner, limit, cursor: link_existing_beliefs(
@@ -4054,6 +4074,7 @@ async def _compose(
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
+                    sweep_people_duplicates=_duplicate_sweep(people_duplicates, principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None

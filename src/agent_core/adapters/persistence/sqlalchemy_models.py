@@ -2071,7 +2071,7 @@ class PeopleHeadRow(Base):
         CheckConstraint(
             "kind IN ('person','identifier','source','mention','memory_link','organization',"
             "'relationship',"
-            "'interaction','commitment','operation','erasure','import_job')",
+            "'interaction','commitment','operation','erasure','import_job','merge_suggestion')",
             name="people_head_kind",
         ),
     )

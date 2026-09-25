@@ -106,6 +106,44 @@ async def test_directory_repair_previews_by_default_and_audits_a_confirmed_run(
         await people.repair_directory_report(identity, False)
 
 
+def test_duplicate_pass_is_listed_and_requires_the_owner() -> None:
+    runner = CliRunner()
+    assert "dedupe" in runner.invoke(app, ["people", "--help"]).output
+    refused = runner.invoke(app, ["people", "dedupe", "--confirm"])
+    assert refused.exit_code != 0 and "--owner" in refused.output
+
+
+async def test_duplicate_pass_previews_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from agent_core.cli import people
+    from agent_core.domain.errors import AuthorizationError
+    from agent_core.domain.people_views import PeopleDedupeReport
+    from tests.contract.support import principal
+
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    calls: list[bool] = []
+
+    class Service:
+        async def dedupe(self, who: object, *, apply: bool) -> PeopleDedupeReport:
+            calls.append(apply)
+            return PeopleDedupeReport(applied=apply, merges=[], suggestions=[], withdrawn=0)
+
+    @asynccontextmanager
+    async def build(**kwargs: Any) -> AsyncIterator[SimpleNamespace]:
+        yield SimpleNamespace(principal=owner, services=SimpleNamespace(people=Service()))
+
+    monkeypatch.setattr(people, "build", build)
+    identity = f"{owner.tenant_id}/{owner.principal_id}"
+    with pytest.raises(AuthorizationError):
+        await people.dedupe_report("other/owner", True)
+    preview = await people.dedupe_report(identity, False)
+    assert isinstance(preview, dict) and preview["applied"] is False
+    await people.dedupe_report(identity, True)
+    assert calls == [False, True]
+
+
 def test_erasure_replay_requires_offline_assertion_before_opening_receipt() -> None:
     result = CliRunner().invoke(
         app,

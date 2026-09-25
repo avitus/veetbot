@@ -35,8 +35,11 @@ from agent_core.domain.people_imports import (
 from agent_core.domain.people_views import (
     CreatePerson,
     LegacyPeopleLinkResult,
+    MergeSuggestionDetail,
+    MergeSuggestionPage,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
+    PeopleDedupeReport,
     PeopleErasureView,
     PeopleEvidenceView,
     PeopleForgetRequest,
@@ -45,6 +48,7 @@ from agent_core.domain.people_views import (
     PeopleSectionPage,
     PeopleSectionQuery,
     PersonProfile,
+    ResolveMergeSuggestion,
     UpdatePerson,
 )
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
@@ -522,6 +526,24 @@ class PeopleService(Protocol):
         key: str,
         ceiling: Sensitivity,
     ) -> PeopleOperation: ...
+    async def merge_suggestions(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> MergeSuggestionPage: ...
+    async def resolve_merge_suggestion(
+        self,
+        principal: Principal,
+        suggestion_id: UUID,
+        request: ResolveMergeSuggestion,
+        *,
+        key: str,
+        ceiling: Sensitivity,
+    ) -> MergeSuggestionDetail: ...
+    async def dedupe(self, principal: Principal, *, apply: bool) -> PeopleDedupeReport: ...
     async def operation(
         self, principal: Principal, operation_id: UUID, *, ceiling: Sensitivity
     ) -> PeopleOperation | PeopleErasureView: ...

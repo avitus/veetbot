@@ -224,6 +224,29 @@ def repair_directory(
     emit(repair_directory_report(owner, confirm))
 
 
+async def dedupe_report(owner: str, confirm: bool) -> object:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        service = composition.services.people
+        if service is None:
+            raise NotFoundError("People is disabled")
+        report = await service.dedupe(principal, apply=confirm)
+        return report.model_dump(mode="json")
+
+
+@app.command("dedupe")
+def dedupe(
+    owner: Owner,
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Merge and record suggestions. Without it, preview.")
+    ] = False,
+) -> None:
+    """Merge duplicates on decisive evidence and ask about the rest (ADR-0125)."""
+    emit(dedupe_report(owner, confirm))
+
+
 @app.command("get")
 def get_person(person_id: UUID, ceiling: Ceiling) -> None:
     """Read identity, relationships, facts, history and commitments."""

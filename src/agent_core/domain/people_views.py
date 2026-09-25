@@ -69,6 +69,34 @@ class LegacyPeopleLinkResult(PeopleValue):
     )
 
 
+class MergeSuggestionDetail(PeopleValue):
+    """A possible duplicate with both identities as the owner sees them (ADR-0125)."""
+
+    id: UUID
+    revision: int
+    source: Person
+    target: Person
+    reason: Literal["same_name", "first_name", "nickname", "same_address"]
+    family_name: bool
+    state: Literal["open", "merged", "separated", "withdrawn"]
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+
+
+class MergeSuggestionPage(PeopleValue):
+    items: list[MergeSuggestionDetail]
+    next_cursor: str | None = None
+
+
+class AutomaticMergeDetail(PeopleValue):
+    """A merge the system applied, which the owner can undo (ADR-0125)."""
+
+    operation_id: UUID
+    revision: int
+    merged: Person
+    merged_at: AwareDatetime
+
+
 class PersonProfile(PeopleValue):
     person: Person
     aliases: list[PersonIdentifier] = Field(default_factory=list)
@@ -78,6 +106,8 @@ class PersonProfile(PeopleValue):
     facts: list[MemoryView] = Field(default_factory=list)
     fact_revisions: dict[UUID, int] = Field(default_factory=dict)
     related_labels: dict[UUID, str] = Field(default_factory=dict)
+    merge_suggestions: list[MergeSuggestionDetail] = Field(default_factory=list)
+    automatic_merges: list[AutomaticMergeDetail] = Field(default_factory=list)
     truncated: bool = False
     coverage: str = (
         "Only recorded, permitted evidence is shown; earlier history may be unavailable."
@@ -243,3 +273,31 @@ class PeopleRepairReport(PeopleValue):
     # Deleting a fact resets the generated summary of the mail thread it came from.
     mail_threads_reset: int = Field(ge=0)
     note: str
+
+
+class ResolveMergeSuggestion(PeopleValue):
+    """The owner's answer to a possible duplicate (ADR-0125)."""
+
+    session_id: UUID
+    expected_revision: int = Field(ge=1)
+    decision: Literal["merge", "separate"]
+
+
+class PeopleMergeEntry(PeopleValue):
+    """One merge applied or proposed by the duplicate pass."""
+
+    source_id: UUID
+    target_id: UUID
+    source_name: str
+    target_name: str
+    reason: Literal["same_name", "first_name", "nickname", "same_address"]
+    family_name: bool = False
+
+
+class PeopleDedupeReport(PeopleValue):
+    """What one duplicate pass merged, or would merge, and what it asks the owner."""
+
+    applied: bool
+    merges: list[PeopleMergeEntry]
+    suggestions: list[PeopleMergeEntry]
+    withdrawn: int = Field(ge=0)
