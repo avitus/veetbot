@@ -198,6 +198,31 @@ On Mac, People sheets open at readable widths: 600 points for short editors and
 Before macOS 15, which ignores a sheet's ideal size, they open at their 560- and
 680-point minimums.
 
+On Mac, Memory's People collection is a split view whose directory selects the
+person the second column shows. Each row is a button that carries the selected
+trait. Its earlier navigation links stopped responding after the first choice
+once the directory was longer than its column, so the first profile stayed
+open; `testMemoryPeopleShowsEachChosenPerson` reproduces this with the
+`--ui-testing-people-directory` fixture, which pages 72 people at the client's
+limit of 50. `PeopleDetailView` keys its state to the person, because SwiftUI
+keeps a view's state when a column shows it again for someone else. The
+column's placeholder has a zero minimum height: a column that cannot shrink
+made the split view grow to the directory's length and pushed its first rows
+above the sheet. Related people open in place, and a fact's evidence opens in
+a sheet, since the column has no way back.
+
+The person profile is one scrolling column at a readable width on every
+platform: a header with initials, name, relationship to the owner, main
+address and actions, then cards for names and contact details, relationships,
+a history timeline, open threads, facts and evidence, and Manage person.
+Sections with nothing recorded collapse into one note. Its palette in
+`PeopleProfileComponents.swift` reuses Email's adaptive accent and surfaces and
+adds an attention orange and a destructive red that keep 4.5:1 contrast in both
+appearances. People views set that adaptive accent as their tint: under the
+app's fixed turquoise tint, bordered buttons were unreadable in dark
+appearance. At accessibility sizes the header stacks, row symbols drop out,
+and buttons use rounded rectangles so a wrapped label is not clipped.
+
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
 same `SessionHistoryStore` contract backed by an atomic Application Support JSON

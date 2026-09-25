@@ -607,7 +607,8 @@ private extension URLRequest {
     }
 }
 
-private func makePeopleClient(_ handler: @escaping (URLRequest) throws -> (Int, String)) throws -> VeetbotAPIClient {
+/// Serves each request from `handler` through a private URL protocol; shared by the People suites.
+func makePeopleClient(_ handler: @escaping (URLRequest) throws -> (Int, String)) throws -> VeetbotAPIClient {
     let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     let handlerID = PeopleTestURLProtocol.register(handler)

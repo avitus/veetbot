@@ -851,6 +851,84 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
     }
 
+    /// Choosing one person after another in Memory's People collection replaces
+    /// the open profile. The directory is longer than the window, as a real one
+    /// is: on the Mac, a second click there once left the first profile open.
+    func testMemoryPeopleShowsEachChosenPerson() {
+        app.launchArguments.append("--ui-testing-people-directory")
+        #if os(macOS)
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #endif
+        app.launch()
+        #if os(macOS)
+        app.activate()
+        let memory = app.buttons["sidebar.memory"]
+        XCTAssertTrue(memory.waitForExistence(timeout: 10))
+        activate(memory)
+        // The Mac sheet exposes the collection picker but not the browser's identifier.
+        let peopleCollection = app.sheets.radioButtons["People"]
+        #else
+        openSidebarDestination(identifier: "sidebar.memory")
+        XCTAssertTrue(app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5))
+        let peopleCollection = app.segmentedControls.buttons["People"]
+        #endif
+        XCTAssertTrue(peopleCollection.waitForExistence(timeout: 5))
+        activate(peopleCollection)
+        let detail = app.descendants(matching: .any)["people.detail"]
+        let fifth = directoryRow("00000000-0000-0000-0000-0000000C0005")
+        let sixth = directoryRow("00000000-0000-0000-0000-0000000C0006")
+        let mayaChen = directoryRow("00000000-0000-0000-0000-000000000782")
+
+        choosePerson(fifth, showing: "contact5@example.com", in: detail)
+        choosePerson(sixth, showing: "contact6@example.com", in: detail)
+        XCTAssertFalse(detail.staticTexts["contact5@example.com"].exists, "The previous profile must close")
+        #if os(macOS)
+        XCTAssertTrue(sixth.isSelected, "The directory marks the person whose profile is open")
+        XCTAssertFalse(fifth.isSelected)
+        #endif
+        // Maya Chen's profile links to Maya and to a fact's evidence; the
+        // directory must still replace it.
+        choosePerson(mayaChen, showing: "maya.chen@example.com", in: detail)
+        choosePerson(fifth, showing: "contact5@example.com", in: detail)
+    }
+
+    private func directoryRow(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any)["people.row.\(id)"]
+    }
+
+    #if os(iOS)
+    /// Drags the lazily rendered directory until the row sits clear of the
+    /// search field that floats over its lower edge.
+    private func revealDirectoryRow(_ row: XCUIElement) {
+        let list = app.descendants(matching: .any)["people.browser"].firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            if row.exists && row.isHittable && row.frame.maxY < list.frame.maxY - 100 { return }
+            // A slow drag that holds at its end moves the list without a fling.
+            list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).press(
+                forDuration: 0.1, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)),
+                withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+    }
+    #endif
+
+    /// Opens a person from the directory, returning to it first where a compact
+    /// layout pushed the previous profile over it.
+    private func choosePerson(_ row: XCUIElement, showing text: String, in detail: XCUIElement) {
+        #if os(iOS)
+        // The sheet's back button, not the first button of the window's bar behind it.
+        if detail.exists && !row.isHittable { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
+        revealDirectoryRow(row)
+        #endif
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        activate(row)
+        XCTAssertTrue(
+            detail.staticTexts[text].waitForExistence(timeout: 5),
+            "Choosing a person must open their profile (\(text))"
+        )
+    }
+
     func testPeopleForgetExplainsSourceRetentionAndPendingCleanup() {
         #if os(macOS)
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"

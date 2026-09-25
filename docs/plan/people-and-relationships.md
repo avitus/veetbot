@@ -1296,6 +1296,18 @@ authorize policy activation or production delivery.
   a conversation. Both remain readable by ID, and neither is deleted. A connection
   change dismisses People presentations, clears their transient data and pending
   retries, and prevents in-flight responses from restoring the old connection.
+- On the Mac, Memory's People collection selects the person its second column
+  shows. Its navigation links stopped responding after the first choice once
+  the directory was longer than the column, leaving the first profile open.
+  The profile keys its state to the person, and a UI test chooses people in
+  turn from a paged 72-person directory on Mac, iPhone and iPad. The profile
+  opens with the person's initials, name, relationship to the owner and main
+  address, and Prepare for a conversation as its primary action. Names and
+  contact details, relationships in plain words, a history timeline, open
+  threads, and facts and evidence follow; relationships, open threads or facts
+  with nothing recorded share one note that claims no absence. Possible
+  duplicates ask above the sections, and automatic merges, Repair identity and
+  Forget person sit under Manage person.
 - Frozen synthetic development and holdout corpora and a paired observation
   scorer exist. Retrieval scoring uses actually injected evidence separately
   from answer citations; paired intervals resample scenario averages across

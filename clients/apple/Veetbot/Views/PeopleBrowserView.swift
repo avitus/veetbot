@@ -60,9 +60,18 @@ struct PeopleLookupSheet: View {
 public struct PeopleBrowserView: View {
     @ObservedObject var model: PeopleViewModel
     let sessionID: UUID?
+    /// The person a profile column beside the directory shows. On the Mac a
+    /// navigation link there stopped responding after the first choice once the
+    /// directory was longer than its column, so that layout selects instead.
+    private let selection: Binding<UUID?>?
     @State private var showingAdd = false
     @State private var showingImport = false
-    public init(model: PeopleViewModel, sessionID: UUID? = nil) { self.model = model; self.sessionID = sessionID }
+    public init(model: PeopleViewModel, sessionID: UUID? = nil) { self.init(model: model, sessionID: sessionID, selection: nil) }
+    init(model: PeopleViewModel, sessionID: UUID?, selection: Binding<UUID?>?) {
+        self.model = model
+        self.sessionID = sessionID
+        self.selection = selection
+    }
 
     public var body: some View {
         Group {
@@ -71,8 +80,12 @@ public struct PeopleBrowserView: View {
             } else {
                 PeopleList(label: "People and filters") {
                     #if os(macOS)
-                    PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { $0.rawValue }) { value in Task { await model.selectCollection(value) } }
-                    PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
+                    VStack(alignment: .leading, spacing: 12) {
+                        PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { $0.rawValue }) { value in Task { await model.selectCollection(value) } }
+                        PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
+                        recentFirstToggle
+                    }
+                    .padding(.bottom, 12)
                     #else
                     Menu {
                         Picker("Show", selection: Binding(get: { model.collection }, set: { value in Task { await model.selectCollection(value) } })) {
@@ -84,8 +97,8 @@ public struct PeopleBrowserView: View {
                             ForEach(PeopleRelationshipFilter.allCases) { Text($0.label).tag($0) }
                         }
                     } label: { filterLabel("Relationship with you", value: model.relationship.label) }
+                    recentFirstToggle
                     #endif
-                    Toggle("Recent interactions first", isOn: Binding(get: { model.recentFirst }, set: { value in Task { await model.setRecentFirst(value) } }))
                     if model.collection == .review && !model.suggestions.isEmpty {
                         // Only Needs review shows this, so no asserted People row moves (ADR-0125).
                         Section("Possible duplicates") {
@@ -122,20 +135,9 @@ public struct PeopleBrowserView: View {
                         }
                     }
                     ForEach(model.items) { person in
-                        NavigationLink {
-                            PeopleDetailView(personID: person.id, sessionID: sessionID)
-                        } label: {
-                            HStack {
-                                Image(systemName: person.pinned ? "pin.fill" : "person.crop.circle")
-                                    .foregroundColor(person.pinned ? AppTheme.orange : .secondary)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(person.displayName).appFont(.headline)
-                                    if person.state == "merged" { Text("Combined identity").appFont(.caption).foregroundColor(.secondary) }
-                                }
-                            }.padding(.vertical, 4)
-                        }
-                        .accessibilityIdentifier("people.row.\(person.id.uuidString)")
-                        .onAppear { if person.id == model.items.last?.id { Task { await model.loadMore() } } }
+                        personRow(person)
+                            .accessibilityIdentifier("people.row.\(person.id.uuidString)")
+                            .onAppear { if person.id == model.items.last?.id { Task { await model.loadMore() } } }
                     }
                     if model.isLoadingMore { ProgressView("Loading more people…") }
                     if let error = model.errorMessage {
@@ -145,17 +147,63 @@ public struct PeopleBrowserView: View {
                         }
                     }
                     if model.availability != .disabled && model.availability != .denied {
-                        Button { showingImport = true } label: { Label("Import history", systemImage: "clock.arrow.circlepath") }
-                        Button { showingAdd = true } label: { Label("Add person", systemImage: "person.badge.plus") }
+                        #if os(macOS)
+                        VStack(alignment: .leading, spacing: 10) { directoryActions }.padding(.top, 12)
+                        #else
+                        directoryActions
+                        #endif
                     }
                 }
             }
         }
+        // The adaptive accent keeps bordered controls legible in dark appearance.
+        .tint(PeopleSurface.accent)
         .accessibilityIdentifier("people.browser")
         .accessibilityLabel("People directory")
         .task { await model.reload() }
         .sheet(isPresented: $showingImport) { PeopleImportHistoryView(initialSessionID: sessionID) }
         .sheet(isPresented: $showingAdd) { AddPersonView(sessionID: sessionID) { _ in Task { await model.reload() } } }
+    }
+
+    private var recentFirstToggle: some View {
+        Toggle("Recent interactions first", isOn: Binding(get: { model.recentFirst }, set: { value in Task { await model.setRecentFirst(value) } }))
+    }
+
+    @ViewBuilder private var directoryActions: some View {
+        Button { showingImport = true } label: { Label("Import history", systemImage: "clock.arrow.circlepath") }
+        Button { showingAdd = true } label: { Label("Add person", systemImage: "person.badge.plus") }
+    }
+
+    @ViewBuilder private func personRow(_ person: PersonView) -> some View {
+        if let selection {
+            let selected = selection.wrappedValue == person.id
+            Button { selection.wrappedValue = person.id } label: {
+                PeopleDirectoryRow(person: person)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(selected ? PeopleSurface.accent.opacity(0.14) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        } else {
+            NavigationLink {
+                PeopleDetailView(personID: person.id, sessionID: sessionID)
+            } label: {
+                PeopleDirectoryRow(person: person)
+                    #if os(macOS)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                    #endif
+            }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            #endif
+        }
     }
 
     private func filterLabel(_ title: String, value: String) -> some View {
@@ -355,16 +403,16 @@ struct PeopleImportHistoryView: View {
     }
 }
 
-/// A directory/profile scroll surface with individually accessible native controls.
+/// The directory's scroll surface, with individually accessible native controls.
 struct PeopleList<Content: View>: View {
     let label: String
     @ViewBuilder let content: () -> Content
     var body: some View {
         #if os(macOS)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) { content() }
+            LazyVStack(alignment: .leading, spacing: 2) { content() }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
+                .padding(16)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(label)
         }
@@ -372,6 +420,28 @@ struct PeopleList<Content: View>: View {
         #else
         List { content() }
         #endif
+    }
+}
+
+/// One person in the directory: initials, name, and any identity note.
+private struct PeopleDirectoryRow: View {
+    let person: PersonView
+
+    var body: some View {
+        HStack(spacing: 10) {
+            PeopleMonogram(name: person.displayName, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.displayName).appFont(.headline)
+                if person.state == "merged" {
+                    Text("Combined identity").appFont(.caption).foregroundColor(PeopleSurface.muted)
+                }
+            }
+            Spacer(minLength: 0)
+            if person.pinned {
+                Image(systemName: "pin.fill").foregroundColor(PeopleSurface.attention).accessibilityLabel("Pinned")
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 

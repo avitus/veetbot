@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — Every person you choose opens, on a redesigned profile
+
+- On the Mac, Memory's People collection opened the first person you chose
+  and then ignored the others: the right pane stayed on that profile. It
+  happened once the directory was longer than its column, as a real one is.
+  The directory now selects the person the right pane shows and highlights
+  that row, and each profile starts fresh for its person.
+- The person profile is redesigned on Mac, iPhone and iPad. A header shows the
+  person's initials, name, what they are to you and their main address, with
+  Prepare for a conversation, Pin and Rename. Cards follow for names and
+  contact details, relationships in plain words such as "Your colleague" or
+  "Friend of Maya", a history timeline, open threads with their state, and
+  facts with Inspect evidence and Correct. Sections with nothing recorded
+  collapse into one note, and the coverage line says what was analyzed.
+- A possible duplicate now asks at the top of the profile. Automatic merges,
+  Repair identity and Forget person sit under Manage person, with Forget in
+  red. Buttons stay legible in dark appearance and at the largest text sizes.
+
 ## 2026-09-25 — Duplicate people merge, and teams stop being people
 
 - After the People cleanup, the directory still held "Investment Team",
