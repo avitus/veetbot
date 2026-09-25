@@ -208,6 +208,35 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
+### The history cache window
+
+Region A is cached by the plan's `after_system` and `after_tools` breakpoints.
+Region B is cached by its third, `after_history_prefix`: the rolling window
+Section 10.1 asks for. The builder places it on every request as up to two
+markers, each naming the last conversation item its cached prefix includes
+(`CacheBreakpoint.through_item`):
+
+- **The carried-history marker** closes the compacted summary and the retained
+  history. It is the only Region B prefix the next run repeats, because rows 11
+  to 14 and the new run's items follow it and can differ between runs. A first
+  run carries nothing and has no such marker.
+- **The run marker** closes the longest prefix the run's next step repeats: the
+  whole conversation, stopping before a replayed provider continuation. The
+  runtime replays only the latest turn's reasoning items (ADR-0007), so the
+  next step no longer carries these, and every envelope nonce after them moves
+  with their indices.
+
+A marker past either point would write a cache entry that no later request
+reads, paying the provider's write premium on every request for nothing. Both
+markers follow the prefix breakpoints in priority order, so a four-breakpoint
+provider sends all four and a smaller budget drops the run marker first
+([model-gateway.md](model-gateway.md)). A provider finds an earlier entry only
+within its lookback, about twenty blocks on Anthropic, so a run that appended
+more than that re-caches the carried history once on the next run's first
+request. The window is a provider cache marker, not prompt text: it is outside
+`prefix_sha256`, it changes no byte the model reads, and a plan persisted
+before it gains the window when loaded, without rotating its epoch.
+
 ### The persona row
 
 Milestone 22 adds one Region A row between the agent instructions and the tool

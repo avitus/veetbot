@@ -547,6 +547,9 @@ class AnthropicMessagesProvider:
         system: list[dict[str, Any]] = []
         messages: list[dict[str, Any]] = []
         tools: list[dict[str, Any]] = []
+        # The last message block at or before each conversation item: where a
+        # history breakpoint naming that item goes. Thinking blocks take none.
+        item_blocks: dict[int, dict[str, Any]] = {}
         for tool in request.tools:
             definition = tool_definition(tool, anthropic=True)
             definition["name"] = canonical_to_wire[tool.name]
@@ -595,16 +598,20 @@ class AnthropicMessagesProvider:
                 if item.provider != "anthropic":
                     raise ModelStreamError("reasoning continuation belongs to another provider")
                 _append_message(messages, "assistant", item.provider_payload)
+            if not isinstance(item, (SystemMessage, ProviderReasoningItem)) and messages:
+                item_blocks[item_index] = messages[-1]["content"][-1]
 
-        kept_boundaries = {hint.boundary for hint in hints[:sent]}
+        kept = hints[:sent]
+        kept_boundaries = {hint.boundary for hint in kept}
         if "after_system" in kept_boundaries and system:
             system[-1]["cache_control"] = {"type": "ephemeral"}
         if "after_tools" in kept_boundaries and tools:
             tools[-1]["cache_control"] = {"type": "ephemeral"}
-        if "after_history_prefix" in kept_boundaries and messages:
-            content = messages[-1]["content"]
-            if isinstance(content, list) and content:
-                content[-1]["cache_control"] = {"type": "ephemeral"}
+        for hint in kept:
+            if hint.boundary == "after_history_prefix":
+                block = _history_block(hint.through_item, item_blocks, messages)
+                if block is not None:
+                    block["cache_control"] = {"type": "ephemeral"}
 
         payload: dict[str, Any] = {
             "model": resolved.model,
@@ -626,6 +633,23 @@ class AnthropicMessagesProvider:
     async def close(self) -> None:
         if self._owns_client and self._client is not None:
             await cast(Any, self._client).close()
+
+
+def _history_block(
+    through_item: int | None,
+    item_blocks: dict[int, dict[str, Any]],
+    messages: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The block a history breakpoint marks: the named item's, else the final one."""
+
+    if through_item is None:
+        if not messages or not messages[-1]["content"]:
+            return None
+        return cast(dict[str, Any], messages[-1]["content"][-1])
+    return next(
+        (item_blocks[index] for index in range(through_item, -1, -1) if index in item_blocks),
+        None,
+    )
 
 
 def _append_message(messages: list[dict[str, Any]], role: str, block: dict[str, Any]) -> None:

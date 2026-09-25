@@ -268,6 +268,9 @@ class CacheBreakpoint(BaseModel):
     boundary: str
     min_tokens: int = 1024
     ttl: str = "default"
+    # A request's history breakpoint names the index, in its conversation, of the
+    # last item the cached prefix includes; None marks the conversation's final block.
+    through_item: int | None = Field(default=None, ge=0)
 
 
 class CacheHints(BaseModel):

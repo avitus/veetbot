@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import logging
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -97,6 +97,34 @@ def _insert_before_current_user(
 
 def _canonical_json(value: object) -> bytes:
     return canonical_json_bytes(value)
+
+
+def _history_window(
+    breakpoints: Sequence[CacheBreakpoint],
+    *,
+    carried_through: int | None,
+    stable_through: int | None,
+) -> list[CacheBreakpoint]:
+    """Place a plan's history window on one request's conversation (Section 10.1).
+
+    The window is two markers. One closes the history carried from earlier runs:
+    it is the only body prefix the next run repeats, since every row after it can
+    differ between runs. The other closes the longest prefix the next step of
+    this run repeats, which stops before a replayed provider continuation: the
+    next step no longer carries those reasoning items, and every envelope nonce
+    after them moves with their indices. A marker past either point would write a
+    cache entry that no later request reads.
+    """
+    placed: list[CacheBreakpoint] = []
+    for hint in breakpoints:
+        if hint.boundary != "after_history_prefix":
+            placed.append(hint.model_copy(deep=True))
+            continue
+        for through in dict.fromkeys(
+            index for index in (carried_through, stable_through) if index is not None
+        ):
+            placed.append(hint.model_copy(update={"through_item": through}))
+    return placed
 
 
 def _insert_provider_continuation(
@@ -190,6 +218,13 @@ class MinimalContextBuilder:
         body_sha256 = hashlib.sha256(
             _canonical_json([item.model_dump(mode="json") for item in body])
         ).hexdigest()
+        # The runtime row moves to the end of the body on a tool step, so the
+        # prefix the next request repeats stops before it or any reasoning item.
+        stable = next(
+            index
+            for index, item in enumerate(body)
+            if item is runtime_item or isinstance(item, ProviderReasoningItem)
+        )
         return ModelRequest(
             model_policy=agent.model_policy,
             conversation=[*prefix, *body],
@@ -206,10 +241,15 @@ class MinimalContextBuilder:
                 "context_origin_trust": TrustLevel.USER.value,
             },
             cache_hints=CacheHints(
-                breakpoints=[
-                    CacheBreakpoint(boundary="after_system"),
-                    CacheBreakpoint(boundary="after_tools"),
-                ]
+                breakpoints=_history_window(
+                    [
+                        CacheBreakpoint(boundary="after_system"),
+                        CacheBreakpoint(boundary="after_tools"),
+                        CacheBreakpoint(boundary="after_history_prefix"),
+                    ],
+                    carried_through=None,
+                    stable_through=len(prefix) + stable - 1 if stable else None,
+                )
             ),
         )
 
@@ -506,6 +546,15 @@ class BudgetedContextBuilder:
         body_sha256 = hashlib.sha256(
             _canonical_json([item.model_dump(mode="json") for item in rendered_body])
         ).hexdigest()
+        carried = len(summary_items) + len(retained_history)
+        stable = next(
+            (
+                index
+                for index, item in enumerate(rendered_body)
+                if isinstance(item, ProviderReasoningItem)
+            ),
+            len(rendered_body),
+        )
         request = ModelRequest(
             model_policy=agent.model_policy,
             conversation=[*prefix, *rendered_body],
@@ -533,7 +582,11 @@ class BudgetedContextBuilder:
                 ),
             },
             cache_hints=CacheHints(
-                breakpoints=[item.model_copy(deep=True) for item in plan.cache_breakpoints]
+                breakpoints=_history_window(
+                    plan.cache_breakpoints,
+                    carried_through=len(prefix) + carried - 1 if carried else None,
+                    stable_through=len(prefix) + stable - 1,
+                )
             ),
         )
         return ContextAssembly(request=request, pressure=pressure)

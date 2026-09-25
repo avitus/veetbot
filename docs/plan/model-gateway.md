@@ -609,7 +609,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:970-972`). The gateway translates those hints into
+(`context-engine.md:999-1001`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -633,8 +633,14 @@ other than the ratio falling.
 
 The breakpoint budget is where the two providers force a real decision. Four
 breakpoints, three natural boundaries (`after_system`, `after_tools`,
-`after_history_prefix`), and a fourth that the context engine may place at a
-compaction boundary. When the context engine supplies more hints than the
+`after_history_prefix`), and a fourth that goes to the history window's second
+marker: the context engine places `after_history_prefix` after the history a
+run carries in and again after the prefix the run's next step repeats
+(`context-engine.md:219-228`). Each history hint names the conversation item it
+closes in `through_item`; the Anthropic adapter marks that item's last content
+block, or the nearest earlier one when the item renders no message block, and
+never a thinking block. A history hint without `through_item` marks the final
+block. When the context engine supplies more hints than the
 provider allows, the adapter keeps the earliest ones and drops the rest, on
 the reasoning that an earlier breakpoint protects a larger prefix. The adapter
 records the drop on the attempt so that a persistent shortfall is visible
@@ -647,7 +653,7 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:948-950` and the
+The cached-prefix ratio is defined in `context-engine.md:977-979` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -666,7 +672,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:267`
+native tool calling, how much output to reserve. `context-engine.md:296`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -725,7 +731,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:233's second half
+    default_output_reserve: int  # context-engine.md:262's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```
@@ -1542,7 +1548,7 @@ the same accepted levels, and effort is not part of the pin.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:510-514` requires that a
+be answerable by a tool result; `context-engine.md:539-543` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider

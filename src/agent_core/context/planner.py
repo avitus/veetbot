@@ -54,6 +54,13 @@ BUILDER_VERSION = "context-builder@12"
 # fail a run parked on an approval if its selection moved (ADR-0123).
 _EQUIVALENT_EARLIER_BUILDERS = frozenset({"context-builder@11"})
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
+# In priority order: the adapter keeps the earliest a model's breakpoint budget
+# allows. The history window is placed per request by the builder (Section 10.1).
+CACHE_BREAKPOINTS = (
+    CacheBreakpoint(boundary="after_system"),
+    CacheBreakpoint(boundary="after_tools"),
+    CacheBreakpoint(boundary="after_history_prefix"),
+)
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
 _SKILL_LOAD_TOOL_NAME = "skill.load"
@@ -76,6 +83,25 @@ def _authority_scope_hashes(principal: Principal) -> tuple[str, ...]:
 
 def _builder_is_current(version: str) -> bool:
     return version == BUILDER_VERSION or version in _EQUIVALENT_EARLIER_BUILDERS
+
+
+def _with_history_window(plan: ContextPlan) -> ContextPlan:
+    """Give a plan persisted before the history window its breakpoint, in place.
+
+    A breakpoint is a provider cache marker, not prompt text: adding one changes
+    neither ``prefix_sha256`` nor a byte the model reads, so the plan keeps its
+    epoch instead of rotating and re-caching its whole prefix for nothing.
+    """
+    if any(item.boundary == "after_history_prefix" for item in plan.cache_breakpoints):
+        return plan
+    return plan.model_copy(
+        update={
+            "cache_breakpoints": (
+                *plan.cache_breakpoints,
+                CacheBreakpoint(boundary="after_history_prefix"),
+            )
+        }
+    )
 
 
 def _discovered_rank(tool: ToolSpec) -> tuple[int, str, str]:
@@ -183,7 +209,7 @@ class EventContextPlanner:
         ]
         if not plans:
             return None
-        plan = max(plans, key=lambda candidate: candidate.epoch)
+        plan = _with_history_window(max(plans, key=lambda candidate: candidate.epoch))
         if plan.memory_snapshot and plan.snapshot_id is not None:
             async with self._uow_factory() as uow:
                 try:
@@ -634,10 +660,7 @@ class EventContextPlanner:
             persona_version=persona_version,
             skill_pins=() if catalog is None else catalog.pins,
             skill_catalog=catalog_metadata,
-            cache_breakpoints=(
-                CacheBreakpoint(boundary="after_system"),
-                CacheBreakpoint(boundary="after_tools"),
-            ),
+            cache_breakpoints=tuple(item.model_copy() for item in CACHE_BREAKPOINTS),
             policy_version=self._policy_version,
             builder_version=BUILDER_VERSION,
             budget=budget,
