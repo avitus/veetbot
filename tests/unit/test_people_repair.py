@@ -684,3 +684,36 @@ async def test_repair_refuses_while_a_people_import_runs() -> None:
             OWNER_PRINCIPAL, confirm=True, session_id=directory.audit_session
         )
     assert "Jensen Huang" in await _names(factory)
+
+
+async def test_group_and_address_named_people_leave_whatever_their_history() -> None:
+    """A team or an address mistaken for a person goes even though the owner wrote to it."""
+    factory, clock = await _stack()
+    directory = await _legacy_directory(factory)
+    common = _fields()
+    async with factory() as uow:
+        for name in ("Investment Team", "iron@gracepres.test"):
+            person = Person(
+                id=uuid4(), display_name=name, support_ids=[directory.mail_source], **common
+            )
+            await uow.people.put(person, expected_revision=0)
+            await uow.people.put(
+                PeopleInteraction(
+                    id=uuid4(),
+                    channel="email",
+                    interaction_kind="exchange",
+                    attribution="observed",
+                    direction="outgoing",
+                    summary="Sent email",
+                    occurred_at=NOW - timedelta(days=2),
+                    participants=[InteractionParticipant(person_id=person.id, role="recipient")],
+                    support_ids=[directory.mail_source],
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    report = await _repair(factory, clock).run(OWNER_PRINCIPAL, confirm=False)
+    reasons = {row.display_name: row.reason for row in report.candidates}
+    assert reasons["Investment Team"] == "group"
+    assert reasons["iron@gracepres.test"] == "group"
+    assert "Correspondent" not in reasons

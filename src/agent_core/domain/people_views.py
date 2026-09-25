@@ -222,7 +222,7 @@ class PeopleRepairCandidate(PeopleValue):
 
     person_id: UUID
     display_name: str
-    reason: Literal["unconfirmed", "pronoun", "self"]
+    reason: Literal["unconfirmed", "pronoun", "self", "group"]
 
 
 class PeopleRepairReport(PeopleValue):

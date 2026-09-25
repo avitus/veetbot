@@ -29,6 +29,7 @@ from agent_core.domain.people import (
     PersonIdentifier,
     PersonMemoryLink,
     RelationshipAssertion,
+    is_group_or_service_name,
     is_non_person_reference,
     referenced_people,
 )
@@ -351,7 +352,7 @@ class PeopleContextService:
                             else:
                                 continue
                             # A pronoun label would match nearly every request.
-                            if is_non_person_reference(label):
+                            if is_non_person_reference(label) or is_group_or_service_name(label):
                                 continue
                             if re.search(
                                 r"(?<!\w)" + re.escape(label) + r"(?!\w)", query.text, re.IGNORECASE

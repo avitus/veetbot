@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from datetime import datetime
 from decimal import Decimal
@@ -529,6 +530,138 @@ def is_self_reference(kind: str, value: str, refs: frozenset[str]) -> bool:
 def is_non_person_reference(label: str) -> bool:
     """Whether a mention label is a pronoun or generic reference, never a person."""
     return " ".join(label.casefold().split()).strip(".,;:!?'\"") in NON_PERSON_REFERENCES
+
+
+# Whole words that make a label name a group, a department, an organization,
+# or an automated service rather than one person (ADR-0125). Singular roles such
+# as "partner", "analyst", or "manager" stay person references, and words that
+# are also common surnames (for example "Mailer" or "Bank") are left out.
+GROUP_OR_SERVICE_WORDS: frozenset[str] = frozenset(
+    {
+        "accounting",
+        "accounts",
+        "admin",
+        "admins",
+        "administration",
+        "admissions",
+        "alerts",
+        "api",
+        "association",
+        "billing",
+        "board",
+        "bookings",
+        "bot",
+        "capital",
+        "careers",
+        "clients",
+        "clinic",
+        "college",
+        "committee",
+        "community",
+        "company",
+        "compliance",
+        "corp",
+        "corporation",
+        "council",
+        "crew",
+        "customer",
+        "customers",
+        "daemon",
+        "department",
+        "dept",
+        "developers",
+        "digest",
+        "directors",
+        "employees",
+        "engineers",
+        "events",
+        "everyone",
+        "executives",
+        "faculty",
+        "families",
+        "family",
+        "feedback",
+        "finance",
+        "foundation",
+        "founders",
+        "friends",
+        "fund",
+        "group",
+        "groups",
+        "help",
+        "helpdesk",
+        "hospital",
+        "hr",
+        "inc",
+        "info",
+        "information",
+        "institute",
+        "insurance",
+        "investors",
+        "invoices",
+        "labs",
+        "leadership",
+        "legal",
+        "llc",
+        "ltd",
+        "managers",
+        "marketing",
+        "media",
+        "members",
+        "membership",
+        "news",
+        "newsletter",
+        "noreply",
+        "notification",
+        "notifications",
+        "oauth",
+        "office",
+        "operations",
+        "orders",
+        "parents",
+        "partners",
+        "payroll",
+        "press",
+        "receipts",
+        "recruiting",
+        "recruitment",
+        "relations",
+        "reservations",
+        "returns",
+        "robot",
+        "sales",
+        "security",
+        "service",
+        "services",
+        "shipping",
+        "society",
+        "squad",
+        "staff",
+        "students",
+        "studios",
+        "support",
+        "survey",
+        "teachers",
+        "team",
+        "teams",
+        "university",
+        "updates",
+        "ventures",
+        "verification",
+        "volunteers",
+    }
+)
+
+
+def is_group_or_service_name(label: str) -> bool:
+    """Whether a label names a group, a service, or an address rather than a person."""
+    cleaned = unicodedata.normalize("NFC", label).strip()
+    if "@" in cleaned:
+        # An address shown as a display name identifies no one by name.
+        return True
+    return any(
+        word in GROUP_OR_SERVICE_WORDS for word in re.findall(r"[^\W\d_]+", cleaned.casefold())
+    )
 
 
 def normalize_identifier(kind: str, namespace: str, value: str) -> str:

@@ -24,6 +24,7 @@ from agent_core.domain.people import (
     PeopleSource,
     Person,
     PersonIdentifier,
+    is_group_or_service_name,
     is_non_person_reference,
     normalize_identifier,
 )
@@ -37,7 +38,12 @@ _ADOPTION_LIMIT = 256
 _ADOPTION_STEP = 32
 
 _ROLE_MAILBOX = re.compile(
-    r"^(?:no[._-]?reply|support|info|hello|sales|help|billing|team|contact|admin|notifications?|news|newsletter|office|jobs|careers)(?:[+._-].*)?$",
+    r"^(?:no[._-]?reply|do[._-]?not[._-]?reply|support|info|hello|sales|help|billing|team"
+    r"|contact|admin|notifications?|news|newsletter|office|jobs|careers|partners|investors"
+    r"|ir|press|media|marketing|hr|recruiting|admissions|accounts|accounting|finance|legal"
+    r"|security|verification|verify|alerts|updates|digest|members|community|orders"
+    r"|receipts|invoices|shipping|returns|feedback|events|reservations|bookings|api|bot)"
+    r"(?:[+._-].*)?$",
     re.IGNORECASE,
 )
 
@@ -443,6 +449,7 @@ async def project_correspondence(
             and name
             and not _ROLE_MAILBOX.fullmatch(address.split("@", 1)[0])
             and not is_non_person_reference(name)
+            and not is_group_or_service_name(name)
             and " ".join(name.casefold().split()) != owner_name
         ):
             # ADR-0121: the owner writing to someone is what adds them to People.
