@@ -517,6 +517,20 @@ belief; `agent email exclude-bulk` previews and, with `--confirm`, applies
 source exclusion across every census-indexed retained source, which is a
 coarser operation because it also drops those threads from the mailbox view.
 
+Each observed exchange in People history also carries a short generated
+summary (ADR-0126).
+- **When.** After assessment and drafts, a refresh summarizes at most four
+  correspondence records, newest first. It stops when less than thirty seconds
+  of the slice deadline remain. A failed call or a spent slice ends the
+  summaries, never the refresh.
+- **From what.** Each message's verified retained passage, not the body cache.
+- **What it skips.** Bulk, excluded and suppressed sources; mail outside the
+  ninety-day boundary; any refresh while learning is paused.
+- **What it must pass.** An exact supporting quote, and the People display
+  hazard checks. One invalid result retries once; a second abstains.
+
+The assessment prompt and revision are unchanged.
+
 Correspondent and historical Sent evidence remain attributed, inferred,
 sensitivity-governed, and unable to supersede an owner assertion. Current
 tentative communication facts retain the existing thirty-day evidence horizon.
@@ -771,7 +785,10 @@ session/run history retain the existing until-session/source-deletion policy.**
 This can outlast the thirty-day cache and draft-store windows, including for
 operational ingestion sessions. Encrypted backups retain deleted copies for at
 most the existing 35 days. This is an explicit retention choice, not a promise
-that all email copies expire after thirty days. The source-lifecycle action must
+that all email copies expire after thirty days. People history's source view
+reads that retained first-party read event, verified against its passage
+digest, so Chat can quote a message after its cached body expires (ADR-0126).
+The cache, `email.context` and the thread view keep the thirty-day rule. The source-lifecycle action must
 remove matching retained source content and derived influence across these
 stores, including duplicate observations, while retaining independently
 supported owner assertions. Canonical mechanics enumerate those copies before

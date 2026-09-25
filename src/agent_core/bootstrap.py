@@ -267,7 +267,7 @@ from agent_core.application.notification_dispatcher import (
 )
 from agent_core.application.notification_producer import NotificationProducer
 from agent_core.application.notification_worker import NotificationWorker
-from agent_core.application.people import PublicPeopleService
+from agent_core.application.people import PublicPeopleService, RetainedEmailReader
 from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
 from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import PeopleIdentityService
@@ -575,7 +575,12 @@ from agent_core.tools.memory_remember import (
     PeopleMemoryRememberTool,
 )
 from agent_core.tools.memory_search import MemorySearchTool
-from agent_core.tools.people import PeopleContextTool, PeopleHistoryTool, PeopleSearchTool
+from agent_core.tools.people import (
+    LegacyPeopleHistoryTool,
+    PeopleContextTool,
+    PeopleHistoryTool,
+    PeopleSearchTool,
+)
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
@@ -617,6 +622,21 @@ def _correspondence_reprojector(
         ).reproject_correspondence(record)
 
     return reproject
+
+
+def _retained_email_reader(
+    uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
+) -> Callable[[Principal], RetainedEmailReader]:
+    """People history's view of the original email Veetbot kept (ADR-0126); no model."""
+
+    def reader(owner: Principal) -> RetainedEmailReader:
+        from agent_core.memory.email_people import EmailPeopleFormationService
+
+        return EmailPeopleFormationService(
+            uow_factory, clock, ids, owner, provider="people-source", model="none"
+        )
+
+    return reader
 
 
 @dataclass(frozen=True, slots=True)
@@ -2891,6 +2911,7 @@ async def _compose(
             legacy_linker=lambda owner, limit, cursor: link_existing_beliefs(
                 uow_factory, clock, owner, limit=limit, cursor=cursor
             ),
+            email_sources=_retained_email_reader(uow_factory, clock, ids),
         )
         if settings.people_enabled
         else None
@@ -2966,6 +2987,8 @@ async def _compose(
         people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
         registry.register(PeopleSearchTool(uow_factory, clock))
         registry.register(PeopleContextTool(people_context))
+        # Chats pinned before ADR-0126 keep 1.0.0; the latest registration wins.
+        registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None

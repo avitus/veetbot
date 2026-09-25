@@ -297,3 +297,43 @@ async def test_memory_semantic_source_timestamps_are_validated_before_writes() -
     _, factory = await memory_uow_factory()
     async with factory() as uow:
         await semantic_source_timestamp_contract(uow.email)
+
+
+async def belief_messages_contract(store: EmailStore) -> None:
+    """ADR-0126: the retained sources that formed a belief name their messages."""
+    from uuid import uuid4
+
+    formed, other = uuid4(), uuid4()
+    for key, message_id, memory_ids in (
+        ("formed-a", "m1", [str(formed)]),
+        ("formed-b", "m2", [str(other), str(formed)]),
+        ("unrelated", "m3", [str(other)]),
+    ):
+        await store.put(
+            record(key).model_copy(
+                update={
+                    "kind": "semantic_source",
+                    "payload": {
+                        "account_id": "work",
+                        "provider_thread_id": "t-belief",
+                        "message_id": message_id,
+                        "evidence_at": NOW.isoformat(),
+                        "memory_ids": memory_ids,
+                    },
+                }
+            ),
+            expected_revision=0,
+        )
+    assert await store.belief_messages(principal(), [formed]) == [
+        ("work", "t-belief", "m1"),
+        ("work", "t-belief", "m2"),
+    ]
+    assert await store.belief_messages(principal(), []) == []
+    foreign = principal().model_copy(update={"principal_id": "other"})
+    assert await store.belief_messages(foreign, [formed]) == []
+
+
+async def test_memory_belief_messages_contract() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await belief_messages_contract(uow.email)

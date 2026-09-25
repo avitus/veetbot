@@ -238,6 +238,7 @@ functionality or release. Production delivery still follows exact-head CI/review
 - [ ] Review complete temporal/source-erasure gate coverage and worst-case initial-fence latency
 - [ ] Finish native accessibility, load/contention and signed restore verification
 - [ ] Independently reviewed labels, version-bound quality and private owner evaluation evidence
+- [ ] Private quality evaluation of the generated correspondence summaries that ADR-0126 activated ahead of it
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
 ### Milestone 29 — Chat thread folders

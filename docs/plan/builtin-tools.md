@@ -1876,7 +1876,10 @@ can remove one source without deleting another account's context.
 `people.search`, `people.context`, and `people.history`. All three require
 `people.read`, are read-only and parallel-safe, return data at memory trust,
 and exist only with `AGENT_PEOPLE_ENABLED=1`. Their closed JSON schemas expose
-all execution bounds. People context shares the ordinary recall budget and
+all execution bounds. The exception is a `people.history@1.1.0` source read
+(ADR-0126). It also requires `email.read`, and it returns the retained original
+email at external-untrusted trust. Chats pinned to 1.0.0 keep the first
+contract. People context shares the ordinary recall budget and
 cannot grant permission to send a message or change an email recipient.
 The governed `memory.remember` surface adds explicit person references only
 while People is enabled; old pinned catalogs retain their prior contract.

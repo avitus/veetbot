@@ -11,6 +11,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
+from agent_core.domain.correspondence import CorrespondenceSummaryWork, EmailCorrespondenceSummary
 from agent_core.domain.email import EmailDraft, EmailFeedback, EmailRecord, EmailTask, EmailThread
 from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
 from agent_core.domain.memory import MemoryRecord
@@ -75,6 +76,12 @@ class EmailStore(Protocol):
     async def delete(
         self, principal: Principal, kind: str, key: str, *, expected_revision: int
     ) -> None: ...
+
+    async def belief_messages(
+        self, principal: Principal, belief_ids: Sequence[UUID]
+    ) -> builtins.list[tuple[str, str, str]]:
+        """The (account, thread, message) of each retained source that formed these beliefs."""
+        ...
 
     async def fence_people_erasure(
         self, principal: Principal, belief_ids: Sequence[UUID], erased_at: datetime
@@ -262,6 +269,24 @@ class EmailSemanticPort(Protocol):
         run: Run | None = None,
         lease: WorkerLease | None = None,
     ) -> list[MemoryRecord]: ...
+
+    async def next_correspondence_summaries(
+        self, account_ids: Sequence[str], *, limit: int
+    ) -> list[CorrespondenceSummaryWork]:
+        """Observed exchanges awaiting a short summary, newest first (ADR-0126)."""
+        ...
+
+    async def record_correspondence_summary(
+        self,
+        work: CorrespondenceSummaryWork,
+        result: EmailCorrespondenceSummary | None,
+        *,
+        model: str,
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> str:
+        """Store a valid summary or count an invalid one; returns the resulting state."""
+        ...
 
 
 class EmailContextRenderer(Protocol):

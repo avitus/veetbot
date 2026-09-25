@@ -11,6 +11,7 @@ from datetime import timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.people_belief_erasure import withhold_email_summaries
 from agent_core.application.people_erasure_batches import (
     ErasureManifest,
     batch_id,
@@ -268,6 +269,7 @@ class PeopleErasureService:
         old: PeopleErasure,
         manifest: ErasureManifest,
     ) -> PeopleErasure:
+        await withhold_email_summaries(uow, principal, list(manifest.belief_positions))
         email_copies = await uow.email.fence_people_erasure(
             principal, list(manifest.belief_positions), self._clock.now()
         )

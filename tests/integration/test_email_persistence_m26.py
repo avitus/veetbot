@@ -270,3 +270,12 @@ async def test_postgres_semantic_source_timestamps_are_validated_before_writes()
         await configure(session)
         await semantic_source_timestamp_contract(PostgresEmailStore(session))
         await session.commit()
+
+
+async def test_postgres_belief_messages_name_the_sources_that_formed_a_belief() -> None:
+    from tests.contract.test_email_store_contract import belief_messages_contract
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        await belief_messages_contract(PostgresEmailStore(session))
+        await session.rollback()

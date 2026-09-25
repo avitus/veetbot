@@ -223,6 +223,30 @@ class InMemoryEmailStore:
             raise ConflictError("email record revision changed or is absent")
         del self._records[address]
 
+    async def belief_messages(
+        self, principal: Principal, belief_ids: Sequence[UUID]
+    ) -> builtins.list[tuple[str, str, str]]:
+        ids = {str(key) for key in belief_ids}
+        return sorted(
+            {
+                (
+                    str(row.payload.get("account_id")),
+                    str(row.payload.get("provider_thread_id")),
+                    str(row.payload.get("message_id")),
+                )
+                for row in self._records.values()
+                if row.tenant_id == principal.tenant_id
+                and row.principal_id == principal.principal_id
+                and row.kind == "semantic_source"
+                and isinstance(linked := row.payload.get("memory_ids"), list)
+                and ids.intersection(str(key) for key in linked)
+                and all(
+                    isinstance(row.payload.get(name), str) and row.payload.get(name)
+                    for name in ("account_id", "provider_thread_id", "message_id")
+                )
+            }
+        )
+
     async def fence_people_erasure(
         self, principal: Principal, belief_ids: Sequence[UUID], erased_at: datetime
     ) -> int:
@@ -511,6 +535,32 @@ class PostgresEmailStore:
         ).scalar_one_or_none()
         if removed is None:
             raise ConflictError("email record revision changed or is absent")
+
+    async def belief_messages(
+        self, principal: Principal, belief_ids: Sequence[UUID]
+    ) -> builtins.list[tuple[str, str, str]]:
+        if not belief_ids:
+            return []
+        payload = EmailRecordRow.payload
+        rows = await self._session.execute(
+            select(
+                payload["account_id"].astext,
+                payload["provider_thread_id"].astext,
+                payload["message_id"].astext,
+            ).where(
+                EmailRecordRow.tenant_id == principal.tenant_id,
+                EmailRecordRow.principal_id == principal.principal_id,
+                EmailRecordRow.kind == "semantic_source",
+                reference_overlap("(payload->'memory_ids')::text", list(belief_ids)),
+            )
+        )
+        return sorted(
+            {
+                (account, thread, message)
+                for account, thread, message in rows.all()
+                if account and thread and message
+            }
+        )
 
     async def fence_people_erasure(
         self, principal: Principal, belief_ids: Sequence[UUID], erased_at: datetime

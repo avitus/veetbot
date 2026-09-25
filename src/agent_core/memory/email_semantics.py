@@ -14,6 +14,11 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.correspondence import (
+    CorrespondenceSummaryWork,
+    EmailCorrespondenceSummary,
+    RetainedEmailMessage,
+)
 from agent_core.domain.email import EmailRecord
 from agent_core.domain.email_semantics import (
     EmailSemanticFact as EmailSemanticFact,
@@ -528,6 +533,28 @@ class EmailSemanticFormationService:
             raise ToolTrustRejectedError(
                 "email passage differs from the original normalized result"
             )
+
+    async def next_correspondence_summaries(
+        self, account_ids: Sequence[str], *, limit: int
+    ) -> list[CorrespondenceSummaryWork]:
+        """Correspondence summaries belong to the People policy (ADR-0126)."""
+        return []
+
+    async def record_correspondence_summary(
+        self,
+        work: CorrespondenceSummaryWork,
+        result: EmailCorrespondenceSummary | None,
+        *,
+        model: str,
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> str:
+        return "skipped"
+
+    async def retained_message(
+        self, account_id: str, thread_id: str, message_id: str, *, offset: int = 0
+    ) -> RetainedEmailMessage | None:
+        return None
 
     async def exclude_source(self, account_id: str, thread_id: str, message_id: str) -> int:
         """Suppress reformation and forget linked inferred beliefs; retain owner corrections."""

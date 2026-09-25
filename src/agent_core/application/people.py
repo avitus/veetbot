@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
+from typing import Protocol
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
@@ -15,6 +16,7 @@ from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import ASSIGNABLE_KINDS, PeopleIdentityService
 from agent_core.application.people_imports import PeopleImportService
 from agent_core.domain.agents import Principal
+from agent_core.domain.correspondence import RetainedEmailMessage
 from agent_core.domain.email import EmailThread
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
@@ -44,6 +46,7 @@ from agent_core.domain.people_imports import (
     PeopleImportRequest,
     PeopleImportView,
 )
+from agent_core.domain.people_tools import HistoryEmailReference, PeopleSourceText
 from agent_core.domain.people_views import (
     AddPersonAlias,
     CreatePerson,
@@ -84,6 +87,67 @@ def _safe(text: str) -> bool:
     return not contains_injection_pattern(text) and not contains_secret_material(text)
 
 
+async def _supports(
+    uow: RepositoryUnitOfWork,
+    principal: Principal,
+    person: Person,
+    reference: UUID,
+    ceiling: Sensitivity,
+) -> bool:
+    """Whether a source supports this person or one of their People records."""
+    if reference in person.support_ids:
+        return True
+    return bool(
+        await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                person_id=person.id,
+                source_id=reference,
+                sensitivity_ceiling=ceiling,
+                kinds=[
+                    "identifier",
+                    "mention",
+                    "memory_link",
+                    "relationship",
+                    "interaction",
+                    "commitment",
+                ],
+                limit=1,
+            )
+        )
+    )
+
+
+async def _email_thread_id(
+    uow: RepositoryUnitOfWork, principal: Principal, source: PeopleSource
+) -> UUID | None:
+    """Email mode's cached conversation holding this exact message, if it still exists."""
+    source_key = hashlib.sha256(f"{source.account_id}:{source.thread_id}".encode()).hexdigest()
+    index = await uow.email.get(principal, "thread_source", source_key)
+    if index is None:
+        return None
+    row = await uow.email.get(principal, "thread", str(index.payload.get("thread_id", "")))
+    if row is None:
+        return None
+    thread = EmailThread.model_validate(row.payload)
+    if (
+        thread.account_id == source.account_id
+        and thread.provider_thread_id == source.thread_id
+        and any(message.id == source.message_id for message in thread.messages)
+    ):
+        return thread.id
+    return None
+
+
+class RetainedEmailReader(Protocol):
+    """The original text Veetbot kept when it read an owner's email (ADR-0126)."""
+
+    async def retained_message(
+        self, account_id: str, thread_id: str, message_id: str, *, offset: int = 0
+    ) -> RetainedEmailMessage | None: ...
+
+
 class PublicPeopleService:
     def __init__(
         self,
@@ -96,6 +160,7 @@ class PublicPeopleService:
         erasure: PeopleErasureService | None = None,
         legacy_linker: Callable[[Principal, int, str | None], Awaitable[LegacyPeopleLinkResult]]
         | None = None,
+        email_sources: Callable[[Principal], RetainedEmailReader] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -104,6 +169,7 @@ class PublicPeopleService:
         self._memory_for = memory_for
         self._erasure = erasure
         self._legacy_linker = legacy_linker
+        self._email_sources = email_sources
         self.imports = PeopleImportService(uow_factory, clock)
 
     async def link_existing(
@@ -968,31 +1034,11 @@ class PublicPeopleService:
         async with self._uow_factory() as uow:
             person = await uow.people.get(principal, person_id, ceiling=ceiling)
             source = await uow.people.get(principal, reference, ceiling=ceiling)
-            if not isinstance(person, Person) or not isinstance(source, PeopleSource):
-                raise NotFoundError("People evidence not found")
-            linked = reference in person.support_ids
-            if not linked:
-                linked = bool(
-                    await uow.people.query(
-                        PeopleQuery(
-                            tenant_id=principal.tenant_id,
-                            principal_id=principal.principal_id,
-                            person_id=person_id,
-                            source_id=reference,
-                            sensitivity_ceiling=ceiling,
-                            kinds=[
-                                "identifier",
-                                "mention",
-                                "memory_link",
-                                "relationship",
-                                "interaction",
-                                "commitment",
-                            ],
-                            limit=1,
-                        )
-                    )
-                )
-            if not linked:
+            if (
+                not isinstance(person, Person)
+                or not isinstance(source, PeopleSource)
+                or not await _supports(uow, principal, person, reference, ceiling)
+            ):
                 raise NotFoundError("People evidence not found")
             require_scope(
                 principal, "email.read" if source.source_kind == "email" else "session.read"
@@ -1012,24 +1058,11 @@ class PublicPeopleService:
                     content = event.payload.get("content")
                     if isinstance(content, str) and len(content) <= 16384:
                         owner_assertion = content
-            email_thread_id = None
-            if source.source_kind == "email":
-                source_key = hashlib.sha256(
-                    f"{source.account_id}:{source.thread_id}".encode()
-                ).hexdigest()
-                index = await uow.email.get(principal, "thread_source", source_key)
-                if index is not None:
-                    row = await uow.email.get(
-                        principal, "thread", str(index.payload.get("thread_id", ""))
-                    )
-                    if row is not None:
-                        thread = EmailThread.model_validate(row.payload)
-                        if (
-                            thread.account_id == source.account_id
-                            and thread.provider_thread_id == source.thread_id
-                            and any(message.id == source.message_id for message in thread.messages)
-                        ):
-                            email_thread_id = thread.id
+            email_thread_id = (
+                await _email_thread_id(uow, principal, source)
+                if source.source_kind == "email"
+                else None
+            )
             return PeopleEvidenceView(
                 reference=reference,
                 source_kind=source.source_kind,
@@ -1042,6 +1075,104 @@ class PublicPeopleService:
                 email_thread_id=email_thread_id,
                 owner_assertion=owner_assertion,
             )
+
+    async def history_email(
+        self, principal: Principal, source_ids: Sequence[UUID], *, ceiling: Sensitivity
+    ) -> HistoryEmailReference | None:
+        """The message behind an email history item, and Email mode's cached thread.
+
+        Only an owner with email access sees message identifiers (ADR-0126).
+        """
+        if "email.read" not in principal.scopes:
+            return None
+        ceiling = self._ceiling(ceiling)
+        async with self._uow_factory() as uow:
+            for source_id in source_ids:
+                source = await uow.people.get(principal, source_id, ceiling=ceiling)
+                if (
+                    isinstance(source, PeopleSource)
+                    and source.source_kind == "email"
+                    and source.account_id
+                    and source.thread_id
+                    and source.message_id
+                ):
+                    return HistoryEmailReference(
+                        account_id=source.account_id,
+                        message_id=source.message_id,
+                        thread_id=await _email_thread_id(uow, principal, source),
+                    )
+        return None
+
+    async def source_text(
+        self,
+        principal: Principal,
+        person_id: UUID,
+        reference: UUID,
+        *,
+        ceiling: Sensitivity,
+        offset: int = 0,
+        run_id: UUID | None = None,
+    ) -> PeopleSourceText:
+        """The retained original text of one email behind this person's history (ADR-0126).
+
+        It is read from the first-party read event Veetbot kept, not the Email
+        cache, so it outlasts the thirty-day body window until the owner deletes
+        the source or the session that fetched it.
+        """
+        require_scope(principal, "people.read")
+        ceiling = self._ceiling(ceiling)
+        async with self._uow_factory() as uow:
+            person = await uow.people.get(principal, person_id, ceiling=ceiling)
+            source = await uow.people.get(principal, reference, ceiling=ceiling)
+            if (
+                not isinstance(person, Person)
+                or not _safe(person.display_name)
+                or not isinstance(source, PeopleSource)
+                or source.source_kind != "email"
+                or not source.account_id
+                or not source.thread_id
+                or not source.message_id
+                or not await _supports(uow, principal, person, reference, ceiling)
+            ):
+                raise NotFoundError("People evidence not found")
+            require_scope(principal, "email.read")
+            thread_id = await _email_thread_id(uow, principal, source)
+        message = (
+            None
+            if self._email_sources is None
+            else await self._email_sources(principal).retained_message(
+                source.account_id, source.thread_id, source.message_id, offset=offset
+            )
+        )
+        if message is None:
+            raise NotFoundError("The original email text is no longer retained")
+        if run_id is not None:
+            async with self._uow_factory() as uow:
+                run = await uow.runs.get(run_id, principal)
+                await uow.events.append(
+                    NewEvent(
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        event_type="people.context.used",
+                        actor_type="memory",
+                        payload={"record_ids": [str(person_id), str(reference)]},
+                    )
+                )
+        return PeopleSourceText(
+            source_id=reference,
+            account_id=source.account_id,
+            message_id=source.message_id,
+            thread_id=thread_id,
+            sender=message.sender[:2000],
+            to=message.to,
+            cc=message.cc,
+            subject=message.subject,
+            sent_at=message.sent_at,
+            text=message.text,
+            offset=message.offset,
+            next_offset=message.next_offset,
+            complete=message.complete,
+        )
 
     async def identity_operation(
         self,

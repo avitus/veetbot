@@ -225,6 +225,25 @@ class InteractionParticipant(PeopleValue):
     role: Literal["sender", "recipient", "participant", "mentioned"]
 
 
+CORRESPONDENCE_SUMMARY_GENERATOR = "correspondence-summary@1"
+
+
+class InteractionSummaryProvenance(PeopleValue):
+    """Where an observed email exchange's generated summary came from (ADR-0126).
+
+    ``generated`` means the summary field carries the gist; ``retry`` and
+    ``abstained`` record invalid results; ``withheld`` means a related fact was
+    deleted, so the label stays and no summary is generated again.
+    """
+
+    state: Literal["generated", "retry", "abstained", "withheld"]
+    generator: str = Field(min_length=1, max_length=64)
+    source_id: UUID | None = None
+    passage_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    recorded_at: AwareDatetime
+
+
 class PeopleInteraction(PeopleEntity):
     kind: Literal["interaction"] = "interaction"
     superseded_by: UUID | None = None
@@ -248,6 +267,7 @@ class PeopleInteraction(PeopleEntity):
     precision: Literal["instant", "day", "month", "year", "unknown"] = "unknown"
     source_timezone: SourceTimezone = None
     participants: list[InteractionParticipant] = Field(min_length=1, max_length=64)
+    summary_provenance: InteractionSummaryProvenance | None = None
 
     @model_validator(mode="after")
     def interaction_consistent(self) -> PeopleInteraction:
@@ -264,6 +284,46 @@ class PeopleInteraction(PeopleEntity):
         if self.ended_at and (not self.occurred_at or self.ended_at < self.occurred_at):
             raise ValueError("interaction interval is reversed")
         return self
+
+
+def observed_email_label(direction: str) -> str:
+    """The fixed summary an observed email exchange carries without a gist (ADR-0121)."""
+    return "Sent email" if direction == "outgoing" else "Received email"
+
+
+def summarizable_exchange(record: PeopleInteraction) -> bool:
+    """Whether a generated correspondence summary may exist on this record (ADR-0126)."""
+    return (
+        record.channel == "email"
+        and record.interaction_kind == "exchange"
+        and record.attribution == "observed"
+        and record.direction in {"incoming", "outgoing"}
+    )
+
+
+def summary_pending(record: PeopleInteraction) -> bool:
+    """An observed exchange with no summary yet, or with one retry left."""
+    return (
+        summarizable_exchange(record)
+        and record.superseded_by is None
+        and (record.summary_provenance is None or record.summary_provenance.state == "retry")
+    )
+
+
+def withheld_summary(record: PeopleInteraction, at: datetime) -> PeopleInteraction:
+    """The same revision with its generated gist replaced by the observed label."""
+    prior = record.summary_provenance
+    return record.model_copy(
+        update={
+            "summary": observed_email_label(record.direction),
+            "summary_provenance": InteractionSummaryProvenance(
+                state="withheld",
+                generator=CORRESPONDENCE_SUMMARY_GENERATOR if prior is None else prior.generator,
+                source_id=None if prior is None else prior.source_id,
+                recorded_at=at,
+            ),
+        }
+    )
 
 
 class PeopleCommitment(PeopleEntity):
@@ -456,6 +516,8 @@ class PeopleQuery(PeopleValue):
     # ADR-0121 review queue: provisional, unpinned people with no attached
     # owner-confirmed or channel-observed identifier.
     needs_review: bool = False
+    # ADR-0126: observed email exchanges still waiting for a generated summary.
+    summary_pending: bool = False
 
     @model_validator(mode="after")
     def ordered_range(self) -> PeopleQuery:

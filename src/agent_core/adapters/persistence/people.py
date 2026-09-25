@@ -61,6 +61,9 @@ from agent_core.domain.people import (
     referenced_assignments,
     referenced_organizations,
     referenced_people,
+    summarizable_exchange,
+    summary_pending,
+    withheld_summary,
 )
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryStore
@@ -413,6 +416,10 @@ class InMemoryPeopleStore:
                 or record.interaction_kind != query.interaction_kind
             ):
                 continue
+            if query.summary_pending and (
+                not isinstance(record, PeopleInteraction) or not summary_pending(record)
+            ):
+                continue
             if (query.unknown_time == "only" and occurred is not None) or (
                 query.unknown_time == "exclude" and occurred is None
             ):
@@ -627,6 +634,47 @@ class InMemoryPeopleStore:
         self, principal: Principal, account_id: str, thread_id: str, message_ids: frozenset[str]
     ) -> int:
         return self.erase_email_source_locked(principal, account_id, thread_id, message_ids)
+
+    async def withhold_generated_summaries(
+        self, principal: Principal, interaction_ids: Sequence[UUID]
+    ) -> int:
+        now = self._clock.now()
+        owner_key = (principal.tenant_id, principal.principal_id)
+        changed = 0
+        for record_id in dict.fromkeys(interaction_ids):
+            key = (*owner_key, record_id)
+            versions = self._records.get(key)
+            if key in self._erased or not versions:
+                continue
+            head = versions[-1]
+            if (
+                not isinstance(head, PeopleInteraction)
+                or not summarizable_exchange(head)
+                or (head.summary_provenance and head.summary_provenance.state == "withheld")
+            ):
+                continue
+            # Every stored gist goes, so a historical read cannot recover it.
+            versions[:] = [
+                withheld_summary(row, now)
+                if isinstance(row, PeopleInteraction)
+                and row.summary_provenance
+                and row.summary_provenance.state == "generated"
+                else row
+                for row in versions
+            ]
+            latest = versions[-1]
+            assert isinstance(latest, PeopleInteraction)
+            versions.append(
+                withheld_summary(latest, now).model_copy(
+                    update={
+                        "revision": latest.revision + 1,
+                        "updated_at": max(now, latest.updated_at + timedelta(microseconds=1)),
+                    }
+                )
+            )
+            self._positions[owner_key] = self._positions.get(owner_key, 0) + 1
+            changed += 1
+        return changed
 
     def erase_email_source_locked(
         self, principal: Principal, account_id: str, thread_id: str, message_ids: frozenset[str]
@@ -1117,6 +1165,17 @@ class PostgresPeopleStore:
             statement = statement.where(
                 payload["interaction_kind"].astext == query.interaction_kind
             )
+        if query.summary_pending:
+            state = payload["summary_provenance"]["state"].astext
+            statement = statement.where(
+                PeopleRevisionRow.kind == "interaction",
+                payload["channel"].astext == "email",
+                payload["interaction_kind"].astext == "exchange",
+                payload["attribution"].astext == "observed",
+                payload["direction"].astext.in_(("incoming", "outgoing")),
+                payload["superseded_by"].astext.is_(None),
+                or_(state.is_(None), state == "retry"),
+            )
         if query.unknown_time != "include":
             statement = statement.where(known if query.unknown_time == "exclude" else ~known)
         if query.after and query.sort != "recent":
@@ -1552,6 +1611,69 @@ class PostgresPeopleStore:
             )
         ids = list((await self._session.execute(statement.distinct())).scalars())
         return await self._erase(principal, ids, preserve_independent=True)
+
+    async def withhold_generated_summaries(
+        self, principal: Principal, interaction_ids: Sequence[UUID]
+    ) -> int:
+        now = self._clock.now()
+        changed = 0
+        async with self.lock(principal):
+            for record_id in dict.fromkeys(interaction_ids):
+                head = await self._session.scalar(
+                    select(PeopleHeadRow.revision).where(
+                        PeopleHeadRow.tenant_id == principal.tenant_id,
+                        PeopleHeadRow.principal_id == principal.principal_id,
+                        PeopleHeadRow.id == record_id,
+                        PeopleHeadRow.kind == "interaction",
+                        ~PeopleHeadRow.erased,
+                    )
+                )
+                if head is None:
+                    continue
+                rows = (
+                    await self._session.scalars(
+                        select(PeopleRevisionRow)
+                        .where(
+                            PeopleRevisionRow.tenant_id == principal.tenant_id,
+                            PeopleRevisionRow.principal_id == principal.principal_id,
+                            PeopleRevisionRow.entity_id == record_id,
+                        )
+                        .order_by(PeopleRevisionRow.revision)
+                    )
+                ).all()
+                current = next((row for row in rows if row.revision == head), None)
+                if current is None:
+                    continue
+                latest = PEOPLE_RECORD.validate_python(current.payload)
+                if (
+                    not isinstance(latest, PeopleInteraction)
+                    or not summarizable_exchange(latest)
+                    or (latest.summary_provenance and latest.summary_provenance.state == "withheld")
+                ):
+                    continue
+                # Every stored gist goes, so a historical read cannot recover it.
+                for row in rows:
+                    value = PEOPLE_RECORD.validate_python(row.payload)
+                    if (
+                        isinstance(value, PeopleInteraction)
+                        and value.summary_provenance
+                        and value.summary_provenance.state == "generated"
+                    ):
+                        row.payload = withheld_summary(value, now).model_dump(mode="json")
+                await self._session.flush()
+                latest = PEOPLE_RECORD.validate_python(current.payload)
+                assert isinstance(latest, PeopleInteraction)
+                await self.put(
+                    withheld_summary(latest, now).model_copy(
+                        update={
+                            "revision": latest.revision + 1,
+                            "updated_at": max(now, latest.updated_at + timedelta(microseconds=1)),
+                        }
+                    ),
+                    expected_revision=latest.revision,
+                )
+                changed += 1
+        return changed
 
     async def erase_session(self, principal: Principal, session_id: UUID) -> int:
         ids = list(

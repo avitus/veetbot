@@ -8,6 +8,7 @@ from typing import Any
 from agent_core.application.authorization import require_scope
 from agent_core.application.people import PublicPeopleService, _safe
 from agent_core.application.people_context import PeopleContextService
+from agent_core.domain import people_tools_v1
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import RecallQuery, Sensitivity
 from agent_core.domain.messages import TextPart
@@ -29,10 +30,17 @@ from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 
-def _spec(name: str, description: str, schema: dict[str, Any], output: dict[str, Any]) -> ToolSpec:
+def _spec(
+    name: str,
+    description: str,
+    schema: dict[str, Any],
+    output: dict[str, Any],
+    *,
+    version: str = "1.0.0",
+) -> ToolSpec:
     return ToolSpec(
         name=name,
-        version="1.0.0",
+        version=version,
         description=description,
         input_schema={key: value for key, value in schema.items() if key != "title"},
         output_schema=output,
@@ -148,9 +156,11 @@ class PeopleContextTool:
 class PeopleHistoryTool:
     spec = _spec(
         "people.history",
-        "Page a person's attributed interactions.",
+        "Page a person's attributed interactions. Pass an email item's source_id to "
+        "read that email's original text.",
         PeopleHistoryArgs.model_json_schema(),
         PeopleHistoryResult.model_json_schema(),
+        version="1.1.0",
     )
 
     def __init__(self, service: PublicPeopleService) -> None:
@@ -158,6 +168,34 @@ class PeopleHistoryTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         request = PeopleHistoryArgs.model_validate(arguments)
+        if request.source_id is not None:
+            # Original mail is untrusted evidence, never memory (ADR-0126).
+            source = await self._service.source_text(
+                context.principal,
+                request.person_id,
+                request.source_id,
+                ceiling=Sensitivity.SENSITIVE,
+                offset=request.offset,
+                run_id=context.run_id,
+            )
+            result = PeopleHistoryResult(items=[], next_cursor=None, coverage="", source=source)
+            return ToolResult(
+                ok=True,
+                content=[TextPart(text=result.model_dump_json())],
+                structured=result.model_dump(mode="json"),
+                output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            )
+        result = await self._history(request, context, email=True)
+        return ToolResult(
+            ok=True,
+            content=[TextPart(text=result.model_dump_json())],
+            structured=result.model_dump(mode="json"),
+            output_trust=TrustLevel.MEMORY,
+        )
+
+    async def _history(
+        self, request: PeopleHistoryArgs, context: ToolExecutionContext, *, email: bool
+    ) -> PeopleHistoryResult:
         result = PeopleHistoryResult(items=[], next_cursor=request.cursor, coverage="")
         for _ in range(request.limit):
             page = await self._service.section(
@@ -165,7 +203,9 @@ class PeopleHistoryTool:
                 request.person_id,
                 PeopleSectionQuery(
                     section="history",
-                    **request.model_dump(exclude={"person_id", "limit", "cursor"}),
+                    **request.model_dump(
+                        exclude={"person_id", "limit", "cursor", "source_id", "offset"}
+                    ),
                     limit=1,
                     cursor=result.next_cursor,
                 ),
@@ -189,6 +229,11 @@ class PeopleHistoryTool:
                 details_truncated=(
                     len(row.summary) > 400 or len(row.participants) > 6 or len(row.support_ids) > 4
                 ),
+                email=await self._service.history_email(
+                    context.principal, row.support_ids, ceiling=Sensitivity.SENSITIVE
+                )
+                if email and row.channel == "email"
+                else None,
             )
             proposed = PeopleHistoryResult(
                 items=[*result.items, item], next_cursor=page.next_cursor, coverage=page.coverage
@@ -198,10 +243,30 @@ class PeopleHistoryTool:
             result = proposed
             if result.next_cursor is None:
                 break
-        payload = result.model_dump(mode="json")
+        return result
+
+
+class LegacyPeopleHistoryTool(PeopleHistoryTool):
+    """The 1.0.0 contract for chats pinned before ADR-0126; its spec is unchanged."""
+
+    spec = _spec(
+        "people.history",
+        "Page a person's attributed interactions.",
+        people_tools_v1.PeopleHistoryArgs.model_json_schema(),
+        people_tools_v1.PeopleHistoryResult.model_json_schema(),
+    )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        request = people_tools_v1.PeopleHistoryArgs.model_validate(arguments)
+        result = await self._history(
+            PeopleHistoryArgs.model_validate(request.model_dump()), context, email=False
+        )
+        legacy = people_tools_v1.PeopleHistoryResult.model_validate(
+            result.model_dump(exclude={"source": True, "items": {"__all__": {"email"}}})
+        )
         return ToolResult(
             ok=True,
-            content=[TextPart(text=result.model_dump_json())],
-            structured=payload,
+            content=[TextPart(text=legacy.model_dump_json())],
+            structured=legacy.model_dump(mode="json"),
             output_trust=TrustLevel.MEMORY,
         )

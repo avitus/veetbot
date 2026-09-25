@@ -6,20 +6,33 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.email import EmailRecord
+from agent_core.domain.correspondence import (
+    RETAINED_TEXT_WINDOW,
+    CorrespondenceSummaryWork,
+    EmailCorrespondenceSummary,
+    RetainedEmailMessage,
+    header_text,
+    summary_text,
+)
+from agent_core.domain.email import EMAIL_HISTORY_DAYS, EmailRecord
 from agent_core.domain.email_people import EmailPeopleFact
 from agent_core.domain.email_people_evidence import EmailPeopleEvidence
-from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
+from agent_core.domain.email_semantics import (
+    EmailSemanticFact,
+    EmailSemanticSource,
+    semantic_source_key,
+)
 from agent_core.domain.errors import (
     ConflictError,
     NotFoundError,
     ToolTrustRejectedError,
     ToolValidationError,
 )
-from agent_core.domain.events import EventEnvelope
+from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     MemoryAuthority,
     MemoryCandidate,
@@ -29,6 +42,15 @@ from agent_core.domain.memory import (
     Polarity,
     Portability,
     Sensitivity,
+)
+from agent_core.domain.people import (
+    CORRESPONDENCE_SUMMARY_GENERATOR,
+    InteractionSummaryProvenance,
+    PeopleInteraction,
+    PeopleQuery,
+    PeopleSource,
+    observed_email_label,
+    summary_pending,
 )
 from agent_core.domain.people_extraction import PeopleClaim
 from agent_core.domain.persistence import WorkerLease
@@ -168,6 +190,312 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 uow, self._principal, source, header, event, self._clock.now()
             )
             return True
+
+    async def next_correspondence_summaries(
+        self, account_ids: Sequence[str], *, limit: int
+    ) -> list[CorrespondenceSummaryWork]:
+        """Exchanges awaiting a summary, newest first, with verified passages (ADR-0126).
+
+        An exchange whose every source in these accounts became bulk mail or no
+        longer verifies abstains here for good, so later refreshes skip it.
+        """
+        if not self.enabled or limit < 1:
+            return []
+        accounts = set(account_ids)
+        now = self._clock.now()
+        query = PeopleQuery(
+            tenant_id=self._principal.tenant_id,
+            principal_id=self._principal.principal_id,
+            kinds=["interaction"],
+            summary_pending=True,
+            sort="history",
+            since=now - timedelta(days=EMAIL_HISTORY_DAYS),
+            sensitivity_ceiling=Sensitivity.RESTRICTED,
+            limit=100,
+        )
+        work: list[CorrespondenceSummaryWork] = []
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
+            for _ in range(10):
+                rows = await uow.people.query(query)
+                for row in rows[:100]:
+                    if len(work) == limit:
+                        return work
+                    if isinstance(row, PeopleInteraction) and summary_pending(row):
+                        item = await self._summary_work(uow, row, accounts)
+                        if item is not None:
+                            work.append(item)
+                if len(rows) <= 100:
+                    break
+                last = rows[99]
+                query = query.model_copy(
+                    update={
+                        "after": last.id,
+                        "after_event_at": last.occurred_at
+                        if isinstance(last, PeopleInteraction)
+                        else None,
+                    }
+                )
+        return work
+
+    async def _summary_work(
+        self, uow: RepositoryUnitOfWork, row: PeopleInteraction, accounts: set[str]
+    ) -> CorrespondenceSummaryWork | None:
+        examined = unavailable = 0
+        for source_id in row.support_ids:
+            source = await uow.people.get(
+                self._principal, source_id, ceiling=Sensitivity.RESTRICTED
+            )
+            if not isinstance(source, PeopleSource) or source.source_kind != "email":
+                continue
+            examined += 1
+            if (
+                source.account_id not in accounts
+                or not source.thread_id
+                or not source.message_id
+                or await uow.people.source_suppressed(self._principal, source.id)
+            ):
+                continue
+            if await self.bulk_source(uow, source.account_id, source.thread_id):
+                unavailable += 1
+                continue
+            record = await uow.email.get(
+                self._principal,
+                "semantic_source",
+                semantic_source_key(source.account_id, source.thread_id, source.message_id),
+            )
+            try:
+                if record is None:
+                    raise ToolTrustRejectedError("email source is not retained")
+                passages = self._retained_passages(record)
+                offsets = sorted(int(key) for key in passages if str(key).isdigit())
+                if not offsets:
+                    raise ToolTrustRejectedError("email source has no retained passage")
+                verified, header, _event = await self._verify_passage(
+                    uow, self._pending_source(record, offsets[0]), passages
+                )
+            except (ToolTrustRejectedError, ConflictError, NotFoundError):
+                unavailable += 1
+                continue
+            assert row.direction in {"incoming", "outgoing"}
+            return CorrespondenceSummaryWork(
+                interaction_id=row.id,
+                source_id=source.id,
+                account_id=source.account_id,
+                provider_thread_id=source.thread_id,
+                message_id=source.message_id,
+                direction="outgoing" if row.direction == "outgoing" else "incoming",
+                sender=verified.sender,
+                to=header_text(header.get("to")),
+                cc=header_text(header.get("cc")),
+                subject=header_text(header.get("subject"), limit=998) or "",
+                sent_at=verified.sent_at,
+                passage=verified.body,
+                passage_sha256=hashlib.sha256(verified.body.encode()).hexdigest(),
+                retrying=row.summary_provenance is not None
+                and row.summary_provenance.state == "retry",
+            )
+        if examined and unavailable == examined:
+            # No account can ever supply this passage again: abstain for good.
+            await self._put_summary(
+                uow,
+                row,
+                summary=observed_email_label(row.direction),
+                provenance=InteractionSummaryProvenance(
+                    state="abstained",
+                    generator=CORRESPONDENCE_SUMMARY_GENERATOR,
+                    recorded_at=self._clock.now(),
+                ),
+            )
+        return None
+
+    async def record_correspondence_summary(
+        self,
+        work: CorrespondenceSummaryWork,
+        result: EmailCorrespondenceSummary | None,
+        *,
+        model: str,
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> str:
+        """Store a valid gist, or count an invalid one: one retry, then abstain."""
+        if not self.enabled:
+            return "skipped"
+        text = summary_text(result, work)
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
+            current = await uow.people.get(
+                self._principal, work.interaction_id, ceiling=Sensitivity.RESTRICTED
+            )
+            if (
+                not isinstance(current, PeopleInteraction)
+                or not summary_pending(current)
+                or work.source_id not in current.support_ids
+                or await uow.people.source_suppressed(self._principal, work.source_id)
+                or await self.bulk_source(uow, work.account_id, work.provider_thread_id)
+            ):
+                return "skipped"
+            record = await uow.email.get(
+                self._principal,
+                "semantic_source",
+                semantic_source_key(work.account_id, work.provider_thread_id, work.message_id),
+            )
+            passages = None if record is None else record.payload.get("passages")
+            if (
+                record is None
+                or record.payload.get("excluded")
+                or not isinstance(passages, dict)
+                or work.passage_sha256 not in passages.values()
+            ):
+                return "skipped"
+            label = observed_email_label(current.direction)
+            retried = (
+                current.summary_provenance is not None
+                and current.summary_provenance.state == "retry"
+            )
+            state: Literal["generated", "retry", "abstained"] = (
+                "generated" if text else "abstained" if retried else "retry"
+            )
+            if run is not None:
+                # The lease fences a worker that no longer owns this refresh.
+                await uow.events.append(
+                    NewEvent(
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        event_type="email.correspondence.summarized",
+                        actor_type="runtime",
+                        payload={
+                            "interaction_id": str(current.id),
+                            "source_id": str(work.source_id),
+                            "state": state,
+                            "generator": CORRESPONDENCE_SUMMARY_GENERATOR,
+                        },
+                    ),
+                    lease=lease,
+                )
+            await self._put_summary(
+                uow,
+                current,
+                summary=f"{label}: {text}" if text else label,
+                provenance=InteractionSummaryProvenance(
+                    state=state,
+                    generator=CORRESPONDENCE_SUMMARY_GENERATOR,
+                    source_id=work.source_id,
+                    passage_sha256=work.passage_sha256,
+                    model=model,
+                    recorded_at=self._clock.now(),
+                ),
+            )
+            return state
+
+    async def _put_summary(
+        self,
+        uow: RepositoryUnitOfWork,
+        row: PeopleInteraction,
+        *,
+        summary: str,
+        provenance: InteractionSummaryProvenance,
+    ) -> None:
+        now = self._clock.now()
+        await uow.people.put(
+            row.model_copy(
+                update={
+                    "summary": summary,
+                    "summary_provenance": provenance,
+                    "revision": row.revision + 1,
+                    "updated_at": max(now, row.updated_at + timedelta(microseconds=1)),
+                }
+            ),
+            expected_revision=row.revision,
+        )
+
+    async def retained_message(
+        self, account_id: str, thread_id: str, message_id: str, *, offset: int = 0
+    ) -> RetainedEmailMessage | None:
+        """A bounded window of the original text Veetbot kept when it read the mail.
+
+        Each passage is verified against its first-party read event and stored
+        digest. The window stops at a gap between retained passages. Excluded,
+        bulk, suppressed or unverifiable sources return nothing.
+        """
+        if not self.enabled or offset < 0:
+            return None
+        async with self._uow_factory() as uow:
+            record = await uow.email.get(
+                self._principal,
+                "semantic_source",
+                semantic_source_key(account_id, thread_id, message_id),
+            )
+            try:
+                if record is None or await self.bulk_source(uow, account_id, thread_id):
+                    return None
+                passages = self._retained_passages(record)
+                offsets = sorted(int(key) for key in passages if str(key).isdigit())
+                parts: list[str] = []
+                first: tuple[EmailSemanticSource, dict[str, object]] | None = None
+                ends_message = exhausted = False
+                expected = offsets[0] if offsets else 0
+                for index, byte_offset in enumerate(offsets):
+                    if byte_offset != expected:
+                        break
+                    source, header, _event = await self._verify_passage(
+                        uow, self._pending_source(record, byte_offset), passages
+                    )
+                    if await uow.people.source_suppressed(
+                        self._principal, email_source_id(self._principal, source)
+                    ):
+                        return None
+                    first = first or (source, header)
+                    parts.append(source.body)
+                    expected = byte_offset + len(source.body.encode())
+                    ends_message = await self._passage_ends_message(uow, source, header)
+                    exhausted = index == len(offsets) - 1
+                    if sum(len(part) for part in parts) > offset + RETAINED_TEXT_WINDOW:
+                        break
+            except (ToolTrustRejectedError, ConflictError, NotFoundError):
+                return None
+        text = "".join(parts)
+        if first is None or offset >= len(text):
+            return None
+        window = text[offset : offset + RETAINED_TEXT_WINDOW]
+        end = offset + len(window)
+        source, header = first
+        return RetainedEmailMessage(
+            account_id=account_id,
+            provider_thread_id=thread_id,
+            message_id=message_id,
+            sender=source.sender,
+            to=header_text(header.get("to")),
+            cc=header_text(header.get("cc")),
+            subject=header_text(header.get("subject"), limit=998) or "",
+            sent_at=source.sent_at,
+            text=window,
+            offset=offset,
+            next_offset=end if end < len(text) else None,
+            # Complete only when the retained text runs from the first byte to the end.
+            complete=exhausted
+            and ends_message
+            and end == len(text)
+            and bool(offsets)
+            and offsets[0] == 0,
+        )
+
+    async def _passage_ends_message(
+        self, uow: RepositoryUnitOfWork, source: EmailSemanticSource, header: dict[str, object]
+    ) -> bool:
+        """Whether this verified passage is the last part of the message body."""
+        if not source.tool_name.endswith(".get_message_body"):
+            return header.get("body_complete") is True
+        document, _event = await self._read_document(
+            uow, source, source.source_event_sequence, source.tool_name
+        )
+        return document.get("complete") is True
 
     def _retained_passages(self, record: EmailRecord) -> dict[str, object]:
         if (
