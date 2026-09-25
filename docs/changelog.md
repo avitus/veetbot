@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — Chat offers every tool, not just the first thirty
+
+- Chat sent the model at most thirty tool definitions and silently dropped the
+  rest: all sixteen Gmail tools, and the next built-in tool would have dropped
+  `mcp.bland_read.list_calls` again. ADR-0123: tools that do not fit are listed
+  in a short deferred tool index and called through `tool.call`, under their
+  own names, policy and approvals. Nothing is dropped silently any more; a
+  tool that fits nowhere is recorded on the plan.
+- Discovered tools now rank reads first, not by name, so looking things up
+  keeps its full definitions. The six schedule and unsubscribe management
+  tools move to the index.
+- With production's flags every one of the forty-six tools is offered: thirty
+  definitions at 5,908 estimated tokens plus a seventeen-entry index at 1,013.
+  New chats get it; existing chats keep their roster.
+
 ## 2026-09-23 — Files reach you on the reply, and replies can be copied
 
 - A file the agent made never reached the owner: `artifact.export` stored it,

@@ -382,7 +382,12 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
-from agent_core.domain.agents import AgentSpec, Principal, content_addressed_agent_version
+from agent_core.domain.agents import (
+    DEFERRED_TOOLS_METADATA_KEY,
+    AgentSpec,
+    Principal,
+    content_addressed_agent_version,
+)
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
@@ -580,7 +585,11 @@ from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
 from agent_core.tools.schedule_lifecycle import (
+    SCHEDULE_CANCEL_TOOL_NAME,
     SCHEDULE_LIFECYCLE_TOOL_NAMES,
+    SCHEDULE_PAUSE_TOOL_NAME,
+    SCHEDULE_RESUME_TOOL_NAME,
+    SCHEDULE_UPDATE_TOOL_NAME,
     LegacyScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -594,6 +603,7 @@ from agent_core.tools.skill_load import (
     SkillLoadTool,
 )
 from agent_core.tools.skill_manage import SkillManageTool
+from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME, ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
@@ -2322,6 +2332,7 @@ async def _compose(
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
+    registry.register(ToolCallTool())
     registry.register(CurrentTimeTool(clock))
     registry.register(WorkspaceReadTextTool())
     registry.register(WorkspaceWriteTextTool())
@@ -4698,6 +4709,7 @@ async def build(
         "artifact.export",
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
+        TOOL_CALL_TOOL_NAME,
         "memory.remember",
         "memory.search",
         "memory.recall_episodes",
@@ -4735,6 +4747,21 @@ async def build(
             else []
         ),
     ]
+    # ADR-0123: management tools that change or clean up existing state are
+    # never the first step of a request, so they are offered through the
+    # deferred tool index and leave their definition slots to other tools.
+    default_deferred_tools = [
+        name
+        for name in (
+            SCHEDULE_UPDATE_TOOL_NAME,
+            SCHEDULE_PAUSE_TOOL_NAME,
+            SCHEDULE_RESUME_TOOL_NAME,
+            SCHEDULE_CANCEL_TOOL_NAME,
+            SUBSCRIPTIONS_TOOL_NAME,
+            UNSUBSCRIBE_TOOL_NAME,
+        )
+        if name in default_enabled_tools
+    ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
         version=(
@@ -4749,6 +4776,11 @@ async def build(
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits or _run_limits_from_defaults(run_defaults),
+        metadata=(
+            {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
+            if enabled_tools is None and default_deferred_tools
+            else {}
+        ),
     )
     if storage == "postgres":
         agent = agent.model_copy(

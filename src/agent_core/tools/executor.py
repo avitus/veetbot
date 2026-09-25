@@ -88,6 +88,7 @@ from agent_core.tools.delegate_run import DELEGATE_RUN_TOOL_NAME
 from agent_core.tools.messages import message_for
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME
 from agent_core.tools.skill_manage import SKILL_MANAGE_TOOL_NAME
+from agent_core.tools.tool_call import TOOL_CALL_INPUT_SCHEMA, TOOL_CALL_TOOL_NAME
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
 logger = logging.getLogger(__name__)
@@ -207,9 +208,16 @@ def _idempotency_key(
 
 
 def _outcome_item(
-    call_id: str, outcome: ToolOutcome, trust: TrustLevel, external_text: str | None = None
+    call_id: str,
+    outcome: ToolOutcome,
+    trust: TrustLevel,
+    external_text: str | None = None,
+    *,
+    detail_text: str | None = None,
 ) -> ToolResultItem:
     content: list[ContentPart] = [TextPart(text=outcome.model_dump_json())]
+    if detail_text is not None:
+        content.append(TextPart(text=detail_text))
     if external_text is not None:
         content.append(TextPart(text=external_text))
         trust = TrustLevel.EXTERNAL_UNTRUSTED
@@ -218,6 +226,43 @@ def _outcome_item(
         content=content,
         is_error=outcome.status is not ToolOutcomeStatus.SUCCEEDED,
         trust=trust,
+    )
+
+
+def _deferred_target(call: ToolCallItem, checkpoint: RunCheckpoint) -> ToolCallItem | str:
+    """Unwrap a tool.call into the pinned tool it names, or return a refusal reason.
+
+    The unwrapped call keeps the model's call id, so its events, approval and
+    result pair with the tool.call the provider replays (ADR-0123).
+    """
+
+    try:
+        wrapper, _rendered, _hash = validate_and_normalize(call.arguments, TOOL_CALL_INPUT_SCHEMA)
+    except ToolValidationError:
+        return "tool.arguments_invalid"
+    name = wrapper["name"]
+    pinned = checkpoint.pinned_tool_specs.get(name)
+    if pinned is None or pinned.kind is ToolKind.CONTROL:
+        return "tool.not_found.not_offered"
+    arguments = wrapper.get("arguments", {})
+    return call.model_copy(
+        update={
+            "name": name,
+            "arguments": arguments,
+            "raw_arguments": json.dumps(
+                arguments, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ),
+            "parse_error": None,
+        },
+        deep=True,
+    )
+
+
+def _unwraps_deferred_call(call: ToolCallItem, agent: AgentSpec) -> bool:
+    return (
+        call.name == TOOL_CALL_TOOL_NAME
+        and call.parse_error is None
+        and TOOL_CALL_TOOL_NAME in agent.enabled_tools
     )
 
 
@@ -492,6 +537,21 @@ class ToolPipeline:
         parallel_group: UUID | None,
     ) -> ToolResultItem:
         progress: list[int] = []
+        through_index = False
+        if _unwraps_deferred_call(call, agent):
+            target = _deferred_target(call, checkpoint)
+            if isinstance(target, str):
+                return await self._refusal(
+                    run,
+                    call,
+                    target,
+                    ToolOutcomeStatus.FAILED
+                    if target == "tool.arguments_invalid"
+                    else ToolOutcomeStatus.DENIED,
+                    lease,
+                )
+            call = target
+            through_index = True
         try:
             tool = self._resolve_pinned_tool(checkpoint, call.name, principal)
         except NotFoundError:
@@ -538,8 +598,16 @@ class ToolPipeline:
                 call.arguments, tool.spec.input_schema
             )
         except ToolValidationError:
+            # A deferred tool's schema was never sent to the provider, so the
+            # refusal carries it; the model retries with valid arguments.
             return await self._refusal(
-                run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED, lease
+                run,
+                call,
+                "tool.arguments_invalid",
+                ToolOutcomeStatus.FAILED,
+                lease,
+                input_schema=tool.spec.input_schema if through_index else None,
+                input_schema_untrusted=tool.spec.source is not ToolSource.BUILTIN,
             )
         progress.append(5)
 
@@ -1700,7 +1768,13 @@ class ToolPipeline:
             SideEffectClass.NETWORK_READ,
         }
         enabled_names: frozenset[str]
-        for call in calls:
+        for wrapped in calls:
+            call = wrapped
+            if _unwraps_deferred_call(wrapped, agent):
+                target = _deferred_target(wrapped, checkpoint)
+                if isinstance(target, str):
+                    return False
+                call = target
             try:
                 tool = self._resolve_pinned_tool(checkpoint, call.name, principal)
             except NotFoundError:
@@ -1989,6 +2063,9 @@ class ToolPipeline:
         status: ToolOutcomeStatus,
         lease: WorkerLease | None,
         message: str | None = None,
+        *,
+        input_schema: Mapping[str, Any] | None = None,
+        input_schema_untrusted: bool = False,
     ) -> ToolResultItem:
         outcome = ToolOutcome(
             status=status,
@@ -2001,7 +2078,19 @@ class ToolPipeline:
         event_type = (
             "tool.call.failed" if status is ToolOutcomeStatus.FAILED else "tool.call.denied"
         )
-        result_item = _outcome_item(call.call_id, outcome, TrustLevel.INTERNAL_TOOL)
+        schema_text = (
+            None
+            if input_schema is None
+            else "Input schema: "
+            + json.dumps(input_schema, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        )
+        result_item = _outcome_item(
+            call.call_id,
+            outcome,
+            TrustLevel.INTERNAL_TOOL,
+            schema_text if input_schema_untrusted else None,
+            detail_text=None if input_schema_untrusted else schema_text,
+        )
         async with self._uow_factory() as uow:
             await self._event_in(
                 uow,

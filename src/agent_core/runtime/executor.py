@@ -634,8 +634,12 @@ class RunExecutor:
         *,
         restored: bool,
     ) -> None:
-        planned_versions = {spec.name: spec.version for spec in context_plan.tool_specs}
-        planned_specs = {spec.name: spec.model_copy(deep=True) for spec in context_plan.tool_specs}
+        # Deferred tools are pinned like defined ones: the run may call them
+        # through tool.call, and a resume must find exactly the same set (ADR-0123).
+        pinned_specs = context_plan.pinned_tool_specs
+        planned_names = [spec.name for spec in pinned_specs]
+        planned_versions = {spec.name: spec.version for spec in pinned_specs}
+        planned_specs = {spec.name: spec.model_copy(deep=True) for spec in pinned_specs}
         pins_are_persisted = checkpoint_state.tool_pins_initialized or bool(
             checkpoint_state.pinned_tool_names
             or checkpoint_state.pinned_tool_versions
@@ -643,7 +647,7 @@ class RunExecutor:
         )
         if restored and pins_are_persisted:
             if (
-                checkpoint_state.pinned_tool_names != list(context_plan.tool_names)
+                checkpoint_state.pinned_tool_names != planned_names
                 or checkpoint_state.pinned_tool_versions != planned_versions
                 or checkpoint_state.pinned_tool_specs != planned_specs
             ):
@@ -658,7 +662,7 @@ class RunExecutor:
                 "a restored run has pending calls without persisted tool pins",
                 reason="tool_pin_mismatch",
             )
-        checkpoint_state.pinned_tool_names = list(context_plan.tool_names)
+        checkpoint_state.pinned_tool_names = planned_names
         checkpoint_state.pinned_tool_versions = planned_versions
         checkpoint_state.pinned_tool_specs = planned_specs
         checkpoint_state.tool_pins_initialized = True

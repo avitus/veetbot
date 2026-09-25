@@ -125,7 +125,7 @@ async def test_prefix_row_stable() -> None:
 
 async def test_budget_capped() -> None:
     """An over-cap persona fails session open naming the class, and the
-    shipped prefix ceiling is the documented 17,000."""
+    shipped prefix ceiling is the documented 22,000."""
 
     planner, factory = await _harness()
     async with factory() as uow:
@@ -149,8 +149,9 @@ async def test_budget_capped() -> None:
     prefix = config["prefix"]
     classes = config["classes"]
     assert isinstance(prefix, dict) and isinstance(classes, dict)
-    # ADR-0105 added the 3,000 tokens it gave the tool class to this ceiling.
-    assert prefix["ceiling_tokens"] == 20000
+    # ADR-0105 added the 3,000 tokens it gave the tool class to this ceiling,
+    # and ADR-0123 the 2,000 of the deferred tool index.
+    assert prefix["ceiling_tokens"] == 22000
     assert classes["persona"] == {"region": "A", "max_items": 30, "max_tokens": 2000}
 
 

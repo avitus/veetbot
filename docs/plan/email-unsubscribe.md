@@ -365,7 +365,7 @@ the arguments an approval of the destination.
 **Classification.** `IDEMPOTENT` is the honest class and not a convenience:
 the request is a constant, and sending it twice leaves the recipient exactly
 as unsubscribed as sending it once. Recovery may therefore re-execute
-(tool-system.md:664-673), which matters because an unsubscribe has no
+(tool-system.md:665-674), which matters because an unsubscribe has no
 read-back that could reconcile an unknown outcome. Per-target outcomes are
 persisted as each completes, so a re-execution skips targets already
 accepted rather than dialling them again.

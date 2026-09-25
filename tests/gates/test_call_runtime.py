@@ -113,10 +113,13 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
 
     Production runs People, Email mode, email unsubscribe, scheduling and web
     together. Configured tools take their slots first and discovered tools fill
-    the rest of the thirty in name order, so the item cap decides whether
-    calling reaches the model at all. These settings enable every flag
-    production enables that changes the default roster; activating another one
-    in production adds it here first (ADR-0124).
+    the rest of the thirty, reads first. What does not fit is offered through
+    the deferred tool index rather than dropped (ADR-0123), so the reads that
+    find a call keep their definitions and starting one is always offered.
+    These settings enable every flag production enables that changes the
+    default roster; activating another one in production adds it here first
+    (ADR-0124). The two-account production roster is gated in
+    `test_deferred_tools_adr0123.py`.
     """
     configuration = call_configuration()
     scripts = {
@@ -182,9 +185,7 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
 
     assert terminal.status is RunStatus.COMPLETED
     assert plan is not None
-    missing = {
-        "mcp.bland_read.list_calls",
-        "mcp.bland_read.get_call",
-        "mcp.bland_call.start_call",
-    } - set(plan.tool_names)
+    missing = {"mcp.bland_read.list_calls", "mcp.bland_read.get_call"} - set(plan.tool_names)
     assert not missing, missing
+    assert "mcp.bland_call.start_call" in {*plan.tool_names, *plan.deferred_tool_names}
+    assert plan.skipped_tool_names == ()

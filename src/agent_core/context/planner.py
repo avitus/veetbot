@@ -11,8 +11,13 @@ from weakref import WeakValueDictionary
 
 from agent_core.context.budget import ContextBudgetAllocator
 from agent_core.context.estimator import canonical_json_bytes
-from agent_core.context.rendering import build_prefix, prefix_bytes
-from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.context.rendering import (
+    build_prefix,
+    deferred_index_items,
+    envelope_items,
+    prefix_bytes,
+)
+from agent_core.domain.agents import DEFERRED_TOOLS_METADATA_KEY, AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import (
     ConflictError,
@@ -25,6 +30,7 @@ from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.persona import render_persona
+from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunKind
 from agent_core.domain.sessions import (
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
@@ -33,7 +39,7 @@ from agent_core.domain.sessions import (
     Session,
     project_scope,
 )
-from agent_core.domain.tools import ToolSpec
+from agent_core.domain.tools import ToolKind, ToolSpec
 from agent_core.memory.profiles import SnapshotProfile, SnapshotProfiles
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
@@ -42,12 +48,20 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@11"
+BUILDER_VERSION = "context-builder@12"
+# Plans from these builders carry no deferred tools and render the same bytes,
+# so they stay current: re-planning them would change no prefix, but it would
+# fail a run parked on an approval if its selection moved (ADR-0123).
+_EQUIVALENT_EARLIER_BUILDERS = frozenset({"context-builder@11"})
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
 _SKILL_LOAD_TOOL_NAME = "skill.load"
 _SKILL_REVIEW_RUN_KIND = "skill_review"
+_TOOL_CALL_TOOL_NAME = "tool.call"
+_READ_SIDE_EFFECTS = frozenset(
+    {SideEffectClass.NONE, SideEffectClass.WORKSPACE_READ, SideEffectClass.NETWORK_READ}
+)
 
 type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
 type DeviceToolAttach = Callable[[UUID, Principal], Awaitable[None]]
@@ -57,6 +71,23 @@ def _authority_scope_hashes(principal: Principal) -> tuple[str, ...]:
     """Identify scope grants without copying scope names into plan events."""
     return tuple(
         sorted(hashlib.sha256(scope.encode("utf-8")).hexdigest() for scope in principal.scopes)
+    )
+
+
+def _builder_is_current(version: str) -> bool:
+    return version == BUILDER_VERSION or version in _EQUIVALENT_EARLIER_BUILDERS
+
+
+def _discovered_rank(tool: ToolSpec) -> tuple[int, str, str]:
+    """Reads before anything that changes the world, then server or device, then name.
+
+    A deferred tool costs at most one extra model step, and a read is usually the
+    first step of a request, so reads keep their definitions (ADR-0123).
+    """
+    return (
+        0 if tool.side_effect in _READ_SIDE_EFFECTS else 1,
+        tool.server_id or tool.device_id or "",
+        tool.name,
     )
 
 
@@ -203,14 +234,15 @@ class EventContextPlanner:
                     current.skill_catalog,
                     current.memory_snapshot,
                     persona=current.persona_text,
+                    deferred_tools=current.deferred_tool_specs,
                 )
                 current_prefix_sha256 = hashlib.sha256(
-                    prefix_bytes(current_prefix, current.tool_specs)
+                    prefix_bytes(current_prefix, current.tool_specs, current.deferred_tool_specs)
                 ).hexdigest()
                 if (
                     current.model_id == model_id
                     and current.policy_version == self._policy_version
-                    and current.builder_version == BUILDER_VERSION
+                    and _builder_is_current(current.builder_version)
                     and current.prefix_sha256 == current_prefix_sha256
                     and current.persona_text == persona_text
                     and current.persona_version == persona_version
@@ -232,7 +264,7 @@ class EventContextPlanner:
                         else "policy_version_changed"
                         if current.policy_version != self._policy_version
                         else "builder_version_changed"
-                        if current.builder_version != BUILDER_VERSION
+                        if not _builder_is_current(current.builder_version)
                         else "persona_changed"
                         if current.persona_text != persona_text
                         or current.persona_version != persona_version
@@ -367,33 +399,100 @@ class EventContextPlanner:
         configured_order = {
             name: index for index, name in enumerate(dict.fromkeys(agent.enabled_tools))
         }
-        candidates = sorted(
-            tools,
-            key=lambda tool: (configured_order.get(tool.name, len(configured_order)), tool.name),
+        # ADR-0123: an agent that enables tool.call offers what does not fit as
+        # deferred index entries instead of dropping it, and defers the tools its
+        # configuration names. Without tool.call, overflow is skipped and recorded.
+        control = (
+            next((tool for tool in tools if tool.name == _TOOL_CALL_TOOL_NAME), None)
+            if _TOOL_CALL_TOOL_NAME in configured_order
+            else None
         )
+        requested_deferred = (
+            frozenset(agent.metadata.get(DEFERRED_TOOLS_METADATA_KEY) or ())
+            if control is not None
+            else frozenset()
+        )
+        configured = sorted(
+            (
+                tool
+                for tool in tools
+                if tool.name in configured_order and tool.name != _TOOL_CALL_TOOL_NAME
+            ),
+            key=lambda tool: configured_order[tool.name],
+        )
+        explicitly_deferred = [
+            tool
+            for tool in configured
+            if tool.name in requested_deferred and tool.kind is not ToolKind.CONTROL
+        ]
+        ranked = [
+            *(tool for tool in configured if tool not in explicitly_deferred),
+            *sorted(
+                (tool for tool in tools if tool.name not in configured_order),
+                key=_discovered_rank,
+            ),
+        ]
         model_id = f"{model.provider}:{model.model}"
-        selected_tools: list[ToolSpec] = []
-        for tool in candidates:
-            if len(selected_tools) == maximum_tools:
-                break
-            proposed = sorted([*selected_tools, tool], key=lambda item: item.name)
-            if tool.name not in configured_order:
-                proposed_prefix = build_prefix(agent, proposed)
-                token_count = self._estimator.estimate(
-                    proposed_prefix[2:], model_id
-                ) + self._estimator.estimate_tools(proposed, model_id)
-                if token_count > int(tool_config["max_tokens"]):
+        maximum_tool_tokens = int(tool_config["max_tokens"])
+
+        def select(reserved: list[ToolSpec]) -> tuple[list[ToolSpec], list[ToolSpec]]:
+            selected_tools = list(reserved)
+            overflow: list[ToolSpec] = []
+            for tool in ranked:
+                if len(selected_tools) >= maximum_tools:
+                    overflow.append(tool)
                     continue
-            # Explicit capabilities still fail at plan time if they cannot fit.
-            # Discovery fills only the remaining item and token capacity.
-            selected_tools.append(tool)
+                if tool.name not in configured_order:
+                    proposed = sorted([*selected_tools, tool], key=lambda item: item.name)
+                    proposed_prefix = build_prefix(agent, proposed)
+                    token_count = self._estimator.estimate(
+                        proposed_prefix[2:], model_id
+                    ) + self._estimator.estimate_tools(proposed, model_id)
+                    if token_count > maximum_tool_tokens:
+                        overflow.append(tool)
+                        continue
+                # Explicit capabilities still fail at plan time if they cannot fit.
+                # Discovery fills only the remaining item and token capacity.
+                selected_tools.append(tool)
+            return selected_tools, overflow
+
+        selected_tools, overflow = select([])
+        deferring = control is not None and bool(explicitly_deferred or overflow)
+        if deferring:
+            assert control is not None
+            # tool.call takes a definition slot only when something is deferred.
+            selected_tools, overflow = select([control])
+        index_candidates = [*explicitly_deferred, *overflow] if deferring else []
+        skipped_tools: list[ToolSpec] = [] if deferring else list(overflow)
+        deferred_tools: list[ToolSpec] = []
+        index_config = classes.get("deferred_tool_index")
+        if index_candidates:
+            if not isinstance(index_config, dict):
+                raise ValueError("deferred-tool-index context configuration must be a mapping")
+            for tool in index_candidates:
+                proposed_index = [*deferred_tools, tool]
+                if len(proposed_index) > int(index_config["max_items"]) or self._estimator.estimate(
+                    envelope_items(deferred_index_items(proposed_index)), model_id
+                ) > int(index_config["max_tokens"]):
+                    skipped_tools.append(tool)
+                    continue
+                deferred_tools.append(tool)
         tools = sorted(selected_tools, key=lambda tool: tool.name)
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
         base_prefix = build_prefix(agent, tools)
         persona_prefix = build_prefix(agent, tools, persona=persona_text)
-        catalog_prefix = build_prefix(agent, tools, catalog_metadata, persona=persona_text)
+        index_prefix = build_prefix(
+            agent, tools, persona=persona_text, deferred_tools=deferred_tools
+        )
+        catalog_prefix = build_prefix(
+            agent,
+            tools,
+            catalog_metadata,
+            persona=persona_text,
+            deferred_tools=deferred_tools,
+        )
         memory_config = classes.get("memory_snapshot")
         if self._memory_retriever is not None and not isinstance(memory_config, dict):
             raise ValueError("memory-snapshot context configuration must be a mapping")
@@ -418,6 +517,7 @@ class EventContextPlanner:
                     catalog_metadata,
                     rendered,
                     persona=persona_text,
+                    deferred_tools=deferred_tools,
                 )
                 return self._estimator.estimate(candidate_prefix[len(catalog_prefix) :], model_id)
 
@@ -442,7 +542,14 @@ class EventContextPlanner:
         memory_snapshot = (
             "" if snapshot is None or not (snapshot.items or snapshot.people) else snapshot.rendered
         )
-        prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot, persona=persona_text)
+        prefix = build_prefix(
+            agent,
+            tools,
+            catalog_metadata,
+            memory_snapshot,
+            persona=persona_text,
+            deferred_tools=deferred_tools,
+        )
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
         # The persona row sits at index 2 of the full prefix when present;
@@ -456,8 +563,9 @@ class EventContextPlanner:
         tool_tokens = self._estimator.estimate(
             base_prefix[2:], model_id
         ) + self._estimator.estimate_tools(tools, model_id)
+        index_tokens = self._estimator.estimate(index_prefix[len(persona_prefix) :], model_id)
         skill_catalog_tokens = self._estimator.estimate(
-            catalog_prefix[len(persona_prefix) :], model_id
+            catalog_prefix[len(index_prefix) :], model_id
         )
         memory_tokens = self._estimator.estimate(prefix[len(catalog_prefix) :], model_id)
         if framing_tokens > int(classes["platform_policy"]["max_tokens"]):
@@ -477,6 +585,10 @@ class EventContextPlanner:
                 raise ContextOverflow("context prefix class persona exceeds its cap")
         if tool_tokens > int(tool_config["max_tokens"]):
             raise ContextOverflow("context prefix class tool_definitions exceeds its cap")
+        if index_tokens and (
+            not isinstance(index_config, dict) or index_tokens > int(index_config["max_tokens"])
+        ):
+            raise ContextOverflow("context prefix class deferred_tool_index exceeds its cap")
         skill_config = classes.get("skill_catalog")
         if not isinstance(skill_config, dict):
             raise ValueError("skill-catalog context configuration must be a mapping")
@@ -484,12 +596,13 @@ class EventContextPlanner:
             raise ContextOverflow("context prefix class skill_catalog exceeds its cap")
         if isinstance(memory_config, dict) and memory_tokens > memory_token_cap:
             raise ContextOverflow("context prefix class memory_snapshot exceeds its cap")
-        encoded_prefix = prefix_bytes(prefix, tools)
+        encoded_prefix = prefix_bytes(prefix, tools, deferred_tools)
         prefix_tokens = (
             framing_tokens
             + agent_tokens
             + persona_tokens
             + tool_tokens
+            + index_tokens
             + skill_catalog_tokens
             + memory_tokens
         )
@@ -529,6 +642,9 @@ class EventContextPlanner:
             builder_version=BUILDER_VERSION,
             budget=budget,
             created_at=self._clock.now(),
+            deferred_tool_names=tuple(tool.name for tool in deferred_tools),
+            deferred_tool_specs=tuple(tool.model_copy(deep=True) for tool in deferred_tools),
+            skipped_tool_names=tuple(tool.name for tool in skipped_tools),
         )
         return await self._append(plan, event_type, reason)
 
