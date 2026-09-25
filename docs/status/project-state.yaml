@@ -76,8 +76,9 @@ project:
   # names each email and reads its retained original text under email.read.
   # ADR-0127 records the owner's non-milestone extension to Milestone 10 on
   # 2026-09-25: a hosted browser lease renews in fifteen-minute steps for up to
-  # an hour while its run is running or parked on its own approval, driven by
-  # the run worker's lease upkeep, which also releases ended runs' leases.
+  # an hour while its run is running, queued to resume, or parked on its own
+  # approval, driven by the run worker's lease upkeep, which also releases
+  # ended runs' leases.
   # ADR-0131 records the owner's non-milestone latency repair on 2026-09-25:
   # full MCP catalog preparation pins the runtime's last live discovery of a
   # server and starts it on first use, the API and interactive worker warm that

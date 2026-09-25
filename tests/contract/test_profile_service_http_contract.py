@@ -396,6 +396,14 @@ async def test_profile_service_data_plane_and_authentication_are_wire_compatible
             sequence=1,
         )
         renewed = await sessions.renew(lease.lease_ref, deadline_at=NOW + timedelta(minutes=10))
+        reattached = await sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            provisioned.provider_ref,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=NOW + timedelta(minutes=5),
+        )
         await sessions.close(lease.lease_ref)
         ceremony = await sessions.begin_authentication(
             PROFILE_ID,
@@ -410,6 +418,7 @@ async def test_profile_service_data_plane_and_authentication_are_wire_compatible
     assert acted.revision == "revision-2"
     assert renewed.lease_ref == lease.lease_ref
     assert renewed.expires_at == NOW + timedelta(minutes=10)
+    assert (reattached.lease_ref, reattached.sequence) == (lease.lease_ref, 1)
     assert ceremony.launch_url is not None and "#capability=" in ceremony.launch_url
     assert status.status is BrowserAuthenticationStatus.NEEDS_USER
     assert status.launch_url is None

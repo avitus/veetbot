@@ -182,6 +182,7 @@ class HostedProfileSessionService:
                 return BrowserLease(
                     lease_ref=self._lease_ref(existing.scope),
                     expires_at=existing.expires_at,
+                    sequence=existing.sequence,
                 )
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile has an active authentication ceremony")
@@ -260,7 +261,11 @@ class HostedProfileSessionService:
                 state.acquired_at + timedelta(seconds=MAXIMUM_LEASE_LIFETIME_SECONDS),
             )
             state.expires_at = max(state.expires_at, extended)
-            return BrowserLease(lease_ref=lease_ref, expires_at=state.expires_at)
+            return BrowserLease(
+                lease_ref=lease_ref,
+                expires_at=state.expires_at,
+                sequence=state.sequence,
+            )
 
     async def close(self, lease_ref: str) -> None:
         async with self._lock:
@@ -268,6 +273,11 @@ class HostedProfileSessionService:
             if state is None or key is None:
                 return
             self._leases.pop(key)
+            expired = state.expires_at <= self._now()
+        if expired:
+            # An expired lease closes without sealing, whoever asks and when.
+            await self._close_lease_state(state)
+            return
         async with state.lock:
             try:
                 material = await state.runtime.storage_state()

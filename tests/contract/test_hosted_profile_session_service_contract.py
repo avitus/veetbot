@@ -302,6 +302,72 @@ async def test_repeated_acquire_for_the_same_attempt_reattaches_to_its_live_leas
         )
 
 
+async def test_reattaching_to_a_lease_continues_its_action_sequence(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=15),
+    )
+    await sessions.act(
+        lease.lease_ref,
+        BrowserAction(
+            kind=BrowserActionKind.CLICK,
+            expected_revision="revision-1",
+            ref="revision-1:0",
+        ),
+        sequence=1,
+    )
+    times[0] = NOW + timedelta(seconds=40)
+
+    reattached = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=times[0] + timedelta(minutes=15),
+    )
+
+    assert lease.sequence == 0
+    assert reattached.lease_ref == lease.lease_ref
+    assert reattached.sequence == 1
+    assert len(runtimes) == 1
+
+
+async def test_closing_an_expired_lease_does_not_seal_its_state(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(seconds=1),
+    )
+    times[0] = NOW + timedelta(seconds=2)
+
+    # A queued close retried after expiry reaches the service before any sweep.
+    await sessions.close(lease.lease_ref)
+    await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=UUID("00000000-0000-0000-0000-0000000000f6"),
+        attempt_number=1,
+        deadline_at=times[0] + timedelta(minutes=5),
+    )
+
+    assert runtimes[0].closed is True
+    assert runtimes[1].initial_material == runtimes[0].initial_material
+    assert runtimes[1].initial_material != runtimes[0].sealed_material
+
+
 async def test_lease_renews_in_fifteen_minute_steps_for_at_most_an_hour(
     tmp_path: Path,
 ) -> None:

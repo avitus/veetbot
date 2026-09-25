@@ -246,7 +246,10 @@ from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
-from agent_core.application.browser_leases import browser_run_state
+from agent_core.application.browser_leases import (
+    browser_run_state,
+    release_browser_lease_if_done,
+)
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
     BrowserProfileManagementService,
@@ -525,7 +528,6 @@ from agent_core.ports.artifacts import AttachmentResolver
 from agent_core.ports.browser import (
     BrowserProvider,
     browser_lease_upkeep,
-    release_browser_run,
 )
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from agent_core.ports.browser_sessions import (
@@ -3377,7 +3379,9 @@ async def _compose(
                 # In one process the parked run's lease is here; elsewhere the
                 # run worker's lease upkeep releases it.
                 try:
-                    await release_browser_run(browser_provider, run_id)
+                    await release_browser_lease_if_done(
+                        browser_provider, uow_factory, principal, run_id
+                    )
                 except Exception:
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
 
@@ -3397,13 +3401,10 @@ async def _compose(
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
             if browser_provider is not None:
-                # Only a run parked on its own approval keeps its page. Any other
-                # end of this execution (terminal, waiting on the user or a child,
-                # requeued after fencing) seals it and frees the profile.
                 try:
-                    state = await browser_run_state(uow_factory, principal, run_id)
-                    if state is not BrowserRunState.AWAITING_APPROVAL:
-                        await release_browser_run(browser_provider, run_id)
+                    await release_browser_lease_if_done(
+                        browser_provider, uow_factory, principal, run_id
+                    )
                 except Exception:
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:

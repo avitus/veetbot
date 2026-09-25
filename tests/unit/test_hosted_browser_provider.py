@@ -558,22 +558,109 @@ async def test_lease_upkeep_never_renews_past_the_run_deadline() -> None:
     assert sessions.renewals == [NOW + timedelta(minutes=20)]
 
 
-@pytest.mark.parametrize(
-    "state",
-    [BrowserRunState.RESUMING, BrowserRunState.ENDED],
-)
-async def test_lease_upkeep_does_not_renew_for_a_run_that_is_not_using_it(
-    state: BrowserRunState,
-) -> None:
+async def test_lease_upkeep_renews_while_an_approved_run_waits_in_the_queue() -> None:
     sessions = FakeSessions()
     clock = [NOW]
-    provider = ready_provider(sessions, now=lambda: clock[0], run_state=run_states({RUN_ID: state}))
+    provider = ready_provider(
+        sessions,
+        now=lambda: clock[0],
+        run_state=run_states({RUN_ID: BrowserRunState.RESUMING}),
+    )
+    await provider.bind_execution(call_at(NOW))
+
+    clock[0] = NOW + timedelta(minutes=11)
+    await provider.maintain_leases()
+
+    assert sessions.renewals == [NOW + timedelta(minutes=26)]
+
+
+async def test_a_run_resumed_in_another_worker_continues_its_lease_and_action_sequence(
+    tmp_path: Path,
+) -> None:
+    hosted = await hosted_service(tmp_path)
+    first_worker = ready_provider(hosted.sessions, now=hosted.now)
+    await first_worker.bind_execution(call_at(NOW))
+    await first_worker.navigate("https://example.org/lesson")
+    await first_worker.act(CLICK)
+    # The first worker is lost; another worker's provider resumes the run.
+    second_worker = ready_provider(hosted.sessions, now=hosted.now)
+
+    await second_worker.bind_execution(call_at(NOW + timedelta(seconds=40)))
+    await second_worker.act(
+        BrowserAction(
+            kind=BrowserActionKind.CLICK,
+            expected_revision="revision-2",
+            ref="revision-2:0",
+        )
+    )
+
+    assert len(hosted.runtimes) == 1
+    assert len(hosted.runtimes[0].actions) == 2
+
+
+OTHER_RUN_ID = UUID("00000000-0000-0000-0000-0000000000eb")
+
+
+@pytest.mark.parametrize(
+    "holder",
+    [
+        BrowserRunState.RUNNING,
+        BrowserRunState.RESUMING,
+        BrowserRunState.AWAITING_APPROVAL,
+    ],
+)
+async def test_another_run_cannot_take_the_page_of_a_run_that_still_needs_it(
+    holder: BrowserRunState,
+) -> None:
+    sessions = FakeSessions()
+    states = {RUN_ID: holder}
+    provider = ready_provider(sessions, run_state=run_states(states))
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await provider.bind_execution(call_at(NOW, run_id=OTHER_RUN_ID))
+    assert raised.value.reason_code == "tool.browser.profile_unavailable"
+    assert sessions.closes == []
+    # Once the holder is done, the newcomer seals and replaces its lease.
+    states[RUN_ID] = BrowserRunState.ENDED
+    await provider.bind_execution(call_at(NOW, run_id=OTHER_RUN_ID))
+
+    assert sessions.closes == [lease_ref(1)]
+    assert sessions.acquisitions[-1] == (PROFILE_ID, OTHER_RUN_ID, 1)
+
+
+async def test_another_run_replaces_a_holders_lease_once_it_has_expired() -> None:
+    sessions = FakeSessions()
+    clock = [NOW]
+    provider = ready_provider(
+        sessions,
+        now=lambda: clock[0],
+        run_state=run_states({RUN_ID: BrowserRunState.AWAITING_APPROVAL}),
+    )
+    await provider.bind_execution(call_at(NOW))
+    clock[0] = NOW + LEASE_CAP
+
+    await provider.bind_execution(call_at(clock[0], run_id=OTHER_RUN_ID))
+
+    assert sessions.acquisitions[-1] == (PROFILE_ID, OTHER_RUN_ID, 1)
+
+
+async def test_lease_upkeep_never_renews_the_lease_of_an_ended_run() -> None:
+    sessions = FakeSessions()
+    clock = [NOW]
+    provider = ready_provider(
+        sessions,
+        now=lambda: clock[0],
+        run_state=run_states({RUN_ID: BrowserRunState.ENDED}),
+    )
     await provider.bind_execution(call_at(NOW))
 
     clock[0] = NOW + timedelta(minutes=11)
     await provider.maintain_leases()
 
     assert sessions.renewals == []
+    assert sessions.closes == [lease_ref(1)]
 
 
 @pytest.mark.parametrize(

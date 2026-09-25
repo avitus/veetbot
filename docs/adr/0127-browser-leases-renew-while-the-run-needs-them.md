@@ -31,6 +31,20 @@ reproduced five further faults against the real session service:
 - **Runs cancelled while parked, or failed by the reclaim sweep, never released
   their lease.** Those paths do not reach the run worker's completion hook.
 
+A second review found four more:
+
+- **Reattaching restarted the action sequence.** Tool calls always carry
+  attempt 1, so a run resumed in another worker reattached to its own live
+  lease but sent action 1 again, and the service refused it.
+- **The end of an execution read the run's current state.** An owner who
+  approved before that read left the run queued or running, and the approved
+  action then met a fresh browser.
+- **A newcomer run closed a page another run still needed.** With one profile
+  pinned for the deployment, a different run's first browser call sealed and
+  replaced the lease of a run parked on its own approval.
+- **A late close sealed an expired lease.** A close retried after expiry
+  reached the service before its sweep, and the service sealed the state.
+
 Separately, the fifteen-minute cap is shorter than an ordinary approval wait.
 `browser.act` needs the owner's approval by default, so an owner who answered
 after fifteen minutes found the page gone and the action refused.
@@ -40,7 +54,10 @@ after fifteen minutes found the page gone and the action refused.
 1. **A repeated acquire for the same run attempt reattaches.** If a live lease
    matches the profile, tenant, principal, provider reference, run, and attempt
    of an acquire, and differs only in the deadline asked for, the service
-   returns that lease and its current expiry. Any other scope still conflicts.
+   returns that lease with its current expiry and action sequence. Any other
+   scope still conflicts. The provider continues that sequence, so a run
+   resumed in another process reattaches to its own live lease and keeps its
+   page.
 2. **The provider drops a lease it can no longer trust.** On
    `profile_unavailable` or `provider_unavailable` from navigate, observe, or
    act, or on any unexpected failure, it stops using the lease, closes it where
@@ -51,16 +68,19 @@ after fifteen minutes found the page gone and the action refused.
    `url_disallowed`), the action is `tool.browser.outcome_unknown`, or
    `profile_unavailable` when the service refused the lease itself. The
    provider retires the lease and never retries the action. A lease it could
-   not close is closed before the provider acquires again, so a new
-   acquisition never reattaches to an out-of-step lease.
-4. **Only the run's own approval keeps the page.** A lease stays open while its
-   run is running or parked on an approval of its own. When an execution ends
-   in any other way, the lease is sealed and closed: the run finished, waits for
-   the user or a delegated child, or was requeued after fencing.
+   not close is closed before the provider acquires again, so the next call
+   starts from a fresh page.
+4. **A lease stays open while its run can still use the page.** That is
+   while the run is running, in this worker or another, queued to resume, or
+   parked on an approval of its own. When an execution ends, the lease is
+   sealed and closed only if the run is done with it: it finished, or waits for
+   the user or a delegated child. The run's status is read again after its
+   pending approvals, so a concurrent approval or park never reads as an end.
 5. **Leases renew while the run needs them.** A lease may be renewed in steps
    of at most fifteen minutes, up to sixty minutes after it was acquired, never
-   past the run's own deadline, and only while its run is running or parked on
-   its own approval. The service caps each request at fifteen minutes and the
+   past the run's own deadline, and only while its run is running, queued to
+   resume, or parked on its own approval. The service caps each request at
+   fifteen minutes and the
    whole lease at sixty. Renewing an expired or revoked lease fails, and the
    service closes that lease without sealing it. The data plane gains an
    authenticated renew route under the same boundary, body ceiling, and exact
@@ -69,11 +89,18 @@ after fifteen minutes found the page gone and the action refused.
    their runs, so each run worker runs a lease upkeep once a minute beside its
    claim loop. The maintenance role is a different process and holds no leases.
    The upkeep closes a lease whose run has ended. It renews a lease within five
-   minutes of expiry whose run is running or parked on its own approval.
+   minutes of expiry whose run still needs it.
    Renewal therefore continues while the run waits for the owner, when no tool
    call arrives. A browser call in another session also releases an ended run's
    lease first. In a single process, cancelling a parked run releases its lease
    directly.
+7. **A run cannot take a page another run still needs.** When a provider holds
+   a live lease for a different run, a newcomer is refused with
+   `profile_unavailable` while that run still needs the page. The provider
+   seals and replaces the lease only once that run has ended, the lease has
+   expired, or no run-state reader is configured.
+8. **An expired lease never seals.** The service closes a lease past its expiry
+   without sealing its state, whoever asks and however late the close arrives.
 
 ## Consequences
 
@@ -82,8 +109,9 @@ after fifteen minutes found the page gone and the action refused.
   must navigate again.
 - A run cancelled while parked, or failed by the reclaim sweep, holds its lease
   until the next upkeep, about a minute, not fifteen.
-- A worker that dies still leaves its leases to expire on the service. The
-  resumed run can reacquire once they do: at most fifteen minutes after the
-  last renewal.
-- The provider does not ask the service to close an expired lease; the service
-  discards it unsealed, as the lease contract requires.
+- A run resumed after its worker died reattaches to its own live lease and
+  continues from its page and action sequence. A different run waits until that
+  run ends or the lease expires, at most fifteen minutes after its last
+  renewal.
+- An expired lease is discarded unsealed, as the lease contract requires. The
+  provider does not ask to close one, and the service never seals one.

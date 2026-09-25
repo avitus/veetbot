@@ -284,6 +284,9 @@ class BrowserLease(BaseModel):
 
     lease_ref: str = Field(min_length=32, max_length=128, repr=False)
     expires_at: datetime
+    # The last action sequence the service applied on this lease; a caller
+    # that reattaches continues from it.
+    sequence: int = Field(default=0, ge=0)
 
 
 class BrowserAuthenticationView(BaseModel):

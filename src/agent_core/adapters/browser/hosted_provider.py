@@ -39,7 +39,9 @@ logger = logging.getLogger(__name__)
 
 # Upkeep renews a lease this close to expiry (ADR-0127).
 _RENEWAL_WINDOW = timedelta(minutes=5)
-_RENEWABLE_RUN_STATES = frozenset({BrowserRunState.RUNNING, BrowserRunState.AWAITING_APPROVAL})
+_RENEWABLE_RUN_STATES = frozenset(
+    {BrowserRunState.RUNNING, BrowserRunState.RESUMING, BrowserRunState.AWAITING_APPROVAL}
+)
 # Failures that mean the service no longer honours, or cannot be asked about,
 # the lease itself rather than refusing one request.
 _LEASE_FAILURES = frozenset(
@@ -148,8 +150,9 @@ class HostedBrowserProvider:
                 and self._lease.expires_at >= context.deadline_at
             ):
                 return
+            await self._refuse_while_the_holder_needs_the_page(context)
             # Close the previous lease, and any given up earlier, before a new
-            # acquisition: it could otherwise reattach to an out-of-step lease.
+            # acquisition, so the next call starts from a fresh page.
             await self._close_locked()
             assert profile.provider_ref is not None
             now = self._now()
@@ -164,6 +167,9 @@ class HostedBrowserProvider:
             self._lease_scope = scope
             self._lease_acquired_at = now
             self._run_deadline_at = context.run_deadline_at
+            # A run resumed in another process reattaches to its own live lease
+            # and continues the action sequence its earlier worker left.
+            self._sequence = self._lease.sequence
 
     async def navigate(self, url: str) -> BrowserObservation:
         if not self.allows(url):
@@ -260,9 +266,10 @@ class HostedBrowserProvider:
     async def maintain_leases(self) -> None:
         """Release or renew the held lease as its run requires (ADR-0127).
 
-        An ended run's lease is closed. A running run's, or one parked on its
-        own approval, is renewed within five minutes of expiry, in steps of at
-        most fifteen minutes, never past an hour or the run's own deadline.
+        An ended run's lease is closed. A lease whose run is running, queued to
+        resume, or parked on its own approval is renewed within five minutes of
+        expiry, in steps of at most fifteen minutes, never past an hour or the
+        run's own deadline.
         """
 
         async with self._lock:
@@ -329,6 +336,24 @@ class HostedBrowserProvider:
             raise BrowserProviderError("tool.browser.needs_user", retryable=False)
         if profile.status is not BrowserProfileStatus.READY:
             await self._close_locked(strict=False)
+            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+
+    async def _refuse_while_the_holder_needs_the_page(
+        self,
+        context: ToolExecutionContext,
+    ) -> None:
+        """Keep another run's live lease from a newcomer while that run needs it."""
+
+        lease, scope = self._lease, self._lease_scope
+        if (
+            lease is None
+            or scope is None
+            or scope[0] == context.run_id
+            or self._run_state is None
+            or lease.expires_at <= self._now()
+        ):
+            return
+        if await self._run_state(scope[0]) is not BrowserRunState.ENDED:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
 
     def _required_lease(self) -> BrowserLease:

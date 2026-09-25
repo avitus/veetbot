@@ -12,11 +12,15 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
-from agent_core.application.browser_leases import browser_run_state
+from agent_core.application.browser_leases import (
+    browser_run_state,
+    release_browser_lease_if_done,
+)
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserRunState
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.runs import Run, RunStatus
+from agent_core.ports.browser import BrowserProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker
@@ -24,14 +28,20 @@ from tests.contract.support import NOW, principal, run
 
 
 class _Runs:
-    def __init__(self, found: Run | None) -> None:
+    """A run whose status may change between reads, as another process commits."""
+
+    def __init__(self, found: Run | None, later: tuple[RunStatus, ...] = ()) -> None:
         self._found = found
+        self._later = list(later)
 
     async def get(self, run_id: UUID, owner: Principal) -> Run:
         del owner
         if self._found is None or self._found.id != run_id:
             raise NotFoundError("run not found")
-        return self._found
+        found = self._found
+        if self._later:
+            self._found = found.model_copy(update={"status": self._later.pop(0)})
+        return found
 
 
 class _Approvals:
@@ -56,8 +66,13 @@ class _Queue:
 
 
 class _UnitOfWork:
-    def __init__(self, found: Run | None = None, pending: int = 0) -> None:
-        self.runs = _Runs(found)
+    def __init__(
+        self,
+        found: Run | None = None,
+        pending: int = 0,
+        later: tuple[RunStatus, ...] = (),
+    ) -> None:
+        self.runs = _Runs(found, later)
         self.approvals = _Approvals(pending)
         self.queue = _Queue()
 
@@ -73,8 +88,21 @@ class _UnitOfWork:
         return None
 
 
-def unit_of_work(found: Run | None = None, pending: int = 0) -> UnitOfWorkFactory:
-    return cast(UnitOfWorkFactory, lambda: _UnitOfWork(found, pending))
+def unit_of_work(
+    found: Run | None = None,
+    pending: int = 0,
+    later: tuple[RunStatus, ...] = (),
+) -> UnitOfWorkFactory:
+    shared = _UnitOfWork(found, pending, later)
+    return cast(UnitOfWorkFactory, lambda: shared)
+
+
+class _Releases:
+    def __init__(self) -> None:
+        self.released: list[UUID] = []
+
+    async def release_run(self, run_id: UUID) -> None:
+        self.released.append(run_id)
 
 
 @pytest.mark.parametrize(
@@ -102,6 +130,55 @@ async def test_only_a_running_run_or_its_own_approval_keeps_the_browser(
     state = await browser_run_state(unit_of_work(found, pending_approvals), principal(), found.id)
 
     assert state is expected
+
+
+async def test_an_approval_resolved_between_reads_is_not_read_as_ended() -> None:
+    # The run parked on its approval; the owner approves while the reader looks,
+    # so the approval is gone by the time it is read and the run is queued.
+    found = run(status=RunStatus.WAITING_FOR_APPROVAL)
+    racing = unit_of_work(found, pending=0, later=(RunStatus.QUEUED,))
+
+    assert await browser_run_state(racing, principal(), found.id) is BrowserRunState.RESUMING
+
+
+async def test_a_run_parking_while_read_is_not_read_as_ended() -> None:
+    found = run(status=RunStatus.RUNNING)
+    racing = unit_of_work(found, pending=1, later=(RunStatus.WAITING_FOR_APPROVAL,))
+
+    assert await browser_run_state(racing, principal(), found.id) is BrowserRunState.RUNNING
+
+
+@pytest.mark.parametrize(
+    ("status", "pending_approvals", "released"),
+    [
+        # Still using the page: here or in another worker, approved and queued
+        # to resume, or parked on its own approval.
+        (RunStatus.RUNNING, 0, False),
+        (RunStatus.QUEUED, 0, False),
+        (RunStatus.WAITING_FOR_APPROVAL, 1, False),
+        # Done with it: parked on a child or the user, or finished.
+        (RunStatus.WAITING_FOR_APPROVAL, 0, True),
+        (RunStatus.WAITING_FOR_USER, 0, True),
+        (RunStatus.COMPLETED, 0, True),
+        (RunStatus.CANCELLED, 0, True),
+    ],
+)
+async def test_an_ended_execution_releases_the_lease_only_when_the_run_is_done_with_it(
+    status: RunStatus,
+    pending_approvals: int,
+    released: bool,
+) -> None:
+    found = run(status=status)
+    provider = _Releases()
+
+    await release_browser_lease_if_done(
+        cast(BrowserProvider, provider),
+        unit_of_work(found, pending_approvals),
+        principal(),
+        found.id,
+    )
+
+    assert provider.released == ([found.id] if released else [])
 
 
 async def test_an_unknown_run_needs_no_browser() -> None:
