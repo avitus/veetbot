@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — Veetbot keeps a website open while you approve its clicks
+
+- With a signed-in browser profile, Veetbot could open a page but not act on
+  it: every browser step started a new blank browser, so a click never found
+  the page it was meant for. One browser now serves a whole run.
+- The page stays open while a click waits for your approval, for up to an hour.
+  After that, Veetbot opens the site again. ADR-0127: a run's browser renews
+  while the run is working or waiting for your approval. It closes when the run
+  ends, waits on something else, or is cancelled, so signing in again is not
+  held up.
+- A lost reply from the browser service no longer locks the profile for
+  fifteen minutes. A click whose outcome is unknown is never repeated. The
+  next browser step starts from a fresh page.
+
 ## 2026-09-25 — New chats stop starting every MCP server before they answer
 
 - Measured over 80 production Chat turns, the first message of a new chat

@@ -49,6 +49,15 @@ async def release_browser_run(provider: BrowserProvider, run_id: UUID) -> None:
     await releaser(run_id)
 
 
+def browser_lease_upkeep(provider: BrowserProvider) -> Callable[[], Awaitable[None]] | None:
+    """The periodic lease upkeep a hosted provider needs, if it holds leases."""
+
+    candidate = getattr(provider, "maintain_leases", None)
+    if candidate is None:
+        return None
+    return cast(Callable[[], Awaitable[None]], candidate)
+
+
 async def browser_action_context(
     provider: BrowserProvider,
     action: BrowserAction,

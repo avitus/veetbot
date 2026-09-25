@@ -40,9 +40,13 @@ class DurableWorker:
         heartbeat_divisor: int = 3,
         poll_interval_seconds: float = 0.25,
         record_claim_metric: RecordClaimMetric | None = None,
+        maintain_browser_leases: Callable[[], Awaitable[None]] | None = None,
+        browser_lease_upkeep_seconds: float = 60,
     ) -> None:
         if heartbeat_divisor < 2:
             raise ValueError("heartbeat_divisor must be at least two")
+        if browser_lease_upkeep_seconds <= 0:
+            raise ValueError("browser lease upkeep interval must be positive")
         self._uow_factory = uow_factory
         self._executor = executor
         self._clock = clock
@@ -58,10 +62,27 @@ class DurableWorker:
         self._heartbeat_interval = lease_seconds / heartbeat_divisor
         self._poll_interval = poll_interval_seconds
         self._record_claim_metric = record_claim_metric
+        # Hosted browser leases live in this process, which ran their runs, so
+        # this worker (not the maintenance role) releases and renews them.
+        self._maintain_browser_leases = maintain_browser_leases
+        self._browser_lease_upkeep_seconds = browser_lease_upkeep_seconds
         self._stopping = False
 
     def stop(self) -> None:
         self._stopping = True
+
+    async def _keep_browser_leases(
+        self,
+        maintain: Callable[[], Awaitable[None]],
+    ) -> None:
+        while not self._stopping:
+            try:
+                await maintain()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("browser lease upkeep failed: %s", self._worker_id)
+            await self._clock.sleep(self._browser_lease_upkeep_seconds)
 
     async def claim(self) -> ClaimedRun | None:
         started = perf_counter()
@@ -162,17 +183,30 @@ class DurableWorker:
         return True
 
     async def run_forever(self) -> None:
-        while not self._stopping:
-            try:
-                worked = await self.run_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("durable worker iteration failed: %s", self._worker_id)
-                await self._clock.sleep(self._poll_interval)
-                continue
-            if not worked:
-                await self._clock.sleep(self._poll_interval)
+        upkeep = (
+            None
+            if self._maintain_browser_leases is None
+            else asyncio.create_task(
+                self._keep_browser_leases(self._maintain_browser_leases),
+                name=f"browser-lease-upkeep-{self._worker_id}",
+            )
+        )
+        try:
+            while not self._stopping:
+                try:
+                    worked = await self.run_once()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("durable worker iteration failed: %s", self._worker_id)
+                    await self._clock.sleep(self._poll_interval)
+                    continue
+                if not worked:
+                    await self._clock.sleep(self._poll_interval)
+        finally:
+            if upkeep is not None:
+                upkeep.cancel()
+                await asyncio.gather(upkeep, return_exceptions=True)
 
 
 class MaintenanceWorker:

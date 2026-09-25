@@ -66,6 +66,10 @@ class _LeaseRequest(BaseModel):
     lease_ref: str = Field(min_length=32, max_length=128)
 
 
+class _RenewRequest(_LeaseRequest):
+    deadline_at: AwareDatetime
+
+
 class _NavigateRequest(_LeaseRequest):
     url: str = Field(min_length=1, max_length=4096)
 
@@ -437,6 +441,15 @@ def create_profile_service_app(
                 sequence=payload.sequence,
             )
             return result.model_dump(mode="json")
+
+        @app.post("/v1/browser-sessions:renew", response_model=None)
+        async def renew(payload: _RenewRequest, request: Request) -> dict[str, Any] | JSONResponse:
+            expected = f"browser-session:{_private_ref_digest(payload.lease_ref)}:renew"
+            rejected = _require_idempotency(request, expected)
+            if rejected is not None:
+                return rejected
+            lease = await sessions.renew(payload.lease_ref, deadline_at=payload.deadline_at)
+            return lease.model_dump(mode="json")
 
         @app.post("/v1/browser-sessions:close", status_code=204, response_model=None)
         async def close(payload: _LeaseRequest, request: Request) -> Response | JSONResponse:

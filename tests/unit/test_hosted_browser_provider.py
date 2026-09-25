@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
 from agent_core.adapters.browser.hosted_provider import (
     HostedBrowserProvider,
+    RunStateReader,
     SessionBoundHostedBrowserProvider,
 )
+from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
+from agent_core.browser_control_plane.ports import StaticProfileKeyring
+from agent_core.browser_control_plane.service import HostedProfileLifecycleService
+from agent_core.browser_control_plane.sessions import HostedProfileSessionService
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
@@ -23,11 +31,14 @@ from agent_core.domain.browser import (
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
+    BrowserRunState,
 )
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.tools import ToolExecutionContext
+from agent_core.ports.browser_sessions import BrowserSessionControlPlane
 from agent_core.tools.browser_navigate import BrowserNavigateTool
-from tests.contract.support import NOW, principal, tool_context
+from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal, tool_context
+from tests.contract.test_hosted_profile_session_service_contract import FakeSessionRuntime
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000e7")
 PROVIDER_REF = "opaque-hosted-provider-reference-0000000001"
@@ -54,8 +65,11 @@ def profile(status: BrowserProfileStatus = BrowserProfileStatus.READY) -> Browse
 class FakeSessions:
     acquisitions: list[tuple[UUID, UUID, int]] = field(default_factory=list)
     deadlines: list[datetime] = field(default_factory=list)
+    renewals: list[datetime] = field(default_factory=list)
     closes: list[str] = field(default_factory=list)
     sequence: list[int] = field(default_factory=list)
+    act_started: asyncio.Event = field(default_factory=asyncio.Event)
+    act_gate: asyncio.Event | None = None
 
     async def acquire(
         self,
@@ -95,16 +109,173 @@ class FakeSessions:
         sequence: int,
     ) -> BrowserObservation:
         del lease_ref, action
+        self.act_started.set()
+        if self.act_gate is not None:
+            await self.act_gate.wait()
         self.sequence.append(sequence)
         return BrowserObservation(url="https://example.org/current", revision="revision-2")
+
+    async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease:
+        self.renewals.append(deadline_at)
+        return BrowserLease(lease_ref=lease_ref, expires_at=deadline_at)
 
     async def close(self, lease_ref: str) -> None:
         self.closes.append(lease_ref)
 
 
+def lease_ref(acquisition: int, run_id: UUID = RUN_ID) -> str:
+    return f"lease-reference-{run_id}-{acquisition:016d}"
+
+
+def call_at(
+    moment: datetime,
+    *,
+    session_id: UUID = SESSION_ID,
+    run_id: UUID = RUN_ID,
+    run_deadline_at: datetime | None = None,
+) -> ToolExecutionContext:
+    """One browser tool call, made at `moment`, of the contract run by default."""
+
+    return replace(
+        tool_context(),
+        deadline_at=moment + timedelta(seconds=30),
+        session_id=session_id,
+        run_id=run_id,
+        run_deadline_at=run_deadline_at,
+    )
+
+
+def run_states(states: dict[UUID, BrowserRunState]) -> RunStateReader:
+    async def read(run_id: UUID) -> BrowserRunState:
+        return states.get(run_id, BrowserRunState.ENDED)
+
+    return read
+
+
+CLICK = BrowserAction(
+    kind=BrowserActionKind.CLICK,
+    expected_revision="revision-1",
+    ref="revision-1:0",
+)
+
+
+@dataclass
+class LossySessions:
+    """The real session service behind a link that can drop one answer."""
+
+    service: HostedProfileSessionService
+    lose: set[str] = field(default_factory=set)
+
+    def _answer(self, operation: str) -> None:
+        if operation in self.lose:
+            self.lose.discard(operation)
+            raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+
+    async def acquire(
+        self,
+        profile_id: UUID,
+        owner: Principal,
+        provider_ref: str,
+        *,
+        run_id: UUID,
+        attempt_number: int,
+        deadline_at: datetime,
+    ) -> BrowserLease:
+        lease = await self.service.acquire(
+            profile_id,
+            owner,
+            provider_ref,
+            run_id=run_id,
+            attempt_number=attempt_number,
+            deadline_at=deadline_at,
+        )
+        self._answer("acquire")
+        return lease
+
+    async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
+        observation = await self.service.navigate(lease_ref, url)
+        self._answer("navigate")
+        return observation
+
+    async def observe(self, lease_ref: str) -> BrowserObservation:
+        observation = await self.service.observe(lease_ref)
+        self._answer("observe")
+        return observation
+
+    async def act(
+        self,
+        lease_ref: str,
+        action: BrowserAction,
+        *,
+        sequence: int,
+    ) -> BrowserObservation:
+        observation = await self.service.act(lease_ref, action, sequence=sequence)
+        self._answer("act")
+        return observation
+
+    async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease:
+        lease = await self.service.renew(lease_ref, deadline_at=deadline_at)
+        self._answer("renew")
+        return lease
+
+    async def close(self, lease_ref: str) -> None:
+        await self.service.close(lease_ref)
+
+
+@dataclass
+class HostedService:
+    """The isolated session service over a real encrypted store, restartable."""
+
+    store: FilesystemEncryptedProfileStore
+    clock: list[datetime] = field(default_factory=lambda: [NOW])
+    runtimes: list[FakeSessionRuntime] = field(default_factory=list)
+    sessions: LossySessions = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.sessions = LossySessions(self._service())
+
+    def _service(self) -> HostedProfileSessionService:
+        def runtime_factory(tenant_id: str) -> FakeSessionRuntime:
+            assert tenant_id == principal().tenant_id
+            runtime = FakeSessionRuntime()
+            self.runtimes.append(runtime)
+            return runtime
+
+        return HostedProfileSessionService(
+            self.store,
+            runtime_factory=runtime_factory,
+            now=self.now,
+            process_secret=b"synthetic-provider-process-secret-32b",
+            ceremony_base_url="https://browser-login.example.test",
+        )
+
+    def now(self) -> datetime:
+        return self.clock[0]
+
+    def restart(self) -> None:
+        """A service restart invalidates every outstanding lease."""
+
+        self.sessions.service = self._service()
+
+
+async def hosted_service(tmp_path: Path) -> HostedService:
+    store = FilesystemEncryptedProfileStore(
+        tmp_path / "profiles",
+        StaticProfileKeyring(
+            {"key-v1": hashlib.sha256(b"synthetic-provider-key").digest()},
+            current_version="key-v1",
+        ),
+    )
+    await HostedProfileLifecycleService(store, reference_factory=lambda: PROVIDER_REF).provision(
+        PROFILE_ID, principal(), ("https://example.org",)
+    )
+    return HostedService(store)
+
+
 def ready_provider(
-    sessions: FakeSessions,
+    sessions: BrowserSessionControlPlane,
     now: Callable[[], datetime] = lambda: NOW,
+    run_state: RunStateReader | None = None,
 ) -> HostedBrowserProvider:
     async def load(owner: Principal, profile_id: UUID) -> BrowserProfile:
         assert owner == principal()
@@ -118,6 +289,7 @@ def ready_provider(
         profiles=load,
         sessions=sessions,
         now=now,
+        run_state=run_state,
     )
 
 
@@ -227,7 +399,9 @@ async def test_hosted_provider_replaces_an_expired_lease_without_renewing_it() -
         (PROFILE_ID, tool_context().run_id, 1),
     ]
     assert sessions.deadlines == [NOW + LEASE_CAP, NOW + 2 * LEASE_CAP]
-    assert len(sessions.closes) == 1
+    # The service discards an expired lease itself, without sealing its state,
+    # so the provider does not ask it to close one.
+    assert sessions.closes == []
 
 
 async def test_hosted_provider_releases_only_the_lease_of_the_run_that_ended() -> None:
@@ -245,6 +419,161 @@ async def test_hosted_provider_releases_only_the_lease_of_the_run_that_ended() -
     with pytest.raises(BrowserProviderError) as raised:
         await provider.observe()
     assert raised.value.reason_code == "tool.browser.profile_unavailable"
+
+
+async def test_hosted_provider_reattaches_when_the_acquire_answer_is_lost(
+    tmp_path: Path,
+) -> None:
+    hosted = await hosted_service(tmp_path)
+    provider = ready_provider(hosted.sessions, now=hosted.now)
+    hosted.sessions.lose.add("acquire")
+    with pytest.raises(BrowserProviderError):
+        await provider.bind_execution(call_at(NOW))
+    # The retry comes later, so a chat run asks for a later fifteen-minute horizon.
+    hosted.clock[0] = NOW + timedelta(seconds=40)
+
+    await provider.bind_execution(call_at(hosted.now()))
+    observation = await provider.navigate("https://example.org/lesson")
+    await provider.release_run(RUN_ID)
+
+    assert observation.url == "https://example.org/lesson"
+    assert len(hosted.runtimes) == 1
+    assert hosted.runtimes[0].closed
+
+
+@pytest.mark.parametrize("failure", ["service_restart", "lost_answer"])
+async def test_hosted_provider_drops_a_lease_it_can_no_longer_trust(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    hosted = await hosted_service(tmp_path)
+    provider = ready_provider(hosted.sessions, now=hosted.now)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+    if failure == "service_restart":
+        hosted.restart()
+    else:
+        hosted.sessions.lose.add("observe")
+
+    with pytest.raises(BrowserProviderError):
+        await provider.observe()
+    await provider.bind_execution(call_at(NOW + timedelta(seconds=10)))
+    observation = await provider.navigate("https://example.org/lesson")
+
+    assert observation.url == "https://example.org/lesson"
+    assert len(hosted.runtimes) == 2
+
+
+async def test_hosted_provider_retires_the_lease_when_an_action_answer_is_lost(
+    tmp_path: Path,
+) -> None:
+    hosted = await hosted_service(tmp_path)
+    provider = ready_provider(hosted.sessions, now=hosted.now)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+    hosted.sessions.lose.add("act")
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await provider.act(CLICK)
+    assert raised.value.reason_code == "tool.browser.outcome_unknown"
+    await provider.bind_execution(call_at(NOW + timedelta(seconds=10)))
+    await provider.navigate("https://example.org/lesson")
+    await provider.act(CLICK)
+
+    # The lost action did land; the next one starts a fresh, in-step lease.
+    assert [len(runtime.actions) for runtime in hosted.runtimes] == [1, 1]
+    assert hosted.runtimes[0].closed
+
+
+async def test_hosted_provider_retires_the_lease_when_an_action_is_abandoned() -> None:
+    sessions = FakeSessions(act_gate=asyncio.Event())
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+    acting = asyncio.create_task(provider.act(CLICK))
+    await sessions.act_started.wait()
+
+    acting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await acting
+    await provider.bind_execution(call_at(NOW + timedelta(seconds=10)))
+
+    assert sessions.acquisitions == [(PROFILE_ID, RUN_ID, 1), (PROFILE_ID, RUN_ID, 1)]
+    assert sessions.closes == [lease_ref(1)]
+
+
+async def test_lease_upkeep_releases_a_lease_once_its_run_has_ended() -> None:
+    sessions = FakeSessions()
+    states = {RUN_ID: BrowserRunState.AWAITING_APPROVAL}
+    provider = ready_provider(sessions, run_state=run_states(states))
+    await provider.bind_execution(call_at(NOW))
+
+    await provider.maintain_leases()
+    assert sessions.closes == []
+    # Cancelled while parked, by another process that cannot reach this lease.
+    states[RUN_ID] = BrowserRunState.ENDED
+    await provider.maintain_leases()
+
+    assert sessions.closes == [lease_ref(1)]
+
+
+async def test_lease_upkeep_renews_while_the_run_needs_the_browser_for_at_most_an_hour() -> None:
+    sessions = FakeSessions()
+    clock = [NOW]
+    states = {RUN_ID: BrowserRunState.RUNNING}
+    provider = ready_provider(sessions, now=lambda: clock[0], run_state=run_states(states))
+    await provider.bind_execution(call_at(NOW))
+
+    for minute in range(1, 71):
+        clock[0] = NOW + timedelta(minutes=minute)
+        if minute == 20:
+            states[RUN_ID] = BrowserRunState.AWAITING_APPROVAL
+        await provider.maintain_leases()
+
+    # Renewed in fifteen-minute steps five minutes before each expiry, never
+    # past sixty minutes; the expired lease is then dropped, not closed.
+    assert sessions.renewals == [
+        NOW + timedelta(minutes=minutes) for minutes in (25, 35, 45, 55, 60)
+    ]
+    assert sessions.closes == []
+    await provider.bind_execution(call_at(clock[0]))
+    assert len(sessions.acquisitions) == 2
+
+
+async def test_lease_upkeep_never_renews_past_the_run_deadline() -> None:
+    sessions = FakeSessions()
+    clock = [NOW]
+    provider = ready_provider(
+        sessions,
+        now=lambda: clock[0],
+        run_state=run_states({RUN_ID: BrowserRunState.RUNNING}),
+    )
+    await provider.bind_execution(call_at(NOW, run_deadline_at=NOW + timedelta(minutes=20)))
+
+    clock[0] = NOW + timedelta(minutes=11)
+    await provider.maintain_leases()
+    clock[0] = NOW + timedelta(minutes=16)
+    await provider.maintain_leases()
+
+    assert sessions.renewals == [NOW + timedelta(minutes=20)]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [BrowserRunState.RESUMING, BrowserRunState.ENDED],
+)
+async def test_lease_upkeep_does_not_renew_for_a_run_that_is_not_using_it(
+    state: BrowserRunState,
+) -> None:
+    sessions = FakeSessions()
+    clock = [NOW]
+    provider = ready_provider(sessions, now=lambda: clock[0], run_state=run_states({RUN_ID: state}))
+    await provider.bind_execution(call_at(NOW))
+
+    clock[0] = NOW + timedelta(minutes=11)
+    await provider.maintain_leases()
+
+    assert sessions.renewals == []
 
 
 @pytest.mark.parametrize(
@@ -373,3 +702,38 @@ async def test_session_bound_provider_keeps_a_live_run_lease_until_that_run_ends
     await provider.release_run(first.run_id)
 
     assert sessions.closes == [f"lease-reference-{first.run_id}-{1:016d}"]
+
+
+async def test_session_bound_provider_releases_another_sessions_lease_once_its_run_ended() -> None:
+    sessions = FakeSessions()
+    states = {RUN_ID: BrowserRunState.AWAITING_APPROVAL}
+
+    async def load(owner: Principal, profile_id: UUID) -> BrowserProfile:
+        del owner, profile_id
+        return profile()
+
+    async def select(context: ToolExecutionContext) -> UUID:
+        del context
+        return PROFILE_ID
+
+    provider = SessionBoundHostedBrowserProvider(
+        principal=principal(),
+        profiles=load,
+        profile_selector=select,
+        sessions=sessions,
+        now=lambda: NOW,
+        run_state=run_states(states),
+    )
+    await provider.bind_execution(call_at(NOW))
+    # The parked run is cancelled from the API process; this worker's next
+    # browser call, in another session, must not wait out the lease.
+    states[RUN_ID] = BrowserRunState.ENDED
+    await provider.bind_execution(
+        call_at(
+            NOW + timedelta(seconds=10),
+            session_id=UUID("00000000-0000-0000-0000-0000000000e9"),
+            run_id=UUID("00000000-0000-0000-0000-0000000000ea"),
+        )
+    )
+
+    assert sessions.closes == [lease_ref(1)]

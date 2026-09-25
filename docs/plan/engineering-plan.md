@@ -4843,7 +4843,7 @@ and general-purpose subagents.
 
 The platform may operate rendered websites through a principal-owned,
 policy-bound browser profile. The detailed mechanism is specified in
-[browser-automation.md](browser-automation.md) and ADR-0056. The repository
+[browser-automation.md](browser-automation.md) and ADR-0058. The repository
 owner authorized this independently deliverable Milestone 10 tranche on
 2026-08-19. It does not authorize general host control, arbitrary JavaScript,
 credential exposure to the model, or weakening external-write approvals.

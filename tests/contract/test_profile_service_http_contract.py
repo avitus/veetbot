@@ -267,6 +267,39 @@ async def test_profile_service_rejects_naive_lease_deadlines_at_the_boundary(
     assert response.json()["error"]["code"] == "invalid_request"
 
 
+@pytest.mark.parametrize(
+    ("deadline", "idempotency_key"),
+    [
+        ("2026-08-20T12:00:00", "valid"),
+        ("2026-08-20T12:00:00+00:00", "browser-session:someone-else:renew"),
+    ],
+)
+async def test_profile_service_renew_route_rejects_naive_deadlines_and_foreign_intent(
+    tmp_path: Path,
+    deadline: str,
+    idempotency_key: str,
+) -> None:
+    lease_ref = "r" * 43
+    digest = hashlib.sha256(lease_ref.encode()).hexdigest()[:24]
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    headers = {
+        "Authorization": f"Bearer {OPAQUE_AUTH_VALUE}",
+        "Idempotency-Key": (
+            f"browser-session:{digest}:renew" if idempotency_key == "valid" else idempotency_key
+        ),
+    }
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as client:
+        response = await client.post(
+            "/v1/browser-sessions:renew",
+            headers=headers,
+            json={"lease_ref": lease_ref, "deadline_at": deadline},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
 async def test_profile_service_health_and_surface_are_minimal(tmp_path: Path) -> None:
     transport = httpx.ASGITransport(app=app(tmp_path / "profiles", readiness=False))
     async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as client:
@@ -362,6 +395,7 @@ async def test_profile_service_data_plane_and_authentication_are_wire_compatible
             ),
             sequence=1,
         )
+        renewed = await sessions.renew(lease.lease_ref, deadline_at=NOW + timedelta(minutes=10))
         await sessions.close(lease.lease_ref)
         ceremony = await sessions.begin_authentication(
             PROFILE_ID,
@@ -374,6 +408,8 @@ async def test_profile_service_data_plane_and_authentication_are_wire_compatible
 
     assert observation.url == "https://example.org/lesson"
     assert acted.revision == "revision-2"
+    assert renewed.lease_ref == lease.lease_ref
+    assert renewed.expires_at == NOW + timedelta(minutes=10)
     assert ceremony.launch_url is not None and "#capability=" in ceremony.launch_url
     assert status.status is BrowserAuthenticationStatus.NEEDS_USER
     assert status.launch_url is None

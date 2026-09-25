@@ -20,6 +20,7 @@ from agent_core.domain.browser import (
     BrowserActionKind,
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
+    BrowserLease,
     BrowserObservation,
     BrowserProviderError,
 )
@@ -261,6 +262,96 @@ async def test_expired_lease_waits_for_an_active_operation_before_closing(
     with pytest.raises(BrowserProviderError):
         await expiry
     assert runtime.closed is True
+
+
+async def test_repeated_acquire_for_the_same_attempt_reattaches_to_its_live_lease(
+    tmp_path: Path,
+) -> None:
+    """A retry whose first response was lost gets the live lease, not a conflict."""
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    first = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=15),
+    )
+    times[0] = NOW + timedelta(seconds=40)
+
+    retried = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=times[0] + timedelta(minutes=15),
+    )
+
+    assert retried == first
+    assert len(runtimes) == 1
+    with pytest.raises(ConflictError):
+        await sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=2,
+            deadline_at=times[0] + timedelta(minutes=15),
+        )
+
+
+async def test_lease_renews_in_fifteen_minute_steps_for_at_most_an_hour(
+    tmp_path: Path,
+) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=15),
+    )
+
+    times[0] = NOW + timedelta(minutes=10)
+    first = await sessions.renew(lease.lease_ref, deadline_at=NOW + timedelta(hours=2))
+    expiries = [first.expires_at]
+    for minute in (20, 30, 40, 50, 55):
+        times[0] = NOW + timedelta(minutes=minute)
+        renewed = await sessions.renew(lease.lease_ref, deadline_at=NOW + timedelta(hours=2))
+        expiries.append(renewed.expires_at)
+    await sessions.observe(lease.lease_ref)
+
+    # Each request adds at most fifteen minutes; the lease never outlives an hour.
+    assert first == BrowserLease(lease_ref=lease.lease_ref, expires_at=NOW + timedelta(minutes=25))
+    assert expiries == [NOW + timedelta(minutes=minutes) for minutes in (25, 35, 45, 55, 60, 60)]
+    times[0] = NOW + timedelta(minutes=60)
+    with pytest.raises(BrowserProviderError) as raised:
+        await sessions.renew(lease.lease_ref, deadline_at=NOW + timedelta(hours=2))
+    assert raised.value.reason_code == "tool.browser.profile_unavailable"
+    assert runtimes[0].closed is True
+
+
+async def test_lease_renewal_is_refused_once_the_profile_is_revoked(tmp_path: Path) -> None:
+    lifecycle, sessions, _runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=15),
+    )
+
+    await lifecycle.revoke(PROFILE_ID, principal(), PROVIDER_REF)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await sessions.renew(lease.lease_ref, deadline_at=NOW + timedelta(minutes=30))
+    assert raised.value.reason_code == "tool.browser.profile_unavailable"
 
 
 async def assert_authentication_ceremony_is_direct_single_use_and_runtime_decided(

@@ -135,4 +135,5 @@ implementation without one.
 - [ADR-0124 — Chat's default roster drops workspace.list_files so the calling tools fit (Accepted; amends ADR-0105)](0124-chat-roster-drops-workspace-list-files.md)
 - [ADR-0125 — Duplicate people merge on decisive evidence and are otherwise suggested (Accepted; amends ADR-0100 and ADR-0121)](0125-duplicate-people-merge-on-decisive-evidence.md)
 - [ADR-0126 — Email correspondence carries a short summary, and Chat can read the original (Accepted; amends ADR-0121)](0126-correspondence-summaries-and-original-email.md)
+- [ADR-0127 — Browser leases renew while the run needs them (Accepted; amends ADR-0058)](0127-browser-leases-renew-while-the-run-needs-them.md)
 - [ADR-0131 — New chats pin MCP catalogs from the last discovery and start servers on first use (Accepted; amends ADR-0103)](0131-new-chats-reuse-mcp-discovery.md)

@@ -264,8 +264,19 @@ class BrowserProfileView(BaseModel):
     last_used_at: datetime | None = None
 
 
-# The hosted service caps every run-attempt lease at fifteen minutes.
+# The hosted service caps each lease request at fifteen minutes and a lease's
+# whole life, renewals included, at sixty (ADR-0127).
 MAXIMUM_BROWSER_LEASE_SECONDS = 15 * 60
+MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS = 60 * 60
+
+
+class BrowserRunState(StrEnum):
+    """What a hosted lease's run needs from it."""
+
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    RESUMING = "resuming"
+    ENDED = "ended"
 
 
 class BrowserLease(BaseModel):

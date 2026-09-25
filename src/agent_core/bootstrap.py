@@ -246,6 +246,7 @@ from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
+from agent_core.application.browser_leases import browser_run_state
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
     BrowserProfileManagementService,
@@ -391,7 +392,7 @@ from agent_core.domain.agents import (
     content_addressed_agent_version,
 )
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.browser import BrowserProfile, BrowserRunState
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -521,7 +522,11 @@ from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.artifacts import AttachmentResolver
-from agent_core.ports.browser import BrowserProvider, release_browser_run
+from agent_core.ports.browser import (
+    BrowserProvider,
+    browser_lease_upkeep,
+    release_browser_run,
+)
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from agent_core.ports.browser_sessions import (
     BrowserAuthenticationControlPlane,
@@ -3365,6 +3370,17 @@ async def _compose(
             if delegation_joins is not None:
                 await delegation_joins.parent_parked(run_id, delegation_id)
 
+        async def after_parked_cancel(run_id: UUID) -> None:
+            if delegation_joins is not None:
+                await delegation_joins.after_run(run_id)
+            if browser_provider is not None:
+                # In one process the parked run's lease is here; elsewhere the
+                # run worker's lease upkeep releases it.
+                try:
+                    await release_browser_run(browser_provider, run_id)
+                except Exception:
+                    logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
+
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
                 async with uow_factory() as uow:
@@ -3381,12 +3397,12 @@ async def _compose(
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
             if browser_provider is not None:
-                # A run waiting for approval keeps its page; an ended one seals it
-                # and frees the profile for the next run or login ceremony.
+                # Only a run parked on its own approval keeps its page. Any other
+                # end of this execution (terminal, waiting on the user or a child,
+                # requeued after fencing) seals it and frees the profile.
                 try:
-                    async with uow_factory() as uow:
-                        ended = await uow.runs.get(run_id, principal)
-                    if ended.status in TERMINAL_RUN_STATUSES:
+                    state = await browser_run_state(uow_factory, principal, run_id)
+                    if state is not BrowserRunState.AWAITING_APPROVAL:
                         await release_browser_run(browser_provider, run_id)
                 except Exception:
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
@@ -3723,7 +3739,7 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             cancel_parked_run=executor.cancel_parked_run,
             trajectory_export_enabled=trajectory_export_enabled,
-            on_parked_cancelled=(None if delegation_joins is None else delegation_joins.after_run),
+            on_parked_cancelled=after_parked_cancel,
         )
         approval_service = ApprovalService(
             uow_factory=uow_factory,
@@ -4067,6 +4083,12 @@ async def _compose(
                 metrics=schedule_metrics,
             )
 
+        # Run workers hold the hosted browser leases of the runs they executed,
+        # so they, not the maintenance role, release and renew them (ADR-0127).
+        browser_lease_maintenance = (
+            None if browser_provider is None else browser_lease_upkeep(browser_provider)
+        )
+
         return (
             Composition(
                 settings=settings,
@@ -4101,6 +4123,7 @@ async def _compose(
                             duration_seconds=duration_seconds,
                         )
                     ),
+                    maintain_browser_leases=browser_lease_maintenance,
                 ),
                 async_worker_factory=lambda worker_id: DurableWorker(
                     uow_factory=uow_factory,
@@ -4119,6 +4142,7 @@ async def _compose(
                             duration_seconds=duration_seconds,
                         )
                     ),
+                    maintain_browser_leases=browser_lease_maintenance,
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
@@ -4315,6 +4339,9 @@ def _browser_provider(
             async with profiles() as uow:
                 return await uow.browser_profiles.get(requested_profile_id, owner)
 
+        async def read_run_state(run_id: UUID) -> BrowserRunState:
+            return await browser_run_state(profiles, principal, run_id)
+
         if profile_id is not None:
             return HostedBrowserProvider(
                 principal=principal,
@@ -4323,6 +4350,7 @@ def _browser_provider(
                 profiles=load_profile,
                 sessions=sessions,
                 now=now,
+                run_state=read_run_state,
             )
 
         async def select_session_profile(context: ToolExecutionContext) -> UUID:
@@ -4339,6 +4367,7 @@ def _browser_provider(
             profile_selector=select_session_profile,
             sessions=sessions,
             now=now,
+            run_state=read_run_state,
         )
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
