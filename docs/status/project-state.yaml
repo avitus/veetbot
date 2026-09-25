@@ -61,6 +61,10 @@ project:
   # default agent stops advertising workspace.list_files so Chat's thirty-item
   # roster fits all three calling tools with email unsubscribe on (amends
   # ADR-0105); the call gate enables every roster-changing production flag.
+  # ADR-0125 records the owner's non-milestone extension to Milestone 28 on
+  # 2026-09-25: groups, services and addresses never become people; duplicate
+  # people merge automatically only on an owner-given endpoint a correspondent
+  # also holds, and every name match becomes a suggestion the owner answers.
   authorized_milestones:
     - 0
     - 1

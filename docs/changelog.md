@@ -4,6 +4,26 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — Duplicate people merge, and teams stop being people
+
+- After the People cleanup, the directory still held "Investment Team",
+  "Partners", a verification service and an address shown as a name, because
+  the owner had written to them. ADR-0125: a label that is an address, or
+  that names a group, department, organization or service, never becomes or
+  matches a person. Rerunning `agent people repair-directory` removes the
+  existing ones.
+- Duplicates such as "Erin Vitus" beside "Erin" now resolve in two ways. An
+  address you gave one person, which a correspondent also holds, merges that
+  correspondent automatically, and the survivor's page offers an undo. A
+  name match asks you instead, because two people can share a name. Needs
+  review lists each possible duplicate with Merge and Not the same.
+- A pair you keep apart, or a merge you undo, is never suggested again. The
+  pass runs every 15 minutes, or now with `agent people dedupe --owner
+  TENANT/PRINCIPAL --confirm`.
+- `GET /v1/people/merge-suggestions` and
+  `POST /v1/people/merge-suggestions/{id}` are new, and migration
+  `524f16dfc8f9` admits the new People record kind.
+
 ## 2026-09-23 — Files reach you on the reply, and replies can be copied
 
 - A file the agent made never reached the owner: `artifact.export` stored it,
