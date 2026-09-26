@@ -617,6 +617,29 @@ def test_every_form_submission_is_checked_against_the_prefix() -> None:
     assert wrong == {}
 
 
+def test_a_key_press_on_a_choice_control_is_not_covered() -> None:
+    """Rule 7: an arrow key moves a radio group to an option nobody classified.
+
+    Select and check classify the option they choose, so choice controls are
+    covered through them and never through press (review finding).
+    """
+
+    choice = facts(field_kind=BrowserFieldKind.CHOICE)
+    found = {
+        key.value: cover(
+            click(kind=BrowserActionKind.PRESS, key=key),
+            labels=("Keep learning",),
+            role="radio",
+            element=choice,
+        )[:2]
+        for key in BrowserKey
+    }
+    assert found == {key.value: (False, "field_not_covered") for key in BrowserKey}
+    assert cover(click(kind=BrowserActionKind.CHECK), labels=("Keep learning",), element=choice)[
+        :2
+    ] == (True, None)
+
+
 def test_standing_ceiling_covers_only_routine_actions_on_its_origins() -> None:
     def ceiling(*labels: str, page_url: str = LESSON) -> tuple[bool, str | None]:
         coverage = standing_ceiling_coverage(

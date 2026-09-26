@@ -164,6 +164,9 @@ change needs the owner's explicit approval, and the owner has given it.
      the approval card.
    - It never covers:
      - credential, one-time-code, payment or identity fields;
+     - key presses on choice controls, since an arrow key checks another
+       radio in the group without classifying it; select and check still
+       cover them;
      - unnamed elements;
      - links or form submissions whose target leaves the origin or the
        prefix, or has a sensitive path segment. Any click on an element in a

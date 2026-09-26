@@ -118,7 +118,9 @@ _FIELD_CONSEQUENCES: dict[BrowserFieldKind, BrowserActionConsequence] = {
 _TYPED_FIELDS = frozenset(
     {BrowserFieldKind.TEXT, BrowserFieldKind.SEARCH, BrowserFieldKind.MULTILINE}
 )
-_PRESSED_FIELDS = _TYPED_FIELDS | {BrowserFieldKind.NONE, BrowserFieldKind.CHOICE}
+# Never CHOICE: an arrow key checks another radio in the group, whose labels
+# nobody classified. Select and check cover choice controls instead.
+_PRESSED_FIELDS = _TYPED_FIELDS | {BrowserFieldKind.NONE}
 _UNCLICKABLE_FIELDS = frozenset(
     {
         BrowserFieldKind.PASSWORD,

@@ -1369,12 +1369,14 @@ def _ref(observation: BrowserObservation, name: str, *, role: str | None = None)
     )
 
 
-def _press(observation: BrowserObservation, name: str, key: str) -> BrowserAction:
+def _press(
+    observation: BrowserObservation, name: str, key: str, *, role: str | None = None
+) -> BrowserAction:
     return BrowserAction.model_validate(
         {
             "kind": "press",
             "expected_revision": observation.revision,
-            "ref": _ref(observation, name),
+            "ref": _ref(observation, name, role=role),
             "key": key,
         }
     )
@@ -1511,3 +1513,23 @@ def test_a_fragment_link_has_no_target_only_on_its_own_page() -> None:
     assert link("", "https://elsewhere.test/lesson/1") == BrowserTargetFacts(
         same_origin=False, first_segment="lesson", sensitive_path=False
     )
+
+
+RADIO_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<label><input type="radio" name="plan" id="keep" checked> Keep learning</label>
+<label><input type="radio" name="plan" id="trial"> Start Super trial $12.99</label>
+</body></html>"""
+
+
+async def test_an_arrow_key_on_a_radio_is_refused_before_dispatch() -> None:
+    """Rule 7: ArrowDown would check the payment-labelled radio unclassified."""
+
+    async with lesson_pages({"/lesson/1": RADIO_PAGE}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        refusal = await _refused(runtime, _press(page, "", "ArrowDown", role="radio"))
+        state = await runtime._current_page().evaluate(
+            "[document.getElementById('keep').checked, document.getElementById('trial').checked]"
+        )
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert state == [True, False]
