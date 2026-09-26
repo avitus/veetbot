@@ -475,6 +475,92 @@ class BrowserGrantRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+_TASK_GRANT_END_REASONS = (
+    "'expired','exhausted','revoked','superseded','profile_changed',"
+    "'profile_revoked','policy_changed','agent_changed','scope_removed'"
+)
+
+
+class BrowserTaskGrantRow(Base):
+    """ADR-0129: a session-bound, thirty-minute, two-hundred-action task grant.
+
+    It holds scope, pins and counters only: no page URL, material, cookie or
+    credential column.
+    """
+
+    __tablename__ = "browser_task_grants"
+    __table_args__ = (
+        CheckConstraint("profile_generation >= 0", name="generation_nonnegative"),
+        CheckConstraint("path_prefix ~ '^/[A-Za-z0-9._~-]{1,64}$'", name="path_prefix_segment"),
+        CheckConstraint("max_actions BETWEEN 1 AND 200", name="max_actions_bounded"),
+        CheckConstraint(
+            "actions_used >= 0 AND actions_used <= max_actions", name="actions_used_bounded"
+        ),
+        CheckConstraint("typed_characters BETWEEN 0 AND 4096", name="typed_characters_bounded"),
+        CheckConstraint(
+            "expires_at > created_at AND expires_at <= created_at + interval '30 minutes'",
+            name="time_window",
+        ),
+        CheckConstraint(
+            f"end_reason IS NULL OR end_reason IN ({_TASK_GRANT_END_REASONS})",
+            name="end_reason_closed",
+        ),
+        CheckConstraint("(ended_at IS NULL) = (end_reason IS NULL)", name="end_paired"),
+        CheckConstraint(
+            "revoked_at IS NULL OR end_reason = 'revoked'", name="revoked_ends_revoked"
+        ),
+        Index(
+            "uq_browser_task_grants_active_session",
+            "session_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+        Index(
+            "ix_browser_task_grants_tenant_principal_created",
+            "tenant_id",
+            "principal_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
+        Index(
+            "ix_browser_task_grants_open_expiry",
+            "expires_at",
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+        Index(
+            "ix_browser_task_grants_profile_open",
+            "profile_id",
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("browser_profiles.id", ondelete="CASCADE")
+    )
+    profile_generation: Mapped[int] = mapped_column(Integer)
+    agent_version: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)
+    path_prefix: Mapped[str] = mapped_column(Text)
+    max_actions: Mapped[int] = mapped_column(Integer)
+    actions_used: Mapped[int] = mapped_column(Integer)
+    typed_characters: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    approval_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    approved_by: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_reason: Mapped[str | None] = mapped_column(Text)
+
+
 class BrowserAuthenticationRow(Base):
     __tablename__ = "browser_authentications"
     __table_args__ = (

@@ -41,6 +41,7 @@ from agent_core.adapters.browser.hosted_provider import (
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
+from agent_core.adapters.browser.task_grants import InMemoryBrowserTaskGrantRepository
 from agent_core.adapters.browser.unavailable import (
     UnavailableBrowserAuthenticationControlPlane,
     UnavailableBrowserProfileControlPlane,
@@ -163,6 +164,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresBrowserAuthenticationRepository,
     PostgresBrowserGrantRepository,
     PostgresBrowserProfileRepository,
+    PostgresBrowserTaskGrantRepository,
     PostgresCapabilityEvaluationRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
@@ -1055,6 +1057,7 @@ def _memory_uow_repositories(
         policy_profiles=InMemoryPolicyProfileRepository(),
         browser_profiles=InMemoryBrowserProfileRepository(),
         browser_grants=InMemoryBrowserGrantRepository(),
+        browser_task_grants=InMemoryBrowserTaskGrantRepository(),
         browser_authentications=InMemoryBrowserAuthenticationRepository(),
         process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
@@ -1137,6 +1140,7 @@ def _postgres_repository_factory(
             policy_profiles=PostgresPolicyProfileRepository(session),
             browser_profiles=PostgresBrowserProfileRepository(session),
             browser_grants=PostgresBrowserGrantRepository(session),
+            browser_task_grants=PostgresBrowserTaskGrantRepository(session),
             browser_authentications=PostgresBrowserAuthenticationRepository(session),
             process_events=PostgresProcessEventRepository(session),
             sessions=sessions,

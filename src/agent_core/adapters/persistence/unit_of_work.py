@@ -15,6 +15,7 @@ from sqlalchemy.sql.functions import func
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.calls import CallStore
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
@@ -85,6 +86,7 @@ class UnitOfWorkRepositories:
     policy_profiles: PolicyProfileRepository
     browser_profiles: BrowserProfileRepository
     browser_grants: BrowserGrantRepository
+    browser_task_grants: BrowserTaskGrantRepository
     browser_authentications: BrowserAuthenticationRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
@@ -150,6 +152,7 @@ class MemoryUnitOfWork:
         self.policy_profiles = repositories.policy_profiles
         self.browser_profiles = repositories.browser_profiles
         self.browser_grants = repositories.browser_grants
+        self.browser_task_grants = repositories.browser_task_grants
         self.browser_authentications = repositories.browser_authentications
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
@@ -271,6 +274,7 @@ class PostgresUnitOfWork:
         self.policy_profiles = repositories.policy_profiles
         self.browser_profiles = repositories.browser_profiles
         self.browser_grants = repositories.browser_grants
+        self.browser_task_grants = repositories.browser_task_grants
         self.browser_authentications = repositories.browser_authentications
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions

@@ -52,6 +52,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     BrowserAuthenticationRow,
     BrowserGrantRow,
     BrowserProfileRow,
+    BrowserTaskGrantRow,
     CheckpointRow,
     ConsolidationWatermarkRow,
     DerivedEventKeyRow,
@@ -98,6 +99,11 @@ from agent_core.domain.browser import (
     BrowserProfile,
     BrowserProfileProvisioning,
     BrowserProfileStatus,
+)
+from agent_core.domain.browser_task_grants import (
+    TASK_GRANT_MAX_TYPED_CHARACTERS,
+    BrowserTaskGrant,
+    BrowserTaskGrantEndReason,
 )
 from agent_core.domain.errors import (
     ConcurrencyConflict,
@@ -1868,6 +1874,266 @@ class PostgresBrowserProfileRepository:
         if current.generation != expected_generation:
             raise ConcurrencyConflict("browser profile generation changed")
         raise ConflictError("browser profile must be revoked before deletion")
+
+
+def _browser_task_grant_to_domain(row: BrowserTaskGrantRow) -> BrowserTaskGrant:
+    return BrowserTaskGrant(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        session_id=row.session_id,
+        profile_id=row.profile_id,
+        profile_generation=row.profile_generation,
+        agent_version=row.agent_version,
+        policy_version=row.policy_version,
+        origin=row.origin,
+        path_prefix=row.path_prefix,
+        max_actions=row.max_actions,
+        actions_used=row.actions_used,
+        typed_characters=row.typed_characters,
+        approval_id=row.approval_id,
+        approved_by=row.approved_by,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        last_used_at=row.last_used_at,
+        revoked_at=row.revoked_at,
+        ended_at=row.ended_at,
+        end_reason=(None if row.end_reason is None else BrowserTaskGrantEndReason(row.end_reason)),
+    )
+
+
+class PostgresBrowserTaskGrantRepository:
+    """ADR-0129 task grants; every statement filters on tenant and principal,
+    and every change is one guarded statement."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def _owned(self, principal: Principal) -> tuple[Any, Any]:
+        return (
+            BrowserTaskGrantRow.tenant_id == principal.tenant_id,
+            BrowserTaskGrantRow.principal_id == principal.principal_id,
+        )
+
+    @staticmethod
+    def _ending(reason: BrowserTaskGrantEndReason, now: datetime) -> dict[str, Any]:
+        return {
+            "ended_at": now,
+            "end_reason": reason.value,
+            "revoked_at": now if reason is BrowserTaskGrantEndReason.REVOKED else None,
+        }
+
+    async def create(self, grant: BrowserTaskGrant) -> BrowserTaskGrant:
+        statement = (
+            pg_insert(BrowserTaskGrantRow)
+            .values(
+                id=grant.id,
+                tenant_id=grant.tenant_id,
+                principal_id=grant.principal_id,
+                session_id=grant.session_id,
+                profile_id=grant.profile_id,
+                profile_generation=grant.profile_generation,
+                agent_version=grant.agent_version,
+                policy_version=grant.policy_version,
+                origin=grant.origin,
+                path_prefix=grant.path_prefix,
+                max_actions=grant.max_actions,
+                actions_used=grant.actions_used,
+                typed_characters=grant.typed_characters,
+                approval_id=grant.approval_id,
+                approved_by=grant.approved_by,
+                created_at=grant.created_at,
+                expires_at=grant.expires_at,
+                last_used_at=grant.last_used_at,
+                revoked_at=grant.revoked_at,
+                ended_at=grant.ended_at,
+                end_reason=None if grant.end_reason is None else grant.end_reason.value,
+            )
+            # The id, the approval and the one-active-grant-per-session index
+            # are all unique; any of them refuses the insert.
+            .on_conflict_do_nothing()
+        )
+        if not _rowcount(await self._session.execute(statement)):
+            raise ConflictError("browser task grant already exists or the session has one")
+        return grant.model_copy(deep=True)
+
+    async def get(self, grant_id: UUID, principal: Principal) -> BrowserTaskGrant:
+        row = (
+            await self._session.scalars(
+                select(BrowserTaskGrantRow).where(
+                    BrowserTaskGrantRow.id == grant_id, *self._owned(principal)
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser task grant not found")
+        return _browser_task_grant_to_domain(row)
+
+    async def active_for_session(
+        self, session_id: UUID, principal: Principal, *, now: datetime
+    ) -> BrowserTaskGrant | None:
+        row = (
+            await self._session.scalars(
+                select(BrowserTaskGrantRow).where(
+                    BrowserTaskGrantRow.session_id == session_id,
+                    *self._owned(principal),
+                    BrowserTaskGrantRow.ended_at.is_(None),
+                    BrowserTaskGrantRow.expires_at > now,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else _browser_task_grant_to_domain(row)
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None = None,
+        active_only: bool = False,
+        now: datetime,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserTaskGrant]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
+        statement = select(BrowserTaskGrantRow).where(*self._owned(principal))
+        if session_id is not None:
+            statement = statement.where(BrowserTaskGrantRow.session_id == session_id)
+        if active_only:
+            statement = statement.where(
+                BrowserTaskGrantRow.ended_at.is_(None), BrowserTaskGrantRow.expires_at > now
+            )
+        if after_created_at is not None and after_id is not None:
+            statement = statement.where(
+                or_(
+                    BrowserTaskGrantRow.created_at < after_created_at,
+                    and_(
+                        BrowserTaskGrantRow.created_at == after_created_at,
+                        BrowserTaskGrantRow.id < after_id,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            BrowserTaskGrantRow.created_at.desc(), BrowserTaskGrantRow.id.desc()
+        )
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
+        return [_browser_task_grant_to_domain(row) for row in rows]
+
+    async def consume(
+        self,
+        grant_id: UUID,
+        principal: Principal,
+        *,
+        session_id: UUID,
+        typed: int,
+        now: datetime,
+    ) -> BrowserTaskGrant | None:
+        exhausts = BrowserTaskGrantRow.actions_used + 1 >= BrowserTaskGrantRow.max_actions
+        row = (
+            await self._session.scalars(
+                update(BrowserTaskGrantRow)
+                .where(
+                    BrowserTaskGrantRow.id == grant_id,
+                    *self._owned(principal),
+                    BrowserTaskGrantRow.session_id == session_id,
+                    BrowserTaskGrantRow.ended_at.is_(None),
+                    BrowserTaskGrantRow.revoked_at.is_(None),
+                    BrowserTaskGrantRow.expires_at > now,
+                    BrowserTaskGrantRow.actions_used < BrowserTaskGrantRow.max_actions,
+                    BrowserTaskGrantRow.typed_characters + typed <= TASK_GRANT_MAX_TYPED_CHARACTERS,
+                )
+                .values(
+                    actions_used=BrowserTaskGrantRow.actions_used + 1,
+                    typed_characters=BrowserTaskGrantRow.typed_characters + typed,
+                    last_used_at=now,
+                    ended_at=case((exhausts, now), else_=None),
+                    end_reason=case(
+                        (exhausts, BrowserTaskGrantEndReason.EXHAUSTED.value), else_=None
+                    ),
+                )
+                .returning(BrowserTaskGrantRow)
+            )
+        ).one_or_none()
+        return None if row is None else _browser_task_grant_to_domain(row)
+
+    async def end(
+        self,
+        grant_id: UUID,
+        principal: Principal,
+        *,
+        reason: BrowserTaskGrantEndReason,
+        now: datetime,
+    ) -> tuple[BrowserTaskGrant, bool]:
+        row = (
+            await self._session.scalars(
+                update(BrowserTaskGrantRow)
+                .where(
+                    BrowserTaskGrantRow.id == grant_id,
+                    *self._owned(principal),
+                    BrowserTaskGrantRow.ended_at.is_(None),
+                )
+                .values(**self._ending(reason, now))
+                .returning(BrowserTaskGrantRow)
+            )
+        ).one_or_none()
+        if row is not None:
+            return _browser_task_grant_to_domain(row), True
+        return await self.get(grant_id, principal), False
+
+    async def end_expired(
+        self, now: datetime, limit: int, *, tenant_id: str
+    ) -> builtins.list[BrowserTaskGrant]:
+        due = (
+            select(BrowserTaskGrantRow.id)
+            .where(
+                BrowserTaskGrantRow.tenant_id == tenant_id,
+                BrowserTaskGrantRow.ended_at.is_(None),
+                BrowserTaskGrantRow.expires_at <= now,
+            )
+            .order_by(BrowserTaskGrantRow.expires_at, BrowserTaskGrantRow.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        rows = (
+            await self._session.scalars(
+                update(BrowserTaskGrantRow)
+                .where(
+                    BrowserTaskGrantRow.id.in_(due.scalar_subquery()),
+                    BrowserTaskGrantRow.ended_at.is_(None),
+                )
+                .values(**self._ending(BrowserTaskGrantEndReason.EXPIRED, now))
+                .returning(BrowserTaskGrantRow)
+            )
+        ).all()
+        return sorted(
+            (_browser_task_grant_to_domain(row) for row in rows),
+            key=lambda grant: (grant.expires_at, grant.id.int),
+        )
+
+    async def end_for_profile(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        reason: BrowserTaskGrantEndReason,
+        now: datetime,
+    ) -> builtins.list[BrowserTaskGrant]:
+        rows = (
+            await self._session.scalars(
+                update(BrowserTaskGrantRow)
+                .where(
+                    BrowserTaskGrantRow.profile_id == profile_id,
+                    *self._owned(principal),
+                    BrowserTaskGrantRow.ended_at.is_(None),
+                )
+                .values(**self._ending(reason, now))
+                .returning(BrowserTaskGrantRow)
+            )
+        ).all()
+        return [_browser_task_grant_to_domain(row) for row in rows]
 
 
 def _browser_grant_to_domain(row: BrowserGrantRow) -> BrowserGrant:
