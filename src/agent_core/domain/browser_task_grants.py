@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -17,6 +17,7 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
     require_task_grant_path_prefix,
 )
+from agent_core.domain.browser_classification import path_is_within_prefix, segment_is_sensitive
 
 # Fixed limits, not configuration (ADR-0129 decision 4). Database check
 # constraints enforce the same numbers.
@@ -78,18 +79,6 @@ def task_grant_id_for_approval(approval_id: UUID) -> UUID:
     return uuid5(NAMESPACE_URL, f"veetbot:browser-task-grant:{approval_id}")
 
 
-def path_is_within_prefix(path: str, path_prefix: str) -> bool:
-    """Whether ``path`` is ``path_prefix`` or below it, on segment boundaries.
-
-    The comparison is case-sensitive, and a path with a dot segment, written
-    plainly or percent-encoded, is never within any prefix.
-    """
-
-    if any(unquote(segment) in {".", ".."} for segment in path.split("/")):
-        return False
-    return path == path_prefix or path.startswith(path_prefix + "/")
-
-
 class BrowserTaskGrantScope(BaseModel):
     """One configured site scope: an exact origin and one path segment (ADR-0129).
 
@@ -109,8 +98,11 @@ class BrowserTaskGrantScope(BaseModel):
 
     @field_validator("path_prefix")
     @classmethod
-    def prefix_is_one_segment(cls, value: str) -> str:
-        return require_task_grant_path_prefix(value)
+    def prefix_is_one_plain_segment(cls, value: str) -> str:
+        require_task_grant_path_prefix(value)
+        if segment_is_sensitive(value[1:]):
+            raise ValueError("a task-grant scope cannot name a sensitive path segment")
+        return value
 
     def contains(self, url: str) -> bool:
         try:
@@ -139,6 +131,8 @@ def _parse_scope(entry: str) -> BrowserTaskGrantScope:
         raise ValueError("does not have exactly one path segment")
     if TASK_GRANT_PATH_SEGMENT.fullmatch(segments[1]) is None:
         raise ValueError("has a path segment that is not a plain name")
+    if segment_is_sensitive(segments[1]):
+        raise ValueError("has a sensitive path segment")
     return BrowserTaskGrantScope(origin=origin, path_prefix=parsed.path)
 
 
@@ -168,6 +162,18 @@ def parse_task_grant_scopes(raw: str) -> tuple[BrowserTaskGrantScope, ...]:
             raise ValueError(f"entry {position} repeats an earlier scope")
         scopes.append(scope)
     return tuple(scopes)
+
+
+def offer_scope(
+    page_url: str, scopes: tuple[BrowserTaskGrantScope, ...]
+) -> BrowserTaskGrantScope | None:
+    """The one configured scope that contains ``page_url``, if any.
+
+    Configuration keeps entries unique and one segment deep, so at most one
+    scope contains a page.
+    """
+
+    return next((scope for scope in scopes if scope.contains(page_url)), None)
 
 
 class BrowserTaskGrantEndReason(StrEnum):

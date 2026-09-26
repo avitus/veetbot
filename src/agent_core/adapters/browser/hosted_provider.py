@@ -17,6 +17,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionConsequence,
     BrowserActionContext,
+    BrowserActionKind,
     BrowserElement,
     BrowserLease,
     BrowserObservation,
@@ -27,6 +28,7 @@ from agent_core.domain.browser import (
     browser_origin,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_classification import classify_browser_action
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
 from agent_core.ports.browser_sessions import BrowserSessionControlPlane
@@ -568,56 +570,18 @@ class SessionBoundHostedBrowserProvider:
         return provider
 
 
-_HARD_EXCLUSION_WORDS = frozenset(
-    {
-        "accept",
-        "agree",
-        "buy",
-        "checkout",
-        "delete",
-        "download",
-        "order",
-        "password",
-        "pay",
-        "post",
-        "publish",
-        "recover",
-        "remove",
-        "security",
-        "submit",
-        "upload",
-    }
-)
-_ROUTINE_CLICK_NAMES = frozenset(
-    {
-        "continue",
-        "done",
-        "finish",
-        "got it",
-        "next",
-        "practice",
-        "review",
-        "skip",
-        "start",
-        "try again",
-    }
-)
-
-
 def _classify_consequence(
     action: BrowserAction,
     element: BrowserElement,
 ) -> BrowserActionConsequence:
-    normalized_name = " ".join(element.name.lower().split())
-    words = frozenset(normalized_name.replace("-", " ").split())
-    if words & _HARD_EXCLUSION_WORDS:
-        return BrowserActionConsequence.UNKNOWN
-    if (
-        action.kind.value == "click"
-        and element.role in {"button", "link"}
-        and normalized_name in _ROUTINE_CLICK_NAMES
-    ):
-        return BrowserActionConsequence.ROUTINE
-    if action.kind.value == "scroll":
-        return BrowserActionConsequence.ROUTINE
-    return BrowserActionConsequence.UNKNOWN
+    """The shared classifier over what the worker's cached observation shows."""
+
+    return classify_browser_action(
+        kind=action.kind,
+        role=element.role,
+        labels=(element.name,),
+        facts=None,
+        option_texts=(action.value,)
+        if action.kind is BrowserActionKind.SELECT and action.value is not None
+        else (),
+    )
