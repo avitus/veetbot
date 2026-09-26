@@ -13,6 +13,7 @@ from typing import Protocol, Self
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.browser_task_grants import end_task_grants_for_profile
 from agent_core.application.errors import BrowserLoginURLValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
@@ -31,6 +32,7 @@ from agent_core.domain.browser import (
     browser_origin,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_task_grants import BrowserTaskGrantEndReason
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.views import Page
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
@@ -40,7 +42,9 @@ from agent_core.ports.browser_profiles import (
     BrowserProfileRepository,
 )
 from agent_core.ports.browser_sessions import BrowserAuthenticationControlPlane
+from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.determinism import Clock, IdFactory
+from agent_core.ports.events import EventRepository
 
 LOGIN_REDIRECT_MESSAGE = (
     "The website redirected the login page to an origin this website access "
@@ -53,6 +57,10 @@ class _BrowserUnitOfWork(Protocol):
     browser_profiles: BrowserProfileRepository
     browser_authentications: BrowserAuthenticationRepository
     browser_grants: BrowserGrantRepository
+    # ADR-0129: a profile change ends the task grants pinned to it, with an
+    # event, in the unit of work that records the change.
+    browser_task_grants: BrowserTaskGrantRepository
+    events: EventRepository
 
     async def __aenter__(self) -> Self: ...
 
@@ -268,6 +276,13 @@ class BrowserProfileManagementService:
                     status=BrowserProfileStatus.REVOKED,
                     updated_at=self._clock.now(),
                 )
+            await end_task_grants_for_profile(
+                uow,
+                principal,
+                profile_id,
+                reason=BrowserTaskGrantEndReason.PROFILE_REVOKED,
+                now=self._clock.now(),
+            )
         return _profile_view(revoked)
 
     async def delete(self, principal: Principal, profile_id: UUID) -> None:
@@ -282,6 +297,13 @@ class BrowserProfileManagementService:
         if profile.provider_ref is not None:
             await self._lifecycle.delete(profile_id, principal, profile.provider_ref)
         async with self._uow_factory() as uow:
+            await end_task_grants_for_profile(
+                uow,
+                principal,
+                profile_id,
+                reason=BrowserTaskGrantEndReason.PROFILE_REVOKED,
+                now=self._clock.now(),
+            )
             await uow.browser_profiles.delete(
                 profile_id,
                 principal,
@@ -472,12 +494,22 @@ class BrowserProfileManagementService:
         ready.
         """
 
-        return await uow.browser_profiles.advance_generation(
+        advanced = await uow.browser_profiles.advance_generation(
             profile.id,
             principal,
             expected_generation=profile.generation,
             updated_at=updated_at,
         )
+        # ADR-0129: a sign-in ends the task grants pinned to the profile; the
+        # authorizer's generation check is the backstop for any other path.
+        await end_task_grants_for_profile(
+            uow,
+            principal,
+            profile.id,
+            reason=BrowserTaskGrantEndReason.PROFILE_CHANGED,
+            now=updated_at,
+        )
+        return advanced
 
     async def _synchronize_profile_status(
         self,

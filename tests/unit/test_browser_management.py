@@ -19,7 +19,12 @@ from agent_core.adapters.browser.profiles import (
     InMemoryBrowserProfileControlPlane,
     InMemoryBrowserProfileRepository,
 )
+from agent_core.adapters.browser.task_grants import InMemoryBrowserTaskGrantRepository
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.persistence.memory import (
+    InMemoryEventRepository,
+    InMemorySessionRepository,
+)
 from agent_core.application.browser_grants import StandingBrowserGrantAuthorizer
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
@@ -40,8 +45,14 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     BrowserProviderError,
 )
+from agent_core.domain.browser_task_grants import (
+    TASK_GRANT_DURATION,
+    BrowserTaskGrant,
+    BrowserTaskGrantEndReason,
+)
 from agent_core.domain.errors import AuthorizationError, ConflictError
 from agent_core.domain.policies import PolicyDecisionType
+from agent_core.domain.sessions import Session, SessionStatus
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000c7")
@@ -54,6 +65,9 @@ class FakeUnitOfWork:
         self.browser_profiles = InMemoryBrowserProfileRepository()
         self.browser_authentications = InMemoryBrowserAuthenticationRepository()
         self.browser_grants = InMemoryBrowserGrantRepository()
+        self.browser_task_grants = InMemoryBrowserTaskGrantRepository()
+        self.sessions = InMemorySessionRepository()
+        self.events = InMemoryEventRepository(self.sessions, FixedClock(NOW))
 
     async def __aenter__(self) -> Self:
         return self
@@ -835,3 +849,116 @@ async def test_standing_grant_stops_authorizing_after_a_sign_in_begins() -> None
     after = await authorize()
 
     assert (before, after) == ("browser.grant.authorized", "browser.grant.mismatch")
+
+
+TASK_SESSION = UUID("00000000-0000-0000-0000-0000000000cb")
+
+
+async def task_grant_on_profile(uow: FakeUnitOfWorkFactory, subject: Principal) -> BrowserTaskGrant:
+    """An active task grant on the profile, in a chat bound to it (ADR-0129)."""
+
+    await uow.uow.sessions.create(
+        Session(
+            id=TASK_SESSION,
+            tenant_id=subject.tenant_id,
+            principal_id=subject.principal_id,
+            agent_id=UUID(int=0xA6),
+            agent_version="agent-v1",
+            status=SessionStatus.ACTIVE,
+            metadata={"browser_profile_id": str(PROFILE_ID)},
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    profile = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    return await uow.uow.browser_task_grants.create(
+        BrowserTaskGrant(
+            id=UUID(int=0xCC),
+            tenant_id=subject.tenant_id,
+            principal_id=subject.principal_id,
+            session_id=TASK_SESSION,
+            profile_id=PROFILE_ID,
+            profile_generation=profile.generation,
+            agent_version="agent-v1",
+            policy_version="policy-v1",
+            origin="https://example.org",
+            path_prefix="/lesson",
+            max_actions=200,
+            actions_used=4,
+            typed_characters=0,
+            approval_id=UUID(int=0xCD),
+            approved_by=subject.principal_id,
+            created_at=NOW,
+            expires_at=NOW + TASK_GRANT_DURATION,
+        )
+    )
+
+
+async def ended_task_grant_events(uow: FakeUnitOfWorkFactory, subject: Principal) -> list[str]:
+    events = await uow.uow.events.list_after(TASK_SESSION, 0, subject)
+    return [
+        event.payload["reason"]
+        for event in events
+        if event.event_type == "browser.task_grant.ended"
+    ]
+
+
+async def test_profile_revoke_and_delete_end_task_grants() -> None:
+    """ADR-0129 section 9: a revoked profile's task grants end profile_revoked."""
+
+    uow = FakeUnitOfWorkFactory()
+    service = profile_service(uow, FakeAuthenticationControlPlane())
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    grant = await task_grant_on_profile(uow, subject)
+
+    await service.revoke(subject, PROFILE_ID)
+    ended = await uow.uow.browser_task_grants.get(grant.id, subject)
+    await service.delete(subject, PROFILE_ID)
+
+    assert ended.end_reason is BrowserTaskGrantEndReason.PROFILE_REVOKED
+    assert await ended_task_grant_events(uow, subject) == ["profile_revoked"]
+
+
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_sign_in_begin_and_ready_end_task_grants_for_the_profile(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0129 with ADR-0128 decision 10: every sign-in ends the profile's
+    task grants, at begin and when a ready outcome finds the profile READY."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    grant = await task_grant_on_profile(uow, subject)
+
+    await service.begin_authentication(
+        subject, PROFILE_ID, login_url="https://example.org/", mode=mode
+    )
+    after_begin = await uow.uow.browser_task_grants.get(grant.id, subject)
+
+    assert after_begin.end_reason is BrowserTaskGrantEndReason.PROFILE_CHANGED
+    assert await ended_task_grant_events(uow, subject) == ["profile_changed"]
+
+    second = await uow.uow.browser_task_grants.create(
+        after_begin.model_copy(
+            update={
+                "id": UUID(int=0xCE),
+                "approval_id": UUID(int=0xCF),
+                "profile_generation": after_begin.profile_generation + 1,
+                "ended_at": None,
+                "end_reason": None,
+            }
+        )
+    )
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+
+    assert (await uow.uow.browser_task_grants.get(second.id, subject)).end_reason is (
+        BrowserTaskGrantEndReason.PROFILE_CHANGED
+    )
+    assert await ended_task_grant_events(uow, subject) == ["profile_changed", "profile_changed"]

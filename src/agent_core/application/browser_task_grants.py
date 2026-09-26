@@ -470,3 +470,42 @@ def _decode_task_grant_cursor(value: str | None) -> tuple[datetime | None, UUID 
         return created_at, UUID(decoded["id"])
     except (TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("task grant cursor is malformed") from exc
+
+
+async def sweep_expired_task_grants(
+    uow_factory: UnitOfWorkFactory, clock: Clock, *, tenant_id: str, limit: int = 100
+) -> int:
+    """End one tenant's task grants whose window closed, in batches (section 9).
+
+    Each ended grant gets its browser.task_grant.ended event in the same unit
+    of work; a grant ends once, so a second pass appends nothing.
+    """
+
+    async with uow_factory() as uow:
+        ended = await uow.browser_task_grants.end_expired(clock.now(), limit, tenant_id=tenant_id)
+        for grant in ended:
+            await uow.events.append(
+                task_grant_ended_event(grant, run_id=None, actor_type="application")
+            )
+    return len(ended)
+
+
+async def end_task_grants_for_profile(
+    uow: Any,
+    principal: Principal,
+    profile_id: UUID,
+    *,
+    reason: BrowserTaskGrantEndReason,
+    now: datetime,
+) -> int:
+    """End every task grant pinned to a profile, with its event, inside the
+    caller's unit of work: a revoke or a new sign-in (ADR-0128 decision 10)."""
+
+    ended = await uow.browser_task_grants.end_for_profile(
+        profile_id, principal, reason=reason, now=now
+    )
+    for grant in ended:
+        await uow.events.append(
+            task_grant_ended_event(grant, run_id=None, actor_type="application")
+        )
+    return len(ended)
