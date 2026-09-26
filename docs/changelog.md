@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — New chats answer again
+
+- After the 2026-09-25 release, the first message of every new chat failed
+  with "the frozen context prefix no longer matches its plan" before it
+  reached the model. Chats started earlier kept working.
+- The deferred tool index (ADR-0123) listed each tool's parameters in the
+  order its schema stored them. PostgreSQL keeps no key order inside a stored
+  plan, so the index read back differently from the bytes the plan's hash
+  recorded, and the check that guards the frozen prefix refused the request.
+  Entries now list required parameters in the schema's declared order and
+  optional ones by name, which reads back identically.
+- A chat that hit the error recovers on its next message: its plan is rebuilt
+  once and its history is kept. Send the failed message again.
+- A PostgreSQL test now sends a new chat's first message with the deferred
+  management tools. Every earlier test of the index ran on the in-memory
+  store, which keeps key order.
+
 ## 2026-09-25 — Veetbot keeps a website open while you approve its clicks
 
 - With a signed-in browser profile, Veetbot could open a page but not act on

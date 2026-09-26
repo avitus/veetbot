@@ -51,15 +51,20 @@ def _first_sentence(description: str) -> str:
 
 
 def _index_line(spec: ToolSpec) -> str:
-    """One index entry: the name, its parameter names (optional ones marked), a summary."""
+    """One index entry: the name, its parameter names (optional ones marked), a summary.
+
+    Required parameters keep the order of the schema's `required` array and
+    optional ones follow by name. A plan re-renders this line from specs stored
+    in PostgreSQL jsonb, which keeps array order but not object key order.
+    """
 
     properties = spec.input_schema.get("properties")
-    required = set(spec.input_schema.get("required") or ())
-    parameters = (
-        [name if name in required else f"{name}?" for name in properties]
-        if isinstance(properties, dict)
-        else []
-    )
+    names = set(properties) if isinstance(properties, dict) else set()
+    required = [
+        name for name in dict.fromkeys(spec.input_schema.get("required") or ()) if name in names
+    ]
+    optional = sorted(names.difference(required))
+    parameters = [*required, *(f"{name}?" for name in optional)]
     return f"- {spec.name}({', '.join(parameters)}): {_first_sentence(spec.description)}"
 
 
