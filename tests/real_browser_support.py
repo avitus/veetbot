@@ -190,7 +190,7 @@ class ConnectRelay:
                 await upstream_writer.wait_closed()
 
 
-@dataclass(frozen=True)
+@dataclass
 class _SharedProxy:
     url: str
 
