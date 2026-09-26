@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — Chats keep their plan when Veetbot restarts
+
+- Each restart could quietly rebuild the plan of about half the chats that can
+  use Email feedback or unsubscribe. A rebuild recalls memory again and pays
+  full price for the next prompt. In about one restart in 25, the next message
+  in each of those chats failed with "the frozen context prefix no longer
+  matches its plan".
+- The cause was the order in which the two Email tools list their permissions.
+  Each worker process could order them differently, and the order is part of
+  the plan's fingerprint. They are now always listed in sorted order.
+- A chat whose plan was fingerprinted in the other order rebuilds its plan
+  once, at its next message, and keeps its history. ADR-0134 (proposed)
+  records the change.
+
 ## 2026-09-26 — New chats answer again
 
 - After the 2026-09-25 release, the first message of every new chat failed

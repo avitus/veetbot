@@ -347,7 +347,11 @@ and empty default annotations while retaining every validation keyword and
 meaningful non-empty default. The complete pinned `ToolSpec` still participates in the
 prefix hash and replay identity, but its output schema, policy classification,
 timeouts, and execution limits are not sent to the model and therefore do not
-consume this prompt class. A session-bound capability is also a runtime-environment
+consume this prompt class. Its `required_scopes` set serializes sorted: a set
+iterates in an order that follows each process's hash seed and can change
+whenever it is copied, so an unsorted dump could give one plan a different
+hash in another worker
+([ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md)). A session-bound capability is also a runtime-environment
 filter: when trusted session metadata has no selected binding, its definitions are
 absent before the plan is pinned rather than advertised as unusable tools.
 
@@ -909,7 +913,7 @@ usage events. Explicitly authored persona entries remain a separate source.
 
 | Failure | How it happens | Defense |
 | --- | --- | --- |
-| **Cache thrash** | A volatile byte reaches the prefix — a date, a counter, a re-serialized tool schema with unstable key order | Region declared per item type; canonical serialization; `prefix_sha256` on every request; the fifty-turn stability gate |
+| **Cache thrash** | A volatile byte reaches the prefix — a date, a counter, a re-serialized tool schema with unstable key order, a set dumped in its process's iteration order | Region declared per item type; canonical serialization (sorted keys and sets, ADR-0134); `prefix_sha256` on every request; the fifty-turn stability gate; one plan identity across hash seeds |
 | **Label laundering** | Compaction paraphrases untrusted content into unlabeled prose | Untrusted spans are elided to typed pointers, never summarized; canary eval |
 | **Envelope forgery** | Tool output contains the closing delimiter | Per-item nonce; delimiter escaping at render; injection eval |
 | **Orphaned tool pair** | The allocator drops a call or a result independently | Pairs are atomic budget units; a validator rejects orphans before send |
