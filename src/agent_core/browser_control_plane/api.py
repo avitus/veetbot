@@ -46,9 +46,13 @@ from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 MAX_PROFILE_SERVICE_BODY_BYTES = 64 * 1024
 MAX_AUTHENTICATION_EVENT_BYTES = 8 * 1024
 _LOGGER = logging.getLogger(__name__)
+# A surface path exactly as the service issues it: the ceremony id in its
+# canonical lowercase, hyphenated form. \Z, unlike $, admits no final newline.
 _AUTHENTICATION_PATH = re.compile(
-    r"^/authentication/(?P<ceremony>[0-9a-fA-F-]{36})(?:/(?P<operation>frame|events|handoff))?$"
+    r"/authentication/(?P<ceremony>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"(?:/(?P<operation>frame|events|handoff))?\Z"
 )
+_AUTHENTICATION_SCRIPT_PATH = "/authentication-surface.js"
 # The largest body each authenticated surface operation accepts.
 _OPERATION_BODY_BYTES = {
     "events": MAX_AUTHENTICATION_EVENT_BYTES,
@@ -235,13 +239,12 @@ class _AuthenticationSurfaceBoundary:
                 message = {**message, "headers": headers}
             await send(message)
 
-        match = _AUTHENTICATION_PATH.fullmatch(str(scope["path"]))
-        if match is None or match.group("operation") is None:
-            await self._app(scope, receive, secured_send)
-            return
-        try:
-            ceremony_id = UUID(match.group("ceremony"))
-        except ValueError:
+        path = str(scope["path"])
+        match = _AUTHENTICATION_PATH.fullmatch(path)
+        if match is None and path != _AUTHENTICATION_SCRIPT_PATH:
+            # Any other spelling, such as a decoded %0A after the operation or
+            # an undashed id, would still reach FastAPI's looser routes and
+            # have its body parsed before any capability check (ADR-0128 D5).
             await _send_response(
                 _error(404, "not_found", "resource not found"),
                 scope,
@@ -249,6 +252,10 @@ class _AuthenticationSurfaceBoundary:
                 secured_send,
             )
             return
+        if match is None or match.group("operation") is None:
+            await self._app(scope, receive, secured_send)
+            return
+        ceremony_id = UUID(match.group("ceremony"))
         operation = cast(SurfaceOperation, match.group("operation"))
         headers = {key.lower(): value for key, value in scope["headers"]}
         capability = headers.get(b"x-browser-ceremony-capability", b"").decode("latin-1")

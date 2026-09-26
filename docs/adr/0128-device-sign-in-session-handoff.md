@@ -100,7 +100,11 @@ the owner's device to the isolated service.
    body to the service unbuffered, through an in-memory buffer that holds the
    whole bound and with ten seconds allowed between reads. The body therefore
    never reaches Nginx's temporary files, and the service refuses a missing or
-   wrong capability before reading it. The service keeps a host-only cookie
+   wrong capability before reading it. The handoff path is exactly the one the
+   service issues, with the ceremony id in lowercase hyphenated form and
+   nothing after `handoff`: Nginx's location ends at `\z` and the service
+   answers any other path under `/authentication/` with `404` before reading
+   its body. The service keeps a host-only cookie
    only when its domain equals an allowed host. It keeps a domain cookie only
    when its domain is an allowed host or a parent of one and is not a public
    suffix under the Public Suffix List, with private entries counted as public
@@ -285,7 +289,9 @@ Automated verification, all red first:
   validation bound, scope filtering (including a public-suffix domain, a
   private-suffix domain, an IP-literal domain, a sibling host and a foreign
   origin), authorization (missing, wrong, consumed, remote-mode and expired
-  capabilities, checked before the body is buffered), single use under
+  capabilities, checked before the body is buffered; a surface path with a
+  decoded trailing newline or an undashed or uppercase ceremony id is `404`
+  with no byte read), single use under
   concurrency, retry after a lost response, each failure outcome writing
   nothing and keeping the prior material, verification timeout, revocation
   during verification, lease exclusion, and the kill switch.
@@ -299,7 +305,9 @@ Automated verification, all red first:
 - Nginx: a block-scoped configuration test shows that the handoff location
   allows `1m`, holds a `1m` in-memory buffer, streams unbuffered, allows ten
   seconds between reads and sixty for the answer, that the virtual host keeps
-  `64k`, and that every TLS server block allows only TLS 1.2 and 1.3. The
+  `64k`, that the location matches only a canonical ceremony path and no path
+  with a trailing newline, and that every TLS server block allows only TLS
+  1.2 and 1.3. The
   deployment job's existing `nginx -t` rejects a malformed configuration and
   restores the previous one.
 - Orchestration contract tests: `mode` on the public begin route, the default

@@ -634,7 +634,12 @@ beginning again.
 boundary authenticates `X-Browser-Ceremony-Capability` before buffering, then
 requires `application/json` and at most 1 MiB. The reverse proxy allows that
 size on this path only and streams the body to the service unbuffered, so it is
-never written to the proxy's disk. The body has exactly `confirmed_url`,
+never written to the proxy's disk. Every surface path carries the ceremony id
+in the lowercase hyphenated form the service issues, and nothing follows the
+operation. The proxy's handoff location is anchored at the absolute end of the
+path, and the boundary answers any other path under `/authentication/`,
+including one with a decoded trailing newline, with `404` before reading its
+body. The body has exactly `confirmed_url`,
 `cookies`, and `origins`, in Playwright's storage-state field names.
 `confirmed_url` is a public HTTPS URL on an allowed origin. Each of at most 300
 cookies has exactly `name`, `value`, `domain`, `path`, `expires`, `httpOnly`,

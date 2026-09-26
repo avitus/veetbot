@@ -9,7 +9,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 from uuid import UUID
 
 import httpx
@@ -856,6 +856,83 @@ async def test_device_handoff_authenticates_before_reading_the_body(tmp_path: Pa
     assert expired.status_code == 401
     for response in (missing, wrong, frame, events, unsupported, declared_too_large, expired):
         assert response.headers["cache-control"] == "no-store"
+
+
+async def _asgi_post(
+    app: FastAPI, path: str, headers: dict[str, str], body: bytes
+) -> tuple[int, int]:
+    """POST ``body`` in 64 KiB chunks to ``path`` as uvicorn delivers it,
+    already percent-decoded; answer the status and how many body bytes the
+    application read."""
+
+    chunks = [body[start : start + 64 * 1024] for start in range(0, len(body), 64 * 1024)]
+    read = 0
+    statuses: list[int] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal read
+        if not chunks:
+            return {"type": "http.disconnect"}
+        chunk = chunks.pop(0)
+        read += len(chunk)
+        return {"type": "http.request", "body": chunk, "more_body": bool(chunks)}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            statuses.append(message["status"])
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": path,
+        "raw_path": quote(path).encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(name.lower().encode(), value.encode()) for name, value in headers.items()],
+        "server": ("service.test", 443),
+        "client": ("127.0.0.1", 50000),
+    }
+    await app(scope, receive, send)  # type: ignore[arg-type]
+    [status] = statuses
+    return status, read
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["newline-handoff", "newline-events", "undashed-handoff", "uppercase-handoff"],
+)
+async def test_a_non_canonical_surface_path_is_refused_before_its_body_is_read(
+    tmp_path: Path, variant: str
+) -> None:
+    """ADR-0128 D5: every path under /authentication/ passes the capability
+    boundary. A ceremony path with a trailing newline (``%0A``, which uvicorn
+    decodes) or another spelling of the id still reached the handoff route
+    through FastAPI's looser matching and had its body parsed, uncapped."""
+
+    application = full_app(tmp_path / "profiles")
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        ceremony_id, _path, _capability = await _begin_device(http)
+    canonical = f"/authentication/{ceremony_id}"
+    path = {
+        "newline-handoff": f"{canonical}/handoff\n",
+        "newline-events": f"{canonical}/events\n",
+        "undashed-handoff": f"/authentication/{UUID(ceremony_id).hex}/handoff",
+        "uppercase-handoff": f"/authentication/{ceremony_id.upper()}/handoff",
+    }[variant]
+    oversized = b" " * (2 * 1024 * 1024)
+
+    status, read = await _asgi_post(
+        application,
+        path,
+        {"Content-Type": "text/plain", "Content-Length": str(len(oversized))},
+        oversized,
+    )
+
+    assert (status, read) == (404, 0)
 
 
 async def test_a_remote_capability_never_authorizes_a_handoff(tmp_path: Path) -> None:

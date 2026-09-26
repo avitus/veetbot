@@ -730,7 +730,10 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert 'mv -Tf "$NEXT_WEBSITE_CURRENT" "$WEBSITE_ROOT/current"' in nginx_deploy
 
 
-_HANDOFF_LOCATION = 'location ~ "^/authentication/[0-9A-Fa-f-]{36}/handoff$" {'
+_HANDOFF_LOCATION = (
+    'location ~ "^/authentication/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    '/handoff\\z" {'
+)
 
 
 def test_browser_handoff_location_streams_its_body_and_keeps_the_vhost_limit() -> None:
@@ -757,6 +760,33 @@ def test_browser_handoff_location_streams_its_body_and_keeps_the_vhost_limit() -
     ):
         assert directive in handoff, directive
     assert "$request_body" not in nginx
+
+
+def test_browser_handoff_location_matches_only_a_canonical_ceremony_path() -> None:
+    """ADR-0128 D5: only the service's own spelling of a ceremony path gets the
+    1 MiB unbuffered location. Nginx decodes ``%0A`` into ``$uri`` and PCRE's
+    ``$`` also matches before a final newline, so the pattern ends at ``\\z``;
+    any other path falls to the virtual host's 64k location."""
+
+    nginx = (ROOT / "nginx/veetbot.conf").read_text(encoding="utf-8")
+    browser = nginx.split("live/browser.veetbot.com/fullchain.pem;", 1)[1]
+    browser = browser.split("\nserver {", 1)[0]
+    [pattern] = re.findall(r'location ~ "([^"]*authentication[^"]*)" \{', browser)
+    # PCRE's \Z, like its $, allows a final newline; its \z is Python's \Z.
+    assert "\\Z" not in pattern
+    location = re.compile(pattern.replace("\\z", "\\Z"))
+    ceremony = "6f1c0000-0000-4000-8000-00000000c001"
+
+    assert location.search(f"/authentication/{ceremony}/handoff")
+    for refused in (
+        f"/authentication/{ceremony}/handoff\n",
+        f"/authentication/{ceremony.upper()}/handoff",
+        f"/authentication/{ceremony.replace('-', '')}/handoff",
+        f"/authentication/{'-' * 36}/handoff",
+        f"/authentication/{ceremony}/handoff/",
+        f"/authentication/{ceremony}/events",
+    ):
+        assert location.search(refused) is None, repr(refused)
 
 
 def test_every_tls_server_block_allows_only_tls_1_2_and_1_3() -> None:
