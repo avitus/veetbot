@@ -162,8 +162,13 @@ class PageProvider:
     async def observe(self) -> BrowserObservation:
         return self.page.observation
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
-        del action
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        del action, constraint
         return self.page.observation
 
     async def close(self) -> None:

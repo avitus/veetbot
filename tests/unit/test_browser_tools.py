@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
@@ -27,6 +28,7 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.tools import ToolFailureKind
+from agent_core.ports.browser import BrowserProvider
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
@@ -453,7 +455,11 @@ async def test_invalid_dispatch_constraint_fails_closed() -> None:
 
 
 class ConstraintlessProvider(FakeBrowserProvider):
-    """A provider whose runtime cannot recheck a grant's constraint."""
+    """A provider whose runtime cannot recheck a grant's constraint.
+
+    It falls outside the port, which takes the constraint; the tool still
+    refuses a constrained act on it rather than dropping the constraint.
+    """
 
     async def act(self, action: BrowserAction) -> BrowserObservation:  # type: ignore[override]
         self.actions.append(action)
@@ -462,10 +468,11 @@ class ConstraintlessProvider(FakeBrowserProvider):
 
 async def test_a_provider_that_cannot_recheck_refuses_a_constrained_act() -> None:
     provider = ConstraintlessProvider()
+    outside_the_port = cast(BrowserProvider, provider)
     context = replace(tool_context(), dispatch_constraint=TASK_CONSTRAINT)
 
-    refused = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, context)
-    approved = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, tool_context())
+    refused = await BrowserActTool(outside_the_port).execute(CLICK_ARGUMENTS, context)
+    approved = await BrowserActTool(outside_the_port).execute(CLICK_ARGUMENTS, tool_context())
 
     assert refused.failure is not None
     assert refused.failure.reason_code == "tool.browser.grant_not_applicable"

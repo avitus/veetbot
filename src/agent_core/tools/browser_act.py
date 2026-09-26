@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -245,5 +245,4 @@ async def _act(
 
     if constraint is None:
         return await provider.act(action)
-    constrained = cast(Callable[..., Awaitable[BrowserObservation]], provider.act)
-    return await constrained(action, constraint=constraint)
+    return await provider.act(action, constraint=constraint)

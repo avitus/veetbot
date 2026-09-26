@@ -12,7 +12,12 @@ from pydantic import ValidationError
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.browser import BrowserAction, BrowserElement, BrowserObservation
+from agent_core.domain.browser import (
+    BrowserAction,
+    BrowserDispatchConstraint,
+    BrowserElement,
+    BrowserObservation,
+)
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.runs import FailureReason, RunLimits, RunStatus
 from agent_core.domain.tools import ToolResult
@@ -83,7 +88,13 @@ class ChangingPageProvider:
             self.page += 1
         return self._observation()
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        del constraint
         self.actions.append(action)
         self.page += 1
         return self._observation()

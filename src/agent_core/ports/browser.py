@@ -9,6 +9,7 @@ from uuid import UUID
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionContext,
+    BrowserDispatchConstraint,
     BrowserObservation,
     BrowserSnapshot,
 )
@@ -26,7 +27,18 @@ class BrowserProvider(Protocol):
 
     async def observe(self) -> BrowserObservation: ...
 
-    async def act(self, action: BrowserAction) -> BrowserObservation: ...
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        """Dispatch one action; only a grant-authorized act names a constraint.
+
+        The adapter's runtime rechecks the constraint against the live page and
+        refuses with ``GRANT_NOT_APPLICABLE`` before dispatch (ADR-0129).
+        """
+        ...
 
     async def close(self) -> None: ...
 

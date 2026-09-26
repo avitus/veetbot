@@ -4508,6 +4508,8 @@ def _browser_provider(
         return PlaywrightBrowserProvider(
             tenant_id=principal.tenant_id,
             allowed_origins=allowed_origins,
+            # ADR-0129: the runtime checks a grant's expiry on this clock.
+            now=now,
         )
     if kind is BrowserProviderKind.HOSTED:
         if sessions is None:

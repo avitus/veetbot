@@ -51,6 +51,7 @@ from agent_core.domain.browser import (
     BrowserRunState,
 )
 from agent_core.domain.errors import InvalidStateTransition, NotFoundError
+from agent_core.domain.execution import EgressPolicy
 from agent_core.domain.messages import (
     FakeModelScript,
     ScriptedToolCall,
@@ -69,13 +70,15 @@ from agent_core.domain.tools import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import browser_lease_upkeep
-from agent_core.ports.browser_sessions import BrowserSessionControlPlane
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.registry import RegisteredTool
 from tests.contract.support import principal as contract_principal
 from tests.contract.test_hosted_profile_session_service_contract import FakeSessionRuntime
+from tests.unit.test_browser_playwright import FakeProxy as PlaywrightFakeProxy
+from tests.unit.test_browser_playwright import FakeRuntime as PlaywrightFakeRuntime
+from tests.unit.test_browser_playwright import lesson_constraint
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
 from tests.unit.test_web_tools import FakeWebProvider
@@ -193,6 +196,47 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         assert isinstance(observe.implementation, BrowserObserveTool)
         assert isinstance(act.implementation, BrowserActTool)
         assert isinstance(navigate.implementation._provider, PlaywrightBrowserProvider)
+
+
+async def test_configured_playwright_provider_rechecks_a_constraint_on_the_composition_clock() -> (
+    None
+):
+    """ADR-0129 R2: the local provider hands its runtime the composition's clock.
+
+    Without one, the runtime cannot check a grant's expiry and refuses every
+    constrained act.
+    """
+
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "playwright",
+            "BROWSER_ALLOWED_ORIGINS": "https://example.org",
+        }
+    )
+    runtime = PlaywrightFakeRuntime()
+
+    async def start_proxy(policy: EgressPolicy, *, tenant_id: str) -> PlaywrightFakeProxy:
+        del policy, tenant_id
+        return PlaywrightFakeProxy()
+
+    constraint = lesson_constraint(origins=("https://example.org",))
+    async with build(settings=settings, fixed_clock_at=GRANT_NOW) as composition:
+        registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
+        provider = cast(BrowserActTool, registered.implementation)._provider
+        assert isinstance(provider, PlaywrightBrowserProvider)
+        provider._runtime = runtime
+        provider._proxy_factory = start_proxy
+        await provider.act(
+            BrowserAction(
+                kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+            ),
+            constraint=constraint,
+        )
+        await provider.close()
+
+    assert runtime.constraints == [(constraint, GRANT_NOW)]
 
 
 async def test_configured_hosted_provider_binds_the_trusted_profile_adapter() -> None:
@@ -997,9 +1041,7 @@ async def hosted_browser_harness(tmp_path: Path) -> HostedBrowserHarness:
             principal=owner,
             profiles=load,
             profile_selector=select,
-            # The in-process service's act gains the dispatch constraint in
-            # Track R (ADR-0129 R2); these runs never carry one.
-            sessions=cast(BrowserSessionControlPlane, sessions),
+            sessions=sessions,
             now=clock.now,
             run_state=read_run_state,
         ),
