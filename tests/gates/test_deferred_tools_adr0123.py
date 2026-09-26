@@ -8,10 +8,11 @@ production adds it here first.
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import SecretStr
@@ -90,6 +91,7 @@ async def _production(
     turns: Sequence[ScriptedTurn],
     *,
     enabled_tools: list[str] | None = None,
+    extra_environment: Mapping[str, str] = MappingProxyType({}),
 ) -> tuple[ScriptedMCPClientFactory, AbstractAsyncContextManager[Composition]]:
     configuration = call_configuration()
     loaded = load_settings(
@@ -98,6 +100,7 @@ async def _production(
             "AGENT_EMAIL_ENABLED": "1",
             "AGENT_EMAIL_MODE_ENABLED": "1",
             "GMAIL_ACCOUNTS_FILE": str(_accounts_manifest(tmp_path)),
+            **extra_environment,
         }
     )
     settings = replace(
