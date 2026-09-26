@@ -29,8 +29,28 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Suggestions are derived and re-proposed by the next duplicate pass; their
-    # revisions and links cascade with the head row.
+    # The owner's answer is final (ADR-0125), so a downgrade never erases one. Open
+    # and withdrawn suggestions are derived and re-proposed by the next duplicate
+    # pass; their revisions and links cascade with the head row.
+    #
+    # The downgrade needs a role that bypasses row-level security. With row
+    # security off, any other role's read of the People tables fails instead of
+    # seeing a filtered table, so the check can never pass on rows it cannot see.
+    # The table lock waits out any People write in flight, so an answer cannot
+    # commit between the check and the delete.
+    op.execute("SET LOCAL row_security = off")
+    op.execute("LOCK TABLE people_heads IN ACCESS EXCLUSIVE MODE")
+    op.execute(
+        "DO $$ BEGIN IF EXISTS (SELECT 1 FROM people_heads AS head "
+        "JOIN people_revisions AS revision ON revision.tenant_id = head.tenant_id "
+        "AND revision.principal_id = head.principal_id "
+        "AND revision.entity_id = head.id AND revision.revision = head.revision "
+        "WHERE head.kind = 'merge_suggestion' "
+        "AND revision.payload->>'state' IN ('separated', 'merged')) THEN "
+        "RAISE EXCEPTION 'People merge suggestions the owner answered must be "
+        "exported and erased before downgrade'; "
+        "END IF; END $$"
+    )
     op.execute("DELETE FROM people_heads WHERE kind = 'merge_suggestion'")
     op.drop_constraint(op.f("ck_people_heads_people_head_kind"), "people_heads", type_="check")
     op.create_check_constraint(

@@ -1305,7 +1305,7 @@ the plan's text stands with an annotation rather than a replacement.
     Milestone 2. The port is declared once and implemented twice.
 4.  **Transaction hygiene in Milestone 0 versus Milestone 2.** The check is a
     Milestone 0 deliverable; the gate is a Milestone 2 acceptance criterion.
-5.  **`agent run <prompt>` versus `agent run get <id>`.** Three reserved
+5.  **`agent run <prompt>` versus `agent run get <id>`.** Five reserved
     subcommand words, and `--` for the literal.
 
 ## Decisions
@@ -1367,8 +1367,8 @@ the plan's text stands with an annotation rather than a replacement.
 15. **CLI results go to stdout and progress goes to stderr**, so the
     Milestone 1 demonstration's six flow lines and its final answer are
     separable without a flag.
-16. **`get`, `events`, `cancel`, and `export` are reserved words after
-    `agent run`.** The residual collision with a prompt that is exactly one
+16. **`get`, `events`, `cancel`, `export`, and `latency` are reserved words
+    after `agent run`.** The residual collision with a prompt that is exactly one
     of them is accepted, with `--` as the escape, rather than renaming a
     command the plan fixed. The set is open to a subject spec that needs a
     subcommand, which is not the same thing as a new command.

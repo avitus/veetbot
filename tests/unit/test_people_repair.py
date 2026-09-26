@@ -717,3 +717,43 @@ async def test_group_and_address_named_people_leave_whatever_their_history() -> 
     assert reasons["Investment Team"] == "group"
     assert reasons["iron@gracepres.test"] == "group"
     assert "Correspondent" not in reasons
+
+
+async def test_group_named_people_the_owner_renamed_or_gave_an_address_stay() -> None:
+    """The owner's own words keep a person whose name reads like a group (ADR-0125)."""
+    factory, clock = await _stack()
+    directory = await _legacy_directory(factory)
+    common = _fields()
+    renamed = Person(id=uuid4(), display_name="Sam", support_ids=[directory.mail_source], **common)
+    addressed = Person(
+        id=uuid4(), display_name="Dana (Finance)", support_ids=[directory.mail_source], **common
+    )
+    async with factory() as uow:
+        await uow.people.put(renamed, expected_revision=0)
+        await uow.people.put(addressed, expected_revision=0)
+        await uow.people.put(
+            PersonIdentifier(
+                id=uuid4(),
+                person_id=addressed.id,
+                identifier_kind="email",
+                namespace="owner",
+                value="dana@example.test",
+                context="owner",
+                verification="owner_confirmed",
+                valid_from=NOW - timedelta(days=10),
+                **common,
+            ),
+            expected_revision=0,
+        )
+    await PublicPeopleService(factory, clock).update(
+        OWNER_PRINCIPAL,
+        renamed.id,
+        UpdatePerson(session_id=session().id, expected_revision=1, display_name="Sam from Legal"),
+        key="rename-legal",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    report = await _repair(factory, clock).run(
+        OWNER_PRINCIPAL, confirm=True, session_id=directory.audit_session
+    )
+    assert not {row.person_id for row in report.candidates} & {renamed.id, addressed.id}
+    assert {"Sam from Legal", "Dana (Finance)"} <= await _names(factory)

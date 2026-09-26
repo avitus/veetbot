@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
+from agent_core.application import people_duplicates
 from agent_core.application.people_duplicates import PeopleDeduplicator
 from agent_core.application.people_identity import PeopleIdentityService
 from agent_core.domain.email import EmailAccount, EmailRecord
@@ -23,6 +24,7 @@ from agent_core.domain.people import (
     Person,
     PersonIdentifier,
 )
+from agent_core.domain.people_duplicates import name_match
 from agent_core.domain.people_views import PeopleIdentityRequest, ResolveMergeSuggestion
 from tests.contract.people_fixtures import PeopleFields
 from tests.contract.support import NOW, memory_uow_factory, principal, session
@@ -325,3 +327,34 @@ async def test_a_suggestion_withdraws_when_the_names_part_and_reopens_when_they_
     await duplicates.run(OWNER, apply=True)
     [reopened] = await _suggestions(factory)
     assert reopened.id == opened.id and reopened.revision == 3
+
+
+async def test_the_name_pass_compares_only_people_whose_first_names_could_agree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large directory is not compared pair by pair; only possible agreements are."""
+    _clock, factory, _identity, duplicates = await _stack()
+    for first in (
+        "Aaron", "Bella", "Cyrus", "Dmitri", "Elena", "Farid", "Greta", "Hiro", "Ines",
+        "Jonas", "Kofi", "Lena", "Mateo", "Nia", "Omar", "Priya", "Quinn", "Rosa",
+        "Sven", "Tariq", "Uma", "Viktor", "Wen", "Xavi", "Yara", "Zoe",
+    ):  # fmt: skip
+        await _person(factory, f"{first} Walker", observed=(f"{first.lower()}@work.test",))
+    kyrri = await _person(factory, "Kyrri", state="active")
+    kyrriana = await _person(factory, "Kyrriana Vitus", observed=("kyrriana@home.test",))
+    sabina = await _person(factory, "Sabina Smith", observed=("sabina@home.test",), history=2)
+    sabina_work = await _person(factory, "Sabina Smith", observed=("sabina@work.test",))
+    compared: list[object] = []
+
+    def counting(first: Any, second: Any) -> Any:
+        compared.append((first, second))
+        return name_match(first, second)
+
+    monkeypatch.setattr(people_duplicates, "name_match", counting)
+    report = await duplicates.run(OWNER, apply=False)
+    assert {(row.source_id, row.target_id, row.reason) for row in report.suggestions} == {
+        (kyrriana.id, kyrri.id, "nickname"),
+        (sabina_work.id, sabina.id, "same_name"),
+    }
+    # Thirty people, two pairs whose first names start alike: 2 comparisons, not 435.
+    assert len(compared) == 2

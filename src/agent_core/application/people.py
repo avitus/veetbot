@@ -813,6 +813,7 @@ class PublicPeopleService:
             tenant_id=principal.tenant_id,
             principal_id=principal.principal_id,
             kinds=["merge_suggestion"],
+            states=["open"],
             sensitivity_ceiling=ceiling,
             after=after,
             limit=100,

@@ -35,9 +35,10 @@ exchange, and access to the original email when it is needed later.
 ## Decisions
 
 1. **Each observed email exchange gets a short generated summary.**
-   - The Email refresh generates summaries after it assesses mail and prepares
-     drafts. It handles at most four correspondence records per slice, newest
-     first.
+   - The Email refresh generates summaries after it assesses mail, prepares
+     drafts and verifies unsubscribe evidence, so a summary backlog never
+     delays them. It handles at most four correspondence records per slice,
+     newest first.
    - It stops when fewer than thirty seconds of the slice deadline remain. A
      failed call or a spent slice ends the summaries, never the refresh.
    - It summarizes the verified retained passage of the message, not the body

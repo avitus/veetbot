@@ -997,14 +997,15 @@ class _TaskIO:
                 # A rejected proposal leaves only this thread undrafted.
                 with suppress(EmailModelResultError):
                     await self.generate_draft(thread.id)
-        await self._summarize_correspondence()
         await self._verify_subscriptions()
+        await self._summarize_correspondence()
 
     async def _summarize_correspondence(self) -> None:
         """Give observed exchanges a short summary, newest first (ADR-0126).
 
-        Assessment and drafts come first. A summary is one metered call on one
-        verified passage; an invalid result is recorded, never kept.
+        Assessment, drafts and subscription verification come first, so a summary
+        backlog never starves them. A summary is one metered call on one verified
+        passage; an invalid result is recorded, never kept.
         """
         c = self.context
         learning = await self.service.learning_context(c.principal, None)
@@ -1058,8 +1059,10 @@ class _TaskIO:
     async def _verify_subscriptions(self) -> None:
         """Read unsubscribe evidence with whatever bounded headroom the slice has left.
 
-        It runs last so it can never starve mailbox synchronization, assessment or
-        drafting, and it stops quietly: an unverified sender simply stays unselectable.
+        It runs after mailbox synchronization, assessment and drafting so it can
+        never starve them, and before the optional correspondence summaries so
+        their backlog cannot starve it. It stops quietly: an unverified sender
+        simply stays unselectable.
         """
         c = self.context
         for account_id in self.task.account_ids:

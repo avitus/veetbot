@@ -207,7 +207,7 @@ agent people repair-directory --owner TENANT/PRINCIPAL --confirm
 The first command is a preview and writes nothing. It reports:
 
 - each person the repair would remove, with a reason of `unconfirmed`,
-  `pronoun`, or `self`;
+  `pronoun`, `self`, or `group`;
 - the active people who would get an owner-confirmed name alias;
 - how many facts would be deleted or unlinked;
 - how many mail threads would have their generated summaries reset.
@@ -267,7 +267,9 @@ good.
 
 Entries named like a group, service or address, such as “Investment Team”,
 stay until the directory repair runs again. Rerun `agent people
-repair-directory` to preview and remove them.
+repair-directory` to preview and remove them. Mail history does not keep such
+an entry. An identifier you confirmed or an edit you made, such as renaming
+someone “Sam from Legal”, does.
 
 ## Historical imports
 

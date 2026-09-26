@@ -1734,6 +1734,8 @@ async def test_postgres_people_duplicate_pass() -> None:
         async with app.uow_factory() as uow:
             [suggestion] = await uow.people.query(query)
         assert isinstance(suggestion, PeopleMergeSuggestion)
+        listed = await service.merge_suggestions(owner, ceiling=Sensitivity.SENSITIVE)
+        assert [row.id for row in listed.items] == [suggestion.id]
         profile = await service.get(owner, people["erin"], ceiling=Sensitivity.SENSITIVE)
         assert [row.merged.display_name for row in profile.automatic_merges] == ["Erin Vitus"]
         decided = await service.resolve_merge_suggestion(
@@ -1746,5 +1748,7 @@ async def test_postgres_people_duplicate_pass() -> None:
             ceiling=Sensitivity.SENSITIVE,
         )
         assert decided.state == "separated"
+        # The store filters on state, so a decided suggestion is never listed.
+        assert (await service.merge_suggestions(owner, ceiling=Sensitivity.SENSITIVE)).items == []
         again = await service.dedupe(owner, apply=True)
         assert again.merges == [] and again.suggestions == []

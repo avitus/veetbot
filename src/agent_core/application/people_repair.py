@@ -327,13 +327,14 @@ class PeopleDirectoryRepair:
             for row in identifiers
         ):
             return "self"
-        # A team, a service, or an address mistaken for a person (ADR-0125).
-        if is_group_or_service_name(person.display_name):
-            return "group"
         if any(row.verification == "owner_confirmed" for row in identifiers):
             return None
         if await self._owner_asserted(uow, principal, person.support_ids, scan):
             return None
+        # A team, a service, or an address mistaken for a person (ADR-0125). Only
+        # the owner's own words above keep it; recorded history does not.
+        if is_group_or_service_name(person.display_name):
+            return "group"
         # Merges, splits, forgets and import scopes are the owner's own operations.
         if await _rows(uow, principal, ["operation", "import_job", "person"], person.id, limit=1):
             return None

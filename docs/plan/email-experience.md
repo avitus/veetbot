@@ -519,10 +519,10 @@ coarser operation because it also drops those threads from the mailbox view.
 
 Each observed exchange in People history also carries a short generated
 summary (ADR-0126).
-- **When.** After assessment and drafts, a refresh summarizes at most four
-  correspondence records, newest first. It stops when less than thirty seconds
-  of the slice deadline remain. A failed call or a spent slice ends the
-  summaries, never the refresh.
+- **When.** After assessment, drafts and subscription verification, a
+  refresh summarizes at most four correspondence records, newest first. It
+  stops when less than thirty seconds of the slice deadline remain. A failed
+  call or a spent slice ends the summaries, never the refresh.
 - **From what.** Each message's verified retained passage, not the body cache.
 - **What it skips.** Bulk, excluded and suppressed sources; mail outside the
   ninety-day boundary; any refresh while learning is paused.

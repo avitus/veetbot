@@ -473,15 +473,20 @@ private struct PeopleProfile: View {
                 Text("No \(peopleList(missing, conjunction: "or")) recorded yet.")
                     .appFont(.body)
                     .fixedSize(horizontal: false, vertical: true)
-                PeopleMeta("They appear here as Veetbot learns more about \(profile.person.displayName).")
+                // Empty states keep primary text: the Mac audit at Large text
+                // fails muted supporting text here, as it failed secondary text.
+                Text("They appear here as Veetbot learns more about \(profile.person.displayName).")
+                    .appFont(PeopleMetrics.meta)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            // The element covers the text, not the decorative edge.
+            .accessibilityElement(children: .combine)
             .padding(PeopleMetrics.rowPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(
                 RoundedRectangle(cornerRadius: PeopleMetrics.cardRadius, style: .continuous)
                     .stroke(PeopleSurface.hairline, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             )
-            .accessibilityElement(children: .combine)
         }
     }
 

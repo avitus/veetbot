@@ -52,6 +52,7 @@ from agent_core.domain.people_duplicates import (
     Standing,
     family_surnames,
     merge_direction,
+    name_key,
     name_match,
     name_tokens,
     shares_family_name,
@@ -333,25 +334,39 @@ class PeopleDeduplicator:
         )
         found: dict[Pair, tuple[str, bool]] = {}
         weak: dict[UUID, set[UUID]] = defaultdict(set)
-        for index, first in enumerate(live):
-            for second in live[index + 1 :]:
-                pair = frozenset((first, second))
-                if pair in directory.distinct:
-                    continue
-                agreement: NameReason | None = name_match(
-                    directory.names[first], directory.names[second]
-                )
-                if agreement is None:
-                    continue
-                family = any(
-                    shares_family_name(tokens, directory.surnames)
-                    for person in (first, second)
-                    for tokens in directory.names[person]
-                )
-                found[pair] = (agreement, family)
-                if agreement != "same_name":
-                    weak[first].add(second)
-                    weak[second].add(first)
+        # Only people with a name key in common can agree, so the pass never
+        # compares a whole directory pair by pair.
+        keyed: dict[str, set[UUID]] = defaultdict(set)
+        for pid in live:
+            for tokens in directory.names[pid]:
+                keyed[name_key(tokens)].add(pid)
+        candidates = sorted(
+            {
+                (first, second)
+                for members in keyed.values()
+                for first in members
+                for second in members
+                if first < second
+            }
+        )
+        for first, second in candidates:
+            pair = frozenset((first, second))
+            if pair in directory.distinct:
+                continue
+            agreement: NameReason | None = name_match(
+                directory.names[first], directory.names[second]
+            )
+            if agreement is None:
+                continue
+            family = any(
+                shares_family_name(tokens, directory.surnames)
+                for person in (first, second)
+                for tokens in directory.names[person]
+            )
+            found[pair] = (agreement, family)
+            if agreement != "same_name":
+                weak[first].add(second)
+                weak[second].add(first)
         # An address only correspondents share asks too; an owner-given one merged above.
         for (kind, value), held in directory.holders.items():
             observed = sorted(pid for pid, evidence in held.items() if "owner" not in evidence)
