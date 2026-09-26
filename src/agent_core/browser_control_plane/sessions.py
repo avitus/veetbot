@@ -25,6 +25,7 @@ from agent_core.domain.browser import (
     MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS,
     MAXIMUM_BROWSER_LEASE_SECONDS,
     BrowserAction,
+    BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
     BrowserInteractiveEvent,
@@ -74,9 +75,13 @@ class _CeremonyState:
     principal_id: str
     identity: ProfileMaterialIdentity
     expires_at: datetime
-    runtime: BrowserSessionRuntime
+    # A device ceremony has no browser until its handoff is verified (ADR-0128).
+    runtime: BrowserSessionRuntime | None
     status: BrowserAuthenticationStatus
     capability_digest: bytes
+    mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
+    # A device handoff is being processed: the capability is spent.
+    consumed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +130,7 @@ class HostedProfileSessionService:
         now: Callable[[], datetime],
         process_secret: bytes,
         ceremony_base_url: str,
+        device_sign_in_enabled: bool = True,
     ) -> None:
         normalized_ceremony_origin = require_service_origin(
             ceremony_base_url,
@@ -137,6 +143,7 @@ class HostedProfileSessionService:
         self._now = now
         self._process_secret = bytes(process_secret)
         self._ceremony_base_url = normalized_ceremony_origin
+        self._device_sign_in_enabled = device_sign_in_enabled
         self._leases: dict[bytes, _LeaseState] = {}
         self._ceremonies: dict[UUID, _CeremonyState] = {}
         self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
@@ -300,8 +307,7 @@ class HostedProfileSessionService:
                     and ceremony_state.status not in _TERMINAL_AUTH_STATUSES
                 ):
                     ceremony_state.status = BrowserAuthenticationStatus.CANCELLED
-                    with suppress(Exception):
-                        await ceremony_state.runtime.close()
+                    await _close_ceremony_runtime(ceremony_state)
                     await self._finish_ceremony_locked(ceremony_state)
         for lease_state in leases:
             async with lease_state.lock:
@@ -316,8 +322,17 @@ class HostedProfileSessionService:
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
-        """Start one scoped login ceremony and preserve safe navigation failures."""
+        """Start one scoped login ceremony and preserve safe navigation failures.
+
+        A remote ceremony opens the service's headed browser at ``login_url``. A
+        device ceremony starts no browser: its capability authorizes one handoff
+        of a session the owner's own client signed in (ADR-0128).
+        """
+        device = mode is BrowserAuthenticationMode.DEVICE
+        if device and not self._device_sign_in_enabled:
+            raise BrowserProviderError("tool.browser.provider_unavailable", retryable=False)
         metadata = await self._owned_metadata(profile_id, principal, provider_ref)
         if metadata.revoked:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
@@ -333,6 +348,29 @@ class HostedProfileSessionService:
             ceremony_id = UUID(bytes=self._mac(b"ceremony-id:" + capability.encode())[:16])
             expires_at = self._now() + timedelta(seconds=AUTHENTICATION_CEREMONY_SECONDS)
             identity = metadata.identity()
+            if device:
+                self._ceremonies[ceremony_id] = _CeremonyState(
+                    id=ceremony_id,
+                    profile_id=profile_id,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    identity=identity,
+                    expires_at=expires_at,
+                    runtime=None,
+                    status=BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
+                    capability_digest=self._lookup_digest("ceremony:" + capability),
+                    mode=BrowserAuthenticationMode.DEVICE,
+                )
+                return BrowserAuthenticationView(
+                    id=ceremony_id,
+                    profile_id=profile_id,
+                    status=BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
+                    expires_at=expires_at,
+                    launch_url=(
+                        f"{self._ceremony_base_url}/authentication/{ceremony_id}/handoff"
+                        f"#capability={capability}"
+                    ),
+                )
             runtime = self._runtime_factory(principal.tenant_id)
             try:
                 await runtime.start(
@@ -398,19 +436,21 @@ class HostedProfileSessionService:
             if terminal is not None:
                 return _terminal_ceremony_view(terminal)
             state = self._owned_ceremony(ceremony_id, principal)
-            if state.status in _TERMINAL_AUTH_STATUSES:
+            runtime = state.runtime
+            if state.status in _TERMINAL_AUTH_STATUSES or runtime is None:
+                # A device ceremony's status changes only through its handoff.
                 return _ceremony_view(state)
-            status = await state.runtime.authentication_status()
+            status = await runtime.authentication_status()
             state.status = status
             if status is BrowserAuthenticationStatus.READY:
                 try:
                     await self._store.write(
                         state.identity,
-                        await state.runtime.storage_state(),
+                        await runtime.storage_state(),
                     )
                 finally:
                     with suppress(Exception):
-                        await state.runtime.close()
+                        await runtime.close()
                 return await self._finish_ceremony_locked(state)
             return _ceremony_view(state)
 
@@ -428,8 +468,7 @@ class HostedProfileSessionService:
             if state.status in _TERMINAL_AUTH_STATUSES:
                 return _ceremony_view(state)
             state.status = BrowserAuthenticationStatus.CANCELLED
-            with suppress(Exception):
-                await state.runtime.close()
+            await _close_ceremony_runtime(state)
             return await self._finish_ceremony_locked(state)
 
     async def authenticate_surface(self, ceremony_id: UUID, capability: str) -> bool:
@@ -454,8 +493,8 @@ class HostedProfileSessionService:
     ) -> bytes:
         await self._expire()
         async with self._lock:
-            state = await self._surface_ceremony_locked(ceremony_id, capability)
-            return await state.runtime.interactive_frame()
+            runtime = await self._surface_runtime_locked(ceremony_id, capability)
+            return await runtime.interactive_frame()
 
     async def authentication_event(
         self,
@@ -465,8 +504,8 @@ class HostedProfileSessionService:
     ) -> None:
         await self._expire()
         async with self._lock:
-            state = await self._surface_ceremony_locked(ceremony_id, capability)
-            await state.runtime.interactive_event(event)
+            runtime = await self._surface_runtime_locked(ceremony_id, capability)
+            await runtime.interactive_event(event)
 
     def _mac(self, value: bytes) -> bytes:
         return hmac.digest(self._process_secret, value, hashlib.sha256)
@@ -527,8 +566,7 @@ class HostedProfileSessionService:
             for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
                 if ceremony_state.expires_at <= now:
                     ceremony_state.status = BrowserAuthenticationStatus.EXPIRED
-                    with suppress(Exception):
-                        await ceremony_state.runtime.close()
+                    await _close_ceremony_runtime(ceremony_state)
                     await self._finish_ceremony_locked(ceremony_state)
             for ceremony_id, terminal_state in tuple(self._terminal_ceremonies.items()):
                 if terminal_state.retained_until <= now:
@@ -598,14 +636,16 @@ class HostedProfileSessionService:
         self._terminal_ceremonies[state.id] = terminal
         return _terminal_ceremony_view(terminal)
 
-    async def _surface_ceremony_locked(
+    async def _surface_runtime_locked(
         self,
         ceremony_id: UUID,
         capability: str,
-    ) -> _CeremonyState:
+    ) -> BrowserSessionRuntime:
+        """The headed browser of a live remote ceremony whose capability matches."""
         state = self._ceremonies.get(ceremony_id)
         if (
             state is None
+            or state.runtime is None
             or state.status in _TERMINAL_AUTH_STATUSES
             or not 32 <= len(capability) <= 128
             or not hmac.compare_digest(
@@ -614,7 +654,7 @@ class HostedProfileSessionService:
             )
         ):
             raise ConflictError("browser authentication capability is invalid")
-        return state
+        return state.runtime
 
     async def _owned_metadata(
         self,
@@ -633,6 +673,12 @@ class HostedProfileSessionService:
         ):
             raise ConflictError("browser profile session scope mismatch")
         return by_profile
+
+
+async def _close_ceremony_runtime(state: _CeremonyState) -> None:
+    if state.runtime is not None:
+        with suppress(Exception):
+            await state.runtime.close()
 
 
 def _ceremony_capability() -> str:

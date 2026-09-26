@@ -21,6 +21,7 @@ from agent_core.browser_control_plane.sessions import HostedProfileSessionServic
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserAuthenticationMode,
     BrowserInteractiveEvent,
     BrowserProviderError,
 )
@@ -81,6 +82,7 @@ class _ActRequest(_LeaseRequest):
 
 class _BeginAuthenticationRequest(_LifecycleRequest):
     login_url: str = Field(min_length=1, max_length=4096)
+    mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
 
 
 class _CeremonyRequest(BaseModel):
@@ -476,6 +478,7 @@ def create_profile_service_app(
                 _principal(payload.tenant_id, payload.principal_id),
                 payload.provider_ref,
                 login_url=payload.login_url,
+                mode=payload.mode,
             )
             return result.model_dump(mode="json")
 

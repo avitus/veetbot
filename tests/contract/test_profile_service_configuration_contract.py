@@ -61,6 +61,31 @@ def test_profile_service_loads_only_private_file_mounted_material(tmp_path: Path
 
 
 @pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, True), ("true", True), ("false", False)],
+)
+def test_device_sign_in_switch_parses_strictly(
+    tmp_path: Path, raw: str | None, expected: bool
+) -> None:
+    """Unset or ``true`` enables device sign-in; ``false`` turns it off (ADR-0128 D13)."""
+
+    values = environment(tmp_path)
+    if raw is not None:
+        values["BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED"] = raw
+
+    assert load_profile_service_settings(values).device_sign_in_enabled is expected
+
+
+@pytest.mark.parametrize("raw", ["yes", "1", "TRUE", "", " false"])
+def test_device_sign_in_switch_refuses_any_other_value(tmp_path: Path, raw: str) -> None:
+    values = environment(tmp_path)
+    values["BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED"] = raw
+
+    with pytest.raises(ProfileStoreIntegrityError, match="device sign-in switch is invalid"):
+        load_profile_service_settings(values)
+
+
+@pytest.mark.parametrize(
     "key",
     [
         "BROWSER_PROFILE_SERVICE_AUTH_FILE",
@@ -153,7 +178,9 @@ def test_profile_service_entrypoint_uses_only_mounted_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = load_profile_service_settings(environment(tmp_path))
+    values = environment(tmp_path)
+    values["BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED"] = "false"
+    settings = load_profile_service_settings(values)
     observed: dict[str, object] = {}
     monkeypatch.setattr(service_main, "load_profile_service_settings", lambda: settings)
     monkeypatch.setattr(
@@ -183,6 +210,7 @@ def test_profile_service_entrypoint_uses_only_mounted_settings(
 
     assert observed["authorization"] is settings.authorization
     assert observed["sessions"] is not None
+    assert observed["sessions"]._device_sign_in_enabled is False  # type: ignore[attr-defined]
     assert observed["app"] == "synthetic-app"
     assert observed["host"] == "0.0.0.0"  # noqa: S104 - boundary fixture
     assert observed["port"] == 8080

@@ -101,6 +101,8 @@ def full_app(
     root: Path,
     *,
     events: list[BrowserInteractiveEvent] | None = None,
+    runtimes: list[FakeRuntime] | None = None,
+    device_sign_in_enabled: bool = True,
 ) -> FastAPI:
     store = FilesystemEncryptedProfileStore(
         root,
@@ -109,12 +111,21 @@ def full_app(
             current_version="key-v1",
         ),
     )
+    created = runtimes if runtimes is not None else []
+
+    def runtime_factory(tenant_id: str) -> FakeRuntime:
+        del tenant_id
+        runtime = FakeRuntime(events)
+        created.append(runtime)
+        return runtime
+
     sessions = HostedProfileSessionService(
         store,
-        runtime_factory=lambda tenant_id: FakeRuntime(events),
+        runtime_factory=runtime_factory,
         now=lambda: NOW,
         process_secret=b"synthetic-http-process-secret-32-bytes",
         ceremony_base_url="https://login.example.test",
+        device_sign_in_enabled=device_sign_in_enabled,
     )
     lifecycle_service = HostedProfileLifecycleService(
         store,
@@ -501,3 +512,122 @@ async def test_authentication_surface_binds_fragment_capability_before_interacti
     assert frame.headers["content-type"] == "image/png"
     assert event.status_code == 204
     assert events == [BrowserInteractiveEvent(kind="click", x=100, y=120)]
+
+
+SERVICE_HEADERS = {
+    "Authorization": f"Bearer {OPAQUE_AUTH_VALUE}",
+    "Content-Type": "application/json",
+}
+
+
+async def _provision_over_http(http: httpx.AsyncClient) -> str:
+    response = await http.post(
+        "/v1/browser-profiles:provision",
+        headers={**SERVICE_HEADERS, "Idempotency-Key": f"browser-profile:{PROFILE_ID}:provision"},
+        json={
+            "profile_id": str(PROFILE_ID),
+            "tenant_id": principal().tenant_id,
+            "principal_id": principal().principal_id,
+            "allowed_origins": ["https://example.org"],
+        },
+    )
+    assert response.status_code == 201
+    return str(response.json()["provider_ref"])
+
+
+async def _begin_over_http(
+    http: httpx.AsyncClient,
+    provider_ref: str,
+    *,
+    mode: str | None,
+    login_url: str = "https://example.org/",
+) -> httpx.Response:
+    body: dict[str, object] = {
+        "profile_id": str(PROFILE_ID),
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "provider_ref": provider_ref,
+        "login_url": login_url,
+    }
+    if mode is not None:
+        body["mode"] = mode
+    return await http.post(
+        "/v1/browser-authentications:begin",
+        headers={
+            **SERVICE_HEADERS,
+            "Idempotency-Key": f"browser-authentication:{PROFILE_ID}:begin",
+        },
+        json=body,
+    )
+
+
+async def test_device_ceremony_begin_returns_a_handoff_capability_and_starts_no_browser(
+    tmp_path: Path,
+) -> None:
+    """A device begin issues a handoff capability; the owner's client signs in (ADR-0128)."""
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        begun = await _begin_over_http(http, provider_ref, mode="device")
+        status = await http.post(
+            "/v1/browser-authentications:status",
+            headers=SERVICE_HEADERS,
+            json={
+                "ceremony_id": begun.json().get("id"),
+                "tenant_id": principal().tenant_id,
+                "principal_id": principal().principal_id,
+            },
+        )
+        bogus = await _begin_over_http(http, provider_ref, mode="bogus")
+
+    assert begun.status_code == 201
+    view = begun.json()
+    launch = urlsplit(view["launch_url"])
+    assert (launch.scheme, launch.netloc) == ("https", "login.example.test")
+    assert launch.path == f"/authentication/{view['id']}/handoff"
+    capability = parse_qs(launch.fragment)["capability"][0]
+    assert len(capability) == 43
+    assert view["status"] == "authentication_required"
+    assert runtimes == []
+    assert status.status_code == 200
+    assert status.json()["status"] == "authentication_required"
+    assert status.json().get("launch_url") is None
+    assert bogus.status_code == 400
+
+
+async def test_remote_ceremony_begin_is_unchanged_without_a_mode(tmp_path: Path) -> None:
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        begun = await _begin_over_http(http, provider_ref, mode=None)
+
+    assert begun.status_code == 201
+    launch = urlsplit(begun.json()["launch_url"])
+    assert launch.path == f"/authentication/{begun.json()['id']}"
+    assert len(runtimes) == 1
+
+
+async def test_device_begin_is_refused_when_device_sign_in_is_off(tmp_path: Path) -> None:
+    """The service kill switch refuses device begins and leaves remote ones alone (D13)."""
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", runtimes=runtimes, device_sign_in_enabled=False)
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        refused = await _begin_over_http(http, provider_ref, mode="device")
+        remote = await _begin_over_http(http, provider_ref, mode="remote")
+
+    assert refused.status_code == 409
+    assert refused.json() == {
+        "error": {
+            "code": "tool.browser.provider_unavailable",
+            "message": "browser operation rejected",
+        }
+    }
+    assert remote.status_code == 201
+    assert len(runtimes) == 1

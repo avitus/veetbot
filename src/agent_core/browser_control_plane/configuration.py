@@ -29,6 +29,8 @@ class ProfileServiceSettings:
     bind_host: str
     bind_port: int
     ceremony_base_url: str
+    # ADR-0128 kill switch: a service environment variable, not a versioned knob.
+    device_sign_in_enabled: bool
 
 
 def load_profile_service_settings(
@@ -78,6 +80,9 @@ def load_profile_service_settings(
         or ceremony_port == 0
     ):
         raise ProfileStoreIntegrityError("authentication ceremony origin is invalid")
+    device_switch = values.get("BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED")
+    if device_switch not in {None, "true", "false"}:
+        raise ProfileStoreIntegrityError("device sign-in switch is invalid")
     return ProfileServiceSettings(
         authorization=SecretValue(authorization),
         session_secret=SecretValue(session_secret),
@@ -86,6 +91,7 @@ def load_profile_service_settings(
         bind_host=bind_host,
         bind_port=bind_port,
         ceremony_base_url=ceremony_base_url.rstrip("/"),
+        device_sign_in_enabled=device_switch != "false",
     )
 
 
