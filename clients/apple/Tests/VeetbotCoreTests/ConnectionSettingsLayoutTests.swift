@@ -190,6 +190,23 @@ import Testing
         #expect(!sheet.contains("@SceneStorage"))
         #expect(!sheet.contains("@AppStorage"))
     }
+
+    /// While I'm signed in is being checked, Cancel is disabled, and a swipe
+    /// on the iPad sheet must not close the window either; a success closes
+    /// only the window it belongs to.
+    @Test
+    func testTheSignInWindowStaysOpenWhileItChecksTheSignIn() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sheet = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/DeviceSignInSheet.swift"),
+            encoding: .utf8
+        )
+
+        #expect(sheet.contains(".disabled(isConfirming)"))
+        #expect(sheet.contains(".interactiveDismissDisabled(isConfirming)"))
+        #expect(sheet.contains("model.finishDeviceSignIn(request)"))
+    }
 }
 
 #if os(macOS)

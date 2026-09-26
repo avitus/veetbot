@@ -84,11 +84,14 @@ origins, and private-network access is blocked. By default the app signs in on
 this device: it opens the website in a private sign-in window that Veetbot
 does not read or keep, the user signs in there, and after I'm signed in the
 app hands only that website's session to Veetbot's isolated browser service,
-once, and clears the window. Passkeys and sign-in through another website's
-identity provider do not work in that window. Sign in again on a profile row
-opens the same window for a profile that is not revoked; if a remote sign-in
-is still open for that profile, the device sign-in cancels it and the app
-forgets its link, so Start over cannot remove the signed-in profile. Use Veetbot's remote
+once, and clears the window. The window cannot be closed while the sign-in is
+being checked; if it closes anyway, the sign-in stops, nothing is chosen for
+new chats, and a website login the window created is removed. Passkeys and
+sign-in through another website's identity provider do not work in that
+window. Sign in again on a profile row opens the same window for a profile
+that is not revoked; if a remote sign-in is still open for that profile, the
+device sign-in cancels it and the app forgets its link, so Start over cannot
+remove the signed-in profile. Use Veetbot's remote
 browser remains available, and the sign-in window offers it when a new
 website's sign-in cannot start on this device: the app opens the
 server-provided isolated login ceremony only after a separate Continue in web

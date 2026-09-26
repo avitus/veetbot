@@ -219,10 +219,7 @@ import Testing
         let model = try await configuredModel(
             server, timing: DeviceSignInTiming(pollInterval: 0.01, pollLimit: 30)
         )
-        let request = DeviceSignInRequest(
-            startURL: URL(string: "https://example.org/")!, allowedOrigins: ["https://example.org"],
-            profileID: profileID, adoptableOrigin: nil
-        )
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
 
         let result = await model.completeDeviceSignIn(
             request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
@@ -253,10 +250,7 @@ import Testing
             }
         }
         let model = try await configuredModel(server)
-        let request = DeviceSignInRequest(
-            startURL: URL(string: "https://example.org/")!, allowedOrigins: ["https://example.org"],
-            profileID: profileID, adoptableOrigin: nil
-        )
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
 
         let result = await model.completeDeviceSignIn(
             request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
@@ -295,7 +289,8 @@ import Testing
         let model = try await configuredModel(server)
 
         let result = await model.completeDeviceSignIn(
-            Self.existingRequest(profileID), handoff: Self.handoff(confirmed: "https://example.org/learn"),
+            try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID))),
+            handoff: Self.handoff(confirmed: "https://example.org/learn"),
             adoptedOrigin: nil
         )
 
@@ -323,7 +318,8 @@ import Testing
         let model = try await configuredModel(server)
 
         let result = await model.completeDeviceSignIn(
-            Self.existingRequest(profileID), handoff: Self.handoff(confirmed: "https://example.org/learn"),
+            try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID))),
+            handoff: Self.handoff(confirmed: "https://example.org/learn"),
             adoptedOrigin: nil
         )
 
@@ -534,7 +530,7 @@ import Testing
             request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
         )
 
-        model.finishDeviceSignIn()
+        model.finishDeviceSignIn(request)
         await model.abandonDeviceSignIn()
 
         #expect(model.deviceSignInRequest == nil)
@@ -653,6 +649,238 @@ import Testing
         #expect(result == .failed(DeviceSignInFailure(message: DeviceSignInMessage.sessionEmpty, canRetry: true)))
         #expect(model.browserAuthentication == nil)
         #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
+    // MARK: - The window closes while I'm signed in is handled
+
+    /// The iPad sheet can be swiped away while the profile is still being
+    /// created. The attempt stops before any ceremony, removes the profile it
+    /// created, and selects nothing, whatever the handoff would have said
+    /// (0128-design §5.2).
+    @Test(arguments: ["ready", "session_empty"])
+    func closingTheWindowWhileTheProfileIsCreatedRemovesItAndSelectsNothing(handoff: String) async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let deleted = Counter()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return handoff == "ready"
+                    ? (200, #"{"status":"ready"}"#)
+                    : (422, #"{"error":{"code":"session_empty","message":"Empty."}}"#)
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            case "GET veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "ready"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke":
+                return (200, Self.profile(profileID, origins: ["https://example.org"], status: "revoked"))
+            case "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)":
+                _ = deleted.next()
+                return (204, "")
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, deleted.value > 0
+                    ? Self.emptyPage
+                    : Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "ready")]))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        let creating = server.hold("POST veetbot.test /v1/browser-profiles")
+        let confirming = Task {
+            await model.completeDeviceSignIn(
+                request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+            )
+        }
+        #expect(await server.arrival(of: "POST veetbot.test /v1/browser-profiles"))
+
+        await model.abandonDeviceSignIn()
+        creating.open()
+        let result = await confirming.value
+
+        #expect(result != .signedIn(profileID: profileID))
+        #expect(server.routes == [
+            "POST veetbot.test /v1/browser-profiles",
+            "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke",
+            "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)",
+            "GET veetbot.test /v1/browser-profiles",
+        ])
+        #expect(model.selectedBrowserProfileID == nil)
+        #expect(model.browserProfiles.isEmpty)
+        #expect(model.deviceSignInRequest == nil)
+        #expect(!model.isManagingWebsiteAccess)
+    }
+
+    /// Closed while the session is handed over for a new website: the attempt,
+    /// not the closing window, cleans up, ending the ceremony before it
+    /// revokes and deletes the profile.
+    @Test
+    func closingTheWindowDuringTheHandoffEndsTheCeremonyThenRemovesTheProfile() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (422, #"{"error":{"code":"session_empty","message":"Empty."}}"#)
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke":
+                return (200, Self.profile(profileID, origins: ["https://example.org"], status: "revoked"))
+            case "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)":
+                return (204, "")
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.emptyPage)
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        let handingOff = server.hold("POST browser.example /authentication/\(ceremonyID.uuidString)/handoff")
+        let confirming = Task {
+            await model.completeDeviceSignIn(
+                request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+            )
+        }
+        #expect(await server.arrival(of: "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff"))
+
+        await model.abandonDeviceSignIn()
+        handingOff.open()
+        _ = await confirming.value
+
+        #expect(server.routes == [
+            "POST veetbot.test /v1/browser-profiles",
+            "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies",
+            "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff",
+            "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel",
+            "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke",
+            "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)",
+            "GET veetbot.test /v1/browser-profiles",
+        ])
+        #expect(model.selectedBrowserProfileID == nil)
+    }
+
+    /// Signing in again, closed while the session is handed over: the
+    /// existing profile stays, but nothing more is read and it is not chosen
+    /// for new chats.
+    @Test
+    func closingASignInAgainWindowDuringTheHandoffSelectsNothing() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (200, #"{"status":"ready"}"#)
+            case "GET veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "ready"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "ready")]))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: try Self.profileView(profileID)))
+        let handingOff = server.hold("POST browser.example /authentication/\(ceremonyID.uuidString)/handoff")
+        let confirming = Task {
+            await model.completeDeviceSignIn(
+                request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+            )
+        }
+        #expect(await server.arrival(of: "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff"))
+
+        await model.abandonDeviceSignIn()
+        handingOff.open()
+        let result = await confirming.value
+
+        #expect(result != .signedIn(profileID: profileID))
+        #expect(server.routes == [
+            "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies",
+            "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff",
+        ])
+        #expect(model.selectedBrowserProfileID == nil)
+    }
+
+    /// A connection change during the handoff: the old client would carry
+    /// the new credential, so the attempt sends nothing more.
+    @Test
+    func aConnectionChangeDuringTheHandoffSendsNothingMore() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (200, #"{"status":"ready"}"#)
+            case "GET veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "ready"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "ready")]))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: try Self.profileView(profileID)))
+        let handingOff = server.hold("POST browser.example /authentication/\(ceremonyID.uuidString)/handoff")
+        let confirming = Task {
+            await model.completeDeviceSignIn(
+                request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+            )
+        }
+        #expect(await server.arrival(of: "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff"))
+
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "another-token"))
+        server.clear()
+        handingOff.open()
+        let result = await confirming.value
+
+        #expect(result != .signedIn(profileID: profileID))
+        #expect(server.routes.isEmpty)
+        #expect(model.selectedBrowserProfileID == nil)
+    }
+
+    /// I'm signed in from a window that is no longer on screen starts nothing.
+    @Test
+    func anAttemptWhoseWindowClosedSendsNothing() async throws {
+        let server = DeviceFlowServer { _ in nil }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        await model.abandonDeviceSignIn()
+
+        let result = await model.completeDeviceSignIn(
+            request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+        )
+
+        #expect(result != .signedIn(profileID: UUID()))
+        #expect(server.routes.isEmpty)
+        #expect(!model.isManagingWebsiteAccess)
+    }
+
+    @Test
+    func finishingAnEarlierWindowLeavesTheCurrentSignInOpen() async throws {
+        let server = DeviceFlowServer { _ in nil }
+        let model = try await configuredModel(server)
+        let earlier = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        let current = try #require(model.beginDeviceSignIn(websiteURL: "example.net"))
+
+        model.finishDeviceSignIn(earlier)
+        #expect(model.deviceSignInRequest == current)
+
+        model.finishDeviceSignIn(current)
+        #expect(model.deviceSignInRequest == nil)
     }
 
     @Test
@@ -812,7 +1040,8 @@ import Testing
         let model = try await configuredModel(server)
 
         let result = await model.completeDeviceSignIn(
-            Self.existingRequest(profileID), handoff: Self.handoff(confirmed: "https://example.org/learn"),
+            try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID))),
+            handoff: Self.handoff(confirmed: "https://example.org/learn"),
             adoptedOrigin: nil
         )
 
@@ -828,13 +1057,6 @@ import Testing
 
     nonisolated private static func route(_ request: URLRequest) -> String {
         "\(request.httpMethod ?? "") \(request.url?.host ?? "") \(request.url?.path ?? "")"
-    }
-
-    nonisolated private static func existingRequest(_ profileID: UUID) -> DeviceSignInRequest {
-        DeviceSignInRequest(
-            startURL: URL(string: "https://example.org/")!, allowedOrigins: ["https://example.org"],
-            profileID: profileID, adoptableOrigin: nil
-        )
     }
 
     nonisolated private static func handoff(confirmed: String, domain: String = "example.org") -> DeviceSessionHandoff {
@@ -854,6 +1076,13 @@ import Testing
     nonisolated private static func profile(_ id: UUID, origins: [String], status: String) -> String {
         let list = origins.map { "\"\($0)\"" }.joined(separator: ",")
         return #"{"id":"\#(id.uuidString)","allowed_origins":[\#(list)],"status":"\#(status)","generation":3,"created_at":"2026-09-25T12:00:00Z","updated_at":"2026-09-25T12:00:00Z","last_used_at":null}"#
+    }
+
+    nonisolated private static func profileView(_ id: UUID) throws -> BrowserProfileView {
+        try JSONDecoder.server.decode(
+            BrowserProfileView.self,
+            from: Data(profile(id, origins: ["https://example.org"], status: "needs_user").utf8)
+        )
     }
 
     nonisolated private static func page(_ items: [String]) -> String {
@@ -904,6 +1133,7 @@ final class DeviceFlowServer: @unchecked Sendable {
     private let handler: Handler
     private let lock = NSLock()
     private var entries: [Entry] = []
+    private var holds: [String: Gate] = [:]
 
     init(handler: @escaping Handler) {
         self.handler = handler
@@ -928,26 +1158,84 @@ final class DeviceFlowServer: @unchecked Sendable {
         return base
     }
 
+    /// Holds every answer to `route` until the gate opens. The request is
+    /// recorded when it arrives; the loading thread, which every stubbed
+    /// session shares, stays free for other requests meanwhile.
+    func hold(_ route: String) -> Gate {
+        let gate = Gate()
+        lock.withLock { holds[route] = gate }
+        return gate
+    }
+
+    func gate(for request: URLRequest) -> Gate? {
+        lock.withLock { holds[Self.route(of: request)] }
+    }
+
+    /// Waits up to five seconds for `route` to arrive.
+    func arrival(of route: String) async -> Bool {
+        for _ in 0..<500 {
+            if routes.contains(route) { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return routes.contains(route)
+    }
+
     func answer(_ request: URLRequest, body: Data) throws -> (Int, String) {
-        let route = "\(request.httpMethod ?? "") \(request.url?.host ?? "") \(request.url?.path ?? "")"
-        if route == "GET veetbot.test /v1/sessions" {
+        if Self.route(of: request) == "GET veetbot.test /v1/sessions" {
             return (200, #"{"items":[],"next_cursor":null}"#)
         }
+        record(request, body: body)
+        return try respond(to: request)
+    }
+
+    func record(_ request: URLRequest, body: Data) {
         lock.withLock {
             entries.append(
                 Entry(
-                    route: route, body: body,
+                    route: Self.route(of: request), body: body,
                     capability: request.value(forHTTPHeaderField: DeviceSignInHandoffClient.capabilityHeader),
                     authorization: request.value(forHTTPHeaderField: "Authorization"),
                     url: request.url?.absoluteString ?? ""
                 )
             )
         }
+    }
+
+    func respond(to request: URLRequest) throws -> (Int, String) {
         guard let answer = try handler(request) else {
-            Issue.record("unexpected request: \(route)")
+            Issue.record("unexpected request: \(Self.route(of: request))")
             return (500, #"{"error":{"code":"internal_error","message":"unexpected","details":{},"request_id":"t"}}"#)
         }
         return answer
+    }
+
+    private static func route(of request: URLRequest) -> String {
+        "\(request.httpMethod ?? "") \(request.url?.host ?? "") \(request.url?.path ?? "")"
+    }
+}
+
+/// Opens once; what waits on it then runs.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiting: [() -> Void] = []
+
+    func open() {
+        let run: [() -> Void] = lock.withLock {
+            isOpen = true
+            defer { waiting = [] }
+            return waiting
+        }
+        run.forEach { $0() }
+    }
+
+    func whenOpen(_ body: @escaping () -> Void) {
+        let now: Bool = lock.withLock {
+            if isOpen { return true }
+            waiting.append(body)
+            return false
+        }
+        if now { body() }
     }
 }
 
@@ -967,15 +1255,40 @@ final class DeviceFlowURLProtocol: URLProtocol {
         guard
             let id = request.value(forHTTPHeaderField: Self.serverHeader),
             let server = Self.lock.withLock({ Self.servers[id] }),
-            let url = request.url
+            request.url != nil
         else {
             client?.urlProtocol(self, didFailWithError: URLError(.unknown))
             return
         }
+        if let gate = server.gate(for: request) {
+            // A held answer is delivered later on this loading thread, as
+            // URLProtocol requires.
+            server.record(request, body: readBody())
+            heldServer = server
+            let thread = Thread.current
+            let modes = [RunLoop.current.currentMode?.rawValue ?? RunLoop.Mode.default.rawValue]
+            gate.whenOpen { [self] in
+                perform(#selector(deliverHeldAnswer), on: thread, with: nil, waitUntilDone: false, modes: modes)
+            }
+            return
+        }
+        deliver { try server.answer(request, body: readBody()) }
+    }
+
+    override func stopLoading() {}
+
+    private var heldServer: DeviceFlowServer?
+
+    @objc private func deliverHeldAnswer() {
+        guard let server = heldServer else { return }
+        deliver { try server.respond(to: request) }
+    }
+
+    private func deliver(_ answer: () throws -> (Int, String)) {
         do {
-            let (status, body) = try server.answer(request, body: readBody())
+            let (status, body) = try answer()
             let response = HTTPURLResponse(
-                url: url, statusCode: status, httpVersion: nil,
+                url: request.url!, statusCode: status, httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -985,8 +1298,6 @@ final class DeviceFlowURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: error)
         }
     }
-
-    override func stopLoading() {}
 
     private func readBody() -> Data {
         if let body = request.httpBody { return body }

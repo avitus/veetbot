@@ -310,6 +310,9 @@ struct DeviceSignInSheet: View {
             Divider()
             footer
         }
+        // Like Cancel, a swipe on the iPad sheet cannot close the window
+        // while the sign-in is being checked.
+        .interactiveDismissDisabled(isConfirming)
         .onDisappear {
             Task { await session.destroy() }
         }
@@ -408,7 +411,7 @@ struct DeviceSignInSheet: View {
             switch result {
             case .signedIn:
                 await session.destroy()
-                model.finishDeviceSignIn()
+                model.finishDeviceSignIn(request)
             case .failed(let reason):
                 failure = reason
             }
