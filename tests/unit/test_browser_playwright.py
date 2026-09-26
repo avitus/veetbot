@@ -13,6 +13,7 @@ import pytest
 from playwright.async_api import ElementHandle, Locator, Page
 from playwright.async_api import Error as PlaywrightError
 
+from agent_core.adapters.browser import playwright as playwright_adapter
 from agent_core.adapters.browser.playwright import (
     PlaywrightBrowserProvider,
     PythonPlaywrightRuntime,
@@ -895,3 +896,179 @@ async def test_the_context_seam_carries_todays_arguments_and_only_a_subclass_ext
         "storage_state": None,
     }
     assert chromium.contexts[1] == {**chromium.contexts[0], "ignore_https_errors": True}
+
+
+class FakeSettlingPage:
+    """A lesson page whose in-page quiet wait is where late content lands (ADR-0130)."""
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        settles_to: str | None = None,
+        never_settles: bool = False,
+        navigation_destroys_first_wait: bool = False,
+    ) -> None:
+        self.url = "about:blank"
+        self.text = text
+        self.settles_to = settles_to
+        self.never_settles = never_settles
+        self.navigation_destroys_first_wait = navigation_destroys_first_wait
+        self.quiet_waits: list[Any] = []
+        self.load_waits: list[str] = []
+        self.handlers: dict[str, list[Callable[[Any], None]]] = {}
+        self.buttons: list[AsyncMock] = []
+
+    def button(self, name: str, *, on_click: Callable[[], None] | None = None) -> AsyncMock:
+        handle = control(name)
+        handle.get_attribute.return_value = None
+        handle.is_enabled.return_value = True
+
+        async def evaluate(expression: str) -> object:
+            if "tagName.toLowerCase()" in expression and "getAttribute" not in expression:
+                return "button"
+            return {"tag": "button", "role": None, "inputType": None, "name": name}
+
+        async def click(*, timeout: int) -> None:
+            del timeout
+            if on_click is not None:
+                on_click()
+
+        handle.evaluate.side_effect = evaluate
+        handle.click.side_effect = click
+        self.buttons.append(handle)
+        return handle
+
+    def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        del wait_until, timeout
+        self.url = url
+
+    def locator(self, selector: str) -> Mock:
+        located = Mock(spec=Locator)
+        if selector == "body":
+            located.inner_text = AsyncMock(side_effect=lambda **_: self.text)
+        else:
+            located.element_handles = AsyncMock(side_effect=lambda: list(self.buttons))
+        return located
+
+    async def title(self) -> str:
+        return "Lesson"
+
+    async def evaluate(self, script: str, argument: Any = None) -> Any:
+        if "getBoundingClientRect" in script:
+            return [True] * len(argument)
+        assert "MutationObserver" in script
+        self.quiet_waits.append(argument)
+        if self.navigation_destroys_first_wait and len(self.quiet_waits) == 1:
+            raise PlaywrightError("Execution context was destroyed, most likely a navigation")
+        if self.never_settles:
+            await asyncio.sleep(3600)
+        if self.settles_to is not None:
+            self.text = self.settles_to
+        return None
+
+    async def wait_for_load_state(self, state: str, *, timeout: float) -> None:
+        del timeout
+        self.load_waits.append(state)
+
+
+def settling_runtime(page: FakeSettlingPage) -> PythonPlaywrightRuntime:
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://site.example",)
+    runtime._attach_page(page)  # type: ignore[arg-type]
+    return runtime
+
+
+@pytest.fixture
+def quick_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(playwright_adapter, "SETTLE_SECONDS", 0.05, raising=False)
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_navigation_observes_the_page_after_it_settles() -> None:
+    """ADR-0130 decision 5: navigation waits for the network and the DOM to go quiet."""
+
+    page = FakeSettlingPage("Loading", settles_to="Exercise 1")
+    page.button("Check")
+
+    observation = await settling_runtime(page).navigate("https://site.example/lesson")
+
+    assert observation.text == "Exercise 1"
+    assert page.load_waits[:1] == ["networkidle"]
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_action_observes_the_page_after_it_settles() -> None:
+    """ADR-0130 decision 6: act returns the page after the action's effect settles."""
+
+    page = FakeSettlingPage("Exercise 1")
+
+    def check() -> None:
+        page.text = "Checking"
+        page.settles_to = "Correct!"
+
+    page.button("Check", on_click=check)
+    runtime = settling_runtime(page)
+    before = await runtime.navigate("https://site.example/lesson")
+
+    after = await runtime.act(
+        BrowserAction(
+            kind=BrowserActionKind.CLICK,
+            expected_revision=before.revision,
+            ref=before.elements[0].ref,
+        )
+    )
+
+    assert after.text == "Correct!"
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_a_page_that_never_settles_is_observed_at_the_bound() -> None:
+    page = FakeSettlingPage("Clock 1", never_settles=True)
+    page.button("Stay")
+
+    observation = await asyncio.wait_for(
+        settling_runtime(page).navigate("https://site.example/lesson"), 1
+    )
+
+    assert observation.text == "Clock 1"
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_settling_survives_a_navigation_that_destroys_the_context() -> None:
+    page = FakeSettlingPage("Old", settles_to="New", navigation_destroys_first_wait=True)
+    page.button("Next")
+
+    observation = await settling_runtime(page).navigate("https://site.example/lesson")
+
+    assert observation.text == "New"
+    assert "domcontentloaded" in page.load_waits
+    assert len(page.quiet_waits) == 2
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_act_can_follow_act_without_observe() -> None:
+    page = FakeSettlingPage("Exercise 1")
+    page.button("Check", on_click=lambda: setattr(page, "text", "Correct!"))
+    runtime = settling_runtime(page)
+    first = await runtime.navigate("https://site.example/lesson")
+    action = BrowserAction(
+        kind=BrowserActionKind.CLICK,
+        expected_revision=first.revision,
+        ref=first.elements[0].ref,
+    )
+
+    second = await runtime.act(action)
+    third = await runtime.act(
+        action.model_copy(
+            update={
+                "expected_revision": second.revision,
+                "ref": second.elements[0].ref,
+            }
+        )
+    )
+
+    assert third.revision not in {first.revision, second.revision}

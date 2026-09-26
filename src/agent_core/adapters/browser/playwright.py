@@ -9,7 +9,7 @@ import secrets
 import tempfile
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from urllib.parse import urlsplit
 
 from playwright.async_api import (
@@ -19,6 +19,7 @@ from playwright.async_api import (
     Dialog,
     Download,
     ElementHandle,
+    Frame,
     Page,
     Playwright,
     Request,
@@ -49,6 +50,29 @@ MAXIMUM_ELEMENTS = 256
 # Candidates scanned for visibility before the element cap applies (ADR-0130).
 MAXIMUM_SCANNED_ELEMENTS = 4_096
 MAXIMUM_TEXT_CHARACTERS = 262_144
+# A page settles for at most this long after navigation or an action (ADR-0130).
+SETTLE_SECONDS = 2.0
+# The DOM counts as quiet after this long without a mutation.
+DOM_QUIET_MILLISECONDS = 300
+_QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
+    let quiet = 0;
+    let limit = 0;
+    const observer = new MutationObserver(() => {
+        clearTimeout(quiet);
+        quiet = setTimeout(finish, quietMs);
+    });
+    function finish() {
+        observer.disconnect();
+        clearTimeout(quiet);
+        clearTimeout(limit);
+        resolve(null);
+    }
+    observer.observe(document, {
+        subtree: true, childList: true, attributes: true, characterData: true
+    });
+    quiet = setTimeout(finish, quietMs);
+    limit = setTimeout(finish, timeoutMs);
+})"""
 # Playwright's is_visible in one round trip: a non-empty box, not visibility:hidden.
 _VISIBLE_SCRIPT = """nodes => nodes.map(node => {
     const box = node.getBoundingClientRect();
@@ -116,6 +140,7 @@ class PythonPlaywrightRuntime:
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
         self._sign_in_entered = False
+        self._main_frame_navigations = 0
 
     async def start(
         self,
@@ -231,7 +256,13 @@ class PythonPlaywrightRuntime:
         # Record refused navigation for failure classification; the CDP document
         # guard enforces redirect hops before dispatch.
         page.on("request", self._track_navigation)
+        page.on("framenavigated", self._count_main_frame_navigation)
         self._page = page
+
+    def _count_main_frame_navigation(self, frame: Frame) -> None:
+        """Count committed main-frame documents so an action knows it loaded a new one."""
+        if frame.parent_frame is None:
+            self._main_frame_navigations += 1
 
     def _track_navigation(self, request: Request) -> None:
         """Remember refused navigation origins for stable browser failure classification."""
@@ -284,7 +315,53 @@ class PythonPlaywrightRuntime:
             ) from exc
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+        await self._settle(page, after_document=True)
+        if not _origin_allowed(page.url, self._allowed_origins):
+            raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
         return await self._observation(page)
+
+    async def _settle(self, page: Page, *, after_document: bool) -> None:
+        """Wait, at most SETTLE_SECONDS, for the page to stop loading and changing.
+
+        ADR-0130 decisions 5 and 6: after a new document, first wait for the
+        network to go idle; then wait in the page until the DOM has not
+        changed for DOM_QUIET_MILLISECONDS. A page that never settles is
+        observed at the bound. Nothing here fails: a context destroyed by a
+        navigation waits for the new document and tries the quiet wait once
+        more within the same deadline.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + SETTLE_SECONDS
+
+        def remaining() -> float:
+            return max(0.0, deadline - loop.time())
+
+        async def load_state(state: Literal["domcontentloaded", "networkidle"]) -> None:
+            left = remaining()
+            if left <= 0:
+                return
+            with suppress(PlaywrightError, TimeoutError):
+                async with asyncio.timeout(left):
+                    await page.wait_for_load_state(state, timeout=max(1.0, left * 1000))
+
+        if after_document:
+            await load_state("networkidle")
+        for attempt in range(2):
+            left = remaining()
+            if left <= 0:
+                return
+            try:
+                async with asyncio.timeout(left + 0.25):
+                    await page.evaluate(
+                        _QUIET_SCRIPT, [DOM_QUIET_MILLISECONDS, max(1, int(left * 1000))]
+                    )
+                return
+            except TimeoutError:
+                return
+            except PlaywrightError:
+                if attempt:
+                    return
+                await load_state("domcontentloaded")
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
         """Load one page and report where it landed and whether it asks to sign in.
@@ -424,6 +501,7 @@ class PythonPlaywrightRuntime:
         ):
             raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
 
+        documents_before = self._main_frame_navigations
         try:
             if action.kind is BrowserActionKind.CLICK:
                 await handle.click(timeout=30_000)
@@ -442,6 +520,8 @@ class PythonPlaywrightRuntime:
                 await page.mouse.wheel(0, action.delta_y or 0)
         except PlaywrightError as exc:
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
+        # The action was sent; settling never turns it into a failure (ADR-0130).
+        await self._settle(page, after_document=self._main_frame_navigations != documents_before)
         return await self._observation(page)
 
     async def storage_state(self) -> dict[str, object]:
@@ -544,6 +624,7 @@ class PythonPlaywrightRuntime:
             self._document_session = None
             self._main_frame_id = None
             self._sign_in_entered = False
+            self._main_frame_navigations = 0
 
 
 async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHandle]) -> None:
