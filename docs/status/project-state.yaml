@@ -84,6 +84,10 @@ project:
   # server and starts it on first use, the API and interactive worker warm that
   # memory at startup, model attempts and MCP handshakes are timed, and
   # `agent run latency` reports Chat latency from the event log.
+  # ADR-0133 records the owner's non-milestone CI change on 2026-09-26: the
+  # reading-lane floor compares each commit's trailer with that commit's own
+  # diff, a merge answers only for what it changed itself, and a range whose
+  # newest trailer covers every changed path still passes.
   authorized_milestones:
     - 0
     - 1
