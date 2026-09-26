@@ -207,14 +207,15 @@ async def test_merge_suggestion_downgrade_never_erases_an_owner_answer() -> None
         _alembic("upgrade", "head")
 
 
-async def _until_the_downgrade_waits_on_a_lock(engine: Any, downgrade: Any) -> None:
+async def _until_the_downgrade_waits_for_people_heads(engine: Any, downgrade: Any) -> None:
     for _ in range(300):
         async with engine.connect() as connection:
             waiting = (
                 await connection.execute(
                     text(
-                        "SELECT count(*) FROM pg_stat_activity "
-                        "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                        "SELECT count(*) FROM pg_locks "
+                        "WHERE relation = 'people_heads'::regclass "
+                        "AND mode = 'AccessExclusiveLock' AND NOT granted"
                     )
                 )
             ).scalar_one()
@@ -260,7 +261,7 @@ async def test_merge_suggestion_downgrade_waits_for_an_answer_in_flight() -> Non
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await _until_the_downgrade_waits_on_a_lock(engine, downgrade)
+                await _until_the_downgrade_waits_for_people_heads(engine, downgrade)
             # The answer commits here, while the downgrade waits on it.
             _output, errors = await downgrade.communicate()
             assert downgrade.returncode != 0, "the downgrade erased an answer in flight"
