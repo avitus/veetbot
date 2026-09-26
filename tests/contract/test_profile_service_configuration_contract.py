@@ -12,6 +12,7 @@ import uvicorn
 
 import agent_core.browser_control_plane.main as service_main
 from agent_core.browser_control_plane.configuration import load_profile_service_settings
+from agent_core.browser_control_plane.log_redaction import profile_service_log_config
 from agent_core.browser_control_plane.models import ProfileStoreIntegrityError
 from agent_core.domain.browser import require_service_origin
 
@@ -198,11 +199,12 @@ def test_profile_service_entrypoint_uses_only_mounted_settings(
     monkeypatch.setattr(
         uvicorn,
         "run",
-        lambda app, *, host, port, access_log: observed.update(
+        lambda app, *, host, port, access_log, log_config: observed.update(
             app=app,
             host=host,
             port=port,
             access_log=access_log,
+            log_config=log_config,
         ),
     )
 
@@ -215,3 +217,4 @@ def test_profile_service_entrypoint_uses_only_mounted_settings(
     assert observed["host"] == "0.0.0.0"  # noqa: S104 - boundary fixture
     assert observed["port"] == 8080
     assert observed["access_log"] is False
+    assert observed["log_config"] == profile_service_log_config()

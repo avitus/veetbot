@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.browser_control_plane.api import create_profile_service_app
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
+from agent_core.browser_control_plane.handoff import DeviceSessionHandoff
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
@@ -130,6 +134,7 @@ def full_app(
     device_sign_in_enabled: bool = True,
     times: list[datetime] | None = None,
     evidence_failure: Exception | None = None,
+    services: list[HostedProfileSessionService] | None = None,
 ) -> FastAPI:
     store = FilesystemEncryptedProfileStore(
         root,
@@ -155,6 +160,8 @@ def full_app(
         ceremony_base_url="https://login.example.test",
         device_sign_in_enabled=device_sign_in_enabled,
     )
+    if services is not None:
+        services.append(sessions)
     lifecycle_service = HostedProfileLifecycleService(
         store,
         reference_factory=lambda: PROVIDER_REF,
@@ -919,3 +926,235 @@ async def test_a_verification_failure_is_a_fixed_answer(
     assert answered.json() == {"error": {"code": code, "message": "browser operation rejected"}}
     assert HANDOFF_SENTINEL not in answered.text
     assert after == "cancelled"
+
+
+# --- ADR-0128 D18: nothing from a handoff reaches a log or escapes -----------
+
+LOG_SENTINEL_NAME = "log-sentinel-cookie-name"
+LOG_SENTINEL_VALUE = "log-sentinel-cookie-value"
+LOG_SENTINEL_STORAGE = "log-sentinel-storage-item"
+LOG_SENTINEL_PATH = "log-sentinel-path"
+_LOG_SENTINELS = (LOG_SENTINEL_NAME, LOG_SENTINEL_VALUE, LOG_SENTINEL_STORAGE, LOG_SENTINEL_PATH)
+
+
+def sentinel_handoff(**overrides: object) -> dict[str, object]:
+    cookie = {
+        "name": LOG_SENTINEL_NAME,
+        "value": LOG_SENTINEL_VALUE,
+        "domain": ".example.org",
+        "path": "/",
+        "expires": -1,
+        "httpOnly": True,
+        "secure": True,
+        "sameSite": "Lax",
+    }
+    body: dict[str, object] = {
+        "confirmed_url": f"https://example.org/{LOG_SENTINEL_PATH}",
+        "cookies": [cookie, {**cookie, "domain": ".example.net"}],
+        "origins": [
+            {
+                "origin": "https://example.org",
+                "localStorage": [{"name": LOG_SENTINEL_STORAGE, "value": LOG_SENTINEL_STORAGE}],
+            }
+        ],
+    }
+    body.update(overrides)
+    return body
+
+
+def injected_failures() -> list[Exception]:
+    """A RuntimeError with a sentinel and a chained cause, a KeyError, a ValidationError."""
+
+    try:
+        raise KeyError(LOG_SENTINEL_NAME)
+    except KeyError as cause:
+        chained = RuntimeError(f"verification failed for {LOG_SENTINEL_VALUE}")
+        chained.__cause__ = cause
+    try:
+        DeviceSessionHandoff.model_validate(
+            {"confirmed_url": LOG_SENTINEL_VALUE, "cookies": [], "origins": []}
+        )
+    except ValidationError as error:
+        validation = error
+    return [chained, KeyError(LOG_SENTINEL_VALUE), validation]
+
+
+def _leaks(records: list[logging.LogRecord], secrets: tuple[str, ...]) -> list[str]:
+    leaks: list[str] = []
+    for record in records:
+        rendered = " ".join(
+            (
+                record.getMessage(),
+                repr(record.args),
+                str(record.exc_text),
+                repr({key: value for key, value in vars(record).items() if key != "exc_info"}),
+            )
+        )
+        if record.exc_info is not None:
+            rendered += logging.Formatter().formatException(record.exc_info)
+        leaks.extend(secret for secret in secrets if secret in rendered)
+    return leaks
+
+
+async def _handoff_once(
+    root: Path, body: dict[str, object], *, failure: Exception | None = None, **options: Any
+) -> tuple[httpx.Response, str]:
+    services: list[HostedProfileSessionService] = []
+    transport = httpx.ASGITransport(app=full_app(root, services=services, **options))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        if failure is not None:
+
+            async def fail(*args: object) -> None:
+                del args
+                raise failure
+
+            services[0].accept_device_session = fail  # type: ignore[method-assign,assignment]
+        response = await http.post(path, headers=_handoff_headers(capability), json=body)
+    return response, capability
+
+
+async def _every_handoff_path(root: Path) -> list[tuple[httpx.Response, str]]:
+    answers = [
+        await _handoff_once(root / "ready", sentinel_handoff()),
+        await _handoff_once(root / "invalid", sentinel_handoff(extra=LOG_SENTINEL_VALUE)),
+        await _handoff_once(
+            root / "bad-cookie",
+            sentinel_handoff(
+                cookies=[
+                    {
+                        "name": LOG_SENTINEL_NAME,
+                        "value": LOG_SENTINEL_VALUE + ";",
+                        "domain": ".example.org",
+                        "path": "/",
+                        "expires": -1,
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "Lax",
+                    }
+                ]
+            ),
+        ),
+        await _handoff_once(
+            root / "unconfirmed", sentinel_handoff(confirmed_url="https://example.org/")
+        ),
+        await _handoff_once(
+            root / "provider",
+            sentinel_handoff(),
+            evidence_failure=RuntimeError(f"net::ERR at /{LOG_SENTINEL_PATH}"),
+        ),
+    ]
+    for index, failure in enumerate(injected_failures()):
+        answers.append(
+            await _handoff_once(root / f"injected-{index}", sentinel_handoff(), failure=failure)
+        )
+    return answers
+
+
+async def test_device_handoff_logs_nothing_from_the_payload(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    answers = await _every_handoff_path(tmp_path)
+
+    assert [response.status_code for response, _ in answers] == [
+        200,
+        400,
+        400,
+        422,
+        409,
+        500,
+        500,
+        500,
+    ]
+    capabilities = tuple(capability for _, capability in answers)
+    assert _leaks(caplog.records, _LOG_SENTINELS + capabilities) == []
+    for response, _capability in answers:
+        assert not any(secret in response.text for secret in _LOG_SENTINELS)
+    assert any(record.getMessage() == "device handoff failed" for record in caplog.records)
+
+
+@pytest.mark.parametrize("failure", injected_failures(), ids=lambda failure: type(failure).__name__)
+async def test_no_exception_leaves_the_handoff_path(tmp_path: Path, failure: Exception) -> None:
+    services: list[HostedProfileSessionService] = []
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", services=services), raise_app_exceptions=True
+    )
+
+    async def fail(*args: object) -> None:
+        del args
+        raise failure
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        services[0].accept_device_session = fail  # type: ignore[method-assign,assignment]
+        try:
+            response = await http.post(
+                path, headers=_handoff_headers(capability), json=sentinel_handoff()
+            )
+        except Exception as escaped:
+            pytest.fail(f"escaped: {type(escaped).__name__}")
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {"code": "internal_error", "message": "service unavailable"}
+    }
+
+
+async def test_the_surface_check_never_raises_into_the_application(tmp_path: Path) -> None:
+    services: list[HostedProfileSessionService] = []
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", services=services), raise_app_exceptions=True
+    )
+
+    async def fail(*args: object) -> bool:
+        del args
+        raise injected_failures()[0]
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        services[0].authenticate_surface = fail  # type: ignore[method-assign,assignment]
+        response = await http.post(
+            path,
+            headers={**_handoff_headers(capability), "Content-Length": "999999"},
+            content=b"never read",
+        )
+
+    assert response.status_code == 500
+    assert response.headers["cache-control"] == "no-store"
+
+
+async def test_device_handoff_authenticates_before_buffering_and_logs_nothing(
+    tmp_path: Path,
+) -> None:
+    """Gate 9 (ADR-0128): capability before body; no payload in any log record."""
+
+    records: list[logging.LogRecord] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Collect(level=logging.DEBUG)
+    root = logging.getLogger()
+    previous = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    try:
+        transport = httpx.ASGITransport(app=full_app(tmp_path / "boundary"))
+        async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+            _ceremony_id, path, _capability = await _begin_device(http)
+            unread = await http.post(
+                path,
+                headers={"Content-Type": "application/json", "Content-Length": "999999"},
+                content=b"not parsed",
+            )
+        answers = await _every_handoff_path(tmp_path / "paths")
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous)
+
+    assert unread.status_code == 401
+    capabilities = tuple(capability for _, capability in answers)
+    assert _leaks(records, _LOG_SENTINELS + capabilities) == []
