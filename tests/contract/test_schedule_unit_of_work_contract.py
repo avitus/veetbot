@@ -25,6 +25,7 @@ FORBIDDEN_REPOSITORIES = {
     "browser_authentications",
     "browser_grants",
     "browser_profiles",
+    "browser_task_grants",
     "evaluations",
     "invocations",
     "knowledge",

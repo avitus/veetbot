@@ -21,6 +21,7 @@ from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserProfile, BrowserProfileStatus
 from agent_core.domain.browser_task_grants import BrowserTaskGrant
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from tests.contract.support import NOW
@@ -229,3 +230,18 @@ async def test_task_grants_force_row_level_security_and_hold_no_material() -> No
         "page_url",
         "url",
     }
+
+
+async def test_deleting_a_session_cascades_to_its_task_grants() -> None:
+    async with _seeded() as (composition, owner):
+        async with composition.uow_factory() as uow:
+            deleted = await uow.browser_task_grants.create(grant(1, owner=owner))
+            kept = await uow.browser_task_grants.create(
+                grant(2, owner=owner, session_id=OTHER_SESSION_ID)
+            )
+        async with composition.uow_factory() as uow:
+            assert await uow.session_deletions.delete(SESSION_ID, owner, NOW)
+        async with composition.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.browser_task_grants.get(deleted.id, owner)
+            assert await uow.browser_task_grants.get(kept.id, owner) == kept

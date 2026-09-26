@@ -1031,6 +1031,7 @@ def _memory_uow_repositories(
     usage = InMemoryUsageRepository(runs)
     trajectory_exports = InMemoryTrajectoryExportRepository()
     artifacts = InMemoryArtifactRepository()
+    browser_task_grants = InMemoryBrowserTaskGrantRepository()
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -1050,6 +1051,7 @@ def _memory_uow_repositories(
         schedules=schedules,
         notification_outbox=notification_outbox,
         delegations=delegations,
+        browser_task_grants=browser_task_grants,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -1057,7 +1059,7 @@ def _memory_uow_repositories(
         policy_profiles=InMemoryPolicyProfileRepository(),
         browser_profiles=InMemoryBrowserProfileRepository(),
         browser_grants=InMemoryBrowserGrantRepository(),
-        browser_task_grants=InMemoryBrowserTaskGrantRepository(),
+        browser_task_grants=browser_task_grants,
         browser_authentications=InMemoryBrowserAuthenticationRepository(),
         process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
