@@ -17,7 +17,7 @@ title: Changelog
 - A chat whose plan was fingerprinted in the other order gets a new
   fingerprint once, at its next message. Its tools, memory and history stay
   as they are, so an approval it is waiting for still works. ADR-0134
-  (proposed) records the change.
+  records the change.
 
 ## 2026-09-26 — New chats answer again
 

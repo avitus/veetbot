@@ -1,6 +1,6 @@
 # ADR-0134: Tool scope sets serialize sorted
 
-- Status: Proposed
+- Status: Accepted (authorized by the repository owner, 2026-09-26)
 - Date: 2026-09-26
 - Related: Sections 10.1 and 11 of the engineering plan; ADR-0020, ADR-0094,
   ADR-0123, ADR-0131
