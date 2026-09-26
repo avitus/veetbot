@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -16,9 +17,10 @@ from sqlalchemy import text
 from agent_core.adapters.persistence.database import create_engine, create_session_factory
 from agent_core.adapters.persistence.revision import EXPECTED_REVISION
 from agent_core.bootstrap import build
+from agent_core.domain.agents import Principal
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import Sensitivity
-from agent_core.domain.people import Person, PersonIdentifier
+from agent_core.domain.people import PeopleMergeSuggestion, Person, PersonIdentifier
 from agent_core.domain.people_views import ResolveMergeSuggestion
 from tests.contract.support import NOW, principal, session
 from tests.integration.m2_support import database_settings
@@ -122,47 +124,57 @@ async def test_lease_expiration_backfill_preserves_continuations_and_crash_histo
             assert await uow.queue.claim("no-terminal-reopen", [0]) is None
 
 
-async def test_merge_suggestion_downgrade_never_erases_an_owner_answer() -> None:
-    """ADR-0125: a downgrade drops derived suggestions but refuses to lose an answer."""
-    owner = principal().model_copy(
+def _people_owner() -> Principal:
+    return principal().model_copy(
         update={
             "principal_id": f"downgrade-{uuid4().hex[:12]}",
             "scopes": {"people.read", "people.write"},
         }
     )
+
+
+async def _two_sabinas(app: Any, owner: Principal) -> UUID:
+    """Seed two correspondents the duplicate pass asks about; return an audit session."""
+    audit = uuid4()
+    fields: dict[str, Any] = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW - timedelta(days=10),
+        "updated_at": NOW - timedelta(days=10),
+    }
+    async with app.uow_factory() as uow:
+        await uow.sessions.create(
+            session().model_copy(update={"id": audit, "principal_id": owner.principal_id})
+        )
+        for address in ("sabina@home.test", "sabina@work.test"):
+            person = Person(id=uuid4(), display_name="Sabina Smith", **fields)
+            await uow.people.put(person, expected_revision=0)
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=person.id,
+                    identifier_kind="email",
+                    namespace="owner",
+                    value=address,
+                    context="owner",
+                    verification="channel_observed",
+                    valid_from=NOW - timedelta(days=10),
+                    **fields,
+                ),
+                expected_revision=0,
+            )
+    return audit
+
+
+async def test_merge_suggestion_downgrade_never_erases_an_owner_answer() -> None:
+    """ADR-0125: a downgrade drops derived suggestions but refuses to lose an answer."""
+    owner = _people_owner()
     settings = replace(database_settings(), people_enabled=True)
     try:
         async with build(settings=settings, storage="postgres", principal=owner) as app:
             service = app.services.people
             assert service is not None
-            audit = uuid4()
-            fields: dict[str, Any] = {
-                "tenant_id": owner.tenant_id,
-                "principal_id": owner.principal_id,
-                "created_at": NOW - timedelta(days=10),
-                "updated_at": NOW - timedelta(days=10),
-            }
-            async with app.uow_factory() as uow:
-                await uow.sessions.create(
-                    session().model_copy(update={"id": audit, "principal_id": owner.principal_id})
-                )
-                for address in ("sabina@home.test", "sabina@work.test"):
-                    person = Person(id=uuid4(), display_name="Sabina Smith", **fields)
-                    await uow.people.put(person, expected_revision=0)
-                    await uow.people.put(
-                        PersonIdentifier(
-                            id=uuid4(),
-                            person_id=person.id,
-                            identifier_kind="email",
-                            namespace="owner",
-                            value=address,
-                            context="owner",
-                            verification="channel_observed",
-                            valid_from=NOW - timedelta(days=10),
-                            **fields,
-                        ),
-                        expected_revision=0,
-                    )
+            audit = await _two_sabinas(app, owner)
 
             async def listed() -> list[Any]:
                 return list(
@@ -193,3 +205,69 @@ async def test_merge_suggestion_downgrade_never_erases_an_owner_answer() -> None
             assert (await service.dedupe(owner, apply=True)).suggestions == []
     finally:
         _alembic("upgrade", "head")
+
+
+async def _until_the_downgrade_waits_on_a_lock(engine: Any, downgrade: Any) -> None:
+    for _ in range(300):
+        async with engine.connect() as connection:
+            waiting = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return
+        assert downgrade.returncode is None, "the downgrade ended before it waited"
+        await asyncio.sleep(0.1)
+    raise AssertionError("the downgrade never waited for the answer in flight")
+
+
+async def test_merge_suggestion_downgrade_waits_for_an_answer_in_flight() -> None:
+    """An answer that commits while the downgrade runs is never lost (ADR-0125)."""
+    owner = _people_owner()
+    settings = replace(database_settings(), people_enabled=True)
+    engine = create_engine(settings.database_url)
+    try:
+        async with build(settings=settings, storage="postgres", principal=owner) as app:
+            service = app.services.people
+            assert service is not None
+            await _two_sabinas(app, owner)
+            assert len((await service.dedupe(owner, apply=True)).suggestions) == 1
+            [asked] = (await service.merge_suggestions(owner, ceiling=Sensitivity.SENSITIVE)).items
+            async with app.uow_factory() as uow:
+                current = await uow.people.get(owner, asked.id, ceiling=Sensitivity.RESTRICTED)
+                assert isinstance(current, PeopleMergeSuggestion)
+                await uow.people.put(
+                    current.model_copy(
+                        update={
+                            "state": "separated",
+                            "revision": current.revision + 1,
+                            "updated_at": current.updated_at + timedelta(seconds=1),
+                        }
+                    ),
+                    expected_revision=current.revision,
+                )
+                downgrade = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "alembic",
+                    "downgrade",
+                    "-1",
+                    cwd=ROOT,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await _until_the_downgrade_waits_on_a_lock(engine, downgrade)
+            # The answer commits here, while the downgrade waits on it.
+            _output, errors = await downgrade.communicate()
+            assert downgrade.returncode != 0, "the downgrade erased an answer in flight"
+            assert b"answered" in errors
+            async with app.uow_factory() as uow:
+                kept = await uow.people.get(owner, asked.id, ceiling=Sensitivity.RESTRICTED)
+            assert isinstance(kept, PeopleMergeSuggestion) and kept.state == "separated"
+    finally:
+        _alembic("upgrade", "head")
+        await engine.dispose()

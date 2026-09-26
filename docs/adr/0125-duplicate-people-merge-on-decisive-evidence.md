@@ -80,7 +80,10 @@ uncertainty.
    referencing both identities, so erasing either person erases them.
    Migration `524f16dfc8f9` admits the kind. Its downgrade drops open and
    withdrawn suggestions, which the next pass proposes again, and refuses
-   while any suggestion the owner answered remains.
+   while any suggestion the owner answered remains. It locks the People
+   table first, so an answer being saved is waited for, not lost, and it
+   runs only as a role that bypasses row-level security: any other role's
+   People read fails rather than seeing a filtered table.
 9. **No new hard gate.** The evidence is unit, contract, PostgreSQL and native
    tests. Gate P01 is unchanged; this decision keeps names from merging anyone.
 
