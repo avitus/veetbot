@@ -11,6 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent_core.domain.browser import BrowserDispatchConstraint
 from agent_core.domain.messages import ContentPart, ToolResultItem
 from agent_core.domain.policies import (
     ExecutionTarget,
@@ -89,6 +90,10 @@ class ToolResult(BaseModel):
     failure: ToolFailure | None = None
     output_trust: TrustLevel | None = None
     metrics: dict[str, int] = Field(default_factory=dict)
+    # ADR-0130: a digest the platform computes from what a successful result
+    # observed. The loop breaker reads it; it is never model-visible and never
+    # serialized, so no stored result or event carries it.
+    evidence_key: str | None = Field(default=None, exclude=True, max_length=64)
 
     @model_validator(mode="after")
     def success_and_failure_are_consistent(self) -> ToolResult:
@@ -131,6 +136,9 @@ class ToolExecutionContext:
     # resource the whole run attempt holds, such as a hosted browser lease, is
     # bounded by this instead. Trusted runtime state, never a model argument.
     run_deadline_at: datetime | None = None
+    # ADR-0129: the constraint a standing or task grant attached when it
+    # authorized this call. Trusted runtime state, never a model argument.
+    dispatch_constraint: BrowserDispatchConstraint | None = None
 
 
 class ToolOutcomeStatus(StrEnum):

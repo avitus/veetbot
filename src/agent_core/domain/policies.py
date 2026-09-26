@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent_core.domain.browser import BrowserDispatchConstraint
+
 
 class TrustLevel(StrEnum):
     PLATFORM = "platform"
@@ -159,12 +161,37 @@ class StandingAuthorization(BaseModel):
     reason_code: str = Field(min_length=1, max_length=128)
     authorization_kind: str | None = Field(default=None, min_length=1, max_length=128)
     authorization_ref: str | None = Field(default=None, min_length=1, max_length=255)
+    # ADR-0129: what the runtime rechecks before a grant-authorized dispatch,
+    # which use of the grant this was, and the approval view of the action.
+    dispatch_constraint: BrowserDispatchConstraint | None = None
+    use_ordinal: int | None = Field(default=None, ge=1)
+    authorization_view: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def allowed_authority_has_auditable_evidence(self) -> StandingAuthorization:
         if self.allowed and (self.authorization_kind is None or self.authorization_ref is None):
             raise ValueError("allowed standing authority requires audit evidence")
+        if not self.allowed and (
+            self.dispatch_constraint is not None
+            or self.use_ordinal is not None
+            or self.authorization_view is not None
+        ):
+            raise ValueError("a denial carries no constraint, use, or authorized view")
         return self
+
+
+class AuthorizationTurn(BaseModel):
+    """What a standing authorizer may know about the run's active turn (ADR-0129).
+
+    The executor computes it from the checkpoint: the trust of the newest user
+    message, and the unwrapped name of every tool call since that message,
+    including the other calls of the current step.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    newest_user_trust: TrustLevel
+    tool_names: frozenset[str] = frozenset()
 
 
 class PolicyRule(BaseModel):

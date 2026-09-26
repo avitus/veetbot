@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from enum import StrEnum
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.web import is_public_https_url
@@ -135,6 +137,31 @@ class BrowserProfileStatus(StrEnum):
     READY = "ready"
     NEEDS_USER = "needs_user"
     REVOKED = "revoked"
+
+
+class BrowserAuthenticationMode(StrEnum):
+    """How an authentication ceremony signs the user in (ADR-0128).
+
+    ``remote`` drives the isolated service's headed browser; ``device`` has the
+    user's own client hand one site's session to the service, which verifies
+    it before sealing.
+    """
+
+    REMOTE = "remote"
+    DEVICE = "device"
+
+
+class BrowserPageEvidence(BaseModel):
+    """What one verification load of a confirmed page found (ADR-0128).
+
+    The path can carry tokens, so it never appears in a representation.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    on_allowed_origin: bool
+    path: str = Field(max_length=4096, repr=False)
+    challenge_visible: bool
 
 
 class BrowserAuthenticationStatus(StrEnum):
@@ -469,6 +496,177 @@ class BrowserObservation(BaseModel):
         if not is_public_https_url(value):
             raise ValueError("browser observation URL is not public HTTPS")
         return value
+
+
+# One path segment of a task-grant scope (ADR-0129). A scope's prefix is "/"
+# followed by exactly one such segment.
+TASK_GRANT_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._~-]{1,64}$")
+# Element facts carry each label source cut to this length (ADR-0129).
+MAXIMUM_FACT_LABEL_CHARACTERS = 256
+
+
+def require_task_grant_path_prefix(value: str) -> str:
+    """Return ``value`` when it is "/" plus one path segment, or raise ``ValueError``."""
+
+    if not value.startswith("/") or TASK_GRANT_PATH_SEGMENT.fullmatch(value[1:]) is None:
+        raise ValueError("a task-grant path prefix is one path segment")
+    return value
+
+
+class BrowserFieldKind(StrEnum):
+    """The closed kind of an element's entry control, derived by the runtime."""
+
+    NONE = "none"
+    TEXT = "text"
+    SEARCH = "search"
+    MULTILINE = "multiline"
+    CHOICE = "choice"
+    EMAIL = "email"
+    TELEPHONE = "telephone"
+    URL = "url"
+    NUMBER = "number"
+    DATE = "date"
+    IDENTITY = "identity"
+    PAYMENT = "payment"
+    PASSWORD = "password"
+    ONE_TIME_CODE = "one_time_code"
+    FILE = "file"
+    OTHER = "other"
+
+
+class BrowserLabelSource(StrEnum):
+    """Each source of an element's label, classified separately (ADR-0129)."""
+
+    ARIA_LABEL = "aria_label"
+    ARIA_LABELLEDBY = "aria_labelledby"
+    LABEL = "label"
+    TITLE = "title"
+    PLACEHOLDER = "placeholder"
+    ALT = "alt"
+    VALUE = "value"
+    VISIBLE_TEXT = "visible_text"
+
+
+class BrowserTargetFacts(BaseModel):
+    """A link or form target reduced inside the runtime; never a raw URL.
+
+    ``sensitive_path`` is true when any segment of the target's path is
+    sensitive, and defaults to true so a missing value denies.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    same_origin: bool
+    first_segment: str | None = Field(default=None, max_length=64)
+    sensitive_path: bool = True
+
+
+class BrowserElementFacts(BaseModel):
+    """Secret-free facts about one observed element; never model-visible.
+
+    ``labels`` holds the label sources whose normalized text differs from the
+    element's name, each cut to 256 characters, so it is usually empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    field_kind: BrowserFieldKind
+    labels: dict[
+        BrowserLabelSource, Annotated[str, Field(max_length=MAXIMUM_FACT_LABEL_CHARACTERS)]
+    ] = Field(default_factory=dict, max_length=len(BrowserLabelSource))
+    link_target: BrowserTargetFacts | None = None
+    form_target: BrowserTargetFacts | None = None
+    download: bool = False
+    context_name: str = Field(default="", max_length=128)
+
+
+class BrowserObservationFacts(BaseModel):
+    """Element facts for one observation revision, keyed by element reference."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(min_length=1, max_length=128)
+    elements: dict[Annotated[str, Field(min_length=1, max_length=128)], BrowserElementFacts] = (
+        Field(default_factory=dict, max_length=256)
+    )
+
+
+class BrowserSnapshot(BaseModel):
+    """What the hosted client returns: the observation and its optional facts.
+
+    Facts are ``None`` from an older service or when they exceeded the
+    service's budget; an element without facts is never covered by a grant.
+    """
+
+    observation: BrowserObservation
+    facts: BrowserObservationFacts | None = None
+
+
+class BrowserDispatchConstraint(BaseModel):
+    """What a grant-authorized act may do; the runtime uses it only to refuse.
+
+    The grant kind fixes the other fields: a task grant has one origin, a path
+    prefix, an ``unknown`` ceiling and a 256-character text cap; a standing
+    grant has a ``routine`` ceiling and neither prefix nor text cap. Anything
+    else is invalid, and the isolated service answers it with ``400``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    grant_kind: Literal["task", "standing"]
+    origins: tuple[str, ...] = Field(min_length=1, max_length=64)
+    path_prefix: str | None = None
+    not_after: AwareDatetime
+    consequence_ceiling: Literal["routine", "unknown"]
+    max_text_characters: Literal[256] | None
+
+    @field_validator("origins")
+    @classmethod
+    def origins_are_exact_and_unique(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(normalize_browser_origin(value) for value in values)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("dispatch constraint origins must be unique")
+        return normalized
+
+    @field_validator("path_prefix")
+    @classmethod
+    def prefix_is_one_segment(cls, value: str | None) -> str | None:
+        return None if value is None else require_task_grant_path_prefix(value)
+
+    @model_validator(mode="after")
+    def fields_match_grant_kind(self) -> BrowserDispatchConstraint:
+        if self.grant_kind == "task":
+            valid = (
+                self.consequence_ceiling == "unknown"
+                and self.max_text_characters == 256
+                and self.path_prefix is not None
+                and len(self.origins) == 1
+            )
+        else:
+            valid = (
+                self.consequence_ceiling == "routine"
+                and self.max_text_characters is None
+                and self.path_prefix is None
+            )
+        if not valid:
+            raise ValueError("dispatch constraint fields do not match its grant kind")
+        return self
+
+
+class BrowserCoverage(BaseModel):
+    """Whether a grant covers one action, and the first rule that failed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    covered: bool
+    consequence: BrowserActionConsequence
+    reason: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def reason_names_a_refusal(self) -> BrowserCoverage:
+        if self.covered == (self.reason is not None):
+            raise ValueError("coverage names a reason exactly when it refuses")
+        return self
 
 
 class BrowserProviderError(RuntimeError):
