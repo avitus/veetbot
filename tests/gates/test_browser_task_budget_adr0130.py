@@ -1,7 +1,8 @@
 """ADR-0130: a chat bound to a website profile gets a budget for a whole lesson.
 
 On the production-shaped roster of the ADR-0123 gate, with the hosted browser
-provider: a bound chat defines every browser tool and runs under the
+provider: a bound chat defines every browser tool, keeps them defined when
+its plan is read back from PostgreSQL jsonb, and runs under the
 browser-task limits; it exceeds its USD 30 cost limit by at most the one call
 in flight; the call that reaches the cost reserve and asks for a tool ends
 the run; an unbound chat is unchanged.
@@ -10,6 +11,7 @@ the run; an unbound chat is unchanged.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +21,7 @@ import httpx
 
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition
+from agent_core.context.rendering import build_prefix, prefix_bytes
 from agent_core.domain.browser import BrowserProfile, BrowserProfileStatus
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.messages import (
@@ -34,6 +37,7 @@ from tests.gates.test_deferred_tools_adr0123 import (
     _production,
     _session_events,
 )
+from tests.unit.test_deferred_tool_index import jsonb_key_order
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000a7")
 HOSTED_BROWSER = {
@@ -117,6 +121,46 @@ async def test_bound_production_chat_defines_every_browser_tool(tmp_path: Path) 
         "mcp.gmail_work_read.search_threads",
     }
     assert moved | {START_CALL} <= set(plan.deferred_tool_names)
+
+
+async def test_a_bound_plan_read_back_from_jsonb_keeps_its_browser_tools_and_prefix(
+    tmp_path: Path,
+) -> None:
+    """ADR-0130 with ADR-0123: the builder re-renders a stored plan, and jsonb keeps
+    no object key order. A bound chat defers the reads its browser tools displace,
+    so its index must read back the same and its browser tools stay defined."""
+
+    _factory, context = await _production(
+        tmp_path,
+        [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)],
+        extra_environment=HOSTED_BROWSER,
+    )
+    async with context as app:
+        session_id = await _bound_session(app)
+        run_id = await app.runs.submit("Do one lesson.", session_id)
+        await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
+        async with app.uow_factory() as uow:
+            session = await uow.sessions.get(session_id, app.principal)
+            agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+            event = await uow.events.latest_before(
+                session_id, (1 << 63) - 1, "context.plan.created", app.principal
+            )
+    assert event is not None
+    stored = ContextPlan.model_validate(jsonb_key_order(event.payload["plan"]))
+
+    assert set(stored.tool_names) >= BROWSER_TOOLS
+    assert not BROWSER_TOOLS & set(stored.deferred_tool_names)
+    assert stored.browser_origins == ("https://www.example.org",)
+    prefix = build_prefix(
+        agent,
+        stored.tool_specs,
+        stored.skill_catalog,
+        stored.memory_snapshot,
+        persona=stored.persona_text,
+        deferred_tools=stored.deferred_tool_specs,
+    )
+    encoded = prefix_bytes(prefix, stored.tool_specs, stored.deferred_tool_specs)
+    assert hashlib.sha256(encoded).hexdigest() == stored.prefix_sha256
 
 
 async def test_bound_production_chat_runs_under_the_browser_task_limits(tmp_path: Path) -> None:
