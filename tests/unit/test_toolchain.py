@@ -797,6 +797,23 @@ def test_compose_has_one_healthy_postgres_service() -> None:
     assert set(compose["volumes"]) == {"agent-pgdata"}
 
 
+def test_only_the_ci_integration_job_marks_its_database_disposable() -> None:
+    """CI's database URL equals the shared local one, so the opt-in, not the URL,
+    is what lets the integration suite erase it."""
+
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    jobs = config["jobs"]
+    assert jobs["integration"]["environment"]["VEETBOT_TEST_DATABASE_DISPOSABLE"] == "1"
+    marked = {
+        name
+        for name, job in jobs.items()
+        if "VEETBOT_TEST_DATABASE_DISPOSABLE" in job.get("environment", {})
+    }
+    assert marked == {"integration"}
+    for shared in (".env.example", "docker-compose.yml"):
+        assert "VEETBOT_TEST_DATABASE_DISPOSABLE" not in (ROOT / shared).read_text(encoding="utf-8")
+
+
 def test_ci_has_the_required_partitions() -> None:
     workflow_directory = ROOT / ".github" / "workflows"
     assert not list(workflow_directory.glob("*.yml"))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -21,6 +20,7 @@ from agent_core.bootstrap import Composition, build
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.runtime.worker import MaintenanceWorker
 from tests.gates.test_attachment_upload_adr0120 import PNG
+from tests.integration.disposable_database import disposable_database_url
 from tests.integration.m2_support import database_settings
 
 
@@ -116,7 +116,7 @@ async def test_only_uploads_and_knowledge_sources_may_lack_a_run(tmp_path: Path)
     async with _postgres(tmp_path) as composition, _client(composition) as client:
         created = await client.post("/v1/sessions", json={"agent_id": "general", "metadata": {}})
         session_id = UUID(created.json()["id"])
-    engine = create_engine(os.environ["DATABASE_URL"])
+    engine = create_engine(disposable_database_url())
     insert = text(
         "INSERT INTO artifacts (id, tenant_id, principal_id, session_id, run_id, name, "
         "media_type, storage_uri, sha256, size_bytes, origin, trust, metadata, created_at) "

@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — Integration tests erase only a database marked disposable
+
+- Every integration test emptied every application table in whatever database
+  `DATABASE_URL` named. CI's URL is the same as the shared local development
+  database's, so a local run with the default URL wiped development data.
+- The reset now runs only when `VEETBOT_TEST_DATABASE_DISPOSABLE=1`. Without it,
+  each case skips and says how to create a scratch database. CI's integration
+  job sets the opt-in for its throwaway container; the README shows the local
+  recipe.
+- A static test keeps every truncate, table drop, and `DATABASE_URL` read in
+  `tests/integration` behind the one guarded helper, so a module that brings
+  its own reset fails the fast suite.
+
 ## 2026-09-26 — Chats keep their plan when Veetbot restarts
 
 - Each restart could quietly rebuild the plan of about half the chats that can
