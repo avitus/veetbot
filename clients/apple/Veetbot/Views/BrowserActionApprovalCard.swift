@@ -171,10 +171,14 @@ struct BrowserActionApprovalCard: View {
     }
 }
 
-/// Website text in quotes, verbatim, three lines until expanded.
-private struct WebsiteQuote: View {
+/// Website text in quotes, verbatim, three lines until expanded. Show more
+/// appears whenever three lines cut the text short at the width it has,
+/// which depends on the screen and text size, not on a character count.
+struct WebsiteQuote: View {
     let text: String
     @State private var expanded = false
+    @State private var cappedHeight: CGFloat = 0
+    @State private var fullHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -182,13 +186,43 @@ private struct WebsiteQuote: View {
                 .appFont(.body)
                 .lineLimit(expanded ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
-            if text.count > 120 {
+                .background(truncationProbe)
+            if fullHeight > cappedHeight + 0.5 {
                 Button(expanded ? "Show less" : "Show more") {
                     expanded.toggle()
                 }
                 .buttonStyle(.borderless)
                 .appFont(.caption)
             }
+        }
+    }
+
+    /// The text capped at three lines and in full, both hidden at the visible
+    /// width: the full one is taller exactly when the cap cuts the text short.
+    private var truncationProbe: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                measured(lineLimit: 3).background(heightReader { cappedHeight = $0 })
+                measured(lineLimit: nil).background(heightReader { fullHeight = $0 })
+            }
+            .frame(width: proxy.size.width, alignment: .topLeading)
+            .hidden()
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func measured(lineLimit: Int?) -> some View {
+        Text(verbatim: "“\(text)”")
+            .appFont(.body)
+            .lineLimit(lineLimit)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func heightReader(_ update: @escaping (CGFloat) -> Void) -> some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { update(proxy.size.height) }
+                .onChange(of: proxy.size.height) { update($0) }
         }
     }
 }
