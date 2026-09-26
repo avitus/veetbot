@@ -64,6 +64,7 @@ from agent_core.domain.tools import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import browser_lease_upkeep
+from agent_core.ports.browser_sessions import BrowserSessionControlPlane
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
@@ -964,7 +965,9 @@ async def hosted_browser_harness(tmp_path: Path) -> HostedBrowserHarness:
             principal=owner,
             profiles=load,
             profile_selector=select,
-            sessions=sessions,
+            # The in-process service's act gains the dispatch constraint in
+            # Track R (ADR-0129 R2); these runs never carry one.
+            sessions=cast(BrowserSessionControlPlane, sessions),
             now=clock.now,
             run_state=read_run_state,
         ),

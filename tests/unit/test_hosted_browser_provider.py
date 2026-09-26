@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+import httpx
 import pytest
 
 from agent_core.adapters.browser.hosted_provider import (
@@ -17,6 +19,8 @@ from agent_core.adapters.browser.hosted_provider import (
     RunStateReader,
     SessionBoundHostedBrowserProvider,
 )
+from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
+from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
@@ -25,6 +29,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserElementFacts,
     BrowserFieldKind,
@@ -75,6 +80,7 @@ class FakeSessions:
     sequence: list[int] = field(default_factory=list)
     act_started: asyncio.Event = field(default_factory=asyncio.Event)
     act_gate: asyncio.Event | None = None
+    constraints: list[BrowserDispatchConstraint | None] = field(default_factory=list)
 
     async def acquire(
         self,
@@ -112,8 +118,10 @@ class FakeSessions:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
         del lease_ref, action
+        self.constraints.append(constraint)
         self.act_started.set()
         if self.act_gate is not None:
             await self.act_gate.wait()
@@ -213,7 +221,10 @@ class LossySessions:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
+        # The in-process service learns the constraint in Track R (ADR-0129 R2).
+        assert constraint is None
         observation = await self.service.act(lease_ref, action, sequence=sequence)
         self._answer("act")
         return observation
@@ -382,8 +393,9 @@ class SettledPageSessions(FakeSessions):
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
-        await super().act(lease_ref, action, sequence=sequence)
+        await super().act(lease_ref, action, sequence=sequence, constraint=constraint)
         revision = f"revision-{sequence + 1}"
         return BrowserObservation(
             url="https://example.org/lesson",
@@ -886,11 +898,12 @@ class RefusingSessions(FakeSessions):
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
         if self.refusals:
             self.act_started.set()
             raise BrowserProviderError(self.refusals.pop(0), retryable=False)
-        return await super().act(lease_ref, action, sequence=sequence)
+        return await super().act(lease_ref, action, sequence=sequence, constraint=constraint)
 
 
 async def test_grant_refusal_keeps_the_lease_and_sequence() -> None:
@@ -995,3 +1008,57 @@ async def test_facts_are_cached_beside_the_observation_per_session() -> None:
     assert mine.facts is not None and mine.facts.elements == {"revision-a:0": FACTS}
     assert context is not None and context.revision == "revision-a"
     assert await browser_snapshot_in_session(provider, UUID(int=0xF7)) is None
+
+
+async def test_act_sends_the_constraint_in_the_request_body() -> None:
+    """ADR-0129 section 8.4: the constraint rides in the act body, and only
+    when a grant authorized the act."""
+
+    bodies: list[dict[str, object]] = []
+
+    def service(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if request.url.path.endswith(":acquire"):
+            return httpx.Response(
+                200,
+                json={
+                    "lease_ref": "lease-reference-" + "1" * 32,
+                    "expires_at": body["deadline_at"],
+                },
+            )
+        page = {
+            "url": "https://example.org/lesson",
+            "revision": "revision-1",
+            "elements": [{"ref": "revision-1:0", "role": "button", "name": "Continue"}],
+        }
+        if request.url.path.endswith(":act"):
+            bodies.append(body)
+        return httpx.Response(200, json=page)
+
+    constraint = BrowserDispatchConstraint(
+        grant_kind="task",
+        origins=("https://example.org",),
+        path_prefix="/lesson",
+        not_after=NOW + timedelta(minutes=30),
+        consequence_ceiling="unknown",
+        max_text_characters=256,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as client:
+        provider = ready_provider(
+            HostedBrowserSessionControlPlane(
+                base_url="https://browser.example.test",
+                credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+                client=client,
+            )
+        )
+        await provider.bind_execution(call_at(NOW))
+        await provider.navigate("https://example.org/lesson")
+        await provider.act(CLICK, constraint=constraint)
+        await provider.act(CLICK)
+
+    assert [body.get("constraint") for body in bodies] == [
+        constraint.model_dump(mode="json"),
+        None,
+    ]
+    assert "constraint" not in bodies[1]
+    assert [body["sequence"] for body in bodies] == [1, 2]

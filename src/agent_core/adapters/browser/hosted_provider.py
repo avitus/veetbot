@@ -19,6 +19,7 @@ from agent_core.domain.browser import (
     BrowserActionConsequence,
     BrowserActionContext,
     BrowserActionKind,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserLease,
     BrowserObservation,
@@ -34,6 +35,7 @@ from agent_core.domain.browser import (
 from agent_core.domain.browser_classification import classify_browser_action
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
+from agent_core.ports.browser import GRANT_NOT_APPLICABLE
 from agent_core.ports.browser_sessions import BrowserSessionControlPlane, BrowserSessionPage
 
 ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
@@ -52,12 +54,9 @@ _RENEWABLE_RUN_STATES = frozenset(
 _LEASE_FAILURES = frozenset(
     {"tool.browser.profile_unavailable", "tool.browser.provider_unavailable"}
 )
-# ADR-0129: the isolated runtime refused a grant-authorized act against the
-# live page. A pre-dispatch refusal like the others, and it also ends the
-# cached observation, so the model must observe again (D16).
-GRANT_NOT_APPLICABLE = "tool.browser.grant_not_applicable"
 # Refusals the runtime gives before it dispatches an action; the lease and its
-# action sequence are unchanged.
+# action sequence are unchanged. GRANT_NOT_APPLICABLE (ADR-0129) also ends the
+# cached observation, so the model must observe again (D16).
 _ACTION_REFUSALS = frozenset(
     {
         "tool.browser.page_changed",
@@ -213,15 +212,22 @@ class HostedBrowserProvider:
                 raise
             return self._cache_page(page)
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
         async with self._lock:
             lease = self._required_lease()
             sequence = self._sequence + 1
             try:
-                page = await self._sessions.act(
-                    lease.lease_ref,
-                    action,
-                    sequence=sequence,
+                page = (
+                    await self._sessions.act(lease.lease_ref, action, sequence=sequence)
+                    if constraint is None
+                    else await self._sessions.act(
+                        lease.lease_ref, action, sequence=sequence, constraint=constraint
+                    )
                 )
             except BrowserProviderError as error:
                 if error.reason_code in _ACTION_REFUSALS:
@@ -532,8 +538,13 @@ class SessionBoundHostedBrowserProvider:
     async def observe(self) -> BrowserObservation:
         return await self._required_provider().observe()
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
-        return await self._required_provider().act(action)
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        return await self._required_provider().act(action, constraint=constraint)
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         return await self._required_provider().action_context(action)

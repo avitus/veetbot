@@ -23,6 +23,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserAuthenticationMode,
     BrowserAuthenticationView,
+    BrowserDispatchConstraint,
     BrowserLease,
     BrowserObservation,
     BrowserObservationFacts,
@@ -209,14 +210,19 @@ class HostedBrowserSessionControlPlane:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserSessionObservation:
         digest = _private_ref_digest(lease_ref)
+        # ADR-0129: only a grant-authorized act names a constraint; the
+        # service answers a malformed one with 400 and dispatches nothing.
+        granted = {} if constraint is None else {"constraint": constraint.model_dump(mode="json")}
         result = await self._post(
             "/v1/browser-sessions:act",
             payload={
                 "lease_ref": lease_ref,
                 "action": action.model_dump(mode="json"),
                 "sequence": sequence,
+                **granted,
             },
             response_model=BrowserSessionObservation,
             idempotency_key=f"browser-session:{digest}:act:{sequence}",

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 
 import pytest
 
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserElementFacts,
     BrowserFieldKind,
@@ -41,6 +43,7 @@ class FakeBrowserProvider:
     actions: list[BrowserAction] = field(default_factory=list)
     action_failure: BrowserProviderError | None = None
     execution_contexts: list[object] = field(default_factory=list)
+    constraints: list[BrowserDispatchConstraint | None] = field(default_factory=list)
 
     async def bind_execution(self, context: object) -> None:
         self.execution_contexts.append(context)
@@ -71,10 +74,16 @@ class FakeBrowserProvider:
         self.observation_count += 1
         return self._observation("https://example.org/account")
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
         if self.action_failure is not None:
             raise self.action_failure
         self.actions.append(action)
+        self.constraints.append(constraint)
         return self._observation("https://example.org/account")
 
     async def close(self) -> None:
@@ -272,9 +281,14 @@ async def test_browser_act_marks_effect_before_provider_dispatch() -> None:
     order: list[str] = []
 
     class OrderedProvider(FakeBrowserProvider):
-        async def act(self, action: BrowserAction) -> BrowserObservation:
+        async def act(
+            self,
+            action: BrowserAction,
+            *,
+            constraint: BrowserDispatchConstraint | None = None,
+        ) -> BrowserObservation:
             order.append("dispatch")
-            return await super().act(action)
+            return await super().act(action, constraint=constraint)
 
     async def mark_effect() -> None:
         order.append("watermark")
@@ -385,3 +399,75 @@ async def test_model_visible_observation_excludes_facts() -> None:
         "text",
         "elements",
     }
+
+
+TASK_CONSTRAINT = BrowserDispatchConstraint(
+    grant_kind="task",
+    origins=("https://example.org",),
+    path_prefix="/lesson",
+    not_after=datetime(2026, 9, 25, 18, 30, tzinfo=UTC),
+    consequence_ceiling="unknown",
+    max_text_characters=256,
+)
+CLICK_ARGUMENTS = {"kind": "click", "expected_revision": "revision-1", "ref": "element-1"}
+
+
+async def test_act_passes_the_dispatch_constraint_to_the_provider() -> None:
+    """ADR-0129: a grant-authorized act carries its constraint to the runtime."""
+
+    provider = FakeBrowserProvider()
+    context = replace(tool_context(), dispatch_constraint=TASK_CONSTRAINT)
+
+    granted = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, context)
+    approved = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, tool_context())
+
+    assert granted.ok and approved.ok
+    assert provider.constraints == [TASK_CONSTRAINT, None]
+
+
+async def test_invalid_dispatch_constraint_fails_closed() -> None:
+    """A constraint that fails its validator is refused before the watermark."""
+
+    marked: list[str] = []
+
+    async def mark_effect() -> None:
+        marked.append("watermark")
+
+    provider = FakeBrowserProvider()
+    forged = BrowserDispatchConstraint.model_construct(
+        grant_kind="standing",
+        origins=("https://example.org",),
+        path_prefix=None,
+        not_after=TASK_CONSTRAINT.not_after,
+        consequence_ceiling="unknown",
+        max_text_characters=None,
+    )
+    context = replace(tool_context(), dispatch_constraint=forged, mark_effect_sent=mark_effect)
+
+    result = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, context)
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.reason_code == "tool.browser.grant_not_applicable"
+    assert (provider.actions, marked) == ([], [])
+
+
+class ConstraintlessProvider(FakeBrowserProvider):
+    """A provider whose runtime cannot recheck a grant's constraint."""
+
+    async def act(self, action: BrowserAction) -> BrowserObservation:  # type: ignore[override]
+        self.actions.append(action)
+        return self._observation("https://example.org/account")
+
+
+async def test_a_provider_that_cannot_recheck_refuses_a_constrained_act() -> None:
+    provider = ConstraintlessProvider()
+    context = replace(tool_context(), dispatch_constraint=TASK_CONSTRAINT)
+
+    refused = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, context)
+    approved = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, tool_context())
+
+    assert refused.failure is not None
+    assert refused.failure.reason_code == "tool.browser.grant_not_applicable"
+    assert approved.ok
+    assert len(provider.actions) == 1

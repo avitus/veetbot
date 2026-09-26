@@ -11,6 +11,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserAuthenticationMode,
     BrowserAuthenticationView,
+    BrowserDispatchConstraint,
     BrowserLease,
     BrowserObservation,
     BrowserSnapshot,
@@ -43,6 +44,7 @@ class BrowserSessionControlPlane(Protocol):
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserSessionPage: ...
 
     async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease: ...

@@ -31,6 +31,11 @@ class BrowserProvider(Protocol):
     async def close(self) -> None: ...
 
 
+# ADR-0129: the refusal a runtime gives when a grant's constraint does not
+# hold on the live page; a pre-dispatch refusal.
+GRANT_NOT_APPLICABLE = "tool.browser.grant_not_applicable"
+
+
 async def bind_browser_execution(
     provider: BrowserProvider,
     context: ToolExecutionContext,
