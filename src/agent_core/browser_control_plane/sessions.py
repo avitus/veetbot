@@ -686,13 +686,14 @@ class HostedProfileSessionService:
         origins = state.identity.allowed_origins
         signed_in = self._runtime_factory(state.tenant_id)
         signed_out = self._runtime_factory(state.tenant_id)
+        loads = [
+            asyncio.create_task(_page_evidence(signed_in, material, origins, page)),
+            asyncio.create_task(_page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page)),
+        ]
         try:
             try:
                 async with asyncio.timeout(self._verification_seconds):
-                    with_session, without_session = await asyncio.gather(
-                        _page_evidence(signed_in, material, origins, page),
-                        _page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page),
-                    )
+                    with_session, without_session = await asyncio.gather(*loads)
                     _decide(with_session, without_session, confirmed_path=urlsplit(page).path)
                     sealed = await signed_in.storage_state()
             except DeviceSessionRejected:
@@ -722,6 +723,10 @@ class HostedProfileSessionService:
                 state.status = BrowserAuthenticationStatus.READY
                 await self._finish_ceremony_locked(state)
         finally:
+            # A load still starting its browser would otherwise outlive close().
+            for load in loads:
+                load.cancel()
+            await asyncio.gather(*loads, return_exceptions=True)
             for runtime in (signed_in, signed_out):
                 with suppress(Exception):
                     await runtime.close()

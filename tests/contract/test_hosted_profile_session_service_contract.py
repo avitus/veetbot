@@ -65,6 +65,9 @@ class HandoffScenario:
     storage_error: Exception | None = None
     gate: asyncio.Event | None = None
     started: asyncio.Event = field(default_factory=asyncio.Event)
+    # The signed-out browser's start waits on this, if set, and records cancellation.
+    signed_out_start_gate: asyncio.Event | None = None
+    signed_out_start_cancelled: bool = False
 
 
 @dataclass
@@ -101,8 +104,18 @@ class FakeSessionRuntime:
         self.initial_material = material
         self.allowed_origins = allowed_origins
         self.interactive = interactive
-        if self.scenario is not None and self.scenario.start_error is not None:
-            raise self.scenario.start_error
+        scenario = self.scenario
+        if scenario is not None and scenario.signed_out_start_gate is not None:
+            if material == NO_SESSION:
+                try:
+                    await scenario.signed_out_start_gate.wait()
+                except asyncio.CancelledError:
+                    scenario.signed_out_start_cancelled = True
+                    raise
+            elif scenario.start_error is not None:
+                raise scenario.start_error
+        elif scenario is not None and scenario.start_error is not None:
+            raise scenario.start_error
 
     async def navigate(self, url: str) -> BrowserObservation:
         """Simulate the browser navigation result needed by this failure-path regression."""
@@ -1030,6 +1043,29 @@ async def test_a_verification_that_cannot_finish_is_unavailable_and_writes_nothi
     assert writes == []
     assert await sealed_material(sessions) == before
     assert runtimes and all(runtime.closed for runtime in runtimes)
+
+
+async def test_a_failed_load_stops_the_other_before_its_browser_is_closed(
+    tmp_path: Path,
+) -> None:
+    """A browser still starting when its sibling fails must not outlive close()."""
+
+    scenario = HandoffScenario(
+        start_error=RuntimeError("the signed-in browser failed to start"),
+        signed_out_start_gate=asyncio.Event(),
+    )
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await asyncio.wait_for(
+            sessions.accept_device_session(ceremony_id, capability, device_handoff()), 5
+        )
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert scenario.signed_out_start_cancelled is True
+    assert all(runtime.closed for runtime in runtimes)
 
 
 async def test_revocation_during_verification_wins_and_nothing_is_written(tmp_path: Path) -> None:
