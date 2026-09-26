@@ -1156,9 +1156,13 @@ Version 0.1 supports:
 
 ```text
 APPROVE_ONCE
+APPROVE_FOR_TASK
 DENY
 ```
-Do not implement session-wide or permanent approval grants initially.
+`APPROVE_FOR_TASK` exists only for `browser.act` and creates a session-bound,
+thirty-minute, two-hundred-action browser task grant inside an
+owner-configured site scope (ADR-0129, accepted by the owner 2026-09-25). Do
+not implement any other session-wide or permanent approval grant.
 
 When approval is required:
 
@@ -2101,6 +2105,15 @@ or:
 {
   "decision": "deny",
   "reason": "Do not perform this action."
+}
+```
+or, only for a `browser.act` approval that carries a task-grant offer
+(ADR-0129):
+
+```json
+{
+  "decision": "approve_for_task",
+  "task_grant": {"origin": "https://www.example.com", "path_prefix": "/lesson"}
 }
 ```
 #### Artifact metadata
@@ -4866,8 +4879,10 @@ credential exposure to the model, or weakening external-write approvals.
 - User-delegated login is an interactive platform surface. CAPTCHA, MFA,
   reauthentication, and consent return `needs_user`; the model cannot bypass or
   complete them with a secret.
-- Mutating actions require ordinary approval or an exact, expiring, revocable
-  standing grant. Initial hard exclusions cannot use a standing grant.
+- Mutating actions require ordinary approval, an exact, expiring, revocable
+  standing grant, or a session-bound task grant created from an approval card
+  inside an owner-configured scope (ADR-0129). Initial hard exclusions cannot
+  use either grant.
 - URL, redirect, frame, popup, download, upload, private-network, and browser
   escape boundaries fail closed.
 - Website resources and embedded verification frames load automatically from
@@ -4885,8 +4900,9 @@ credential exposure to the model, or weakening external-write approvals.
   external-untrusted results, and cannot authorize arbitrary egress.
 - Profiles and grants are tenant/principal scoped, encrypted, revocable,
   deletable, and never selected through model-authored identifiers.
-- Every mutation has an approval or matching standing grant and revalidates
-  policy, profile, origin, grant, and page revision immediately before dispatch.
+- Every mutation has an approval or matching standing or task grant and
+  revalidates policy, profile, origin, grant, and page revision immediately
+  before dispatch; a task grant is also rechecked against the live page.
 - Secret leakage, prompt injection, stale actions, cross-origin navigation,
   session expiry, device loss, provider failure, and uncertain writes pass the
   adversarial acceptance suite before tenant rollout.

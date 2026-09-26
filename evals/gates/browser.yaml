@@ -57,5 +57,5 @@
   milestone: 10
   kind: case
   spec: docs/plan/browser-automation.md#hard-gates
-  statement: "**Standing grants** — grants are exact, expiring, revocable, revalidated, and cannot cover hard exclusions."
+  statement: "**Standing and task grants** — grants are exact, expiring, revocable, revalidated, and cannot cover named consequences; task grants are owner-scoped, session-bound, capped, prefix-confined, and rechecked against the live page."
   check: tests/gates/test_browser_m10.py::test_standing_grant

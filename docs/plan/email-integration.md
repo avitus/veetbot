@@ -266,7 +266,7 @@ Nothing here runs with networking disabled, and the specification says which
 process is which rather than leaving it to be inferred. The Milestone 8
 adapter spawns a stdio server as an ordinary child process of the worker, and
 [tool-system.md](tool-system.md) states the consequence
-(tool-system.md:1033-1035): a stdio child inherits the worker's network
+(tool-system.md:1049-1051): a stdio child inherits the worker's network
 position, which in this platform is a privileged one, which is why stdio
 servers are operator-configured only. The restriction that applies to the
 worker is that the worker itself dials nothing on a `gmail_*` call; the child
@@ -393,9 +393,9 @@ undetermined-outcome code, resolves to the platform's `uncertain` outcome with
 blocked from being proposed again in the run by the unified breaker's
 threshold-of-one row (tool-system.md:858). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:1870-1872) and the one
+after the watermark (tool-system.md:1886-1888) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
-(browser-automation.md:642-646), generalized from those two cases to every
+(browser-automation.md:920-924), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
 amendment to [tool-system.md](tool-system.md) in the change that implements
 it, keyed on the declared idempotency class rather than on any `gmail_*` name,

@@ -136,5 +136,8 @@ implementation without one.
 - [ADR-0125 — Duplicate people merge on decisive evidence and are otherwise suggested (Accepted; amends ADR-0100 and ADR-0121)](0125-duplicate-people-merge-on-decisive-evidence.md)
 - [ADR-0126 — Email correspondence carries a short summary, and Chat can read the original (Accepted; amends ADR-0121)](0126-correspondence-summaries-and-original-email.md)
 - [ADR-0127 — Browser leases renew while the run needs them (Accepted; amends ADR-0058)](0127-browser-leases-renew-while-the-run-needs-them.md)
+- [ADR-0128 — The owner signs in on their own device and hands the session to the isolated service (Accepted; amends ADR-0058 and ADR-0106)](0128-device-sign-in-session-handoff.md)
+- [ADR-0129 — A time-boxed task grant from the approval card (Accepted; amends ADR-0058 and ADR-0127)](0129-time-boxed-task-grant-from-the-approval-card.md)
+- [ADR-0130 — Chats bound to a website profile get a browser task budget (Accepted; amends ADR-0123)](0130-browser-task-budget.md)
 - [ADR-0131 — New chats pin MCP catalogs from the last discovery and start servers on first use (Accepted; amends ADR-0103)](0131-new-chats-reuse-mcp-discovery.md)
 - [ADR-0132 — Scheduled runs cache their prefix for an hour (Accepted)](0132-scheduled-runs-cache-their-prefix-for-an-hour.md)

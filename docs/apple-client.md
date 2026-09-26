@@ -74,6 +74,11 @@ permission request.
 
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
+A `browser.act` card instead names the action, the element and the page, marks
+website text as such, and offers Allow once, Deny, and, when the server offers
+it, Allow for this task after a confirmation. An active task permission shows
+above the composer with its remaining actions and time and a Stop control
+(ADR-0129).
 
 Settings use a compact header and a scrolling body. Connection, Website Access,
 Appearance, and Data & Privacy cards group controls by user intent. The Connect
@@ -91,17 +96,35 @@ interface palette uses the app icon's turquoise, orange, and navy while retainin
 semantic colors for errors, approvals, and tool risk.
 
 Website Access lists the authenticated principal's browser profiles and lets the
-user choose one `READY` profile for new conversations. Adding access sends
-the exact public-HTTPS primary origin, optional `additionalOrigins` included
-in `allowedOrigins`, and the login-page URL to Veetbot. Each additional value
+user choose one `READY` profile for new conversations. Adding access, or
+signing in again to a profile that is not revoked, uses Sign in on this device
+by default (ADR-0128). The app opens the website in a private sign-in window:
+a `WKWebView` with a non-persistent data store, the platform's own user agent,
+no injected script or message handler, and top-level navigation confined to
+the profile's origins. The user types usernames, passwords, and one-time codes
+into the website itself, and the app reads none of them. When the user taps
+I'm signed in, the app creates the profile if it is new, begins a device
+ceremony, and sends that website's cookies and `localStorage` once, directly
+to the isolated browser service's handoff address, with the ceremony's
+single-use capability and never with the Veetbot API credential. It then
+clears the window's data. No cookie, storage value, capability, or confirmed
+page address is persisted, logged, or kept in view state. The service filters
+and verifies the session and decides the outcome. Passkeys and identity
+providers on other origins do not work in that window.
+
+Use Veetbot's remote browser remains the alternative. It sends the exact
+public-HTTPS primary origin, optional `additionalOrigins` included in
+`allowedOrigins`, and the login-page URL to Veetbot. Each additional value
 must also be an exact public HTTPS origin. The client then presents a
-separate Continue in web browser action for the server's five-minute, single-use
-browser ceremony. A rejected system-browser handoff cancels the ceremony and
-removes its unused profile; a ceremony-creation failure also rolls its partial
-profile back. The user enters usernames,
-passwords, passkeys, and MFA directly in that isolated browser surface; the app
-has no website-credential fields and receives no keystrokes, cookies, storage
-state, or provider material. It polls only the secret-free ceremony status.
+separate Continue in web browser action for the server's five-minute,
+single-use browser ceremony. A rejected system-browser handoff cancels the
+ceremony and removes its unused profile; a ceremony-creation failure also
+rolls its partial profile back. In that mode the user enters usernames,
+passwords, passkeys, and MFA directly in the isolated browser surface; the
+app has no website-credential fields and receives no keystrokes, cookies,
+storage state, or provider material. It reads only the secret-free ceremony
+status, when the user asks and whenever the app becomes active or Website
+Access appears.
 The direct surface gives numbered focused-field instructions and identifies a
 closed, reloaded, incomplete, or expired one-time link. The app exposes Start
 over to remove that setup and obtain a fresh ceremony.

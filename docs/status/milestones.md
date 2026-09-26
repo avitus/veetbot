@@ -284,6 +284,21 @@ tap. Nineteen gates bind passing checks; the feature stays default-off.
 - [ ] Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
+## Outside a milestone
+
+Open work that no active milestone owns: owner-only steps of non-milestone
+ADRs, and specification-versus-code gaps found in completed milestones. It
+mirrors `open_items_outside_milestones` in
+[`project-state.yaml`](project-state.yaml).
+
+- [ ] Owner, after the main pull request carrying ADR-0127 to ADR-0130 merges: confirm deploy-app and deploy-nginx succeeded on the merge commit, and install the macOS TestFlight build on every Mac
+- [ ] Owner: confirm production AUTH_SCOPES contains browser.profile.read, browser.profile.write, browser.grant.read and browser.grant.write
+- [ ] Owner: production acceptance of device sign-in (ADR-0128 V1, V3 and V4; V2 once the iOS build ships)
+- [ ] Owner: once a client build that decodes approve_for_task runs on every device, set BROWSER_TASK_GRANT_SCOPES=https://www.duolingo.com/lesson and BROWSER_TASK_GRANTS_ENABLED=1 for the API and workers
+- [ ] Owner: production acceptance of the task grant (ADR-0129 TG1 to TG4) and the first-lesson budget measurement in a new bound chat (ADR-0130)
+- [ ] Owner: keep BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED unset or true in production; set it to false to turn device sign-in off
+- [ ] Tool system: the circuit-breaker section of tool-system.md specifies one counter keyed on name, arguments hash, outcome and reason, but runtime/loop.py keeps separate identical-denial and identical-call counters; change the code or propose an ADR that accepts two (found during ADR-0130)
+
 ## Authorized
 
 Specified, gated, and authorized, with implementation not yet begun.

@@ -556,6 +556,33 @@ three changes together: set `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, add
 `AUTH_SCOPES`, and let `deploy-nginx` publish the location after the release.
 Until the Nginx job lands, an upload above 1 MiB receives Nginx's own `413`.
 
+The `browser.veetbot.com` virtual host keeps `client_max_body_size 64k`
+except on the device sign-in handoff (ADR-0128). That location allows `1m`,
+streams the body to the browser-profile service unbuffered through an
+in-memory buffer, so it is never written to disk, allows ten seconds between
+body reads, and waits sixty seconds while the service verifies the session.
+Every TLS server block allows only TLS 1.2 and 1.3. Like every Nginx change,
+these reach production through `deploy-nginx` after the release.
+`BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED` (`true` when unset) turns device
+sign-in off in the browser-profile service without a release: set it to
+`false` in the release environment file and recreate the service with the
+release's `docker compose … up -d browser-profile-service`. Remote sign-in is
+unaffected.
+
+Browser task grants (ADR-0129) are off until the owner turns them on, and
+only after every device the owner uses runs a client build that understands
+`approve_for_task`. Turning them on takes three changes together in
+`/etc/veetbot/veetbot.env`: add `browser.grant.read` and
+`browser.grant.write` to the owner principal's `AUTH_SCOPES`, set
+`BROWSER_TASK_GRANT_SCOPES` to the exact site scopes the owner allows (one
+public-HTTPS origin and one path segment each, comma-separated; production
+uses `https://www.duolingo.com/lesson`), and set
+`BROWSER_TASK_GRANTS_ENABLED=1`. Then restart the API and the workers. Both
+settings require `BROWSER_PROVIDER=hosted`. Adding a scope widens what the
+owner can allow from an approval card, and it is the owner's decision.
+Removing one ends its active grants at their next authorization. Unsetting
+the flag removes the task-grant routes and offers.
+
 ## CircleCI setup
 
 Generate a Veetbot-only Ed25519 deploy key on a protected operator machine:

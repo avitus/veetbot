@@ -193,11 +193,12 @@ distinguish it from `conflict` is not.
 }
 ```
 
-`conflict` carries a `reason` discriminator because it covers three
-unrelated situations — an active run already exists, an idempotency key
-was reused with a different body, and an approval was resolved twice with
-different decisions — and a client that must tell them apart should not
-be parsing English.
+`conflict` carries a `reason` discriminator because it covers unrelated
+situations — among them an active run already exists, an idempotency key
+was reused with a different body, an approval was resolved twice with
+different decisions, and, since ADR-0129, a task-grant approval whose offer
+is no longer available or whose repeated offer differs — and a client that
+must tell them apart should not be parsing English.
 
 ```text
 code       reason                     details also carries
@@ -205,6 +206,8 @@ code       reason                     details also carries
 conflict   active_run_exists          run_id, run_status
 conflict   idempotency_key_reused     (nothing)
 conflict   approval_already_resolved  approval_id, decision
+conflict   task_grant_unavailable     (nothing)
+conflict   task_grant_offer_mismatch  (nothing)
 ```
 
 `tool_validation_error` carries `{"tool_name": ..., "errors": [...]}`
@@ -577,6 +580,33 @@ reason and nothing else — never the message. The response to an accepted
 message is `202` with the routing (`duplicate`, `session_id`, `run_id`); the
 body the device captured appears in no response, no error, and no log line.
 
+### The ADR-0129 browser task-grant extension
+
+[browser-automation.md](browser-automation.md) adds three routes and no
+scopes: the owner lists, reads, and revokes browser task grants under the
+existing `browser.grant.read` and `browser.grant.write`. The router is mounted
+only when `BROWSER_TASK_GRANTS_ENABLED` is set, so the routes are absent while
+the feature is off and the Milestone 5 census above is unchanged. There is no
+create route: a task grant is created only by resolving a `browser.act`
+approval with `approve_for_task`.
+
+```text
+GET    /v1/browser-task-grants                        browser.grant.read
+GET    /v1/browser-task-grants/{grant_id}             browser.grant.read
+POST   /v1/browser-task-grants/{grant_id}/revoke      browser.grant.write
+```
+
+The list takes `session_id`, `status` (`active` or `all`), `limit` (1 to 200),
+and an opaque cursor, and orders by creation, newest first; an unowned
+`session_id` is `404`, and a bad `status` or cursor is `400
+malformed_request`. A cross-principal grant is `404`. Revoke ends an active
+grant and returns its view; revoking an ended grant returns it unchanged with
+`200`, so a retry is safe. Views never carry a page URL beyond the configured
+origin and path prefix. `approve_for_task` on
+`POST /v1/approvals/{approval_id}/resolve` also requires
+`browser.grant.write`, checked by the application service before any read;
+the route's declared scope stays `approval.resolve`.
+
 ### Tenancy is a repository argument, never a filter applied afterwards
 
 Every repository method that reads a tenant-scoped resource takes the
@@ -682,6 +712,9 @@ the session. The server then stores only the UUID under the reserved
 `browser_profile_id` metadata key. Clients cannot set that key through
 `metadata`, and neither form reaches the model. This is the trusted profile pin
 used by hosted browser composition when there is no deployment-wide profile.
+Runs in a session created with it use the browser-task limits of
+[runtime-loop.md](runtime-loop.md) (ADR-0130), so their run body shows
+`limits.max_cost_usd`.
 
 ### Reading a session
 
@@ -1452,14 +1485,18 @@ identifier on the wire becomes a rule identifier in a client's
 conditional, and the rule set is meant to be editable without breaking
 clients.
 
-Resolution takes the two-value decision vocabulary and nothing else.
+Resolution takes the three-value decision vocabulary and nothing else.
+`approve_for_task` (ADR-0129) is valid only for a `browser.act` approval that
+carries a task-grant offer, and its body repeats the offered origin and path
+prefix.
 
 ```json
 {"decision": "approve_once"}
+{"decision": "approve_for_task", "task_grant": {"origin": "https://www.example.com", "path_prefix": "/lesson"}}
 {"decision": "deny", "reason": "Do not perform this action."}
 ```
 
-Four behaviours the API layer owns:
+Five behaviours the API layer owns:
 
 1. **`approval.resolve` is required**, and it is the one scope the
    corpus already names.
@@ -1473,6 +1510,13 @@ Four behaviours the API layer owns:
    failed its run with `APPROVAL_EXPIRED`, and the 409 is what tells a
    human why their click did nothing.
 4. **Cross-tenant is `404`.** Never `403`.
+5. **`approve_for_task` needs more than `approval.resolve`.** It also
+   requires `browser.grant.write`, checked before any read. A body without
+   `task_grant`, or with it on another decision, is `400
+   malformed_request`. An offer that is no longer available is `conflict`
+   with `reason = "task_grant_unavailable"`, and a repeated offer that
+   differs is `reason = "task_grant_offer_mismatch"`; both leave the
+   approval pending.
 
 Resolution writes the decision and then `NOTIFY`s, on the same terms as
 every other notification in this document: the run resumes from its
@@ -1548,7 +1592,11 @@ response, tenancy, secret-exclusion, lifecycle, and idempotency contracts are in
 views never include provider references, key versions, lease references,
 launch capabilities after ceremony creation, cookies, storage state, or
 provider diagnostics. Cross-principal identifiers remain `404`, and every
-mutation uses the ordinary HTTP idempotency boundary.
+mutation uses the ordinary HTTP idempotency boundary. Ceremony begin takes an
+optional `mode`, `remote` by default or `device` (ADR-0128), and its `201`
+response is `Cache-Control: private, no-store`. A device ceremony's launch URL
+is its handoff address on the isolated service, and the session it carries
+never passes through this API. Device mode adds no route.
 
 The profile routes create and authenticate the secret-bearing provider state;
 the optional `browser_profile_id` on `POST /v1/sessions` selects only its

@@ -79,6 +79,24 @@ project:
   # an hour while its run is running, queued to resume, or parked on its own
   # approval, driven by the run worker's lease upkeep, which also releases
   # ended runs' leases.
+  # ADR-0128 records the owner's non-milestone extension to Milestone 10 on
+  # 2026-09-25: Website Access signs in on the owner's device and hands only
+  # that site's session to the isolated service, which filters, verifies and
+  # seals it; every sign-in advances the profile generation, ending its
+  # grants; remote ceremonies no longer lose a finished sign-in.
+  # ADR-0129 records the owner's non-milestone extension to the Milestone 10
+  # browser tranche on 2026-09-25: a browser.act approval card names what it
+  # acts on and, only inside an owner-configured site scope, can create a
+  # session-bound, thirty-minute, two-hundred-action task grant that covers
+  # unknown but never named consequences and is rechecked against the live
+  # page; the browser gate count is unchanged.
+  # ADR-0130 records the owner's non-milestone extension to Milestone 10 on
+  # 2026-09-25: a chat bound to a website profile runs under a browser-task
+  # budget (160 steps, 120 model calls, 160 tool calls, USD 30 with a USD 3
+  # reserve) pinned by the default agent's version and always defines the three
+  # browser tools; pages settle before they are observed, hidden nodes never
+  # take an element slot, new evidence restarts the identical-call count at
+  # most 32 times a run, and each request names the origins navigate accepts.
   # ADR-0131 records the owner's non-milestone latency repair on 2026-09-25:
   # full MCP catalog preparation pins the runtime's last live discovery of a
   # server and starts it on first use, the API and interactive worker warm that
@@ -1848,6 +1866,19 @@ milestones:
         unsigned probe was logged as calling.callback_rejected
         reason=signature_missing, which confirms that each delivery's outcome
         reaches the journal.
+
+# Open work that no active milestone owns: owner-only steps of non-milestone
+# ADRs, and specification-versus-code gaps found in completed milestones.
+# docs/status/milestones.md lists the same items, in the same order, under
+# "Outside a milestone".
+open_items_outside_milestones:
+- 'Owner, after the main pull request carrying ADR-0127 to ADR-0130 merges: confirm deploy-app and deploy-nginx succeeded on the merge commit, and install the macOS TestFlight build on every Mac'
+- 'Owner: confirm production AUTH_SCOPES contains browser.profile.read, browser.profile.write, browser.grant.read and browser.grant.write'
+- 'Owner: production acceptance of device sign-in (ADR-0128 V1, V3 and V4; V2 once the iOS build ships)'
+- 'Owner: once a client build that decodes approve_for_task runs on every device, set BROWSER_TASK_GRANT_SCOPES=https://www.duolingo.com/lesson and BROWSER_TASK_GRANTS_ENABLED=1 for the API and workers'
+- 'Owner: production acceptance of the task grant (ADR-0129 TG1 to TG4) and the first-lesson budget measurement in a new bound chat (ADR-0130)'
+- 'Owner: keep BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED unset or true in production; set it to false to turn device sign-in off'
+- 'Tool system: the circuit-breaker section of tool-system.md specifies one counter keyed on name, arguments hash, outcome and reason, but runtime/loop.py keeps separate identical-denial and identical-call counters; change the code or propose an ADR that accepts two (found during ADR-0130)'
 
 # Evidence for completed milestones 0 through 12, 16, and 17 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

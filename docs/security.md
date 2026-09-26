@@ -59,7 +59,10 @@ Milestone 1 adds executable controls at the first model/tool boundary:
   authentication mode is unsafe, and production rejects evaluation tenants,
   principals, and policy profiles.
 - Runtime limits, cancellation observation points, retry bounds, and the
-  identical-call breaker stop unbounded execution.
+  identical-call breaker stop unbounded execution. A chat bound to a website
+  profile also has a per-run cost limit that one model call at most can
+  exceed, and new page evidence can restart an identical call's count at most
+  32 times in a run (ADR-0130).
 
 Milestone 2 makes those controls durable: tenant and principal predicates live
 in every repository query, state changes and their events commit atomically,
@@ -122,9 +125,16 @@ in `AGENTS.md` names; this page summarizes, it does not restate.
   9 and 10).
 - Web and browser content is external-untrusted; egress targets are fixed by
   configuration, never by model arguments; `browser.act` is an external write
-  under approval or an exact revocable standing grant; the model never enters
-  credentials; profile material is encrypted outside PostgreSQL in a separately
-  deployed least-privilege process (Milestone 10).
+  under approval, an exact revocable standing grant, or a session-bound,
+  thirty-minute, two-hundred-action task grant confined to an
+  owner-configured site scope, created only from an approval card and
+  rechecked against the live page (ADR-0129); the model never enters
+  credentials; a device sign-in hands one site's session from the owner's
+  client to the isolated profile service alone, through a single-use,
+  write-only capability, that service filters and verifies it before
+  sealing, and every sign-in ends the grants pinned to the profile
+  (ADR-0128); profile material is encrypted outside PostgreSQL in a
+  separately deployed least-privilege process (Milestone 10).
 
 ## Milestone 11 scheduling controls
 

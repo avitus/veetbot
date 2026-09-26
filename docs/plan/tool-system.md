@@ -854,12 +854,28 @@ reason_code)`, per run:
 | Condition | Threshold | Result |
 | --- | --- | --- |
 | Identical denied proposal | 3 | `ToolPolicyDenied`, run fails |
-| Identical call, any outcome, no intervening success | 5 | `ToolLoopDetected` |
+| Identical call with no new evidence (below) | 5 | `ToolLoopDetected` |
 | Identical `uncertain` proposal | 1 | denied; never retried |
 
 The last row is not a loop rule, it is a safety rule: an invocation that
 resolved `UNCERTAIN` must never be proposed again in the same run, because the
 one thing we know is that we do not know whether it happened.
+
+**New evidence** (engineering plan Section 12.5; ADR-0130). The identical-call
+row counts calls with the same name and arguments across the run, before
+dispatch. A tool may attach an evidence key to a successful result: a digest
+the platform computes from what the result observed, never model-visible,
+never stored with the result, and never taken from model arguments. When an
+identical call's result carries a key different from the one last recorded for
+that call, its count restarts at one; a call without a key keeps counting.
+Restarts are capped at 32 in a run across all calls, and a restart counts only
+when it lowers a count; after the cap the plain count applies. The browser
+tools key the page they return (its URL, title, text, and each element's role,
+name and state, without the revision or element references), so re-observing a
+page that changed is not a loop, five identical calls that keep returning the
+same page are, and a page that changes on every observation allows at most 36
+identical observations in a run.
+
 ## Parallel calls, and what a step actually is
 
 Section 12.4 gives five conditions for parallel execution and one warning.

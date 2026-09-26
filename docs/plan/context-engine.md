@@ -110,7 +110,7 @@ Assembly order is fixed and total:
 | 11 | B | Loaded skill bodies, in load order | per skill |
 | 12 | B | Working-state block | per entry |
 | 13 | B | In-turn recall and correction lines | `MEMORY` |
-| 14 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
+| 14 | B | Runtime metadata: current date, principal scope, surface; the origins `browser.navigate` accepts when the plan offers it | `PLATFORM` |
 | 15 | B | The current user message | `USER` |
 
 Rows 7 and 11 are added by [skills.md](skills.md), which owns their content,
@@ -361,6 +361,12 @@ capabilities still fail at plan time if they exceed the token cap. The selected
 set is then sorted by name for stable rendering. Adding an MCP account must not
 evict an explicitly enabled web, clock, or workspace capability merely because
 its name sorts earlier.
+
+In a session bound to a website profile, `browser.navigate`,
+`browser.observe` and `browser.act` are required definitions (ADR-0130): they
+rank ahead of every other candidate, neither the agent's deferral list nor
+overflow moves them to the index, and a plan that cannot define them fails at
+plan time. What they displace moves to the index in the order above.
 
 When anything is deferred and the agent enables `tool.call`, `tool.call` takes
 a definition slot, and every candidate without a definition becomes an index

@@ -7,6 +7,9 @@
 - Amends: ADR-0105 (its consequence that a silent skip remains the documented
   behavior), ADR-0124 (its consequence that no slot is spare) and
   `tool-system.md` decision 25 (the control-tool set of four)
+- Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
+  `browser.observe` and `browser.act` first and never defers them in a chat
+  bound to a website profile
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
 
