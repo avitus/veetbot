@@ -461,6 +461,29 @@ fi
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 grep -Fq 'AUTH_TOKEN is required for the API contract probe' "$TEST_ROOT/no-auth.out"
 
+# ADR-0128: the device sign-in switch is true, false or unset; anything else
+# fails the release before any service changes.
+for device_switch in yes 1 TRUE; do
+  device_env="$TEST_ROOT/device-switch-$device_switch.env"
+  cp "$ENV_FILE" "$device_env"
+  printf 'BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=%s\n' "$device_switch" >>"$device_env"
+  device_id="20260810-152238-000000${#device_switch}"
+  make_stage "$device_id"
+  : >"$LOG_FILE"
+  if VEETBOT_TEST_ENV_FILE="$device_env" run_release "$device_id" \
+    >"$TEST_ROOT/device-switch.out" 2>&1; then
+    printf 'release with device sign-in switch %s unexpectedly succeeded\n' \
+      "$device_switch" >&2
+    exit 1
+  fi
+  [[ ! -e "$DEPLOY_ROOT/releases/$device_id" ]]
+  [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
+  grep -Fq 'BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED must be true or false' \
+    "$TEST_ROOT/device-switch.out"
+  assert_log_lacks 'systemctl restart'
+  assert_log_lacks 'docker compose'
+done
+
 unsupported_id="20260810-152239-bcdef00"
 make_stage "$unsupported_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
@@ -520,7 +543,11 @@ ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
 printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/agent-core-sandbox"
 printf '%s\n' "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-browser-profile-service"
 : >"$LOG_FILE"
-run_release "$equal_timestamp_id"
+# A release may switch device sign-in off (ADR-0128); compose reads the value.
+device_off_env="$TEST_ROOT/device-off.env"
+cp "$ENV_FILE" "$device_off_env"
+printf '%s\n' 'BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=false' >>"$device_off_env"
+VEETBOT_TEST_ENV_FILE="$device_off_env" run_release "$equal_timestamp_id"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
 # The store already satisfied the retention rule, so the step removes nothing.

@@ -241,6 +241,7 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
+    assert "BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=true" in environment.splitlines()
     assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" not in environment
     assert "AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock" in environment
     example_values = dict(
@@ -352,6 +353,8 @@ def test_production_compose_preserves_browser_profile_isolation() -> None:
         "BROWSER_PROFILE_BIND_HOST": "0.0.0.0",  # noqa: S104 - boundary fixture
         "BROWSER_PROFILE_BIND_PORT": "8080",
         "BROWSER_PROFILE_CEREMONY_BASE_URL": "${BROWSER_PROFILE_CEREMONY_BASE_URL}",
+        # ADR-0128 kill switch: on unless the release environment says false.
+        "BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED": "${BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED:-true}",
     }
     mounts = profile_service["volumes"]
     assert mounts == [
