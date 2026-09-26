@@ -838,43 +838,127 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
 
 
 # One read of an element: the model-visible name exactly as before, and every
-# live attribute its facts are derived from (ADR-0129 section 4.5).
+# live attribute its facts are derived from (ADR-0129 section 4.5). Facts follow
+# the flat tree the browser renders and dispatches events through: a slotted
+# node's parent is its slot, a shadow root's is its host, and a slot's children
+# include what is assigned to it. A click lands on whatever lies at the
+# element's centre, which may be a descendant, so descendants' targets count
+# too. Past the walk's bounds, or with an embedded document inside, the element
+# is opaque: its targets cannot be listed.
 _ELEMENT_SCRIPT = """node => {
     const clean = value => Array.from(String(value || '').replace(/\\s+/g, ' ').trim())
         .slice(0, 1024).join('');
+    const tree = node.getRootNode();
+    const byId = id => (tree.getElementById ? tree.getElementById(id) : null)
+        || document.getElementById(id);
     const referenced = ids => String(ids || '').split(/\\s+/).filter(Boolean).slice(0, 8)
         .map(id => {
-            const target = document.getElementById(id);
+            const target = byId(id);
             return target ? target.textContent : '';
         }).join(' ');
     const resolve = value => {
         try { return new URL(value, document.baseURI).href; } catch (error) { return ''; }
     };
-    const tag = node.tagName.toLowerCase();
-    const type = (node.getAttribute('type') || '').toLowerCase();
-    const link = node.closest('a[href]');
+    const parentOf = current => {
+        if (current.assignedSlot) {
+            return current.assignedSlot;
+        }
+        const parent = current.parentNode;
+        if (parent && parent.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+            return parent.host || null;
+        }
+        return parent && parent.nodeType === Node.ELEMENT_NODE ? parent : null;
+    };
+    const childrenOf = current => [
+        ...current.children,
+        ...(current.shadowRoot ? current.shadowRoot.children : []),
+        ...(typeof current.assignedElements === 'function'
+            ? current.assignedElements({flatten: true}) : []),
+    ];
+    let opaque = false;
+    const ancestors = [];
+    let current = node;
+    while (current) {
+        if (ancestors.length === 256) {
+            opaque = true;
+            break;
+        }
+        ancestors.push(current);
+        current = parentOf(current);
+    }
+    const descendants = [];
+    const seen = new Set([node]);
+    const pending = childrenOf(node);
+    while (pending.length) {
+        const next = pending.pop();
+        if (seen.has(next)) {
+            continue;
+        }
+        if (descendants.length === 2048) {
+            opaque = true;
+            break;
+        }
+        seen.add(next);
+        descendants.push(next);
+        pending.push(...childrenOf(next));
+    }
+    const reached = [node, ...descendants];
+    if (reached.some(element => ['iframe', 'frame', 'object', 'embed'].includes(element.localName)
+            || element.hasAttribute('usemap'))) {
+        opaque = true;
+    }
+    const flat = [...ancestors, ...descendants];
+    const anchor = element => ['a', 'area'].includes(element.localName);
+    const hrefOf = element => anchor(element)
+        ? (element.getAttribute('href')
+            ?? element.getAttributeNS('http://www.w3.org/1999/xlink', 'href'))
+        : null;
+    const links = flat.filter(element => hrefOf(element) !== null)
+        .map(element => ({linkHref: hrefOf(element), link: resolve(hrefOf(element))}));
     const submits = element => !!element && !!element.form && (
-        (element.tagName === 'BUTTON' && element.type === 'submit')
-        || (element.tagName === 'INPUT' && ['submit', 'image'].includes(element.type)));
-    const labelled = node.closest('label');
-    const control = labelled ? labelled.control : null;
-    // The submit control a click activates: the node, its button, or its
-    // label's control. Otherwise Enter submits through the default button.
-    const submitter = [node.closest('button'), node.closest('input'), control]
-        .find(submits) || null;
-    const form = submitter ? submitter.form
-        : (node.form || (control ? control.form : null) || node.closest('form'));
-    const defaultButton = form && !submitter
-        ? Array.from(document.querySelectorAll('button,input'))
+        (element.localName === 'button' && element.type === 'submit')
+        || (element.localName === 'input' && ['submit', 'image'].includes(element.type)));
+    const controlsOf = elements => elements
+        .filter(element => element.localName === 'label' && element.control)
+        .map(element => element.control);
+    const ownControls = controlsOf(ancestors);
+    // The submit control a click activates: the node, a button or input
+    // around it, or its label's control. Otherwise Enter or a click submits
+    // its form through the form's default button.
+    const own = [...ancestors, ...ownControls].filter(submits);
+    const inner = [...descendants, ...controlsOf(descendants)].filter(submits);
+    const actionOf = submitter => resolve(
+        (submitter.hasAttribute('formaction')
+            ? submitter.getAttribute('formaction')
+            : submitter.form.getAttribute('action')) || document.URL);
+    const form = own.length ? null
+        : (node.form || ownControls.map(control => control.form).find(Boolean)
+            || ancestors.find(element => element.localName === 'form') || null);
+    const defaultButton = form
+        ? Array.from(form.getRootNode().querySelectorAll('button,input'))
             .find(element => element.form === form && submits(element)) || null
         : null;
-    // Only a submit control's formaction counts; a field's is ignored.
-    const through = submitter || defaultButton;
-    const formAction = through ? through.getAttribute('formaction') : null;
-    const dialog = node.closest('dialog,[role=dialog],[role=alertdialog]');
+    const forms = [
+        ...own.map(actionOf),
+        ...(form ? [defaultButton ? actionOf(defaultButton)
+            : resolve(form.getAttribute('action') || document.URL)] : []),
+        ...inner.map(actionOf),
+    ];
+    if (links.length > 64 || forms.length > 64) {
+        opaque = true;
+    }
+    const dialog = ancestors.find(
+        element => element.matches('dialog,[role=dialog],[role=alertdialog]')) || null;
     const heading = dialog ? dialog.querySelector('h1,h2,h3') : null;
-    const images = Array.from(node.querySelectorAll('img')).slice(0, 8)
+    const images = reached.filter(element => element.localName === 'img').slice(0, 8)
         .map(image => image.getAttribute('alt') || '');
+    const unrendered = ['style', 'script', 'template', 'noscript'];
+    const shadowText = reached.filter(element => element.shadowRoot)
+        .flatMap(element => Array.from(element.shadowRoot.children))
+        .filter(element => !unrendered.includes(element.localName))
+        .map(element => element.innerText ?? element.textContent ?? '');
+    const tag = node.tagName.toLowerCase();
+    const type = (node.getAttribute('type') || '').toLowerCase();
     const valued = tag === 'button'
         || (tag === 'input' && ['submit', 'button', 'reset'].includes(type));
     return {
@@ -894,14 +978,12 @@ _ELEMENT_SCRIPT = """node => {
             placeholder: clean(node.getAttribute('placeholder')),
             alt: clean([node.getAttribute('alt') || '', ...images].join(' ')),
             value: valued ? clean(node.getAttribute('value')) : '',
-            visible_text: clean(node.innerText),
+            visible_text: clean([node.innerText || '', ...shadowText].join(' ')),
         },
-        linkHref: link ? link.getAttribute('href') : null,
-        link: link ? resolve(link.getAttribute('href')) : null,
-        form: form
-            ? resolve(formAction ? formAction : (form.getAttribute('action') || document.URL))
-            : null,
-        download: node.closest('a[download]') !== null,
+        links: links.slice(0, 64),
+        forms: forms.slice(0, 64),
+        opaque,
+        download: flat.some(element => anchor(element) && element.hasAttribute('download')),
         context: dialog ? clean(dialog.getAttribute('aria-label')
             || referenced(dialog.getAttribute('aria-labelledby'))
             || (heading ? heading.textContent : '')) : '',
@@ -1126,7 +1208,22 @@ def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> Bro
         for source, value in _live_labels(metadata).items()
         if normalize_text(value) != visible_name
     }
-    form = metadata.get("form")
+    links = metadata.get("links")
+    forms = metadata.get("forms")
+    link_targets = [
+        target
+        for link in (links if isinstance(links, list) else [])
+        if isinstance(link, dict) and (target := _link_target(link, page_url=page_url))
+    ]
+    if metadata.get("opaque") is not False:
+        # An embedded document or a walk past its bounds: the element may
+        # reach a target no one listed.
+        link_targets.append(_OUTSIDE_EVERY_ORIGIN)
+    form_targets = [
+        _target_facts(form, page_url=page_url)
+        for form in (forms if isinstance(forms, list) else [])
+        if isinstance(form, str)
+    ]
     return BrowserElementFacts(
         field_kind=_field_kind(
             tag=str(metadata.get("tag") or ""),
@@ -1136,10 +1233,27 @@ def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> Bro
             editable=metadata.get("editable") is True,
         ),
         labels=labels,
-        link_target=_link_target(metadata, page_url=page_url),
-        form_target=(_target_facts(form, page_url=page_url) if isinstance(form, str) else None),
+        link_target=_meet(link_targets),
+        form_target=_meet(form_targets),
         download=metadata.get("download") is True,
         context_name=str(metadata.get("context") or "")[:MAXIMUM_CONTEXT_NAME_CHARACTERS],
+    )
+
+
+def _meet(targets: list[BrowserTargetFacts]) -> BrowserTargetFacts | None:
+    """One target that is inside an origin and prefix only when every target is.
+
+    Same-origin only when all are, a first segment only when all share it, and
+    sensitive when any is.
+    """
+
+    if not targets:
+        return None
+    first = targets[0].first_segment
+    return BrowserTargetFacts(
+        same_origin=all(target.same_origin for target in targets),
+        first_segment=(first if all(target.first_segment == first for target in targets) else None),
+        sensitive_path=any(target.sensitive_path for target in targets),
     )
 
 

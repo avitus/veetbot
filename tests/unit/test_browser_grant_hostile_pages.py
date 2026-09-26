@@ -12,11 +12,18 @@ from typing import Any
 
 import pytest
 
-from agent_core.domain.browser import BrowserAction, BrowserActionKind, BrowserProviderError
+from agent_core.domain.browser import (
+    BrowserAction,
+    BrowserActionKind,
+    BrowserElementFacts,
+    BrowserProviderError,
+    BrowserTargetFacts,
+)
 from tests.unit.test_browser_playwright import (
     GRANT_NOW,
     _click_named,
     _press,
+    _ref,
     _refused,
     lesson_constraint,
     lesson_pages,
@@ -183,3 +190,171 @@ async def test_a_script_link_is_a_target_outside_the_prefix() -> None:
 
     assert script.reason_code == mixed_case.reason_code == GRANT_NOT_APPLICABLE
     assert left == []
+
+
+# A form inside an open shadow root submits Enter through its default button.
+SHADOW_DEFAULT = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div id="host"></div>
+<script>
+document.getElementById('host').attachShadow({mode: 'open'}).innerHTML =
+  '<form method="post" action="/lesson/check">'
+  + '<input type="text" aria-label="Answer">'
+  + '<button type="submit" formaction="/settings/delete">Go</button></form>';
+</script>
+</body></html>"""
+# A shadow-root span inside a light-DOM submit button activates the button.
+SHADOW_IN_BUTTON = """<!doctype html><html><head><title>Lesson</title></head><body>
+<form method="post" action="/courses/remove-course">
+<button type="submit" aria-label="Remove course"><x-label id="label"></x-label></button>
+</form>
+<script>
+document.getElementById('label').attachShadow({mode: 'open'}).innerHTML =
+  '<span role="button">Continue</span>';
+</script>
+</body></html>"""
+# A light-DOM span slotted into a shadow submit button, and a light-DOM link
+# slotted inside a shadow control.
+SLOTTED = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div id="submitter"><span role="button">Continue</span></div>
+<div id="wrapper">
+<a href="/courses/remove-course" style="display:block;width:200px;height:40px"></a>
+</div>
+<script>
+document.getElementById('submitter').attachShadow({mode: 'open'}).innerHTML =
+  '<form method="post" action="/courses/remove-course">'
+  + '<button type="submit" style="padding:20px"><slot></slot></button></form>';
+document.getElementById('wrapper').attachShadow({mode: 'open'}).innerHTML =
+  '<div role="button" style="position:relative">Next<slot></slot></div>';
+</script>
+</body></html>"""
+
+
+async def test_facts_follow_the_flat_tree_through_shadow_roots_and_slots() -> None:
+    pages = {"/lesson/1": SHADOW_DEFAULT, "/lesson/2": SHADOW_IN_BUTTON}
+    async with lesson_pages(pages) as (runtime, visit, _left):
+
+        async def facts(path: str, name: str) -> BrowserElementFacts:
+            page = await visit(path)
+            observed = runtime.facts(page.revision)
+            assert observed is not None
+            return observed.elements[_ref(page, name)]
+
+        answer = await facts("/lesson/1", "Answer")
+        inner = await facts("/lesson/2", "Continue")
+
+    removed = BrowserTargetFacts(same_origin=True, first_segment="courses", sensitive_path=True)
+    assert answer.form_target == BrowserTargetFacts(
+        same_origin=True, first_segment="settings", sensitive_path=True
+    )
+    assert inner.form_target == removed
+
+
+async def test_shadow_and_slotted_submissions_off_the_prefix_are_refused() -> None:
+    pages = {"/lesson/1": SHADOW_DEFAULT, "/lesson/2": SHADOW_IN_BUTTON, "/lesson/3": SLOTTED}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        await _page_value(
+            runtime,
+            "document.getElementById('host').shadowRoot.querySelector('input').value = 'hola'",
+        )
+        default = await _refused(runtime, _press(page, "Answer", "Enter"))
+        page = await visit("/lesson/2")
+        inner = await _refused(runtime, _click_named(page, "Continue"))
+        page = await visit("/lesson/3")
+        slotted = await _refused(runtime, _click_named(page, "Continue"))
+        page = await runtime.observe()
+        slotted_link = await _refused(runtime, _click_named(page, "Next"))
+
+    refusals = {default.reason_code, inner.reason_code, slotted.reason_code}
+    assert refusals | {slotted_link.reason_code} == {GRANT_NOT_APPLICABLE}
+    assert left == []
+
+
+# The click lands on whatever lies at the element's center, which may be a
+# descendant with a target of its own, or a document the page embeds.
+DESCENDANTS = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div role="button" style="position:relative;width:200px;height:60px">Continue
+<a href="/courses/remove-course" style="position:absolute;inset:0"></a></div>
+<div role="button" style="position:relative;width:200px;height:60px">Next
+<form method="post" action="/courses/remove-course" style="position:absolute;inset:0;margin:0">
+<button type="submit" aria-label="Go" style="width:100%;height:100%;opacity:0.01"></button>
+</form></div>
+<iframe role="button" aria-label="Skip" src="/lesson/frame"
+ style="width:300px;height:120px"></iframe>
+<svg width="200" height="60" xmlns:xlink="http://www.w3.org/1999/xlink">
+<a xlink:href="/courses/remove-course" aria-label="Start"><rect width="200" height="60"></rect></a>
+</svg>
+</body></html>"""
+FRAME = """<!doctype html><html><body style="margin:0">
+<form method="post" action="/courses/remove-course">
+<button type="submit" style="width:300px;height:120px">Go</button></form>
+</body></html>"""
+
+
+async def test_descendant_embedded_and_svg_targets_off_the_prefix_are_refused() -> None:
+    pages = {"/lesson/1": DESCENDANTS, "/lesson/frame": FRAME}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        refusals = []
+        for name in ("Continue", "Next", "Skip", "Start"):
+            refusals.append((await _refused(runtime, _click_named(page, name))).reason_code)
+            page = await runtime.observe()
+
+    assert refusals == [GRANT_NOT_APPLICABLE] * 4
+    assert left == []
+
+
+# aria-labelledby names an element in the same tree, here a shadow root.
+SHADOW_LABELLEDBY = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div id="host"></div>
+<script>
+document.getElementById('host').attachShadow({mode: 'open'}).innerHTML =
+  '<span id="name" hidden>Buy 500 gems</span>'
+  + '<button aria-labelledby="name" onclick="window.clicks.push(1)">Continue</button>';
+window.clicks = [];
+</script>
+</body></html>"""
+
+
+async def test_a_shadow_root_label_reference_is_read_in_its_own_tree() -> None:
+    async with lesson_pages({"/lesson/1": SHADOW_LABELLEDBY}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        refusal = await _refused(runtime, _click_named(page, "Continue"))
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert refusal.reason_code == GRANT_NOT_APPLICABLE
+    assert clicks == []
+
+
+# innerText leaves out shadow content, which is what these buttons show.
+SHADOW_TEXT = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button aria-label="Continue" onclick="window.clicks.push('gems')">
+<x-text id="gems"></x-text></button>
+<button onclick="window.clicks.push('next')"><x-text id="next"></x-text></button>
+<script>
+window.clicks = [];
+document.getElementById('gems').attachShadow({mode: 'open'}).innerHTML = '<b>Buy 500 gems</b>';
+document.getElementById('next').attachShadow({mode: 'open'}).innerHTML =
+  '<style>b { order: 1; }</style><b>Next</b>';
+</script>
+</body></html>"""
+
+
+async def test_text_a_shadow_root_renders_is_visible_text() -> None:
+    """Its rendered text is classified; its style sheet is not text."""
+
+    async with lesson_pages({"/lesson/1": SHADOW_TEXT}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        refusal = await _refused(runtime, _click_named(page, "Continue"))
+        page = await runtime.observe()
+        unnamed = next(element.ref for element in page.elements if element.name == "")
+        await _covered(
+            runtime,
+            BrowserAction(
+                kind=BrowserActionKind.CLICK, expected_revision=page.revision, ref=unnamed
+            ),
+        )
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert refusal.reason_code == GRANT_NOT_APPLICABLE
+    assert clicks == ["next"]

@@ -132,6 +132,15 @@ change needs the owner's explicit approval, and the owner has given it.
      - a closed field kind;
      - the navigation target of a link or form, including every segment of
        its path.
+   - Label sources and targets are read over the flat tree the browser
+     renders, through open shadow roots and slots. What a shadow root renders
+     is visible text, and an `aria-labelledby` reference resolves in the
+     element's own tree. A click lands on whatever lies at the element's
+     centre, so the targets are those of the link or submit control around
+     the element, its label's control, and every link and submit control
+     inside it. The element's target is inside a prefix only when all of them
+     are. An element with an embedded document inside it has a target outside
+     every origin.
    - Each label source is classified separately. A match of the exclusion
      vocabulary in any of them yields that named consequence, so a button
      labelled "Continue" for assistive technology but showing "Pay $12.99"

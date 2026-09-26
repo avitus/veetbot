@@ -474,7 +474,16 @@ formaction of the submit control a click activates or, for Enter in a field,
 of the form's default button, else the form's action. A fragment or empty link
 has no target only when it stays on the page, since a `<base>` element can
 send it elsewhere; a `javascript:` link, and any target that is not HTTPS, is
-outside every origin. Raw target URLs never leave the runtime. Facts feed the
+outside every origin. Facts follow the flat tree the browser renders, through
+open shadow roots and slots: visible text includes what a shadow root renders,
+an `aria-labelledby` reference resolves in the element's own tree, and a form's
+default button is found in the form's own tree. A click lands on whatever lies
+at the element's centre, so the targets are those of the link or submit control
+around the element, its label's control, and every link and submit control
+inside it; the facts carry one target that is inside a prefix only when every
+one of them is. An element with an embedded document inside it, or too large
+to walk, has a target outside every origin. Raw target URLs never leave the
+runtime. Facts feed the
 action classifier and the approval view and never enter a model-visible
 result. An act request may carry a dispatch constraint naming the grant kind,
 origins, an optional path prefix, an expiry, a consequence ceiling, and a text
