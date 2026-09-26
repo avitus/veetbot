@@ -741,3 +741,157 @@ async def test_begin_response_is_private_no_store(mode: str | None) -> None:
 
     assert response.status_code == 201, response.text
     assert response.headers.get("cache-control") == "private, no-store"
+
+
+class DeviceCeremonyService:
+    """A stateful isolated service behind MockTransport (ADR-0128 section 2.4).
+
+    Each begin opens a new ceremony. ``reject_handoffs`` models the owner's
+    client posting a handoff the service refused: the service already
+    records the ceremony ``cancelled``, which orchestration learns only
+    through status or cancel.
+    """
+
+    def __init__(self) -> None:
+        self.statuses: dict[UUID, str] = {}
+        self.begun: list[dict[str, object]] = []
+        self.reject_handoffs = False
+
+    def _view(self, ceremony_id: UUID, *, launch: bool) -> dict[str, object]:
+        view: dict[str, object] = {
+            "id": str(ceremony_id),
+            "profile_id": str(PROFILE_ID),
+            "status": self.statuses[ceremony_id],
+            "expires_at": (NOW + timedelta(minutes=5)).isoformat(),
+        }
+        if launch:
+            view["launch_url"] = (
+                f"https://browser.example.test/authentication/{ceremony_id}/handoff"
+                "#capability=one-time"
+            )
+        return view
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if request.url.path.endswith(":begin"):
+            self.begun.append(body)
+            ceremony_id = UUID(int=0xD100 + len(self.begun))
+            self.statuses[ceremony_id] = (
+                "cancelled" if self.reject_handoffs else "authentication_required"
+            )
+            view = self._view(ceremony_id, launch=True)
+            view["status"] = "authentication_required"
+            return httpx.Response(201, json=view)
+        ceremony_id = UUID(body["ceremony_id"])
+        if request.url.path.endswith(":cancel") and self.statuses[ceremony_id] in {
+            "authentication_required",
+            "needs_user",
+        }:
+            self.statuses[ceremony_id] = "cancelled"
+        return httpx.Response(200, json=self._view(ceremony_id, launch=False))
+
+
+async def _device_begin_client(
+    service: DeviceCeremonyService,
+) -> tuple[httpx.AsyncClient, httpx.AsyncClient]:
+    clock, uow_factory = await memory_uow_factory()
+    owner = principal().model_copy(
+        update={"scopes": {"browser.profile.read", "browser.profile.write"}}
+    )
+    provider = httpx.AsyncClient(transport=httpx.MockTransport(service))
+    profiles = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow_factory),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=HostedBrowserSessionControlPlane(
+            base_url="https://browser.example.test",
+            credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+            client=provider,
+        ),
+        clock=clock,
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    await profiles.create(owner, ("https://www.example.org",))
+    app = create_app(
+        SimpleNamespace(browser_profiles=profiles),
+        settings(),
+        owner,
+        lambda: str(PROFILE_ID),
+        _ready,
+    )
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://127.0.0.1",
+    )
+    return provider, client
+
+
+DEVICE_BEGIN = {"login_url": "https://www.example.org/", "mode": "device"}
+CEREMONIES = f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies"
+
+
+async def test_device_begin_after_a_rejected_handoff_is_409_until_cancelled() -> None:
+    """ADR-0128 D20: a refused handoff leaves the record open until cancel."""
+
+    service = DeviceCeremonyService()
+    service.reject_handoffs = True
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        first = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        blocked = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        cancelled = await client.post(
+            f"/v1/browser-authentication-ceremonies/{first.json()['id']}/cancel"
+        )
+        service.reject_handoffs = False
+        retried = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+
+    assert first.status_code == 201, first.text
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "conflict"
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert retried.status_code == 201, retried.text
+    assert retried.json()["id"] != first.json()["id"]
+    assert [body.get("mode") for body in service.begun] == ["device", "device"]
+
+
+async def test_device_begin_after_reading_a_cancelled_status_is_admitted() -> None:
+    service = DeviceCeremonyService()
+    service.reject_handoffs = True
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        first = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        status = await client.get(f"/v1/browser-authentication-ceremonies/{first.json()['id']}")
+        service.reject_handoffs = False
+        retried = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+
+    assert status.json()["status"] == "cancelled"
+    assert status.json()["launch_url"] is None
+    assert retried.status_code == 201, retried.text
+
+
+async def test_lost_device_begin_is_recovered_by_list_cancel_and_begin() -> None:
+    """ADR-0128 D20 (B6): the client never saw the id, so it lists, cancels
+    the newest open ceremony and begins once more."""
+
+    service = DeviceCeremonyService()
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        lost = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        del lost  # The response never reached the client.
+        listed = await client.get(CEREMONIES)
+        open_ceremonies = [
+            item
+            for item in listed.json()
+            if item["status"] in {"authentication_required", "needs_user"}
+        ]
+        newest = max(open_ceremonies, key=lambda item: item["expires_at"])
+        cancelled = await client.post(
+            f"/v1/browser-authentication-ceremonies/{newest['id']}/cancel"
+        )
+        retried = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+
+    assert len(open_ceremonies) == 1
+    assert all(item["launch_url"] is None for item in listed.json())
+    assert cancelled.json()["status"] == "cancelled"
+    assert retried.status_code == 201, retried.text
+    assert "/handoff#capability=" in retried.json()["launch_url"]
