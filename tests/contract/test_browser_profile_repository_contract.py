@@ -276,6 +276,97 @@ async def assert_profile_repository_requires_revocation_before_idempotent_delete
         await repository.get(profile_id, owner)
 
 
+async def assert_profile_repository_advances_generation_without_changing_status(
+    repository: BrowserProfileRepository,
+    profile_id: UUID = PROFILE_ID,
+    owner: Principal | None = None,
+) -> None:
+    """ADR-0128 decision 10: a sign-in moves the generation, not the status."""
+
+    owner = owner or principal()
+    await repository.create(profile(profile_id=profile_id, owner=owner))
+    ready = await repository.transition(
+        profile_id,
+        owner,
+        expected_generation=0,
+        status=BrowserProfileStatus.READY,
+        updated_at=NOW + timedelta(seconds=1),
+    )
+
+    advanced = await repository.advance_generation(
+        profile_id,
+        owner,
+        expected_generation=ready.generation,
+        updated_at=NOW + timedelta(seconds=2),
+    )
+
+    assert (advanced.status, advanced.generation) == (
+        BrowserProfileStatus.READY,
+        ready.generation + 1,
+    )
+    assert advanced.updated_at == NOW + timedelta(seconds=2)
+    assert await repository.get(profile_id, owner) == advanced
+    with pytest.raises(ConcurrencyConflict):
+        await repository.advance_generation(
+            profile_id,
+            owner,
+            expected_generation=ready.generation,
+            updated_at=NOW + timedelta(seconds=3),
+        )
+    with pytest.raises(ConflictError):
+        await repository.advance_generation(
+            profile_id,
+            owner,
+            expected_generation=advanced.generation,
+            updated_at=NOW + timedelta(seconds=1),
+        )
+    foreign = Principal(
+        tenant_id=owner.tenant_id, principal_id="principal-b", roles={"user"}, scopes=set()
+    )
+    with pytest.raises(NotFoundError):
+        await repository.advance_generation(
+            profile_id,
+            foreign,
+            expected_generation=advanced.generation,
+            updated_at=NOW + timedelta(seconds=3),
+        )
+    revoked = await repository.transition(
+        profile_id,
+        owner,
+        expected_generation=advanced.generation,
+        status=BrowserProfileStatus.REVOKED,
+        updated_at=NOW + timedelta(seconds=3),
+    )
+    with pytest.raises(ConflictError):
+        await repository.advance_generation(
+            profile_id,
+            owner,
+            expected_generation=revoked.generation,
+            updated_at=NOW + timedelta(seconds=4),
+        )
+    assert (await repository.get(profile_id, owner)).generation == revoked.generation
+
+    reservation_id = UUID(int=profile_id.int + 1)
+    await repository.create(
+        profile(profile_id=reservation_id, owner=owner).model_copy(
+            update={
+                "provider_name": None,
+                "provider_ref": None,
+                "encryption_key_version": None,
+                "status": BrowserProfileStatus.PROVISIONING,
+            }
+        )
+    )
+    with pytest.raises(ConflictError):
+        await repository.advance_generation(
+            reservation_id,
+            owner,
+            expected_generation=0,
+            updated_at=NOW + timedelta(seconds=1),
+        )
+    assert (await repository.get(reservation_id, owner)).generation == 0
+
+
 async def test_profile_repository_scopes_create_get_and_list() -> None:
     await assert_profile_repository_scopes_create_get_and_list(InMemoryBrowserProfileRepository())
 
@@ -306,5 +397,11 @@ async def test_profile_repository_paginates_by_created_at_and_id() -> None:
 
 async def test_profile_repository_requires_revocation_before_idempotent_delete() -> None:
     await assert_profile_repository_requires_revocation_before_idempotent_delete(
+        InMemoryBrowserProfileRepository()
+    )
+
+
+async def test_profile_repository_advances_generation_without_changing_status() -> None:
+    await assert_profile_repository_advances_generation_without_changing_status(
         InMemoryBrowserProfileRepository()
     )

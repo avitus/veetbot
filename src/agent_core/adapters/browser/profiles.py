@@ -31,6 +31,12 @@ def _owned(profile: BrowserProfile, principal: Principal) -> bool:
     )
 
 
+# A sign-in never advances a profile that is still provisioning or revoked.
+_GENERATION_FROZEN_STATUSES = frozenset(
+    {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}
+)
+
+
 class InMemoryBrowserProfileRepository:
     def __init__(self) -> None:
         self._profiles: dict[UUID, BrowserProfile] = {}
@@ -158,6 +164,28 @@ class InMemoryBrowserProfileRepository:
                 "generation": profile.generation + 1,
                 "updated_at": updated_at,
             },
+            deep=True,
+        )
+        self._profiles[profile_id] = updated
+        return _copy(updated)
+
+    async def advance_generation(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        expected_generation: int,
+        updated_at: datetime,
+    ) -> BrowserProfile:
+        profile = await self.get(profile_id, principal)
+        if profile.generation != expected_generation:
+            raise ConcurrencyConflict("browser profile generation changed")
+        if profile.status in _GENERATION_FROZEN_STATUSES:
+            raise ConflictError("browser profile cannot start a sign-in")
+        if updated_at < profile.updated_at:
+            raise ConflictError("browser profile update time moved backwards")
+        updated = profile.model_copy(
+            update={"generation": profile.generation + 1, "updated_at": updated_at},
             deep=True,
         )
         self._profiles[profile_id] = updated

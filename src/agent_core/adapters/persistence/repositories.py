@@ -1804,6 +1804,43 @@ class PostgresBrowserProfileRepository:
             raise ConcurrencyConflict("browser profile generation changed")
         return _browser_profile_to_domain(row)
 
+    async def advance_generation(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        expected_generation: int,
+        updated_at: datetime,
+    ) -> BrowserProfile:
+        row = (
+            await self._session.scalars(
+                update(BrowserProfileRow)
+                .where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                    BrowserProfileRow.generation == expected_generation,
+                    BrowserProfileRow.status.not_in(
+                        (
+                            BrowserProfileStatus.PROVISIONING.value,
+                            BrowserProfileStatus.REVOKED.value,
+                        )
+                    ),
+                    BrowserProfileRow.updated_at <= updated_at,
+                )
+                .values(generation=BrowserProfileRow.generation + 1, updated_at=updated_at)
+                .returning(BrowserProfileRow)
+            )
+        ).one_or_none()
+        if row is not None:
+            return _browser_profile_to_domain(row)
+        current = await self.get(profile_id, principal)
+        if current.generation != expected_generation:
+            raise ConcurrencyConflict("browser profile generation changed")
+        if current.status in {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}:
+            raise ConflictError("browser profile cannot start a sign-in")
+        raise ConflictError("browser profile update time moved backwards")
+
     async def delete(
         self,
         profile_id: UUID,

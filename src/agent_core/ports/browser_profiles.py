@@ -66,6 +66,23 @@ class BrowserProfileRepository(Protocol):
         updated_at: datetime,
     ) -> BrowserProfile: ...
 
+    async def advance_generation(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        expected_generation: int,
+        updated_at: datetime,
+    ) -> BrowserProfile:
+        """Increment the generation without changing status (ADR-0128 decision 10).
+
+        Every sign-in attempt moves the generation, so grants pinned to the old
+        one stop matching. ``NotFoundError`` for a missing or foreign row,
+        ``ConcurrencyConflict`` on a generation mismatch, ``ConflictError`` for a
+        provisioning or revoked profile or an update time that moves backwards.
+        """
+        ...
+
     async def delete(
         self,
         profile_id: UUID,

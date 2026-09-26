@@ -23,6 +23,7 @@ from tests.contract.test_browser_grant_repository_contract import (
     assert_grant_repository_paginates_by_created_at_and_id,
 )
 from tests.contract.test_browser_profile_repository_contract import (
+    assert_profile_repository_advances_generation_without_changing_status,
     assert_profile_repository_binds_only_the_reserved_generation,
     assert_profile_repository_paginates_by_created_at_and_id,
     assert_profile_repository_rejects_duplicate_and_stale_writes,
@@ -67,6 +68,11 @@ async def test_postgres_browser_profile_repository_satisfies_shared_contract() -
         await assert_profile_repository_requires_revocation_before_idempotent_delete(
             uow.browser_profiles,
             UUID(int=0xE4),
+            composition.principal,
+        )
+        await assert_profile_repository_advances_generation_without_changing_status(
+            uow.browser_profiles,
+            UUID(int=0xE8),
             composition.principal,
         )
 
