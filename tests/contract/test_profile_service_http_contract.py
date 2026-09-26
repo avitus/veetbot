@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -135,6 +137,7 @@ def full_app(
     times: list[datetime] | None = None,
     evidence_failure: Exception | None = None,
     services: list[HostedProfileSessionService] | None = None,
+    sweep_interval_seconds: float = 0,
 ) -> FastAPI:
     store = FilesystemEncryptedProfileStore(
         root,
@@ -171,6 +174,7 @@ def full_app(
         lifecycle_service,
         SecretValue(OPAQUE_AUTH_VALUE),
         sessions=sessions,
+        sweep_interval_seconds=sweep_interval_seconds,
     )
 
 
@@ -1158,3 +1162,47 @@ async def test_device_handoff_authenticates_before_buffering_and_logs_nothing(
     assert unread.status_code == 401
     capabilities = tuple(capability for _, capability in answers)
     assert _leaks(records, _LOG_SENTINELS + capabilities) == []
+
+
+async def test_service_lifespan_runs_the_sweep(tmp_path: Path) -> None:
+    """ADR-0128 D16: the service sweeps on a timer, not only when traffic arrives."""
+
+    services: list[HostedProfileSessionService] = []
+    application = full_app(tmp_path / "profiles", services=services, sweep_interval_seconds=0.01)
+    swept = asyncio.Event()
+    calls = 0
+
+    async def sweep() -> None:
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            swept.set()
+        if calls == 1:
+            raise RuntimeError("a failed sweep never stops the timer")
+
+    services[0].sweep = sweep  # type: ignore[method-assign]
+
+    async with application.router.lifespan_context(application):
+        with suppress(TimeoutError):
+            await asyncio.wait_for(swept.wait(), timeout=2)
+        assert swept.is_set(), "the service never swept on its own"
+    stopped_at = calls
+    await asyncio.sleep(0.05)
+
+    assert calls == stopped_at
+
+
+async def test_a_zero_interval_runs_no_sweep(tmp_path: Path) -> None:
+    services: list[HostedProfileSessionService] = []
+    application = full_app(tmp_path / "profiles", services=services, sweep_interval_seconds=0)
+    calls = 0
+
+    async def sweep() -> None:
+        nonlocal calls
+        calls += 1
+
+    services[0].sweep = sweep  # type: ignore[method-assign]
+    async with application.router.lifespan_context(application):
+        await asyncio.sleep(0.05)
+
+    assert calls == 0

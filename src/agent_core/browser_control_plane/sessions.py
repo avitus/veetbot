@@ -51,6 +51,10 @@ AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 DEVICE_VERIFICATION_SECONDS = 30.0
 # Finished ceremonies kept for idempotent status reads, oldest dropped first.
 MAXIMUM_TERMINAL_CEREMONIES = 1_024
+# An outcome no client has read yet is kept this long (ADR-0128 D16).
+TERMINAL_CEREMONY_RETENTION_SECONDS = 24 * 60 * 60
+# The sweep checks an open remote ceremony in its last seconds of life.
+SWEEP_WINDOW_SECONDS = 20
 _NO_SESSION_MATERIAL = b'{"format_version":1}'
 SurfaceOperation = Literal["frame", "events", "handoff"]
 
@@ -111,6 +115,10 @@ class _CeremonyState:
     mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
     # A device handoff is being processed: the capability is spent.
     consumed: bool = False
+    # The sweep has sampled this remote ceremony near its expiry (ADR-0128 D16).
+    swept: bool = False
+    # Serializes calls into the headed page: sweep, refresh, frame and events.
+    runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +171,7 @@ class HostedProfileSessionService:
         ceremony_base_url: str,
         device_sign_in_enabled: bool = True,
         verification_seconds: float = DEVICE_VERIFICATION_SECONDS,
+        sweep_sample_seconds: float = 2.5,
     ) -> None:
         normalized_ceremony_origin = require_service_origin(
             ceremony_base_url,
@@ -177,6 +186,7 @@ class HostedProfileSessionService:
         self._ceremony_base_url = normalized_ceremony_origin
         self._device_sign_in_enabled = device_sign_in_enabled
         self._verification_seconds = verification_seconds
+        self._sweep_sample_seconds = sweep_sample_seconds
         self._leases: dict[bytes, _LeaseState] = {}
         self._ceremonies: dict[UUID, _CeremonyState] = {}
         self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
@@ -473,17 +483,19 @@ class HostedProfileSessionService:
             if state.status in _TERMINAL_AUTH_STATUSES or runtime is None:
                 # A device ceremony's status changes only through its handoff.
                 return _ceremony_view(state)
-            status = await runtime.authentication_status()
-            state.status = status
+            async with state.runtime_lock:
+                status = await runtime.authentication_status()
+                state.status = status
+                if status is BrowserAuthenticationStatus.READY:
+                    try:
+                        await self._store.write(
+                            state.identity,
+                            await runtime.storage_state(),
+                        )
+                    finally:
+                        with suppress(Exception):
+                            await runtime.close()
             if status is BrowserAuthenticationStatus.READY:
-                try:
-                    await self._store.write(
-                        state.identity,
-                        await runtime.storage_state(),
-                    )
-                finally:
-                    with suppress(Exception):
-                        await runtime.close()
                 return await self._finish_ceremony_locked(state)
             return _ceremony_view(state)
 
@@ -503,6 +515,75 @@ class HostedProfileSessionService:
             state.status = BrowserAuthenticationStatus.CANCELLED
             await _close_ceremony_runtime(state)
             return await self._finish_ceremony_locked(state)
+
+    async def sweep(self) -> None:
+        """Close what has expired, and keep a finished remote sign-in (ADR-0128 D16).
+
+        Run on a timer by the service's lifespan. Expired leases and
+        ceremonies close without waiting for traffic. An open remote ceremony
+        in its last SWEEP_WINDOW_SECONDS is checked once: when two samples,
+        taken ``sweep_sample_seconds`` apart, both find the sign-in ready, its
+        state is sealed as a status refresh would; otherwise it is left to
+        expire. The manual READY rule is unchanged.
+        """
+        await self._expire()
+        async with self._lock:
+            now = self._now()
+            window = timedelta(seconds=SWEEP_WINDOW_SECONDS)
+            due = [
+                state
+                for state in self._ceremonies.values()
+                if state.mode is BrowserAuthenticationMode.REMOTE
+                and state.runtime is not None
+                and not state.swept
+                and state.status not in _TERMINAL_AUTH_STATUSES
+                and state.expires_at - now <= window
+            ]
+            for state in due:
+                state.swept = True
+        for state in due:
+            # An unready or failed sample leaves the ceremony to expire.
+            with suppress(Exception):
+                await self._sweep_ceremony(state)
+
+    async def _sweep_ceremony(self, state: _CeremonyState) -> None:
+        if await self._sample(state) is not BrowserAuthenticationStatus.READY:
+            return
+        await asyncio.sleep(self._sweep_sample_seconds)
+        if await self._sample(state) is not BrowserAuthenticationStatus.READY:
+            return
+        async with self._lock:
+            runtime = state.runtime
+            if (
+                runtime is None
+                or self._ceremonies.get(state.id) is not state
+                or state.status in _TERMINAL_AUTH_STATUSES
+            ):
+                return
+            metadata = await self._store.find_by_profile(state.profile_id)
+            if metadata is None or metadata.revoked:
+                return
+            try:
+                async with state.runtime_lock:
+                    try:
+                        await self._store.write(state.identity, await runtime.storage_state())
+                    finally:
+                        with suppress(Exception):
+                            await runtime.close()
+            except Exception:
+                # The browser is gone either way; end the ceremony, not a lease.
+                state.status = BrowserAuthenticationStatus.CANCELLED
+                await self._finish_ceremony_locked(state)
+                raise
+            state.status = BrowserAuthenticationStatus.READY
+            await self._finish_ceremony_locked(state)
+
+    async def _sample(self, state: _CeremonyState) -> BrowserAuthenticationStatus | None:
+        async with state.runtime_lock:
+            runtime = state.runtime
+            if runtime is None or self._ceremonies.get(state.id) is not state:
+                return None
+            return await runtime.authentication_status()
 
     async def accept_device_session(
         self,
@@ -645,8 +726,9 @@ class HostedProfileSessionService:
     ) -> bytes:
         await self._expire()
         async with self._lock:
-            runtime = await self._surface_runtime_locked(ceremony_id, capability)
-            return await runtime.interactive_frame()
+            state, runtime = self._surface_runtime_locked(ceremony_id, capability)
+            async with state.runtime_lock:
+                return await runtime.interactive_frame()
 
     async def authentication_event(
         self,
@@ -656,8 +738,9 @@ class HostedProfileSessionService:
     ) -> None:
         await self._expire()
         async with self._lock:
-            runtime = await self._surface_runtime_locked(ceremony_id, capability)
-            await runtime.interactive_event(event)
+            state, runtime = self._surface_runtime_locked(ceremony_id, capability)
+            async with state.runtime_lock:
+                await runtime.interactive_event(event)
 
     def _mac(self, value: bytes) -> bytes:
         return hmac.digest(self._process_secret, value, hashlib.sha256)
@@ -783,7 +866,7 @@ class HostedProfileSessionService:
             tenant_id=state.tenant_id,
             principal_id=state.principal_id,
             expires_at=state.expires_at,
-            retained_until=self._now() + timedelta(seconds=AUTHENTICATION_CEREMONY_SECONDS),
+            retained_until=self._now() + timedelta(seconds=TERMINAL_CEREMONY_RETENTION_SECONDS),
             status=state.status,
         )
         self._terminal_ceremonies[state.id] = terminal
@@ -792,11 +875,11 @@ class HostedProfileSessionService:
             self._terminal_ceremonies.pop(next(iter(self._terminal_ceremonies)))
         return _terminal_ceremony_view(terminal)
 
-    async def _surface_runtime_locked(
+    def _surface_runtime_locked(
         self,
         ceremony_id: UUID,
         capability: str,
-    ) -> BrowserSessionRuntime:
+    ) -> tuple[_CeremonyState, BrowserSessionRuntime]:
         """The headed browser of a live remote ceremony whose capability matches."""
         state = self._ceremonies.get(ceremony_id)
         if (
@@ -806,7 +889,7 @@ class HostedProfileSessionService:
             or not self._surface_live_locked(state, capability)
         ):
             raise ConflictError("browser authentication capability is invalid")
-        return state.runtime
+        return state, state.runtime
 
     async def _owned_metadata(
         self,

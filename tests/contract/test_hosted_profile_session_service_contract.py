@@ -78,6 +78,9 @@ class FakeSessionRuntime:
     # runtime started with a session, and the failures a scenario injects.
     scenario: HandoffScenario | None = None
     evidence_urls: list[str] = field(default_factory=list)
+    # Successive answers to authentication_status, then ``authentication``.
+    authentication_samples: list[BrowserAuthenticationStatus] = field(default_factory=list)
+    status_checks: int = 0
 
     async def start(
         self,
@@ -143,6 +146,9 @@ class FakeSessionRuntime:
         return self.sealed_material
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
+        self.status_checks += 1
+        if self.authentication_samples:
+            return self.authentication_samples.pop(0)
         return self.authentication
 
     async def interactive_frame(self) -> bytes:
@@ -193,6 +199,7 @@ def services(
         process_secret=b"synthetic-process-secret-with-32-bytes",
         ceremony_base_url="https://browser-login.example.test",
         verification_seconds=verification_seconds,
+        sweep_sample_seconds=0,
     )
     lifecycle = HostedProfileLifecycleService(
         store,
@@ -612,9 +619,9 @@ async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runti
     await assert_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(tmp_path)
 
 
-async def test_expired_authentication_is_retained_for_bounded_idempotency(
-    tmp_path: Path,
-) -> None:
+async def test_terminal_outcome_is_retained_for_a_day(tmp_path: Path) -> None:
+    """ADR-0128 D16: an outcome no client read in minutes is still there for a day."""
+
     lifecycle, sessions, _runtimes, times = services(tmp_path)
     await provision(lifecycle)
     ceremony = await sessions.begin_authentication(
@@ -632,8 +639,18 @@ async def test_expired_authentication_is_retained_for_bounded_idempotency(
     assert replay == expired
 
     times[0] += timedelta(minutes=5, seconds=1)
+    try:
+        after_minutes = await sessions.authentication_status(ceremony.id, principal())
+    except ConflictError:
+        pytest.fail("a finished ceremony was forgotten after five minutes")
+    times[0] = expired.expires_at + timedelta(seconds=1) + timedelta(hours=23, minutes=59)
+    after_a_day_less_a_minute = await sessions.authentication_status(ceremony.id, principal())
+    times[0] += timedelta(minutes=1)
     with pytest.raises(ConflictError):
         await sessions.authentication_status(ceremony.id, principal())
+
+    assert after_minutes == expired
+    assert after_a_day_less_a_minute == expired
 
 
 @pytest.mark.parametrize(
@@ -1169,3 +1186,127 @@ async def test_terminal_ceremonies_are_capped_at_1024(tmp_path: Path) -> None:
     assert await ceremony_status(sessions, last_id) is BrowserAuthenticationStatus.CANCELLED
     with pytest.raises(ConflictError):
         await ceremony_status(sessions, first_id)
+
+
+# --- ADR-0128 D16: remote outcomes are not lost ------------------------------
+
+
+async def begin_remote(sessions: HostedProfileSessionService) -> UUID:
+    view = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    return view.id
+
+
+async def test_sweep_seals_a_remote_ceremony_ready_on_two_samples(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    writes = record_writes(sessions)
+    ceremony_id = await begin_remote(sessions)
+    runtime = runtimes[0]
+    runtime.authentication = BrowserAuthenticationStatus.READY
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=15)
+
+    await sessions.sweep()
+
+    assert runtime.status_checks == 2
+    assert writes == [runtime.sealed_material]
+    assert runtime.closed is True
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+
+
+async def test_sweep_does_not_seal_on_one_sample(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    writes = record_writes(sessions)
+    ceremony_id = await begin_remote(sessions)
+    runtime = runtimes[0]
+    runtime.authentication_samples = [BrowserAuthenticationStatus.READY]
+    runtime.authentication = BrowserAuthenticationStatus.NEEDS_USER
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=15)
+
+    await sessions.sweep()
+    await sessions.sweep()
+
+    assert runtime.status_checks == 2
+    assert writes == []
+    assert runtime.closed is False
+    status = await ceremony_status(sessions, ceremony_id)
+    assert status is not BrowserAuthenticationStatus.READY
+
+
+async def test_sweep_samples_only_in_the_last_twenty_seconds(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    await begin_remote(sessions)
+    runtime = runtimes[0]
+    runtime.authentication = BrowserAuthenticationStatus.READY
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=21)
+
+    await sessions.sweep()
+
+    assert runtime.status_checks == 0
+    assert runtime.closed is False
+
+
+async def test_sweep_closes_expired_runtimes_without_traffic(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id = await begin_remote(sessions)
+    ceremony_runtime = runtimes[0]
+    ceremony_runtime.authentication = BrowserAuthenticationStatus.NEEDS_USER
+    times[0] = NOW + timedelta(minutes=6)
+
+    await sessions.sweep()
+
+    assert ceremony_runtime.closed is True
+    terminal = sessions._terminal_ceremonies[ceremony_id]  # noqa: SLF001 - no traffic arrived
+    assert terminal.status is BrowserAuthenticationStatus.EXPIRED
+
+    await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=times[0] + timedelta(minutes=1),
+    )
+    lease_runtime = runtimes[-1]
+    times[0] += timedelta(minutes=2)
+
+    await sessions.sweep()
+
+    assert lease_runtime.closed is True
+    assert sessions._leases == {}  # noqa: SLF001 - no traffic arrived
+
+
+async def test_a_swept_ceremony_never_serves_two_callers_at_once(tmp_path: Path) -> None:
+    """The sweep and a status refresh take turns on the headed page."""
+
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id = await begin_remote(sessions)
+    runtime = runtimes[0]
+    active = 0
+    overlapped = False
+    original = runtime.authentication_status
+
+    async def exclusive_status() -> BrowserAuthenticationStatus:
+        nonlocal active, overlapped
+        active += 1
+        overlapped = overlapped or active > 1
+        await asyncio.sleep(0.01)
+        try:
+            return await original()
+        finally:
+            active -= 1
+
+    runtime.authentication_status = exclusive_status  # type: ignore[method-assign]
+    runtime.authentication = BrowserAuthenticationStatus.NEEDS_USER
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=15)
+
+    await asyncio.gather(
+        sessions.sweep(), sessions.refresh_authentication(ceremony_id, principal())
+    )
+
+    assert overlapped is False

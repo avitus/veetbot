@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from typing import Any, cast
 from uuid import UUID
 
@@ -339,8 +341,25 @@ def create_profile_service_app(
     *,
     readiness: Callable[[], bool] = lambda: True,
     sessions: HostedProfileSessionService | None = None,
+    sweep_interval_seconds: float = 15.0,
 ) -> FastAPI:
-    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # ADR-0128 D16: sweep on a timer, not only when traffic arrives.
+        sweeping = (
+            asyncio.create_task(_sweep_forever(sessions, sweep_interval_seconds))
+            if sessions is not None and sweep_interval_seconds > 0
+            else None
+        )
+        try:
+            yield
+        finally:
+            if sweeping is not None:
+                sweeping.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sweeping
+
+    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(_ProfileServiceBoundary, authorization=authorization)
     if sessions is not None:
         app.add_middleware(_AuthenticationSurfaceBoundary, sessions=sessions)
@@ -622,6 +641,18 @@ def create_profile_service_app(
             return Response(status_code=204)
 
     return app
+
+
+async def _sweep_forever(sessions: HostedProfileSessionService, interval: float) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await sessions.sweep()
+        except Exception as exc:
+            _LOGGER.error(
+                "profile session sweep failed",
+                extra={"failure_type": type(exc).__name__},
+            )
 
 
 def _principal(tenant_id: str, principal_id: str) -> Principal:
