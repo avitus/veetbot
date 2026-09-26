@@ -308,6 +308,10 @@ idempotency and events all run under the deferred tool's own name; invalid
 arguments return that tool's input schema. A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
 forty entries and 2,000 tokens, and the prefix ceiling rose by exactly that cap.
+An entry lists required parameters in the order of the schema's `required`
+array and optional ones by name, never in the order of the schema's
+properties: the builder re-renders the prefix from the specifications on the
+plan event, and PostgreSQL `jsonb` keeps array order but not object key order.
 
 After authorization and session-environment filtering, tools explicitly named in
 `AgentSpec.enabled_tools` receive definitions first, in first-occurrence order,

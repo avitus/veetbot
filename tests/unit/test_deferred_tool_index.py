@@ -67,6 +67,47 @@ def test_builtin_entries_are_trusted_and_discovered_entries_are_data() -> None:
     assert '<untrusted trust="external_untrusted"' in _text(rendered[-1])
 
 
+def jsonb_key_order(value: object) -> object:
+    """Reorder object keys the way PostgreSQL jsonb stores them: shorter keys first, then bytes."""
+
+    if isinstance(value, dict):
+        return {
+            key: jsonb_key_order(value[key])
+            for key in sorted(value, key=lambda key: (len(key.encode()), key.encode()))
+        }
+    if isinstance(value, list):
+        return [jsonb_key_order(item) for item in value]
+    return value
+
+
+def test_an_entry_renders_the_same_bytes_from_a_plan_reloaded_out_of_jsonb() -> None:
+    """A plan's prefix re-renders from its persisted specs, and jsonb keeps no key order."""
+    declared = _discovered("Send a message.").model_copy(
+        update={
+            "name": "mcp.mail_send.send_message",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string"},
+                    "to": {"type": "array", "items": {"type": "string"}},
+                    "body": {"type": "string"},
+                    "cc": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["to", "subject", "body"],
+            },
+        }
+    )
+    reloaded = declared.model_copy(update={"input_schema": jsonb_key_order(declared.input_schema)})
+
+    assert prefix_bytes(
+        build_prefix(agent(), [], deferred_tools=[reloaded]), [], [reloaded]
+    ) == prefix_bytes(build_prefix(agent(), [], deferred_tools=[declared]), [], [declared])
+    [_system, data] = deferred_index_items([reloaded])
+    assert _text(data).splitlines()[1] == (
+        "- mcp.mail_send.send_message(to, subject, body, cc?): Send a message."
+    )
+
+
 def test_a_long_summary_is_cut_to_one_bounded_sentence() -> None:
     [_system, data] = deferred_index_items([_discovered("word " * 80)])
 
