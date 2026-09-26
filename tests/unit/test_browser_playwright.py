@@ -70,6 +70,7 @@ async def test_observation_pipelines_slow_controls_with_bounded_concurrency() ->
     page.url = "https://site.example/login"
     page.title = AsyncMock(return_value="Sign in")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    page.evaluate = AsyncMock(return_value=[True] * len(handles))
 
     observation = await asyncio.wait_for(PythonPlaywrightRuntime()._observation(page), 1)
 
@@ -110,6 +111,7 @@ async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_con
     page.url = "https://site.example/login"
     page.title = AsyncMock(return_value="Sign in")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    page.evaluate = AsyncMock(return_value=[True])
     runtime = PythonPlaywrightRuntime()
 
     observation = await runtime._observation(page)
@@ -119,6 +121,85 @@ async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_con
     assert observation.elements[0].name == "Log in"
     assert observation.elements[0].role == "button"
     assert runtime._elements[observation.elements[0].ref] is handle
+
+
+def observed_page(handles: list[AsyncMock], flags: list[bool]) -> Mock:
+    """A page whose controls are ``handles`` and whose visibility pass returns ``flags``."""
+
+    controls = Mock(spec=Locator)
+    controls.element_handles = AsyncMock(return_value=handles)
+    body = Mock(spec=Locator)
+    body.inner_text = AsyncMock(return_value="Lesson")
+    page = Mock(spec=Page)
+    page.url = "https://site.example/lesson"
+    page.title = AsyncMock(return_value="Lesson")
+    page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    page.evaluate = AsyncMock(return_value=flags)
+    return page
+
+
+def control(name: str, *, visible: bool = True) -> AsyncMock:
+    handle = AsyncMock(spec=ElementHandle)
+    handle.is_visible.return_value = visible
+    handle.is_disabled.return_value = False
+    handle.evaluate.return_value = {"tag": "button", "role": None, "inputType": None, "name": name}
+    return handle
+
+
+async def test_hidden_controls_never_take_an_element_slot() -> None:
+    """ADR-0130 decision 8: visibility is decided before the 256-element cap."""
+
+    hidden = [control(f"Hidden {index}", visible=False) for index in range(300)]
+    visible = [control(f"Answer {index}") for index in range(5)]
+    page = observed_page(hidden + visible, [False] * 300 + [True] * 5)
+
+    observation = await PythonPlaywrightRuntime()._observation(page)
+
+    assert [element.name for element in observation.elements] == [
+        f"Answer {index}" for index in range(5)
+    ]
+    for handle in hidden:
+        handle.is_visible.assert_not_awaited()
+
+
+async def test_observation_disposes_unkept_and_replaced_handles() -> None:
+    """Handles the runtime no longer references are released in the page (decision 8)."""
+
+    first_hidden = control("Hidden", visible=False)
+    first_kept = control("Check")
+    runtime = PythonPlaywrightRuntime()
+    await runtime._observation(observed_page([first_hidden, first_kept], [False, True]))
+    first_hidden.dispose.assert_awaited_once()
+    first_kept.dispose.assert_not_awaited()
+
+    second_kept = control("Continue")
+    await runtime._observation(observed_page([second_kept], [True]))
+
+    first_kept.dispose.assert_awaited_once()
+    second_kept.dispose.assert_not_awaited()
+    assert list(runtime._elements.values()) == [second_kept]
+
+
+async def test_disposal_failures_never_fail_an_observation() -> None:
+    stale = control("Hidden", visible=False)
+    stale.dispose.side_effect = PlaywrightError("Target page, context or browser has been closed")
+
+    observation = await PythonPlaywrightRuntime()._observation(
+        observed_page([stale, control("Check")], [False, True])
+    )
+
+    assert [element.name for element in observation.elements] == ["Check"]
+
+
+async def test_observation_scans_at_most_4096_candidates() -> None:
+    handles = [control(f"Hidden {index}", visible=False) for index in range(4100)]
+    page = observed_page(handles, [False] * 4096)
+
+    await PythonPlaywrightRuntime()._observation(page)
+
+    page.evaluate.assert_awaited_once()
+    scanned = page.evaluate.await_args.args[1]
+    assert len(scanned) == 4096
 
 
 @dataclass

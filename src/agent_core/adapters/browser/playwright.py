@@ -7,7 +7,7 @@ import os
 import re
 import secrets
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
@@ -46,7 +46,14 @@ from agent_core.domain.web import is_public_https_url
 from agent_core.execution.proxy import start_browser_egress_proxy
 
 MAXIMUM_ELEMENTS = 256
+# Candidates scanned for visibility before the element cap applies (ADR-0130).
+MAXIMUM_SCANNED_ELEMENTS = 4_096
 MAXIMUM_TEXT_CHARACTERS = 262_144
+# Playwright's is_visible in one round trip: a non-empty box, not visibility:hidden.
+_VISIBLE_SCRIPT = """nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect();
+    return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden';
+})"""
 
 
 class BrowserRuntime(Protocol):
@@ -327,7 +334,13 @@ class PythonPlaywrightRuntime:
         body = page.locator("body")
         text = (await body.inner_text(timeout=5_000))[:MAXIMUM_TEXT_CHARACTERS]
         locator = page.locator("a,button,input,select,textarea,[role]")
-        snapshot = (await locator.element_handles())[:MAXIMUM_ELEMENTS]
+        found = await locator.element_handles()
+        candidates = found[:MAXIMUM_SCANNED_ELEMENTS]
+        # Hidden controls never take an element slot (ADR-0130 decision 8).
+        flags = await page.evaluate(_VISIBLE_SCRIPT, candidates)
+        snapshot = [handle for handle, visible in zip(candidates, flags, strict=True) if visible][
+            :MAXIMUM_ELEMENTS
+        ]
         slots = asyncio.Semaphore(8)
 
         async def capture(index: int, handle: ElementHandle) -> BrowserElement | None:
@@ -343,8 +356,10 @@ class PythonPlaywrightRuntime:
             if element is not None:
                 elements.append(element)
                 handles[element.ref] = handle
+        released = [*self._elements.values(), *found]
         self._revision = revision
         self._elements = handles
+        await _dispose(released, keep=handles.values())
         return BrowserObservation(
             url=page.url,
             title=await page.title(),
@@ -529,6 +544,19 @@ class PythonPlaywrightRuntime:
             self._document_session = None
             self._main_frame_id = None
             self._sign_in_entered = False
+
+
+async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHandle]) -> None:
+    """Release page-side handles the runtime no longer references (ADR-0130 decision 8)."""
+
+    kept = {id(handle) for handle in keep}
+    released = {id(handle): handle for handle in handles if id(handle) not in kept}
+
+    async def release(handle: ElementHandle) -> None:
+        with suppress(PlaywrightError):
+            await handle.dispose()
+
+    await asyncio.gather(*(release(handle) for handle in released.values()))
 
 
 def _default_role(tag: str, input_type: str | None) -> str:
