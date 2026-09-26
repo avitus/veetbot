@@ -91,7 +91,11 @@ async def test_an_arrow_key_cannot_reach_a_radio_that_kept_focus() -> None:
     assert state == [True, False]
 
 
-# The covered field hands focus away as soon as it takes it.
+# The covered field hands focus away as soon as it takes it. The handoff is a
+# microtask, so it always runs after the focus check that focused the field and
+# before the next key or text arrives. A timer would race the keyboard: when
+# the key or text arrives first, it goes to the covered field and the handoff
+# is never exercised.
 FOCUS_HANDOFF = """<!doctype html><html><head><title>Lesson</title></head><body>
 <input type="text" id="answer" aria-label="Answer">
 <form method="post" action="/courses/remove-course">
@@ -99,7 +103,7 @@ FOCUS_HANDOFF = """<!doctype html><html><head><title>Lesson</title></head><body>
 </form>
 <script>
 document.getElementById('answer').addEventListener('focus', () => {
-  setTimeout(() => document.getElementById(window.handoff).focus(), 0);
+  queueMicrotask(() => document.getElementById(window.handoff).focus());
 });
 window.handoff = 'check';
 </script>
