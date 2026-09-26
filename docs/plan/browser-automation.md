@@ -931,12 +931,12 @@ server-authored words, a closed role word, and the page host and path. Its
 arguments are a view, not the action: the action kind, the page origin and path
 (never the query or fragment), and, quoted as website content, the page title,
 element role, accessible name, the element's visible text when it differs,
-and the enclosing dialog name; plus the key, scroll distance, chosen option,
-or typed text. Typed text is shown so the owner can judge it, except that a
-password, one-time-code, or payment field and any credential-shaped value are
-redacted; text over 512 characters carries its digest. The view never contains
-the element reference or page revision. When the worker can no longer describe
-the element, the view says so and makes no offer.
+the enclosing dialog name, and the chosen option; plus the key, scroll
+distance, or typed text. Typed text is shown so the owner can judge it, except
+that a password, one-time-code, or payment field and any credential-shaped
+value are redacted; text over 512 characters carries its digest. The view never
+contains the element reference or page revision. When the worker can no longer
+describe the element, the view says so and makes no offer.
 
 ## Reliability and retries
 
