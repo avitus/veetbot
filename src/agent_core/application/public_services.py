@@ -45,6 +45,7 @@ from agent_core.domain.artifacts import (
 )
 from agent_core.domain.attachments import upload_key, upload_media_type, upload_name
 from agent_core.domain.browser import BrowserProfileStatus
+from agent_core.domain.browser_task_grants import TaskGrantEcho
 from agent_core.domain.canonical import canonical_json
 from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
@@ -1356,9 +1357,19 @@ class PublicApprovalService:
         decision: ApprovalResolutionType,
         reason: str | None,
         *,
+        task_grant: TaskGrantEcho | None = None,
         lease: WorkerLease | None = None,
     ) -> ApprovalView:
         require_scope(principal, "approval.resolve")
+        if decision is ApprovalResolutionType.APPROVE_FOR_TASK:
+            # ADR-0129: creating a task grant needs the grant scope too, checked
+            # before any read; with no task grants composed nothing is read.
+            require_scope(principal, "browser.grant.write")
+            raise ConflictError(
+                "Allow for this task is not available.",
+                reason="task_grant_unavailable",
+                details={"approval_id": str(approval_id)},
+            )
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, principal)

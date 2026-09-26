@@ -80,6 +80,8 @@ from agent_core.domain.approvals import (
     ApprovalResolutionState,
     ApprovalResolutionType,
     ApprovalStatus,
+    approval_resolution_document,
+    approval_status_for,
 )
 from agent_core.domain.artifacts import (
     REPLY_ATTACHMENT_ORIGINS,
@@ -1469,6 +1471,8 @@ class PostgresApprovalRepository:
         principal: Principal,
         resolution: ApprovalResolutionType,
         reason: str | None,
+        *,
+        task_grant_id: UUID | None = None,
     ) -> ApprovalResolutionOutcome:
         row = (
             await self._session.scalars(
@@ -1490,11 +1494,6 @@ class PostgresApprovalRepository:
                 else ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY
             )
             return ApprovalResolutionOutcome(state=state, approval=current)
-        status = (
-            ApprovalStatus.APPROVED
-            if resolution is ApprovalResolutionType.APPROVE_ONCE
-            else ApprovalStatus.DENIED
-        )
         updated_row = (
             await self._session.scalars(
                 update(ApprovalRow)
@@ -1503,8 +1502,8 @@ class PostgresApprovalRepository:
                     ApprovalRow.status == ApprovalStatus.PENDING.value,
                 )
                 .values(
-                    status=status.value,
-                    resolution={"resolution": resolution.value, "reason": reason},
+                    status=approval_status_for(resolution).value,
+                    resolution=approval_resolution_document(resolution, reason, task_grant_id),
                     resolved_at=self._clock.now(),
                     resolved_by=principal.principal_id,
                 )

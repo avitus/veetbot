@@ -68,6 +68,7 @@ from agent_core.domain.browser import (
     BrowserProfileView,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_task_grants import TaskGrantEcho
 from agent_core.domain.devices import (
     DeviceCapability,
     DeviceInvocationStatus,
@@ -277,6 +278,17 @@ class ResolveApprovalRequest(BaseModel):
 
     decision: ApprovalResolutionType
     reason: str | None = Field(default=None, max_length=APPROVAL_REASON_MAX_LENGTH)
+    # ADR-0129: the offer's origin and prefix, repeated exactly when the owner
+    # allows the action for the task.
+    task_grant: TaskGrantEcho | None = None
+
+    @model_validator(mode="after")
+    def _task_grant_only_with_approve_for_task(self) -> "ResolveApprovalRequest":
+        if (self.task_grant is not None) != (
+            self.decision is ApprovalResolutionType.APPROVE_FOR_TASK
+        ):
+            raise ValueError("task_grant is required exactly with approve_for_task")
+        return self
 
 
 class CreateBrowserProfileRequest(BaseModel):
@@ -895,7 +907,7 @@ def create_app(
     ) -> ApprovalView:
         """Resolve the exact approval through the governed decision service."""
         return await services.approvals.resolve(
-            authenticated, approval_id, body.decision, body.reason
+            authenticated, approval_id, body.decision, body.reason, task_grant=body.task_grant
         )
 
     @app.get(

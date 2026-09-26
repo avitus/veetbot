@@ -3,6 +3,7 @@ from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.memory import InMemoryApprovalRepository
+from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import (
     ApprovalCursor,
     ApprovalRequest,
@@ -10,12 +11,14 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
+from agent_core.domain.browser_task_grants import task_grant_id_for_approval
 from agent_core.domain.policies import (
     ActionKind,
     PolicyDecision,
     PolicyDecisionType,
     RiskLevel,
 )
+from agent_core.ports.repositories import ApprovalRepository
 from tests.contract.support import NOW, PRINCIPAL_ID, RUN_ID, SESSION_ID, TENANT, principal
 
 
@@ -109,3 +112,59 @@ async def test_approval_repository_paginates_by_its_cursor_and_expires_one_tenan
     assert (
         await repository.get(foreign.id, principal().model_copy(update={"tenant_id": "tenant-b"}))
     ).status is ApprovalStatus.PENDING
+
+
+async def assert_approve_for_task_resolves_to_approved(
+    repository: ApprovalRepository, approval_id: UUID, owner: Principal
+) -> None:
+    """ADR-0129: approve_for_task approves the action and records its grant.
+
+    Any resolution other than approve_once used to be stored as denied, which
+    would have silently refused the owner's approval.
+    """
+
+    grant_id = task_grant_id_for_approval(approval_id)
+    first = await repository.resolve(
+        approval_id,
+        owner,
+        ApprovalResolutionType.APPROVE_FOR_TASK,
+        "lesson",
+        task_grant_id=grant_id,
+    )
+    stored = await repository.get(approval_id, owner)
+    same = await repository.resolve(
+        approval_id,
+        owner,
+        ApprovalResolutionType.APPROVE_FOR_TASK,
+        "lesson",
+        task_grant_id=grant_id,
+    )
+    once = await repository.resolve(approval_id, owner, ApprovalResolutionType.APPROVE_ONCE, None)
+
+    assert first.state is ApprovalResolutionState.APPLIED
+    assert (stored.status, stored.resolution, stored.task_grant_id) == (
+        ApprovalStatus.APPROVED,
+        ApprovalResolutionType.APPROVE_FOR_TASK,
+        grant_id,
+    )
+    assert stored.resolution_reason == "lesson"
+    assert same.state is ApprovalResolutionState.ALREADY_RESOLVED_IDENTICALLY
+    assert same.approval.task_grant_id == grant_id
+    assert once.state is ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY
+
+
+async def test_approve_for_task_resolves_to_approved() -> None:
+    repository = InMemoryApprovalRepository(FixedClock(NOW))
+    created = await repository.create(request())
+
+    await assert_approve_for_task_resolves_to_approved(repository, created.id, principal())
+
+
+async def test_approve_once_records_no_task_grant() -> None:
+    repository = InMemoryApprovalRepository(FixedClock(NOW))
+    created = await repository.create(request())
+
+    await repository.resolve(created.id, principal(), ApprovalResolutionType.APPROVE_ONCE, None)
+
+    stored = await repository.get(created.id, principal())
+    assert (stored.status, stored.task_grant_id) == (ApprovalStatus.APPROVED, None)

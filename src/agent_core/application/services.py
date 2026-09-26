@@ -16,6 +16,7 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
+from agent_core.domain.browser_task_grants import TaskGrantEcho
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
@@ -163,6 +164,8 @@ class ApprovalService(Protocol):
         approval_id: UUID,
         decision: ApprovalResolutionType,
         reason: str | None,
+        *,
+        task_grant: TaskGrantEcho | None = None,
     ) -> ApprovalView: ...
 
 

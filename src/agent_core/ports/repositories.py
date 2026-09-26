@@ -178,6 +178,8 @@ class ApprovalRepository(Protocol):
         principal: Principal,
         resolution: ApprovalResolutionType,
         reason: str | None,
+        *,
+        task_grant_id: UUID | None = None,
     ) -> ApprovalResolutionOutcome: ...
 
     async def expire_due(

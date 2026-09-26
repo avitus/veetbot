@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from agent_core.domain.browser_task_grants import BrowserTaskGrantOffer, TaskGrantNotCovered
 from agent_core.domain.policies import ActionKind, PolicyDecision, RiskLevel
 
 
@@ -22,7 +23,33 @@ class ApprovalStatus(StrEnum):
 
 class ApprovalResolutionType(StrEnum):
     APPROVE_ONCE = "approve_once"
+    # ADR-0129: approve the pending browser action once and create a
+    # session-bound task grant from the approval's offer.
+    APPROVE_FOR_TASK = "approve_for_task"
     DENY = "deny"
+
+
+# Resolutions that approve the pending action. Every other resolution denies.
+APPROVING_RESOLUTIONS = frozenset(
+    {ApprovalResolutionType.APPROVE_ONCE, ApprovalResolutionType.APPROVE_FOR_TASK}
+)
+
+
+def approval_status_for(resolution: ApprovalResolutionType) -> ApprovalStatus:
+    """The stored status a resolution produces (ADR-0129: both approvals approve)."""
+
+    return ApprovalStatus.APPROVED if resolution in APPROVING_RESOLUTIONS else ApprovalStatus.DENIED
+
+
+def approval_resolution_document(
+    resolution: ApprovalResolutionType, reason: str | None, task_grant_id: UUID | None
+) -> dict[str, Any]:
+    """The persisted resolution record; only a task approval names its grant."""
+
+    document: dict[str, Any] = {"resolution": resolution.value, "reason": reason}
+    if task_grant_id is not None:
+        document["task_grant_id"] = str(task_grant_id)
+    return document
 
 
 class ApprovalResolutionState(StrEnum):
@@ -62,6 +89,12 @@ class ApprovalRequest(BaseModel):
     created_at: datetime
     resolved_at: datetime | None = None
     resolved_by: str | None = None
+    # ADR-0129: the server-authored task-grant offer shown on a browser.act
+    # card, why the session's active grant did not cover the action, and the
+    # grant an approve_for_task resolution created. Older records carry none.
+    task_grant_offer: BrowserTaskGrantOffer | None = None
+    task_grant_not_covered: TaskGrantNotCovered | None = None
+    task_grant_id: UUID | None = None
 
 
 class ApprovalResolutionOutcome(BaseModel):

@@ -35,7 +35,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec
-from agent_core.domain.approvals import ApprovalRequest
+from agent_core.domain.approvals import ApprovalRequest, approval_resolution_document
 from agent_core.domain.delegations import Delegation
 from agent_core.domain.devices import (
     Device,
@@ -590,6 +590,9 @@ def approval_to_domain(row: ApprovalRow) -> ApprovalRequest:
             "status": row.status,
             "resolution": (None if row.resolution is None else row.resolution.get("resolution")),
             "resolution_reason": (None if row.resolution is None else row.resolution.get("reason")),
+            "task_grant_id": (
+                None if row.resolution is None else row.resolution.get("task_grant_id")
+            ),
             "revalidated_policy_version": row.revalidated_policy_version,
             "resolved_at": row.resolved_at,
             "resolved_by": row.resolved_by,
@@ -616,7 +619,9 @@ def approval_values(request: ApprovalRequest) -> dict[str, Any]:
         "resolution": (
             None
             if request.resolution is None
-            else {"resolution": request.resolution.value, "reason": request.resolution_reason}
+            else approval_resolution_document(
+                request.resolution, request.resolution_reason, request.task_grant_id
+            )
         ),
         "expires_at": request.expires_at,
         "created_at": request.created_at,
