@@ -899,11 +899,13 @@ credential-shaped value. A task grant never covers a named consequence; a
 credential, one-time-code, payment, or identity field; an unnamed element; a
 link or form target outside the origin or prefix or with a sensitive path
 segment; a download link or file input; or a page outside the prefix or with a
-sensitive path segment. A path segment is sensitive when it matches the
-exclusion vocabulary or names an administrative, authentication, pricing, or
-messaging area. The worker checks coverage against the observation that named
-the element; the isolated runtime repeats it against the live page and refuses
-with `tool.browser.grant_not_applicable`.
+sensitive path segment. Any click on an element in a form, and Enter or Space
+pressed on one, counts as a submission whatever the element's role. A path
+segment is sensitive when it matches the exclusion vocabulary or names an
+administrative, authentication, pricing, or messaging area. The worker checks
+coverage against the observation that named the element; the isolated runtime
+repeats it against the live page and refuses with
+`tool.browser.grant_not_applicable`.
 
 `browser.task_grant.created`, `tool.call.authorized` (with the grant id, use
 ordinal, and the approval view of the action), and exactly one

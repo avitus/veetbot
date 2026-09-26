@@ -133,6 +133,8 @@ _UNCLICKABLE_FIELDS = frozenset(
     }
 )
 _NAVIGATING_KINDS = frozenset({BrowserActionKind.CLICK, BrowserActionKind.PRESS})
+# Enter submits a form from a field or a button; Space activates a focused button.
+_SUBMITTING_KEYS = frozenset({BrowserKey.ENTER, BrowserKey.SPACE})
 # Coverage rule 8's per-action cap; a task grant's constraint carries the same.
 MAXIMUM_COVERED_TEXT_CHARACTERS = 256
 _CONSONANTS = frozenset("bcdfghjklmnpqrstvwxyz")
@@ -407,9 +409,11 @@ def task_grant_coverage(
     link = facts.link_target
     if kind in _NAVIGATING_KINDS and link is not None and not _target_inside(link, path_prefix):
         return _refused(consequence, "link_outside_prefix")
+    # Any click may land on a submit button, whatever its role or its field
+    # kind, so every click on an element with a form counts as a submission.
     form = facts.form_target
-    submits = (kind is BrowserActionKind.CLICK and field is BrowserFieldKind.NONE) or (
-        kind is BrowserActionKind.PRESS and action.key is BrowserKey.ENTER
+    submits = kind is BrowserActionKind.CLICK or (
+        kind is BrowserActionKind.PRESS and action.key in _SUBMITTING_KEYS
     )
     if submits and form is not None and not _target_inside(form, path_prefix):
         return _refused(consequence, "form_outside_prefix")

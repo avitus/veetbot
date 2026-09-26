@@ -1325,3 +1325,82 @@ async def test_refusal_forgets_the_revision() -> None:
     assert stale.value.reason_code == "tool.browser.page_changed"
     assert clicks == []
     assert forgotten is None
+
+
+@asynccontextmanager
+async def lesson_pages(
+    pages: dict[str, str],
+) -> AsyncIterator[tuple[RealBrowserRuntime, dict[str, BrowserObservation], list[str]]]:
+    """Serve ``pages`` on the lesson prefix and record every request that leaves them."""
+
+    require_real_browser()
+    left: list[str] = []
+
+    async def page(request: Request) -> Response:
+        return HTMLResponse(pages[request.url.path])
+
+    async def elsewhere(request: Request) -> Response:
+        if request.url.path != "/favicon.ico":
+            left.append(f"{request.method} {request.url.path}")
+        return HTMLResponse("<!doctype html><title>Elsewhere</title><p>Elsewhere</p>")
+
+    routes = [Route(path, page) for path in pages]
+    routes.append(Route("/{rest:path}", elsewhere, methods=["GET", "POST"]))
+    async with local_https_site(Starlette(routes=routes)) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            observed = {path: await runtime.navigate(site.url(path)) for path in pages}
+            yield runtime, observed, left
+        finally:
+            await runtime.close()
+
+
+def _ref(observation: BrowserObservation, name: str, *, role: str | None = None) -> str:
+    return next(
+        element.ref
+        for element in observation.elements
+        if element.name == name and (role is None or element.role == role)
+    )
+
+
+def _press(observation: BrowserObservation, name: str, key: str) -> BrowserAction:
+    return BrowserAction.model_validate(
+        {
+            "kind": "press",
+            "expected_revision": observation.revision,
+            "ref": _ref(observation, name),
+            "key": key,
+        }
+    )
+
+
+def _click_named(
+    observation: BrowserObservation, name: str, *, role: str | None = None
+) -> BrowserAction:
+    return BrowserAction(
+        kind=BrowserActionKind.CLICK,
+        expected_revision=observation.revision,
+        ref=_ref(observation, name, role=role),
+    )
+
+
+SUBMITTING_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<form method="post" action="/courses/remove-course">
+<button type="submit">Check</button>
+<button type="submit" role="radio" aria-checked="false">Spanish</button>
+</form>
+</body></html>"""
+
+
+async def test_space_and_choice_role_submissions_off_the_prefix_are_refused() -> None:
+    """Rule 11: Space on a submit button, or a click on one with a choice role, submits."""
+
+    async with lesson_pages({"/lesson/1": SUBMITTING_PAGE}) as (runtime, observed, left):
+        page = observed["/lesson/1"]
+        space = await _refused(runtime, _press(page, "Check", "Space"))
+        page = await runtime.observe()
+        choice = await _refused(runtime, _click_named(page, "Spanish"))
+
+    assert space.reason_code == choice.reason_code == "tool.browser.grant_not_applicable"
+    assert left == []

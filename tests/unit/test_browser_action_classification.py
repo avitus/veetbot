@@ -551,6 +551,72 @@ def test_task_grant_coverage_names_the_first_failing_rule() -> None:
     assert cases["an answer tile"][0][2] is C.UNKNOWN
 
 
+def test_every_form_submission_is_checked_against_the_prefix() -> None:
+    """Rule 11: any click, and Enter or Space, can submit the element's form.
+
+    A submit button keeps its form's target whatever its ARIA role, and Space
+    on a focused submit button submits as a click does (review finding).
+    """
+
+    outside = BrowserTargetFacts(same_origin=True, first_segment="courses", sensitive_path=True)
+    inside = BrowserTargetFacts(same_origin=True, first_segment="lesson", sensitive_path=False)
+
+    def press(key: BrowserKey) -> BrowserAction:
+        return click(kind=BrowserActionKind.PRESS, key=key)
+
+    cases: dict[str, tuple[tuple[bool, str | None, C], tuple[bool, str | None]]] = {
+        "Space on a submit button": (
+            cover(press(BrowserKey.SPACE), labels=("Check",), element=facts(form_target=outside)),
+            (False, "form_outside_prefix"),
+        ),
+        "Enter on a submit button": (
+            cover(press(BrowserKey.ENTER), labels=("Check",), element=facts(form_target=outside)),
+            (False, "form_outside_prefix"),
+        ),
+        "a click on a submit button with a choice role": (
+            cover(
+                labels=("Spanish",),
+                role="radio",
+                element=facts(field_kind=BrowserFieldKind.CHOICE, form_target=outside),
+            ),
+            (False, "form_outside_prefix"),
+        ),
+        "a click on a text field in a form off the prefix": (
+            cover(
+                labels=("Answer",),
+                element=facts(field_kind=BrowserFieldKind.TEXT, form_target=outside),
+            ),
+            (False, "form_outside_prefix"),
+        ),
+        "Space on a submit button inside the prefix": (
+            cover(press(BrowserKey.SPACE), labels=("Check",), element=facts(form_target=inside)),
+            (True, None),
+        ),
+        "a choice-role submit button inside the prefix": (
+            cover(
+                labels=("Spanish",),
+                role="radio",
+                element=facts(field_kind=BrowserFieldKind.CHOICE, form_target=inside),
+            ),
+            (True, None),
+        ),
+        "an arrow key in a text field in a form off the prefix": (
+            cover(
+                press(BrowserKey.ARROW_LEFT),
+                labels=("Answer",),
+                element=facts(field_kind=BrowserFieldKind.TEXT, form_target=outside),
+            ),
+            (True, None),
+        ),
+        "Escape on a button in a form off the prefix": (
+            cover(press(BrowserKey.ESCAPE), labels=("Check",), element=facts(form_target=outside)),
+            (True, None),
+        ),
+    }
+    wrong = {name: found[:2] for name, (found, expected) in cases.items() if found[:2] != expected}
+    assert wrong == {}
+
+
 def test_standing_ceiling_covers_only_routine_actions_on_its_origins() -> None:
     def ceiling(*labels: str, page_url: str = LESSON) -> tuple[bool, str | None]:
         coverage = standing_ceiling_coverage(

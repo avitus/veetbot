@@ -166,7 +166,9 @@ change needs the owner's explicit approval, and the owner has given it.
      - credential, one-time-code, payment or identity fields;
      - unnamed elements;
      - links or form submissions whose target leaves the origin or the
-       prefix, or has a sensitive path segment;
+       prefix, or has a sensitive path segment. Any click on an element in a
+       form, and Enter or Space pressed on one, counts as a submission,
+       whatever the element's role;
      - download links and file inputs;
      - a page outside the prefix, or one with a sensitive path segment.
    - Credential and one-time-code fields stay refused outright, as before.
