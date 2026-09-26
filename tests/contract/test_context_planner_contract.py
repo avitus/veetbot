@@ -471,6 +471,59 @@ async def test_context_planner_defers_overflow_and_records_what_the_index_cannot
     assert "- system.current_time(timezone?): " in part.text
 
 
+async def test_context_planner_ranks_required_session_tools_first_and_never_defers_them() -> None:
+    """ADR-0130: a required tool keeps its definition over configured order and
+    over the agent's own deferred list; one that cannot fit fails the plan."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    config["classes"]["tool_definitions"]["max_items"] = 3
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    registry.register(CalculatorTool())
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": ["web.fetch", "system.current_time", "math.calculate", "tool.call"],
+            "metadata": {"deferred_tools": ["math.calculate"]},
+        }
+    )
+
+    def planner(required: frozenset[str], factory: MemoryUnitOfWorkFactory) -> EventContextPlanner:
+        return EventContextPlanner(
+            factory,
+            registry,
+            ConservativeTokenEstimator(),
+            clock,
+            principal(),
+            config,
+            policy_version="contract-policy@1",
+            session_required_tools=lambda _session: required,
+        )
+
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    plan = await planner(frozenset({"math.calculate", "system.current_time"}), factory).plan(
+        session(), configured_agent, principal(), model
+    )
+
+    # math.calculate is named deferred by the agent, and required by the session.
+    assert plan.tool_names == ("math.calculate", "system.current_time", "web.fetch")
+    assert plan.deferred_tool_names == ()
+
+    config["classes"]["tool_definitions"]["max_items"] = 2
+    _clock, fresh, _service, _retriever = await formation_stack()
+    required = frozenset({"math.calculate", "system.current_time", "web.fetch"})
+    with pytest.raises(ValueError, match=r"system\.current_time, web\.fetch"):
+        await planner(required, fresh).plan(
+            session(),
+            configured_agent,
+            principal(),
+            model,
+        )
+
+
 async def test_context_planner_keeps_a_plan_from_an_equivalent_earlier_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

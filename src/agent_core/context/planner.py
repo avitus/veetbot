@@ -72,6 +72,9 @@ _READ_SIDE_EFFECTS = frozenset(
 )
 
 type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
+# ADR-0130: tool names a session must define in full, ranked ahead of every
+# configured tool and never deferred.
+type SessionRequiredTools = Callable[[Session], frozenset[str]]
 type DeviceToolAttach = Callable[[UUID, Principal], Awaitable[None]]
 
 
@@ -165,6 +168,7 @@ class EventContextPlanner:
         skill_catalogs: SkillCatalog | None = None,
         memory_retriever: MemoryRetriever | None = None,
         session_tool_filter: SessionToolFilter | None = None,
+        session_required_tools: SessionRequiredTools | None = None,
         attach_device_tools: DeviceToolAttach | None = None,
         snapshot_profiles: SnapshotProfiles | None = None,
         cache_capacity: int = 1_024,
@@ -181,6 +185,7 @@ class EventContextPlanner:
         self._skill_catalogs = skill_catalogs
         self._memory_retriever = memory_retriever
         self._session_tool_filter = session_tool_filter
+        self._session_required_tools = session_required_tools
         self._attach_device_tools = attach_device_tools
         self._snapshot_profiles = (
             SnapshotProfiles() if snapshot_profiles is None else snapshot_profiles
@@ -475,15 +480,37 @@ class EventContextPlanner:
             ),
             key=lambda tool: configured_order[tool.name],
         )
+        # ADR-0130: tools the session requires rank first, by name, and are
+        # never deferred, whatever the configuration names.
+        required_names = (
+            frozenset()
+            if self._session_required_tools is None
+            else self._session_required_tools(session)
+            & {tool.name for tool in tools if tool.name != _TOOL_CALL_TOOL_NAME}
+        )
+        required = sorted(
+            (tool for tool in tools if tool.name in required_names), key=lambda tool: tool.name
+        )
         explicitly_deferred = [
             tool
             for tool in configured
-            if tool.name in requested_deferred and tool.kind is not ToolKind.CONTROL
+            if tool.name in requested_deferred
+            and tool.kind is not ToolKind.CONTROL
+            and tool.name not in required_names
         ]
         ranked = [
-            *(tool for tool in configured if tool not in explicitly_deferred),
+            *required,
+            *(
+                tool
+                for tool in configured
+                if tool not in explicitly_deferred and tool.name not in required_names
+            ),
             *sorted(
-                (tool for tool in tools if tool.name not in configured_order),
+                (
+                    tool
+                    for tool in tools
+                    if tool.name not in configured_order and tool.name not in required_names
+                ),
                 key=_discovered_rank,
             ),
         ]
@@ -517,6 +544,13 @@ class EventContextPlanner:
             assert control is not None
             # tool.call takes a definition slot only when something is deferred.
             selected_tools, overflow = select([control])
+        missing_required = required_names - {tool.name for tool in selected_tools}
+        if missing_required:
+            # Explicit capabilities still fail at plan time (ADR-0130).
+            raise ValueError(
+                "required session tools do not fit the tool-definition cap: "
+                + ", ".join(sorted(missing_required))
+            )
         index_candidates = [*explicitly_deferred, *overflow] if deferring else []
         skipped_tools: list[ToolSpec] = [] if deferring else list(overflow)
         deferred_tools: list[ToolSpec] = []

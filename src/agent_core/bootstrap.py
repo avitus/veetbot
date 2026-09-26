@@ -792,6 +792,16 @@ def _session_tool_filter(
     return filter_tools
 
 
+def _session_required_tools(session: Session) -> frozenset[str]:
+    """ADR-0130: a chat bound to a website profile always defines the browser
+    tools, so the item cap can never push them into the deferred index."""
+
+    selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+    if isinstance(selected_profile, str) and selected_profile:
+        return _BROWSER_TOOL_NAMES
+    return frozenset()
+
+
 def _run_limits_from_defaults(run_defaults: Mapping[str, Any]) -> RunLimits:
     return RunLimits(
         max_steps=int(run_defaults["max_steps"]),
@@ -3191,6 +3201,7 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
             session_tool_filter=_session_tool_filter(browser_provider),
+            session_required_tools=_session_required_tools,
             attach_device_tools=attach_device_tools,
             snapshot_profiles=memory_profiles.snapshots,
         )

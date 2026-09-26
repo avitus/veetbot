@@ -414,6 +414,87 @@ async def test_chat_pinned_before_the_overlay_keeps_the_interactive_limits() -> 
     assert run.limits == INTERACTIVE_LIMITS
 
 
+REQUIRED_TOOLS_ENABLED = [
+    "web.fetch",
+    "system.current_time",
+    "math.calculate",
+    "browser.navigate",
+    "browser.observe",
+    "browser.act",
+    "tool.call",
+]
+
+
+async def _plan_with_four_definitions(tmp_path: Path, *, bound: bool) -> dict[str, object]:
+    overlay = tmp_path / "context" / "plan.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("classes:\n  tool_definitions:\n    max_items: 4\n", encoding="utf-8")
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            "AGENT_CONFIG_DIR": str(tmp_path),
+        }
+    )
+    provider = FakeWebProvider()
+    async with build(
+        settings=settings,
+        script=one_text_turn(),
+        enabled_tools=REQUIRED_TOOLS_ENABLED,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal,
+            "general",
+            {},
+            browser_profile_id=PROFILE_ID if bound else None,
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+        assert run.status is RunStatus.COMPLETED
+        return await context_plan_payload(composition, created.id)
+
+
+async def test_bound_chat_defines_the_browser_tools_ahead_of_every_configured_tool(
+    tmp_path: Path,
+) -> None:
+    """ADR-0130 decision 6: the item cap never defers a bound chat's browser tools."""
+
+    plan = await _plan_with_four_definitions(tmp_path, bound=True)
+
+    assert set(cast(list[str], plan["tool_names"])) == {
+        "tool.call",
+        "browser.navigate",
+        "browser.observe",
+        "browser.act",
+    }
+    assert set(cast(list[str], plan["deferred_tool_names"])) == {
+        "web.fetch",
+        "system.current_time",
+        "math.calculate",
+    }
+    assert tuple(cast(list[str], plan["skipped_tool_names"])) == ()
+
+
+async def test_unbound_chat_keeps_its_configured_tools_under_the_same_cap(
+    tmp_path: Path,
+) -> None:
+    plan = await _plan_with_four_definitions(tmp_path, bound=False)
+
+    assert {"web.fetch", "system.current_time", "math.calculate"} <= set(
+        cast(list[str], plan["tool_names"])
+    )
+    assert not set(cast(list[str], plan["tool_names"])) & {
+        "browser.navigate",
+        "browser.observe",
+        "browser.act",
+    }
+
+
 async def test_session_creation_binds_only_a_ready_principal_owned_browser_profile() -> None:
     settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
 
