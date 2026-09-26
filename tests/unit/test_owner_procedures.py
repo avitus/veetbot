@@ -126,7 +126,8 @@ async def test_handoff_location_check_tells_a_missing_location_from_a_live_one(
     url = next(argument for argument in arguments if argument.startswith("https://"))
     path = url.removeprefix("https://browser.veetbot.com")
 
-    assert re.fullmatch(location.group(1), path), url
+    # The location ends at PCRE's \z, which is Python's \Z (Python 3.12 has no \z).
+    assert re.fullmatch(location.group(1).replace("\\z", "\\Z"), path), url
     assert _nginx_limit(vhost_limit.group(1)) < len(body) <= _nginx_limit(handoff_limit.group(1)), (
         f"a {len(body)}-byte body passes both locations, so a missing handoff "
         f"location also answers 401; it must exceed the virtual host's {vhost_limit.group(1)}"
