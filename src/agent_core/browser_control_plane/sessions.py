@@ -34,6 +34,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
+    BrowserDispatchConstraint,
     BrowserElementFacts,
     BrowserInteractiveEvent,
     BrowserLease,
@@ -151,6 +152,14 @@ class BrowserSessionRuntime(Protocol):
     async def observe(self) -> BrowserObservation: ...
 
     async def act(self, action: BrowserAction) -> BrowserObservation: ...
+
+    async def act_within_grant(
+        self,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> BrowserObservation: ...
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
 
@@ -272,8 +281,12 @@ class HostedProfileSessionService:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
-        return (await self.act_snapshot(lease_ref, action, sequence=sequence)).observation
+        snapshot = await self.act_snapshot(
+            lease_ref, action, sequence=sequence, constraint=constraint
+        )
+        return snapshot.observation
 
     async def navigate_snapshot(self, lease_ref: str, url: str) -> BrowserSnapshot:
         """Navigate, returning the observation and its element facts (ADR-0129)."""
@@ -298,15 +311,32 @@ class HostedProfileSessionService:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserSnapshot:
+        """Act once on the lease; a grant's constraint can only refuse (ADR-0129).
+
+        Inside the lease lock and after the sequence check, a constraint that
+        has expired or names an origin outside the lease is refused, and the
+        runtime rechecks the live page under it. Every refusal leaves the
+        sequence where it was.
+        """
         state = await self._require_lease(lease_ref)
         async with state.lock:
             if state.closed:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             if sequence != state.sequence + 1:
                 raise ConflictError("browser lease action sequence is invalid")
+            now = self._now()
+            if constraint is not None and (
+                now >= constraint.not_after
+                or not set(constraint.origins) <= set(state.identity.allowed_origins)
+            ):
+                raise BrowserProviderError("tool.browser.grant_not_applicable", retryable=False)
             try:
-                observation = await state.runtime.act(action)
+                if constraint is None:
+                    observation = await state.runtime.act(action)
+                else:
+                    observation = await state.runtime.act_within_grant(action, constraint, now=now)
             except BrowserProviderError:
                 raise
             except Exception as exc:

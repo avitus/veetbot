@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 import pytest
@@ -14,7 +15,9 @@ from agent_core.browser_control_plane.runtime import (
 )
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
     BrowserElementFacts,
     BrowserFieldKind,
     BrowserInteractiveEvent,
@@ -40,6 +43,9 @@ class FakeStatefulRuntime:
     storage: dict[str, object] = field(default_factory=dict)
     started: tuple[str, tuple[str, ...], dict[str, object], bool] | None = None
     closed: bool = False
+    constrained: list[tuple[BrowserDispatchConstraint | None, datetime | None]] = field(
+        default_factory=list
+    )
 
     async def start(
         self,
@@ -57,8 +63,15 @@ class FakeStatefulRuntime:
     async def observe(self) -> BrowserObservation:
         return BrowserObservation(url="https://example.org", revision="r1")
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation:
         del action
+        self.constrained.append((constraint, now))
         return BrowserObservation(url="https://example.org", revision="r2")
 
     def facts(self, revision: str) -> BrowserObservationFacts | None:
@@ -276,3 +289,29 @@ async def test_observation_carries_facts_beside_it() -> None:
 
     assert runtime.facts("r1") == facts
     assert runtime.facts("r2") is None
+
+
+async def test_a_constrained_act_reaches_the_playwright_runtime() -> None:
+    """ADR-0129: the live recheck runs where the page is, with the service's clock."""
+
+    low_level = FakeStatefulRuntime()
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+    constraint = BrowserDispatchConstraint(
+        grant_kind="task",
+        origins=("https://example.org",),
+        path_prefix="/lesson",
+        not_after=datetime(2026, 9, 25, 12, 30, tzinfo=UTC),
+        consequence_ceiling="unknown",
+        max_text_characters=256,
+    )
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
+    action = BrowserAction(kind=BrowserActionKind.CLICK, expected_revision="r1", ref="r1:0")
+
+    await runtime.act_within_grant(action, constraint, now=now)
+    await runtime.act(action)
+
+    assert low_level.constrained == [(constraint, now), (None, None)]

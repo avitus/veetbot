@@ -30,6 +30,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
     BrowserElementFacts,
     BrowserFieldKind,
     BrowserInteractiveEvent,
@@ -83,6 +84,16 @@ class FakeRuntime:
     async def act(self, action: BrowserAction) -> BrowserObservation:
         del action
         return BrowserObservation(url=self.origins[0], revision="revision-2")
+
+    async def act_within_grant(
+        self,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> BrowserObservation:
+        del constraint, now
+        return await self.act(action)
 
     def facts(self, revision: str) -> BrowserObservationFacts | None:
         """Facts for every revision this fake reports: one plain button."""

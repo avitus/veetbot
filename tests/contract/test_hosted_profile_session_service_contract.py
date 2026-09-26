@@ -32,6 +32,7 @@ from agent_core.domain.browser import (
     BrowserActionKind,
     BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
     BrowserElementFacts,
     BrowserFieldKind,
     BrowserInteractiveEvent,
@@ -87,6 +88,8 @@ class FakeSessionRuntime:
     status_checks: int = 0
     # ADR-0129: the facts this runtime reports, by observation revision.
     known_facts: dict[str, BrowserObservationFacts] = field(default_factory=dict)
+    # ADR-0129: every grant-constrained act, with the service clock it carried.
+    constrained: list[tuple[BrowserDispatchConstraint, datetime]] = field(default_factory=list)
 
     async def start(
         self,
@@ -123,6 +126,16 @@ class FakeSessionRuntime:
             url=self.allowed_origins[0] + "/current",
             revision="revision-2",
         )
+
+    async def act_within_grant(
+        self,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> BrowserObservation:
+        self.constrained.append((constraint, now))
+        return await self.act(action)
 
     @property
     def signed_in(self) -> bool:

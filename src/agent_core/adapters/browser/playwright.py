@@ -9,7 +9,8 @@ import secrets
 import tempfile
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
-from typing import Any, Literal, Protocol, cast
+from datetime import datetime
+from typing import Any, Literal, NoReturn, Protocol, cast
 from urllib.parse import urlsplit
 
 from playwright.async_api import (
@@ -36,6 +37,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserElementFacts,
     BrowserFieldKind,
@@ -49,7 +51,11 @@ from agent_core.domain.browser import (
     browser_origin,
     normalize_browser_origin,
 )
-from agent_core.domain.browser_classification import normalize_text, path_is_sensitive
+from agent_core.domain.browser_classification import (
+    dispatch_constraint_coverage,
+    normalize_text,
+    path_is_sensitive,
+)
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
 from agent_core.domain.web import is_public_https_url
 from agent_core.execution.proxy import start_browser_egress_proxy
@@ -95,7 +101,13 @@ class BrowserRuntime(Protocol):
 
     async def observe(self) -> BrowserObservation: ...
 
-    async def act(self, action: BrowserAction) -> BrowserObservation: ...
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation: ...
 
     async def close(self) -> None: ...
 
@@ -498,8 +510,20 @@ class PythonPlaywrightRuntime:
         )
         return element, _element_facts(metadata, name=element.name, page_url=page_url)
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation:
         page = self._current_page()
+        if constraint is not None and (
+            now is None
+            or now >= constraint.not_after
+            or not set(constraint.origins) <= set(self._allowed_origins)
+        ):
+            await self._refuse_grant()
         if action.expected_revision != self._revision:
             raise BrowserProviderError("tool.browser.page_changed", retryable=False)
         handle = self._elements.get(action.ref)
@@ -526,6 +550,10 @@ class PythonPlaywrightRuntime:
         ):
             raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
 
+        if constraint is not None:
+            assert now is not None
+            await self._require_live_coverage(page, handle, action, constraint, now=now)
+
         documents_before = self._main_frame_navigations
         try:
             if action.kind is BrowserActionKind.CLICK:
@@ -548,6 +576,56 @@ class PythonPlaywrightRuntime:
         # The action was sent; settling never turns it into a failure (ADR-0130).
         await self._settle(page, after_document=self._main_frame_navigations != documents_before)
         return await self._observation(page)
+
+    async def _require_live_coverage(
+        self,
+        page: Page,
+        handle: ElementHandle,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> None:
+        """Recheck a grant-authorized act against the live page before dispatch (ADR-0129).
+
+        The worker decided from the observation it was shown; this reads the
+        live URL, every live label source at full length and live facts, and
+        runs the same coverage rules. A constraint can only narrow.
+        """
+        try:
+            metadata = await handle.evaluate(_ELEMENT_SCRIPT)
+        except PlaywrightError:
+            await self._refuse_grant()
+        name = str(metadata.get("name") or "")[:1024]
+        role = str(metadata.get("role") or "") or _default_role(
+            str(metadata.get("tag") or ""), metadata.get("inputType")
+        )
+        coverage = dispatch_constraint_coverage(
+            constraint,
+            action=action,
+            page_url=page.url,
+            role=role,
+            labels=[name, *_live_labels(metadata).values()],
+            facts=_element_facts(metadata, name=name, page_url=page.url),
+            option_texts=_option_texts(metadata, action),
+            runtime_origins=self._allowed_origins,
+            now=now,
+        )
+        if not coverage.covered:
+            await self._refuse_grant()
+
+    async def _refuse_grant(self) -> NoReturn:
+        """Refuse before dispatch and forget the observation (ADR-0129 D16).
+
+        The model must observe again, so a stale reference can neither burn
+        grant uses nor, once the owner approves it, act on a changed element.
+        """
+        released = list(self._elements.values())
+        self._revision = None
+        self._elements = {}
+        self._facts = None
+        await _dispose(released, keep=())
+        raise BrowserProviderError("tool.browser.grant_not_applicable", retryable=False)
 
     async def storage_state(self) -> dict[str, object]:
         if self._context is None:
@@ -854,6 +932,18 @@ def _live_labels(metadata: dict[str, Any]) -> dict[BrowserLabelSource, str]:
     }
 
 
+def _option_texts(metadata: dict[str, Any], action: BrowserAction) -> list[str]:
+    """For a selection, the matched option's label and value, as the page has them."""
+
+    if action.kind is not BrowserActionKind.SELECT or action.value is None:
+        return []
+    options = metadata.get("options")
+    for option in options if isinstance(options, list) else []:
+        if isinstance(option, list) and len(option) == 2 and action.value in option:
+            return [str(option[0]), str(option[1])]
+    return [action.value]
+
+
 def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> BrowserElementFacts:
     """Derive one element's facts from its live attributes (ADR-0129 section 4.5)."""
 
@@ -909,6 +999,7 @@ class PlaywrightBrowserProvider:
         allowed_origins: tuple[str, ...],
         runtime: BrowserRuntime | None = None,
         proxy_factory: ProxyFactory = start_browser_egress_proxy,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         if not tenant_id:
             raise ValueError("browser provider requires a tenant")
@@ -919,6 +1010,7 @@ class PlaywrightBrowserProvider:
         self._allowed_origins = normalized
         self._runtime = runtime or PythonPlaywrightRuntime()
         self._proxy_factory = proxy_factory
+        self._now = now
         self._proxy: BrowserProxy | None = None
         self._started = False
         self._start_lock = asyncio.Lock()
@@ -990,10 +1082,24 @@ class PlaywrightBrowserProvider:
             raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
         return observation
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
         await self._start()
         try:
-            observation = await self._runtime.act(action)
+            if constraint is None:
+                observation = await self._runtime.act(action)
+            else:
+                # Without a clock the runtime cannot check the grant's expiry,
+                # so it refuses the act.
+                observation = await self._runtime.act(
+                    action,
+                    constraint=constraint,
+                    now=None if self._now is None else self._now(),
+                )
         except BrowserProviderError:
             raise
         except Exception as exc:

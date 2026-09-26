@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -26,6 +28,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
     BrowserFieldKind,
     BrowserInteractiveEvent,
     BrowserLabelSource,
@@ -218,6 +221,9 @@ class FakeRuntime:
     closed: bool = False
     fail: bool = False
     actions: list[BrowserAction] = field(default_factory=list)
+    constraints: list[tuple[BrowserDispatchConstraint | None, datetime | None]] = field(
+        default_factory=list
+    )
 
     async def start(self, proxy_url: str, allowed_origins: tuple[str, ...]) -> None:
         self.starts.append((proxy_url, allowed_origins))
@@ -236,8 +242,15 @@ class FakeRuntime:
     async def observe(self) -> BrowserObservation:
         return await self.navigate("https://example.org/current")
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation:
         self.actions.append(action)
+        self.constraints.append((constraint, now))
         return BrowserObservation(
             url="https://example.org/current",
             title="Example",
@@ -1143,3 +1156,172 @@ async def test_element_facts_classify_fields_links_forms_dialogs() -> None:
     rendered = facts.model_dump_json()
     assert "/settings" not in rendered and "checkout" in rendered
     assert "report.pdf" not in rendered and "mailto" not in rendered
+
+
+GRANT_NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
+
+
+def lesson_constraint(**overrides: Any) -> BrowserDispatchConstraint:
+    fields: dict[str, Any] = {
+        "grant_kind": "task",
+        "origins": ("https://site.test",),
+        "path_prefix": "/lesson",
+        "not_after": GRANT_NOW + timedelta(minutes=30),
+        "consequence_ceiling": "unknown",
+        "max_text_characters": 256,
+    }
+    fields.update(overrides)
+    return BrowserDispatchConstraint.model_validate(fields)
+
+
+async def test_local_provider_passes_the_constraint_to_the_runtime() -> None:
+    runtime = FakeRuntime()
+
+    async def start_proxy(policy: EgressPolicy, *, tenant_id: str) -> FakeProxy:
+        del policy, tenant_id
+        return FakeProxy()
+
+    provider = PlaywrightBrowserProvider(
+        tenant_id="tenant-a",
+        allowed_origins=("https://example.org",),
+        runtime=runtime,
+        proxy_factory=start_proxy,
+        now=lambda: GRANT_NOW,
+    )
+    action = BrowserAction(
+        kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+    )
+    constraint = lesson_constraint(origins=("https://example.org",))
+
+    await provider.act(action, constraint=constraint)
+    await provider.act(action)
+
+    assert runtime.constraints == [(constraint, GRANT_NOW), (None, None)]
+
+
+GRANT_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button id="go" onclick="window.clicks.push('go')">Continue</button>
+<button id="rename" onclick="window.clicks.push('rename')">Continue</button>
+<button id="pay" aria-label="Continue" onclick="window.clicks.push('pay')">Pay $12.99</button>
+<a id="leave" href="/settings" onclick="window.clicks.push('leave');return false">Continue</a>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+@asynccontextmanager
+async def grant_page() -> AsyncIterator[tuple[RealBrowserRuntime, BrowserObservation]]:
+    require_real_browser()
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return HTMLResponse(GRANT_PAGE)
+
+    async with local_https_site(Starlette(routes=[Route("/lesson/1", lesson)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            yield runtime, await runtime.navigate(site.url("/lesson/1"))
+        finally:
+            await runtime.close()
+
+
+def _click_on(observation: BrowserObservation, index: int) -> BrowserAction:
+    element = observation.elements[index]
+    return BrowserAction(
+        kind=BrowserActionKind.CLICK, expected_revision=observation.revision, ref=element.ref
+    )
+
+
+async def _clicks(runtime: RealBrowserRuntime) -> list[str]:
+    clicks: list[str] = await runtime._current_page().evaluate("window.clicks")
+    return clicks
+
+
+async def test_a_covered_click_dispatches_under_the_constraint() -> None:
+    async with grant_page() as (runtime, observation):
+        acted = await runtime.act(
+            _click_on(observation, 0), constraint=lesson_constraint(), now=GRANT_NOW
+        )
+        clicks = await _clicks(runtime)
+
+    assert clicks == ["go"]
+    assert acted.revision != observation.revision
+
+
+async def _refused(
+    runtime: RealBrowserRuntime, action: BrowserAction, **constraint: Any
+) -> BrowserProviderError:
+    with pytest.raises(BrowserProviderError) as raised:
+        await runtime.act(action, constraint=lesson_constraint(**constraint), now=GRANT_NOW)
+    return raised.value
+
+
+async def test_live_page_outside_prefix_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        await runtime._current_page().evaluate("history.pushState({}, '', '/settings')")
+        refusal = await _refused(runtime, _click_on(observation, 0))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_renamed_element_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        await runtime._current_page().evaluate(
+            "document.getElementById('rename').textContent = 'Buy now'"
+        )
+        refusal = await _refused(runtime, _click_on(observation, 1))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_hidden_label_source_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        assert observation.elements[2].name == "Continue"
+        refusal = await _refused(runtime, _click_on(observation, 2))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_sensitive_link_target_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        refusal = await _refused(runtime, _click_on(observation, 3))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_expired_or_foreign_constraints_are_refused_in_the_runtime() -> None:
+    async with grant_page() as (runtime, observation):
+        expired = await _refused(
+            runtime, _click_on(observation, 0), not_after=GRANT_NOW - timedelta(seconds=1)
+        )
+        observation = await runtime.observe()
+        foreign = await _refused(
+            runtime, _click_on(observation, 0), origins=("https://elsewhere.test",)
+        )
+        clicks = await _clicks(runtime)
+
+    assert expired.reason_code == foreign.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_refusal_forgets_the_revision() -> None:
+    """ADR-0129 D16: after a refusal the model must observe again."""
+
+    async with grant_page() as (runtime, observation):
+        await _refused(runtime, _click_on(observation, 3))
+        with pytest.raises(BrowserProviderError) as stale:
+            await runtime.act(_click_on(observation, 0))
+        clicks = await _clicks(runtime)
+        forgotten = runtime.facts(observation.revision)
+
+    assert stale.value.reason_code == "tool.browser.page_changed"
+    assert clicks == []
+    assert forgotten is None

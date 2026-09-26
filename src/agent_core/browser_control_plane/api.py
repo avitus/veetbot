@@ -34,6 +34,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserAuthenticationMode,
+    BrowserDispatchConstraint,
     BrowserInteractiveEvent,
     BrowserProviderError,
     BrowserSnapshot,
@@ -102,6 +103,9 @@ class _NavigateRequest(_LeaseRequest):
 class _ActRequest(_LeaseRequest):
     action: BrowserAction
     sequence: int = Field(ge=1)
+    # ADR-0129: a grant-authorized act carries what the grant allows; the
+    # service and the runtime use it only to refuse.
+    constraint: BrowserDispatchConstraint | None = None
 
 
 class _BeginAuthenticationRequest(_LifecycleRequest):
@@ -501,6 +505,7 @@ def create_profile_service_app(
                 payload.lease_ref,
                 payload.action,
                 sequence=payload.sequence,
+                constraint=payload.constraint,
             )
             return _snapshot_response(result)
 

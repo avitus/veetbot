@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserObservation,
 )
@@ -109,7 +111,14 @@ class AdapterRuntime:
             elements=(BrowserElement(ref="opaque-2", role="button", name="Continue"),),
         )
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation:
+        del constraint, now
         self.current_url = f"https://example.org/action/{action.kind.value}"
         return await self.observe()
 
