@@ -1,6 +1,7 @@
 """Milestone 10 hard gates for authenticated browser automation."""
 
 from pathlib import Path
+from uuid import UUID
 
 from agent_core.domain.browser import BrowserAuthenticationStatus
 from tests.contract import test_browser_authentication_repository_contract as auth_repository
@@ -8,6 +9,8 @@ from tests.contract import test_browser_grant_repository_contract as grant_repos
 from tests.contract import test_browser_profile_repository_contract as profile_repository
 from tests.contract import test_browser_provider_contract as provider_contract
 from tests.contract import test_browser_public_api_contract as public_api_contract
+from tests.contract import test_browser_task_grant_api_contract as task_grant_api
+from tests.contract import test_browser_task_grant_repository_contract as task_grant_repository
 from tests.contract import test_encrypted_profile_store_contract as encrypted_store
 from tests.contract import (
     test_hosted_profile_lifecycle_service_contract as lifecycle_service,
@@ -15,13 +18,20 @@ from tests.contract import (
 from tests.contract import test_hosted_profile_session_service_contract as session_service
 from tests.contract import test_profile_service_configuration_contract as service_configuration
 from tests.contract import test_profile_service_http_contract as service_http
+from tests.integration import test_browser_task_grant_pipeline as task_grant_pipeline
+from tests.unit import test_browser_act_approval_view as approval_view
+from tests.unit import test_browser_action_classification as classification
 from tests.unit import test_browser_composition as composition_contract
+from tests.unit import test_browser_dispatch_constraint as dispatch_constraint
 from tests.unit import test_browser_grants as grant_authority
 from tests.unit import test_browser_management as management_contract
 from tests.unit import test_browser_playwright as playwright_contract
 from tests.unit import test_browser_policy as policy_contract
+from tests.unit import test_browser_task_grant_authorizer as task_grant_authority
+from tests.unit import test_browser_task_grant_domain as task_grant_domain
 from tests.unit import test_browser_tools as tool_contract
 from tests.unit import test_hosted_browser_runtime as hosted_runtime
+from tests.unit import test_maintenance_task_grant_sweep as task_grant_sweep
 from tests.unit import test_persistence_schema as persistence_schema
 from tests.unit import test_toolchain as toolchain_contract
 from tests.unit.test_browser_composition import (
@@ -159,13 +169,83 @@ async def test_authentication_boundary(tmp_path: Path) -> None:
     persistence_schema.test_browser_authentications_schema_is_secret_free()
 
 
-async def test_standing_grant() -> None:
+async def test_standing_grant(tmp_path: Path) -> None:
     await grant_repository.test_in_memory_browser_grant_repository_contract()
     grant_repository.test_browser_grant_refuses_ambient_or_unbounded_authority()
     await management_contract.test_standing_grant_creation_pins_profile_agent_policy_and_approver()
     await grant_authority.test_exact_routine_action_can_replace_one_approval()
     await grant_authority.test_expired_revoked_mismatched_or_excluded_grant_fails_closed()
     await grant_authority.test_policy_allow_or_deny_is_never_overridden()
+    await grant_authority.test_standing_grant_sends_a_routine_constraint()
+    await grant_authority.test_hidden_label_source_is_not_routine_for_a_standing_grant()
     await exact_grant_pipeline()
     await revoked_grant_pipeline()
     persistence_schema.test_browser_grants_schema_contains_exact_authority_without_material()
+    await _task_grants(tmp_path)
+
+
+async def _task_grants(tmp_path: Path) -> None:
+    """ADR-0129: owner-scoped, session-bound, capped, prefix-confined, and
+    rechecked against the live page."""
+
+    # The scope, the grant's shape and its closed coverage rules.
+    task_grant_domain.test_constraint_fields_must_match_the_grant_kind()
+    task_grant_domain.test_scope_setting_refuses_multi_segment_and_duplicate_entries()
+    task_grant_domain.test_scope_contains_only_its_origin_and_prefix()
+    task_grant_domain.test_grant_window_caps_and_end_pairing_are_validated()
+    classification.test_scope_setting_refuses_a_sensitive_segment()
+    classification.test_the_old_hard_exclusions_are_named_consequences()
+    classification.test_every_label_source_is_classified_separately()
+    classification.test_task_grant_coverage_names_the_first_failing_rule()
+    classification.test_dispatch_constraints_check_expiry_and_origins_before_coverage()
+    # Created only from an approval card that offered it, inside a configured scope.
+    await approval_view.test_the_offer_copies_the_configured_scope()
+    for case in approval_view.OFFERLESS_CASES:
+        await approval_view.test_each_offer_rule_withholds_the_offer(case)
+    await task_grant_api.test_approve_for_task_approves_once_and_creates_the_grant()
+    await task_grant_api.test_task_grant_routes_exist_only_with_the_flag()
+    # Session-bound and capped, with uses that cannot race past the caps.
+    await task_grant_repository.test_one_active_grant_per_session()
+    await task_grant_repository.test_concurrent_uses_stop_at_the_action_cap()
+    await task_grant_repository.test_typed_characters_never_pass_the_grant_budget()
+    await task_grant_repository.test_no_use_after_expiry_revocation_or_in_another_session()
+    await (
+        task_grant_authority.test_a_covered_click_is_allowed_with_the_task_constraint_and_its_view()
+    )
+    await task_grant_authority.test_an_ineligible_run_is_refused(
+        {"parent_run_id": UUID(int=0xC1)}, task_grant_authority.BROWSER_TURN, None
+    )
+    await task_grant_authority.test_a_changed_pin_ends_the_grant(
+        {"generation": 4}, "agent-v1", {}, "profile_changed"
+    )
+    await task_grant_authority.test_the_composite_asks_the_standing_grant_first_and_keeps_the_specific_denial()  # noqa: E501
+    await task_grant_sweep.test_an_expired_task_grant_is_ended_once_with_an_event()
+    persistence_schema.test_browser_task_grants_schema_holds_scope_pins_and_counters_only()
+    # The isolated service rechecks every grant-authorized act before dispatch.
+    await dispatch_constraint.test_expired_constraint_is_refused_before_the_runtime_acts(
+        tmp_path / "constraint-expired"
+    )
+    await dispatch_constraint.test_refusal_leaves_the_sequence_unchanged(
+        tmp_path / "constraint-sequence"
+    )
+    await dispatch_constraint.test_constraint_on_a_foreign_lease_or_wrong_credential_is_refused_and_dispatches_nothing(  # noqa: E501
+        tmp_path / "constraint-foreign"
+    )
+    # The whole pipeline, from the approval card to the live-page recheck.
+    pipeline = tmp_path / "pipeline"
+    await task_grant_pipeline.assert_allowed_task_authorizes_the_next_acts(pipeline / "allowed")
+    await task_grant_pipeline.assert_the_two_hundred_and_first_act_asks(pipeline / "cap")
+    await task_grant_pipeline.assert_text_past_the_grant_budget_asks(pipeline / "text")
+    for ending in ("revoked", "expired"):
+        await task_grant_pipeline.assert_a_revoked_or_expired_grant_asks(pipeline / ending, ending)
+    await task_grant_pipeline.assert_another_or_scheduled_session_asks(pipeline / "sessions")
+    await task_grant_pipeline.assert_another_tool_in_the_turn_asks(pipeline / "turn")
+    await task_grant_pipeline.assert_a_destructive_button_asks(pipeline / "destructive")
+    await task_grant_pipeline.assert_a_sign_in_ends_the_grant(pipeline / "sign-in")
+    await task_grant_pipeline.assert_a_credential_shaped_type_is_denied_not_granted(
+        pipeline / "credential"
+    )
+    await task_grant_pipeline.assert_a_standing_grant_answers_first(pipeline / "standing")
+    await task_grant_pipeline.assert_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(
+        pipeline / "refusal"
+    )
