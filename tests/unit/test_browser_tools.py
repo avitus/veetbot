@@ -471,3 +471,34 @@ async def test_a_provider_that_cannot_recheck_refuses_a_constrained_act() -> Non
     assert refused.failure.reason_code == "tool.browser.grant_not_applicable"
     assert approved.ok
     assert len(provider.actions) == 1
+
+
+def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
+    """ADR-0130 decision 6: navigate and act return the settled page, so the
+    model acts on it directly instead of observing again. Versions stay."""
+
+    provider = FakeBrowserProvider()
+
+    assert BrowserNavigateTool(provider).spec.description == (
+        "Open one page in this chat's website profile and return it once it settles. "
+        "Use a full https:// URL on an origin listed as browser_origins in the runtime "
+        "metadata."
+    )
+    assert BrowserObserveTool(provider).spec.description == (
+        "Read the current page of this chat's website profile again. navigate and act "
+        "already return the settled page, so observe only to refresh a page that changes "
+        "on its own."
+    )
+    assert BrowserActTool(provider).spec.description == (
+        "Perform one action, subject to approval, on an element of the latest page "
+        "revision. The result is the page after the action settles, with a new revision "
+        "and element refs; act on it directly without observing first."
+    )
+    assert {
+        tool.spec.version
+        for tool in (
+            BrowserNavigateTool(provider),
+            BrowserObserveTool(provider),
+            BrowserActTool(provider),
+        )
+    } == {"1.0.0"}

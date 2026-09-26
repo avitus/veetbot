@@ -25,7 +25,11 @@ class BrowserObserveTool:
     spec = ToolSpec(
         name="browser.observe",
         version="1.0.0",
-        description="Observe the current rendered page in the bound browser profile.",
+        description=(
+            "Read the current page of this chat's website profile again. navigate and act "
+            "already return the settled page, so observe only to refresh a page that changes "
+            "on its own."
+        ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
         side_effect=SideEffectClass.NETWORK_READ,

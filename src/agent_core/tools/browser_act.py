@@ -151,7 +151,11 @@ class BrowserActTool:
     spec = ToolSpec(
         name="browser.act",
         version="1.0.0",
-        description="Perform one approved action on an element from the current page revision.",
+        description=(
+            "Perform one action, subject to approval, on an element of the latest page "
+            "revision. The result is the page after the action settles, with a new revision "
+            "and element refs; act on it directly without observing first."
+        ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
         side_effect=SideEffectClass.EXTERNAL_WRITE,
