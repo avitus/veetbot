@@ -416,6 +416,17 @@ Agents verify with these automated tests only. Production deploys only from
 `main`, and the owner chose to keep this work on a development branch until the
 whole lesson path is built and verified, then open one `main` pull request. The
 owner's production acceptance happens after that pull request merges and the
-macOS TestFlight build that carries the new card ships: a real lesson on the
-configured scope, run with one approval, the banner's count and Stop control,
-and a payment or settings control that still asks.
+macOS TestFlight build that carries the new card ships, in a chat bound to a
+`READY` profile on the configured scope:
+
+- **TG1:** ask for one lesson. The first `browser.act` card names the element
+  and the page and offers **Allow for this task**; after one approval the
+  lesson continues without further cards, and the banner counts actions and
+  minutes.
+- **TG2:** **Stop** on the banner ends the grant, and the next action shows a
+  card.
+- **TG3:** after allowing again, an action outside the lesson, such as a
+  payment or settings control or leaving the scope, still shows a card that
+  says why the permission does not cover it.
+- **TG4:** the lesson's activity rows that the grant authorized show "Allowed
+  by task permission" and what was clicked or typed.

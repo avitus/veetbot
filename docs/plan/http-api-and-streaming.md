@@ -206,8 +206,8 @@ code       reason                     details also carries
 conflict   active_run_exists          run_id, run_status
 conflict   idempotency_key_reused     (nothing)
 conflict   approval_already_resolved  approval_id, decision
-conflict   task_grant_unavailable     (nothing)
-conflict   task_grant_offer_mismatch  (nothing)
+conflict   task_grant_unavailable     approval_id
+conflict   task_grant_offer_mismatch  approval_id
 ```
 
 `tool_validation_error` carries `{"tool_name": ..., "errors": [...]}`

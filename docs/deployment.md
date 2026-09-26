@@ -562,12 +562,68 @@ streams the body to the browser-profile service unbuffered through an
 in-memory buffer, so it is never written to disk, allows ten seconds between
 body reads, and waits sixty seconds while the service verifies the session.
 Every TLS server block allows only TLS 1.2 and 1.3. Like every Nginx change,
-these reach production through `deploy-nginx` after the release.
+these reach production through `deploy-nginx` after the release. Once it has
+run, check the handoff location from any machine:
+
+```sh
+head -c 70000 /dev/zero | tr '\0' ' ' | curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' --data-binary @- https://browser.veetbot.com/authentication/00000000-0000-0000-0000-000000000000/handoff
+```
+
+The 70,000-byte body is over the virtual host's 64 KiB and within the
+handoff's 1 MiB, and the service refuses a missing capability before it reads
+any body. So `401` means the location is live, `413` means Nginx still lacks
+it, and `404` means the browser-profile service predates device sign-in. A
+small body cannot tell these apart: both locations pass it and it gets `401`.
+Then check the TLS floor:
+
+```sh
+openssl s_client -connect browser.veetbot.com:443 -servername browser.veetbot.com -tls1_1 -cipher 'DEFAULT@SECLEVEL=0' </dev/null 2>&1 | grep -Eo 'alert protocol version|Cipher is .*'
+```
+
+It should print `alert protocol version` and `Cipher is (NONE)`: the server
+refused TLS 1.1. A cipher name after `Cipher is` means the server accepted
+TLS 1.1 and the floor is missing. No output means the local `openssl` could
+not offer TLS 1.1, so the check did not run. OpenSSL 3 offers it only with
+the lowered security level above, and macOS's LibreSSL rejects that option,
+so use OpenSSL 1.1 or later, such as Homebrew's `openssl@3`.
+
 `BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED` (`true` when unset) turns device
-sign-in off in the browser-profile service without a release: set it to
-`false` in the release environment file and recreate the service with the
-release's `docker compose … up -d browser-profile-service`. Remote sign-in is
-unaffected.
+sign-in off in the browser-profile service without a release. Remote sign-in
+is unaffected. Compose reads it from `/etc/veetbot/veetbot.env` only when it
+creates the container, so `docker restart` and `docker compose restart` keep
+the old value: the container must be recreated. Run the complete block below
+as root on the production host, in one shell. It sets the value, takes the
+deployment lock, recreates the service from the current release's image with
+the release's own Compose invocation, and confirms the container's value. Set
+`value=true` instead to turn device sign-in back on.
+
+```bash
+set -euo pipefail
+value=false
+environment_file=/etc/veetbot/veetbot.env
+if grep -q '^BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=' "$environment_file"; then
+  sed -i "s/^BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=.*/BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=$value/" \
+    "$environment_file"
+else
+  printf 'BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=%s\n' "$value" >>"$environment_file"
+fi
+exec 9>/opt/veetbot/shared/deploy.lock
+flock -w 900 9
+cd /opt/veetbot/current
+set -a
+. "$environment_file"
+. ./.release.env
+set +a
+export BROWSER_PROFILE_SERVICE_IMAGE="veetbot-browser-profile-service:$VEETBOT_RELEASE_ID"
+compose=(docker compose --env-file "$environment_file"
+  --project-name "${COMPOSE_PROJECT_NAME:-veetbot}"
+  -f docker-compose.yml -f deploy/docker-compose.production.yml)
+"${compose[@]}" up -d --no-build --wait --wait-timeout 60 browser-profile-service
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  "$("${compose[@]}" ps -q browser-profile-service)" \
+  | grep -Fx "BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=$value"
+exec 9>&-
+```
 
 Browser task grants (ADR-0129) are off until the owner turns them on, and
 only after every device the owner uses runs a client build that understands

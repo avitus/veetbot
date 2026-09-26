@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -45,6 +46,18 @@ from tests.contract.support import NOW, memory_uow_factory, principal
 APPROVAL_ID = UUID("00000000-0000-0000-0000-0000000001a1")
 ORIGIN = "https://www.example.org"
 PREFIX = "/lesson"
+_HTTP_SPEC = Path(__file__).resolve().parents[2] / "docs/plan/http-api-and-streaming.md"
+
+
+def specified_conflict_details() -> dict[str, set[str]]:
+    """The `conflict` table's "details also carries" column, by reason."""
+
+    table = _HTTP_SPEC.read_text(encoding="utf-8").split("details also carries\n", 1)[1]
+    carried: dict[str, set[str]] = {}
+    for row in table.split("```", 1)[0].splitlines()[1:]:
+        _code, reason, fields = row.split(maxsplit=2)
+        carried[reason] = set() if fields == "(nothing)" else set(fields.split(", "))
+    return carried
 
 
 def settings(**overrides: Any) -> Settings:
@@ -443,7 +456,9 @@ async def test_approve_for_task_failures_leave_the_approval_pending(case: str, r
     )
 
     assert response.status_code == 409, case
-    assert response.json()["error"]["details"]["reason"] == reason
+    details = response.json()["error"]["details"]
+    assert details["reason"] == reason
+    assert set(details) == {"reason", *specified_conflict_details()[reason]}, case
     assert (await subject.approval()).status is ApprovalStatus.PENDING
     assert await subject.grants() == []
 
@@ -465,10 +480,19 @@ async def test_approve_for_task_is_retry_safe() -> None:
     assert again.json() == first.json()
     assert len(await subject.grants()) == 1
     assert len(await subject.events("browser.task_grant.created")) == 1
+    carried = specified_conflict_details()
     assert other_echo.status_code == 409
     assert other_echo.json()["error"]["details"]["reason"] == "task_grant_offer_mismatch"
+    assert set(other_echo.json()["error"]["details"]) == {
+        "reason",
+        *carried["task_grant_offer_mismatch"],
+    }
     assert other_decision.status_code == 409
     assert other_decision.json()["error"]["details"]["reason"] == "approval_already_resolved"
+    assert set(other_decision.json()["error"]["details"]) == {
+        "reason",
+        *carried["approval_already_resolved"],
+    }
 
 
 async def test_a_new_task_grant_supersedes_the_sessions_previous_one() -> None:

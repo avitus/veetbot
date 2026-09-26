@@ -181,9 +181,11 @@ the owner's device to the isolated service.
 11. **The isolated service can switch device sign-in off.** The service's
     `BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED` setting, `true` when unset, refuses
     device begins with `tool.browser.provider_unavailable` when `false`, so the
-    operator can stop the new material path with a service restart instead of a
-    code revert through `main`. Remote sign-in is unaffected. No orchestration
-    flag is added: device mode is reachable only through an authenticated
+    operator can stop the new material path by recreating the service container
+    (Compose reads the value only at creation, so a restart keeps the old one)
+    instead of a code revert through `main`; `docs/deployment.md` gives the
+    commands. Remote sign-in is unaffected. No orchestration flag is added:
+    device mode is reachable only through an authenticated
     `browser.profile.write` begin, and older clients never ask for it.
 
 ## Consequences

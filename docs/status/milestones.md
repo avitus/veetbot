@@ -295,8 +295,8 @@ mirrors `open_items_outside_milestones` in
 - [ ] Owner: confirm production AUTH_SCOPES contains browser.profile.read, browser.profile.write, browser.grant.read and browser.grant.write
 - [ ] Owner: production acceptance of device sign-in (ADR-0128 V1, V3 and V4; V2 once the iOS build ships)
 - [ ] Owner: once a client build that decodes approve_for_task runs on every device, set BROWSER_TASK_GRANT_SCOPES=https://www.duolingo.com/lesson and BROWSER_TASK_GRANTS_ENABLED=1 for the API and workers
-- [ ] Owner: production acceptance of the task grant (ADR-0129 TG1 to TG4) and the first-lesson budget measurement in a new bound chat (ADR-0130)
-- [ ] Owner: keep BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED unset or true in production; set it to false to turn device sign-in off
+- [ ] Owner: production acceptance of the task grant (ADR-0129 Validation): one approval runs a lesson while the banner counts actions and minutes; Stop brings the card back; an action outside the lesson, such as a payment or settings control, still asks and says why; activity rows the grant authorized show "Allowed by task permission" and what was clicked or typed. Then measure the budget of the first lesson in a new bound chat (ADR-0130)
+- [ ] Owner: keep BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED unset or true in production; to turn device sign-in off, set it to false in /etc/veetbot/veetbot.env and recreate the browser-profile-service container with the block in docs/deployment.md (a restart keeps the old value)
 - [ ] Tool system: the circuit-breaker section of tool-system.md specifies one counter keyed on name, arguments hash, outcome and reason, but runtime/loop.py keeps separate identical-denial and identical-call counters; change the code or propose an ADR that accepts two (found during ADR-0130)
 
 ## Authorized
