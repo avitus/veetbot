@@ -11,19 +11,27 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionConsequence,
     BrowserActionContext,
+    BrowserDispatchConstraint,
     BrowserGrantAuthorization,
     BrowserProfileStatus,
     BrowserProviderError,
 )
+from agent_core.domain.browser_act_views import option_texts
+from agent_core.domain.browser_classification import classify_browser_action
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.policies import (
+    AuthorizationTurn,
     PolicyDecision,
     PolicyDecisionType,
     ProposedAction,
     StandingAuthorization,
 )
 from agent_core.domain.runs import Run
-from agent_core.ports.browser import BrowserProvider, browser_action_context
+from agent_core.ports.browser import (
+    BrowserProvider,
+    browser_action_context,
+    browser_snapshot_in_session,
+)
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -125,7 +133,9 @@ class ConfiguredBrowserStandingAuthorizer:
         run: Run,
         agent_version: str,
         action_deadline: datetime,
+        turn: AuthorizationTurn | None = None,
     ) -> StandingAuthorization:
+        del turn
         denied = StandingAuthorization(
             allowed=False,
             reason_code="browser.grant.unavailable",
@@ -141,6 +151,9 @@ class ConfiguredBrowserStandingAuthorizer:
             context = await browser_action_context(self._provider, browser_action)
             if context is None:
                 return denied
+            # ADR-0129 G2: every label source must read as the same routine
+            # word, not only the model-visible name.
+            context = await self._with_every_label_source(run, browser_action, context)
             revalidated = await self._policy.evaluate(
                 action.model_copy(update={"evaluated_at": self._now()}),
                 principal,
@@ -171,6 +184,16 @@ class ConfiguredBrowserStandingAuthorizer:
                     context=context,
                     deterministic_decision=revalidated.decision,
                 )
+                grant = await uow.browser_grants.get(self._grant_id, principal)
+            # ADR-0129 D17: the runtime rechecks a routine ceiling and the
+            # grant's origins against the live page before dispatch.
+            constraint = BrowserDispatchConstraint(
+                grant_kind="standing",
+                origins=grant.allowed_origins,
+                not_after=grant.expires_at,
+                consequence_ceiling="routine",
+                max_text_characters=None,
+            )
         except (AgentCoreError, BrowserProviderError, OSError, ValueError):
             return denied
         if not exact.allowed:
@@ -183,7 +206,30 @@ class ConfiguredBrowserStandingAuthorizer:
             reason_code=exact.reason_code,
             authorization_kind="standing_browser_grant",
             authorization_ref=str(self._grant_id),
+            dispatch_constraint=constraint,
         )
+
+    async def _with_every_label_source(
+        self, run: Run, action: BrowserAction, context: BrowserActionContext
+    ) -> BrowserActionContext:
+        snapshot = await browser_snapshot_in_session(self._provider, run.session_id)
+        facts = None
+        if (
+            snapshot is not None
+            and snapshot.facts is not None
+            and snapshot.facts.revision == context.revision
+        ):
+            facts = snapshot.facts.elements.get(context.ref)
+        consequence = classify_browser_action(
+            kind=action.kind,
+            role=context.role,
+            labels=[context.name, *(() if facts is None else facts.labels.values())],
+            facts=facts,
+            option_texts=option_texts(action),
+        )
+        if consequence is context.consequence:
+            return context
+        return context.model_copy(update={"consequence": consequence})
 
 
 def _denied(reason_code: str) -> BrowserGrantAuthorization:

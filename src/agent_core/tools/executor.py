@@ -1010,6 +1010,16 @@ class ToolPipeline:
                             "authorization_reason": standing_authorization.reason_code,
                         }
                     )
+                    # ADR-0129 G7: which use of a task grant this was, and the
+                    # view of the unreviewed action it authorized.
+                    if standing_authorization.use_ordinal is not None:
+                        authorization_payload["authorization_use"] = (
+                            standing_authorization.use_ordinal
+                        )
+                    if standing_authorization.authorization_view is not None:
+                        authorization_payload["authorization_view"] = (
+                            standing_authorization.authorization_view
+                        )
                 await self._event_in(
                     uow,
                     run,
@@ -1246,6 +1256,11 @@ class ToolPipeline:
             idempotency_key=key,
             deadline_at=deadline,
             run_deadline_at=run.deadline_at,
+            dispatch_constraint=(
+                standing_authorization.dispatch_constraint
+                if standing_authorization is not None and standing_authorization.allowed
+                else None
+            ),
             timeout_seconds=effective_timeout,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
@@ -1615,6 +1630,7 @@ class ToolPipeline:
                 run=run,
                 agent_version=agent.version,
                 action_deadline=action_deadline,
+                turn=_active_turn_facts(checkpoint),
             )
         except Exception:
             logger.exception(

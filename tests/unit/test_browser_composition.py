@@ -812,6 +812,33 @@ async def test_exact_standing_browser_grant_authorizes_without_interactive_appro
     assert authorized.payload["authorization_ref"] == str(GRANT_ID)
 
 
+async def test_a_standing_grant_dispatch_carries_its_routine_constraint() -> None:
+    """ADR-0129 D17: the executor hands the grant's constraint to the tool,
+    which carries it to the provider's runtime."""
+
+    provider = GrantBrowserProvider()
+    async with build(
+        settings=hosted_grant_settings(),
+        script=browser_action_script(),
+        browser_provider_override=provider,
+        fixed_clock_at=GRANT_NOW,
+        enabled_tools=["browser.act"],
+    ) as composition:
+        await seed_browser_authority(composition)
+        run_id = await composition.runs.submit("Continue my language practice.")
+        run = await composition.runs.get(run_id)
+
+    assert run.status is RunStatus.COMPLETED
+    [constraint] = provider.constraints
+    assert constraint is not None
+    assert (constraint.grant_kind, constraint.consequence_ceiling, constraint.origins) == (
+        "standing",
+        "routine",
+        ("https://example.org",),
+    )
+    assert constraint.not_after == GRANT_NOW + timedelta(days=7)
+
+
 async def test_revoked_standing_browser_grant_falls_back_to_interactive_approval() -> None:
     provider = GrantBrowserProvider()
     async with build(

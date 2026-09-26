@@ -42,6 +42,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
     ActionKind,
+    AuthorizationTurn,
     ExecutionTarget,
     IdempotencyClass,
     PolicyDecision,
@@ -626,7 +627,9 @@ async def test_standing_authorization_shares_the_execution_deadline(
                 run: Run,
                 agent_version: str,
                 action_deadline: datetime,
+                turn: AuthorizationTurn | None = None,
             ) -> StandingAuthorization:
+                del turn
                 expected_deadline = NOW + timedelta(seconds=tool.spec.timeout_seconds)
                 if run.deadline_at is not None:
                     expected_deadline = min(expected_deadline, run.deadline_at)

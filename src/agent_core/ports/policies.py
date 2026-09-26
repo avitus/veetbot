@@ -8,6 +8,7 @@ from typing import Protocol
 from agent_core.domain.agents import Principal
 from agent_core.domain.policies import (
     AdvisoryVerdict,
+    AuthorizationTurn,
     PolicyDecision,
     ProposedAction,
     StandingAuthorization,
@@ -44,4 +45,8 @@ class StandingAuthorizer(Protocol):
         run: Run,
         agent_version: str,
         action_deadline: datetime,
-    ) -> StandingAuthorization: ...
+        turn: AuthorizationTurn | None = None,
+    ) -> StandingAuthorization:
+        """``turn`` is the executor's view of the active turn (ADR-0129); an
+        authorizer that needs it treats ``None`` as ineligible."""
+        ...
