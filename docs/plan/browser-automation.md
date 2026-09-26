@@ -137,9 +137,11 @@ The ephemeral provider also refuses typing into password fields or controls
 whose autocomplete semantics identify a current password, new password, or
 one-time code. Opaque references bind stable element handles rather than
 selectors that could retarget after DOM reordering. Observation first checks the
-visibility of at most 4,096 candidate nodes in one browser call and keeps the
-first 256 visible ones in document order, so hidden nodes never take an element
-slot; it releases every other handle and those of the observation it replaces.
+visibility of at most 4,096 candidate nodes in one browser call, by the same
+rule as Playwright's `is_visible` (a `display: contents` control counts when a
+child is visible), and keeps the first 256 visible ones in document order, so
+hidden nodes never take an element slot; it releases every other handle and
+those of the observation it replaces.
 It then reads bounded metadata from each kept handle in one browser call,
 avoiding repeated selector resolution and excessive round trips while a login
 form is changing. At most eight elements are inspected concurrently; results

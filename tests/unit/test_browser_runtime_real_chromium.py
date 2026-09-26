@@ -151,6 +151,25 @@ async def _crowded_page(request: Request) -> Response:
     return html(hidden + visible)
 
 
+async def _contents_page(request: Request) -> Response:
+    del request
+    return html(
+        '<div role="button" style="display:contents"><span>Contents choice</span></div>'
+        '<a href="/x" style="display:contents"><span>Contents link</span></a>'
+        '<div role="button" style="display:contents"></div>'
+        '<button style="visibility:collapse">Collapsed</button>'
+        "<button>Plain</button>"
+    )
+
+
+async def _collapsed_page(request: Request) -> Response:
+    del request
+    collapsed = "".join(
+        f'<button style="visibility:collapse">Collapsed {index}</button>' for index in range(300)
+    )
+    return html(collapsed + "<button>Answer</button>")
+
+
 async def _restless_page(request: Request) -> Response:
     del request
     return html(
@@ -178,6 +197,8 @@ LESSON_ROUTES = [
     Route("/api/exercise", _exercise_api),
     Route("/exercise", _exercise_page),
     Route("/crowded", _crowded_page),
+    Route("/contents", _contents_page),
+    Route("/collapsed", _collapsed_page),
     Route("/restless", _restless_page),
     Route("/one", _linking_page),
     Route("/two", _second_document),
@@ -216,6 +237,29 @@ async def test_hidden_controls_never_take_an_element_slot_in_chromium() -> None:
     assert [element.name for element in observation.elements] == [
         f"Answer {index}" for index in range(5)
     ]
+
+
+async def test_the_visibility_scan_keeps_display_contents_controls() -> None:
+    """The one-call scan matches Playwright's is_visible (review finding): a
+    display:contents control is visible when one of its children is."""
+
+    async with browsing(LESSON_ROUTES) as (site, runtime):
+        contents = await runtime.navigate(site.url("/contents"))
+
+    assert [(element.role, element.name) for element in contents.elements] == [
+        ("button", "Contents choice"),
+        ("link", "Contents link"),
+        ("button", "Plain"),
+    ]
+
+
+async def test_collapsed_controls_never_take_an_element_slot() -> None:
+    """visibility:collapse is hidden to is_visible, so the scan drops it first."""
+
+    async with browsing(LESSON_ROUTES) as (site, runtime):
+        collapsed = await runtime.navigate(site.url("/collapsed"))
+
+    assert [element.name for element in collapsed.elements] == ["Answer"]
 
 
 async def test_action_returns_the_page_after_it_settles() -> None:

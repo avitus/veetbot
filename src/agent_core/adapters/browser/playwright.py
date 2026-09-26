@@ -87,11 +87,50 @@ _QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
     quiet = setTimeout(finish, quietMs);
     limit = setTimeout(finish, timeoutMs);
 })"""
-# Playwright's is_visible in one round trip: a non-empty box, not visibility:hidden.
-_VISIBLE_SCRIPT = """nodes => nodes.map(node => {
-    const box = node.getBoundingClientRect();
-    return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden';
-})"""
+# Playwright's is_visible in one round trip, ported from its computeBox: a
+# display:contents node is visible when a child element or text is; any other
+# node needs checkVisibility(), visibility:visible and a non-empty box.
+_VISIBLE_SCRIPT = """nodes => {
+    const visible = node => {
+        const view = node.ownerDocument.defaultView;
+        const style = view ? view.getComputedStyle(node) : null;
+        if (!style) {
+            return true;
+        }
+        if (style.display === 'contents') {
+            for (let child = node.firstChild; child; child = child.nextSibling) {
+                if (child.nodeType === 1 && visible(child)) {
+                    return true;
+                }
+                if (child.nodeType === 3) {
+                    const range = child.ownerDocument.createRange();
+                    range.selectNode(child);
+                    const box = range.getBoundingClientRect();
+                    if (box.width > 0 && box.height > 0) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        if (Element.prototype.checkVisibility) {
+            if (!node.checkVisibility()) {
+                return false;
+            }
+        } else {
+            const details = node.closest('details,summary');
+            if (details !== node && details && details.nodeName === 'DETAILS' && !details.open) {
+                return false;
+            }
+        }
+        if (style.visibility !== 'visible') {
+            return false;
+        }
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+    };
+    return nodes.map(visible);
+}"""
 
 
 class BrowserRuntime(Protocol):
