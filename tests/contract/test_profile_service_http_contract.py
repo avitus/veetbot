@@ -30,8 +30,11 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
 )
@@ -80,6 +83,13 @@ class FakeRuntime:
     async def act(self, action: BrowserAction) -> BrowserObservation:
         del action
         return BrowserObservation(url=self.origins[0], revision="revision-2")
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        """Facts for every revision this fake reports: one plain button."""
+        return BrowserObservationFacts(
+            revision=revision,
+            elements={f"{revision}:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
+        )
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
         """A public home page, and members' pages that send a visitor to sign in."""
@@ -1206,3 +1216,55 @@ async def test_a_zero_interval_runs_no_sweep(tmp_path: Path) -> None:
         await asyncio.sleep(0.05)
 
     assert calls == 0
+
+
+async def test_facts_are_an_optional_sibling_of_the_observation(tmp_path: Path) -> None:
+    """ADR-0129 D26: responses keep the observation at the top level and add facts."""
+
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        acquired = await http.post(
+            "/v1/browser-sessions:acquire",
+            headers={
+                **SERVICE_HEADERS,
+                "Idempotency-Key": f"browser-session:{PROFILE_ID}:{RUN_ID}:1:acquire",
+            },
+            json={
+                "profile_id": str(PROFILE_ID),
+                "tenant_id": principal().tenant_id,
+                "principal_id": principal().principal_id,
+                "provider_ref": provider_ref,
+                "run_id": str(RUN_ID),
+                "attempt_number": 1,
+                "deadline_at": (NOW + timedelta(minutes=5)).isoformat(),
+            },
+        )
+        lease_ref = acquired.json()["lease_ref"]
+        navigated = await http.post(
+            "/v1/browser-sessions:navigate",
+            headers=SERVICE_HEADERS,
+            json={"lease_ref": lease_ref, "url": "https://example.org/lesson"},
+        )
+        observed = await http.post(
+            "/v1/browser-sessions:observe", headers=SERVICE_HEADERS, json={"lease_ref": lease_ref}
+        )
+
+    for response in (navigated, observed):
+        body = response.json()
+        assert response.status_code == 200
+        assert BrowserObservation.model_validate(body).revision == "revision-1"
+        assert "facts" in body, "the response carries no facts"
+        assert body["facts"] == {
+            "revision": "revision-1",
+            "elements": {
+                "revision-1:0": {
+                    "field_kind": "none",
+                    "labels": {},
+                    "link_target": None,
+                    "form_target": None,
+                    "download": False,
+                    "context_name": "",
+                }
+            },
+        }

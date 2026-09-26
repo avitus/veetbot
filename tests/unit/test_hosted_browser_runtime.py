@@ -15,8 +15,11 @@ from agent_core.browser_control_plane.runtime import (
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserAuthenticationStatus,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
 )
@@ -57,6 +60,10 @@ class FakeStatefulRuntime:
     async def act(self, action: BrowserAction) -> BrowserObservation:
         del action
         return BrowserObservation(url="https://example.org", revision="r2")
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        del revision
+        return None
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
         return BrowserPageEvidence(
@@ -247,3 +254,25 @@ async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -
     assert evidence.path == "/learn"
     assert raised.value.reason_code == "tool.browser.provider_unavailable"
     assert "provider-private-diagnostic" not in str(raised.value)
+
+
+async def test_observation_carries_facts_beside_it() -> None:
+    """ADR-0129: the hosted runtime hands on the facts of the revision it observed."""
+
+    facts = BrowserObservationFacts(
+        revision="r1",
+        elements={"r1:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
+    )
+
+    class FactualRuntime(FakeStatefulRuntime):
+        def facts(self, revision: str) -> BrowserObservationFacts | None:
+            return facts if revision == "r1" else None
+
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=FactualRuntime(),
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+
+    assert runtime.facts("r1") == facts
+    assert runtime.facts("r2") is None

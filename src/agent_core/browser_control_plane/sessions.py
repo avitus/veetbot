@@ -34,11 +34,14 @@ from agent_core.domain.browser import (
     BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
+    BrowserElementFacts,
     BrowserInteractiveEvent,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserSnapshot,
     browser_origin,
     require_service_origin,
 )
@@ -49,6 +52,8 @@ MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 # A device handoff's two verification loads end within this budget (ADR-0128).
 DEVICE_VERIFICATION_SECONDS = 30.0
+# Element facts beside one observation are cut to this many serialized bytes.
+MAXIMUM_FACTS_BYTES = 64 * 1024
 # Finished ceremonies kept for idempotent status reads, oldest dropped first.
 MAXIMUM_TERMINAL_CEREMONIES = 1_024
 # An outcome no client has read yet is kept this long (ADR-0128 D16).
@@ -148,6 +153,8 @@ class BrowserSessionRuntime(Protocol):
     async def act(self, action: BrowserAction) -> BrowserObservation: ...
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
     async def storage_state(self) -> bytes: ...
 
@@ -254,20 +261,10 @@ class HostedProfileSessionService:
         return BrowserLease(lease_ref=lease_ref, expires_at=expires_at)
 
     async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
-        state = await self._require_lease(lease_ref)
-        if browser_origin(url) not in state.identity.allowed_origins:
-            raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
-        async with state.lock:
-            if state.closed:
-                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-            return await state.runtime.navigate(url)
+        return (await self.navigate_snapshot(lease_ref, url)).observation
 
     async def observe(self, lease_ref: str) -> BrowserObservation:
-        state = await self._require_lease(lease_ref)
-        async with state.lock:
-            if state.closed:
-                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-            return await state.runtime.observe()
+        return (await self.observe_snapshot(lease_ref)).observation
 
     async def act(
         self,
@@ -276,6 +273,32 @@ class HostedProfileSessionService:
         *,
         sequence: int,
     ) -> BrowserObservation:
+        return (await self.act_snapshot(lease_ref, action, sequence=sequence)).observation
+
+    async def navigate_snapshot(self, lease_ref: str, url: str) -> BrowserSnapshot:
+        """Navigate, returning the observation and its element facts (ADR-0129)."""
+        state = await self._require_lease(lease_ref)
+        if browser_origin(url) not in state.identity.allowed_origins:
+            raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+        async with state.lock:
+            if state.closed:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+            return _snapshot(state.runtime, await state.runtime.navigate(url))
+
+    async def observe_snapshot(self, lease_ref: str) -> BrowserSnapshot:
+        state = await self._require_lease(lease_ref)
+        async with state.lock:
+            if state.closed:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+            return _snapshot(state.runtime, await state.runtime.observe())
+
+    async def act_snapshot(
+        self,
+        lease_ref: str,
+        action: BrowserAction,
+        *,
+        sequence: int,
+    ) -> BrowserSnapshot:
         state = await self._require_lease(lease_ref)
         async with state.lock:
             if state.closed:
@@ -292,7 +315,7 @@ class HostedProfileSessionService:
                     retryable=False,
                 ) from exc
             state.sequence = sequence
-            return observation
+            return _snapshot(state.runtime, observation)
 
     async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease:
         """Extend a live lease by at most fifteen minutes, never past an hour.
@@ -908,6 +931,33 @@ class HostedProfileSessionService:
         ):
             raise ConflictError("browser profile session scope mismatch")
         return by_profile
+
+
+def _snapshot(runtime: BrowserSessionRuntime, observation: BrowserObservation) -> BrowserSnapshot:
+    """The observation and, when the runtime has them, its element facts (ADR-0129)."""
+    return BrowserSnapshot(
+        observation=observation, facts=_bounded_facts(runtime.facts(observation.revision))
+    )
+
+
+def _bounded_facts(facts: BrowserObservationFacts | None) -> BrowserObservationFacts | None:
+    """Keep facts, in element order, within MAXIMUM_FACTS_BYTES serialized.
+
+    An element whose facts do not fit is dropped with every later one, never
+    cut: an element without facts is never covered by a grant.
+    """
+    if facts is None:
+        return None
+    used = len(BrowserObservationFacts(revision=facts.revision).model_dump_json().encode())
+    kept: dict[str, BrowserElementFacts] = {}
+    for ref, element in facts.elements.items():
+        # The key, its quotes and colon, the value, and a separating comma.
+        size = len(json.dumps(ref).encode()) + 2 + len(element.model_dump_json().encode())
+        if used + size > MAXIMUM_FACTS_BYTES:
+            break
+        kept[ref] = element
+        used += size
+    return BrowserObservationFacts(revision=facts.revision, elements=kept)
 
 
 async def _page_evidence(

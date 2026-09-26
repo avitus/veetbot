@@ -13,6 +13,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
     normalize_browser_origin,
@@ -40,6 +41,8 @@ class StatefulBrowserRuntime(Protocol):
     async def act(self, action: BrowserAction) -> BrowserObservation: ...
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
     async def storage_state(self) -> dict[str, object]: ...
 
@@ -135,6 +138,10 @@ class HostedPlaywrightSessionRuntime:
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
         return await self._runtime.act(action)
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        """The element facts of ``revision``, while it is the current observation."""
+        return self._runtime.facts(revision)
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
         """Load one confirmed page and report what it showed (ADR-0128)."""

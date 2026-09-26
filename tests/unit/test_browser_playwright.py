@@ -12,6 +12,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from playwright.async_api import ElementHandle, Locator, Page
 from playwright.async_api import Error as PlaywrightError
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, Response
+from starlette.routing import Route
 
 from agent_core.adapters.browser import playwright as playwright_adapter
 from agent_core.adapters.browser.playwright import (
@@ -22,12 +26,16 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
+    BrowserLabelSource,
     BrowserObservation,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserTargetFacts,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
+from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
 
 
 async def test_observation_pipelines_slow_controls_with_bounded_concurrency() -> None:
@@ -1072,3 +1080,66 @@ async def test_act_can_follow_act_without_observe() -> None:
     )
 
     assert third.revision not in {first.revision, second.revision}
+
+
+FACTS_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<input type="password" aria-label="Password">
+<input autocomplete="cc-number" aria-label="Card number">
+<input type="email" aria-label="Email">
+<textarea aria-label="Answer"></textarea>
+<a href="/settings">Settings</a>
+<form action="/lesson/submit"><button formaction="/lesson/../checkout">Check</button></form>
+<a href="/files/report.pdf" download>Report</a>
+<dialog open aria-label="Try Super free"><button>Keep going</button></dialog>
+<button aria-label="Continue">Pay $12.99</button>
+<a href="/lesson/2">Next lesson</a>
+<a href="#top">Top</a>
+<a href="mailto:owner@example.org">Write</a>
+</body></html>"""
+
+
+async def test_element_facts_classify_fields_links_forms_dialogs() -> None:
+    """ADR-0129 section 4.5: facts are derived from live attributes, in a real Chromium."""
+
+    require_real_browser()
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return HTMLResponse(FACTS_PAGE)
+
+    async with local_https_site(Starlette(routes=[Route("/lesson/1", lesson)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            observation = await runtime.navigate(site.url("/lesson/1"))
+            facts = runtime.facts(observation.revision)
+            stale = runtime.facts("another-revision")
+        finally:
+            await runtime.close()
+
+    assert facts is not None
+    assert stale is None
+    assert facts.revision == observation.revision
+    by_name = {element.name: facts.elements[element.ref] for element in observation.elements}
+    assert by_name["Password"].field_kind is BrowserFieldKind.PASSWORD
+    assert by_name["Card number"].field_kind is BrowserFieldKind.PAYMENT
+    assert by_name["Email"].field_kind is BrowserFieldKind.EMAIL
+    assert by_name["Answer"].field_kind is BrowserFieldKind.MULTILINE
+    assert by_name["Settings"].link_target == BrowserTargetFacts(
+        same_origin=True, first_segment="settings", sensitive_path=True
+    )
+    assert by_name["Check"].form_target == BrowserTargetFacts(
+        same_origin=True, first_segment="checkout", sensitive_path=True
+    )
+    assert by_name["Report"].download is True
+    assert by_name["Keep going"].context_name == "Try Super free"
+    assert by_name["Continue"].labels == {BrowserLabelSource.VISIBLE_TEXT: "Pay $12.99"}
+    assert by_name["Next lesson"].link_target == BrowserTargetFacts(
+        same_origin=True, first_segment="lesson", sensitive_path=False
+    )
+    assert by_name["Top"].link_target is None
+    assert by_name["Write"].link_target is not None
+    assert by_name["Write"].link_target.same_origin is False
+    rendered = facts.model_dump_json()
+    assert "/settings" not in rendered and "checkout" in rendered
+    assert "report.pdf" not in rendered and "mailto" not in rendered

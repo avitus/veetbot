@@ -36,6 +36,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationMode,
     BrowserInteractiveEvent,
     BrowserProviderError,
+    BrowserSnapshot,
 )
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import ConflictError
@@ -480,13 +481,13 @@ def create_profile_service_app(
 
         @app.post("/v1/browser-sessions:navigate", response_model=None)
         async def navigate(payload: _NavigateRequest) -> dict[str, Any]:
-            result = await sessions.navigate(payload.lease_ref, payload.url)
-            return result.model_dump(mode="json")
+            result = await sessions.navigate_snapshot(payload.lease_ref, payload.url)
+            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:observe", response_model=None)
         async def observe(payload: _LeaseRequest) -> dict[str, Any]:
-            result = await sessions.observe(payload.lease_ref)
-            return result.model_dump(mode="json")
+            result = await sessions.observe_snapshot(payload.lease_ref)
+            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:act", response_model=None)
         async def act(payload: _ActRequest, request: Request) -> dict[str, Any] | JSONResponse:
@@ -496,12 +497,12 @@ def create_profile_service_app(
             rejected = _require_idempotency(request, expected)
             if rejected is not None:
                 return rejected
-            result = await sessions.act(
+            result = await sessions.act_snapshot(
                 payload.lease_ref,
                 payload.action,
                 sequence=payload.sequence,
             )
-            return result.model_dump(mode="json")
+            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:renew", response_model=None)
         async def renew(payload: _RenewRequest, request: Request) -> dict[str, Any] | JSONResponse:
@@ -653,6 +654,18 @@ async def _sweep_forever(sessions: HostedProfileSessionService, interval: float)
                 "profile session sweep failed",
                 extra={"failure_type": type(exc).__name__},
             )
+
+
+def _snapshot_response(snapshot: BrowserSnapshot) -> dict[str, Any]:
+    """The observation's fields at the top level, and facts as an optional sibling.
+
+    An older worker parses the response as a plain observation and ignores
+    ``facts`` (ADR-0129 D26).
+    """
+    response = snapshot.observation.model_dump(mode="json")
+    if snapshot.facts is not None:
+        response["facts"] = snapshot.facts.model_dump(mode="json")
+    return response
 
 
 def _principal(tenant_id: str, principal_id: str) -> Principal:

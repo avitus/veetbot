@@ -32,9 +32,13 @@ from agent_core.domain.browser import (
     BrowserActionKind,
     BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
+    BrowserLabelSource,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
 )
@@ -81,6 +85,8 @@ class FakeSessionRuntime:
     # Successive answers to authentication_status, then ``authentication``.
     authentication_samples: list[BrowserAuthenticationStatus] = field(default_factory=list)
     status_checks: int = 0
+    # ADR-0129: the facts this runtime reports, by observation revision.
+    known_facts: dict[str, BrowserObservationFacts] = field(default_factory=dict)
 
     async def start(
         self,
@@ -121,6 +127,9 @@ class FakeSessionRuntime:
     @property
     def signed_in(self) -> bool:
         return self.initial_material not in {None, NO_SESSION}
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        return self.known_facts.get(revision)
 
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
         self.evidence_urls.append(url)
@@ -1310,3 +1319,77 @@ async def test_a_swept_ceremony_never_serves_two_callers_at_once(tmp_path: Path)
     )
 
     assert overlapped is False
+
+
+# --- ADR-0129: element facts beside the observation --------------------------
+
+
+def many_facts(revision: str, count: int) -> BrowserObservationFacts:
+    labels = {source: source.value[0] * 256 for source in BrowserLabelSource}
+    return BrowserObservationFacts(
+        revision=revision,
+        elements={
+            f"{revision}:{index}": BrowserElementFacts(
+                field_kind=BrowserFieldKind.NONE, labels=labels, context_name="c" * 128
+            )
+            for index in range(count)
+        },
+    )
+
+
+async def test_navigate_observe_and_act_carry_the_facts_of_their_revision(
+    tmp_path: Path,
+) -> None:
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=10),
+    )
+    runtime = runtimes[0]
+    runtime.known_facts = {"revision-1": many_facts("revision-1", 1)}
+
+    navigated = await sessions.navigate_snapshot(lease.lease_ref, "https://example.org/lesson")
+    observed = await sessions.observe_snapshot(lease.lease_ref)
+    acted = await sessions.act_snapshot(
+        lease.lease_ref,
+        BrowserAction(
+            kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+        ),
+        sequence=1,
+    )
+
+    assert navigated.facts == runtime.known_facts["revision-1"]
+    assert observed.facts == runtime.known_facts["revision-1"]
+    assert acted.observation.revision == "revision-2"
+    assert acted.facts is None
+
+
+async def test_facts_beyond_64_kib_are_dropped_in_element_order(tmp_path: Path) -> None:
+    """An element without facts is never covered; the budget never truncates one."""
+
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=10),
+    )
+    everything = many_facts("revision-1", 256)
+    runtimes[0].known_facts = {"revision-1": everything}
+
+    snapshot = await sessions.navigate_snapshot(lease.lease_ref, "https://example.org/lesson")
+
+    assert snapshot.facts is not None
+    kept = list(snapshot.facts.elements)
+    assert 0 < len(kept) < 256
+    assert kept == list(everything.elements)[: len(kept)]
+    assert all(snapshot.facts.elements[ref] == everything.elements[ref] for ref in kept)
+    assert len(snapshot.facts.model_dump_json().encode()) <= 64 * 1024

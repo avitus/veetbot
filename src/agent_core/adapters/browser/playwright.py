@@ -31,17 +31,25 @@ from playwright.async_api import Error as PlaywrightError
 
 from agent_core.adapters.browser.virtual_display import platform_virtual_display
 from agent_core.domain.browser import (
+    MAXIMUM_FACT_LABEL_CHARACTERS,
+    TASK_GRANT_PATH_SEGMENT,
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
     BrowserElement,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
+    BrowserLabelSource,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserTargetFacts,
     browser_origin,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_classification import normalize_text, path_is_sensitive
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
 from agent_core.domain.web import is_public_https_url
 from agent_core.execution.proxy import start_browser_egress_proxy
@@ -136,6 +144,7 @@ class PythonPlaywrightRuntime:
         self._allowed_origins: tuple[str, ...] = ()
         self._revision: str | None = None
         self._elements: dict[str, ElementHandle] = {}
+        self._facts: BrowserObservationFacts | None = None
         self._disallowed_navigation = False
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
@@ -363,6 +372,12 @@ class PythonPlaywrightRuntime:
                     return
                 await load_state("domcontentloaded")
 
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        """The element facts of ``revision``, while it is the current observation."""
+        if self._facts is None or self._facts.revision != revision:
+            return None
+        return self._facts
+
     async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
         """Load one page and report where it landed and whether it asks to sign in.
 
@@ -419,23 +434,32 @@ class PythonPlaywrightRuntime:
             :MAXIMUM_ELEMENTS
         ]
         slots = asyncio.Semaphore(8)
+        page_url = page.url
 
-        async def capture(index: int, handle: ElementHandle) -> BrowserElement | None:
+        async def capture(
+            index: int, handle: ElementHandle
+        ) -> tuple[BrowserElement, BrowserElementFacts] | None:
             async with slots:
-                return await self._element_observation(handle, f"{revision}:{index}")
+                return await self._element_observation(
+                    handle, f"{revision}:{index}", page_url=page_url
+                )
 
         captured = await asyncio.gather(
             *(capture(index, handle) for index, handle in enumerate(snapshot))
         )
         elements: list[BrowserElement] = []
         handles: dict[str, ElementHandle] = {}
-        for handle, element in zip(snapshot, captured, strict=True):
-            if element is not None:
+        facts: dict[str, BrowserElementFacts] = {}
+        for handle, observed in zip(snapshot, captured, strict=True):
+            if observed is not None:
+                element, element_facts = observed
                 elements.append(element)
                 handles[element.ref] = handle
+                facts[element.ref] = element_facts
         released = [*self._elements.values(), *found]
         self._revision = revision
         self._elements = handles
+        self._facts = BrowserObservationFacts(revision=revision, elements=facts)
         await _dispose(released, keep=handles.values())
         return BrowserObservation(
             url=page.url,
@@ -446,32 +470,33 @@ class PythonPlaywrightRuntime:
         )
 
     @staticmethod
-    async def _element_observation(handle: ElementHandle, ref: str) -> BrowserElement | None:
-        """Read one captured node without resolving a selector that may have changed."""
+    async def _element_observation(
+        handle: ElementHandle, ref: str, *, page_url: str
+    ) -> tuple[BrowserElement, BrowserElementFacts] | None:
+        """Read one captured node without resolving a selector that may have changed.
+
+        The same read gives the element's facts (ADR-0129 section 4.5): its
+        field kind, every label source, its link and form targets reduced to
+        facts, whether it downloads, and its dialog's name. Raw target URLs
+        stay in this process.
+        """
         if not await handle.is_visible():
             return None
-        metadata = await handle.evaluate(
-            """node => ({
-                tag: node.tagName.toLowerCase(),
-                role: node.getAttribute('role'),
-                inputType: node.getAttribute('type'),
-                name: Array.from(node.getAttribute('aria-label') || node.getAttribute('title') ||
-                    node.getAttribute('placeholder') || node.innerText || '')
-                    .slice(0, 1024).join('')
-            })"""
-        )
+        metadata = await handle.evaluate(_ELEMENT_SCRIPT)
         tag = str(metadata["tag"])
         input_type = metadata["inputType"]
         checked: bool | None = None
         if tag == "input" and input_type in {"checkbox", "radio"}:
             checked = await handle.is_checked()
-        return BrowserElement(
+        role = metadata["role"] or _default_role(tag, input_type)
+        element = BrowserElement(
             ref=ref,
-            role=metadata["role"] or _default_role(tag, input_type),
+            role=role,
             name=str(metadata["name"])[:1024],
             disabled=await handle.is_disabled(),
             checked=checked,
         )
+        return element, _element_facts(metadata, name=element.name, page_url=page_url)
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
         page = self._current_page()
@@ -620,6 +645,7 @@ class PythonPlaywrightRuntime:
             self._temporary_home = None
             self._revision = None
             self._elements = {}
+            self._facts = None
             self._disallowed_navigation = False
             self._document_session = None
             self._main_frame_id = None
@@ -638,6 +664,220 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
             await handle.dispose()
 
     await asyncio.gather(*(release(handle) for handle in released.values()))
+
+
+# One read of an element: the model-visible name exactly as before, and every
+# live attribute its facts are derived from (ADR-0129 section 4.5).
+_ELEMENT_SCRIPT = """node => {
+    const clean = value => Array.from(String(value || '').replace(/\\s+/g, ' ').trim())
+        .slice(0, 1024).join('');
+    const referenced = ids => String(ids || '').split(/\\s+/).filter(Boolean).slice(0, 8)
+        .map(id => {
+            const target = document.getElementById(id);
+            return target ? target.textContent : '';
+        }).join(' ');
+    const resolve = value => {
+        try { return new URL(value, document.baseURI).href; } catch (error) { return ''; }
+    };
+    const tag = node.tagName.toLowerCase();
+    const type = (node.getAttribute('type') || '').toLowerCase();
+    const link = node.closest('a[href]');
+    const form = node.form || node.closest('form');
+    const formAction = node.getAttribute('formaction');
+    const dialog = node.closest('dialog,[role=dialog],[role=alertdialog]');
+    const heading = dialog ? dialog.querySelector('h1,h2,h3') : null;
+    const images = Array.from(node.querySelectorAll('img')).slice(0, 8)
+        .map(image => image.getAttribute('alt') || '');
+    const valued = tag === 'button'
+        || (tag === 'input' && ['submit', 'button', 'reset'].includes(type));
+    return {
+        tag,
+        role: node.getAttribute('role'),
+        inputType: node.getAttribute('type'),
+        name: Array.from(node.getAttribute('aria-label') || node.getAttribute('title') ||
+            node.getAttribute('placeholder') || node.innerText || '')
+            .slice(0, 1024).join(''),
+        autocomplete: node.getAttribute('autocomplete') || '',
+        editable: node.isContentEditable === true,
+        labels: {
+            aria_label: clean(node.getAttribute('aria-label')),
+            aria_labelledby: clean(referenced(node.getAttribute('aria-labelledby'))),
+            label: clean(Array.from(node.labels || []).map(label => label.innerText).join(' ')),
+            title: clean(node.getAttribute('title')),
+            placeholder: clean(node.getAttribute('placeholder')),
+            alt: clean([node.getAttribute('alt') || '', ...images].join(' ')),
+            value: valued ? clean(node.getAttribute('value')) : '',
+            visible_text: clean(node.innerText),
+        },
+        linkHref: link ? link.getAttribute('href') : null,
+        link: link ? resolve(link.getAttribute('href')) : null,
+        form: form
+            ? resolve(formAction ? formAction : (form.getAttribute('action') || document.URL))
+            : null,
+        download: node.closest('a[download]') !== null,
+        context: dialog ? clean(dialog.getAttribute('aria-label')
+            || referenced(dialog.getAttribute('aria-labelledby'))
+            || (heading ? heading.textContent : '')) : '',
+        options: tag === 'select'
+            ? Array.from(node.options).slice(0, 256).map(option => [option.label, option.value])
+            : [],
+    };
+}"""
+_INPUT_FIELD_KINDS = {
+    "": BrowserFieldKind.TEXT,
+    "text": BrowserFieldKind.TEXT,
+    "search": BrowserFieldKind.SEARCH,
+    "email": BrowserFieldKind.EMAIL,
+    "tel": BrowserFieldKind.TELEPHONE,
+    "url": BrowserFieldKind.URL,
+    "number": BrowserFieldKind.NUMBER,
+    "date": BrowserFieldKind.DATE,
+    "time": BrowserFieldKind.DATE,
+    "month": BrowserFieldKind.DATE,
+    "week": BrowserFieldKind.DATE,
+    "datetime-local": BrowserFieldKind.DATE,
+    "password": BrowserFieldKind.PASSWORD,
+    "file": BrowserFieldKind.FILE,
+    "checkbox": BrowserFieldKind.CHOICE,
+    "radio": BrowserFieldKind.CHOICE,
+    "submit": BrowserFieldKind.NONE,
+    "button": BrowserFieldKind.NONE,
+    "reset": BrowserFieldKind.NONE,
+    "image": BrowserFieldKind.NONE,
+}
+_AUTOCOMPLETE_QUALIFIERS = frozenset(
+    {"shipping", "billing", "home", "work", "mobile", "fax", "pager"}
+)
+_IDENTITY_TOKENS = frozenset(
+    {
+        "name",
+        "given-name",
+        "additional-name",
+        "family-name",
+        "nickname",
+        "username",
+        "street-address",
+        "postal-code",
+        "sex",
+        "email",
+        "impp",
+        "url",
+        "photo",
+    }
+)
+_IDENTITY_PREFIXES = (
+    "honorific-",
+    "organization",
+    "address-line",
+    "address-level",
+    "country",
+    "bday",
+    "tel",
+)
+_CHOICE_ROLES = frozenset({"checkbox", "radio", "option", "menuitemradio"})
+MAXIMUM_CONTEXT_NAME_CHARACTERS = 128
+
+
+def _field_kind(
+    *, tag: str, input_type: str, autocomplete: str, role: str, editable: bool
+) -> BrowserFieldKind:
+    """The closed field kind of one element; its autocomplete token decides first."""
+
+    tokens = [
+        token
+        for token in autocomplete.lower().split()
+        if not token.startswith("section-") and token not in _AUTOCOMPLETE_QUALIFIERS
+    ]
+    token = tokens[-1] if tokens else ""
+    if token and token not in {"on", "off"}:
+        if token in {"current-password", "new-password"}:
+            return BrowserFieldKind.PASSWORD
+        if token == "one-time-code":
+            return BrowserFieldKind.ONE_TIME_CODE
+        if token.startswith(("cc-", "transaction-")):
+            return BrowserFieldKind.PAYMENT
+        if token in _IDENTITY_TOKENS or token.startswith(_IDENTITY_PREFIXES):
+            return BrowserFieldKind.IDENTITY
+        return BrowserFieldKind.OTHER
+    if tag == "input":
+        return _INPUT_FIELD_KINDS.get(input_type.lower(), BrowserFieldKind.OTHER)
+    if tag == "textarea" or editable:
+        return BrowserFieldKind.MULTILINE
+    if tag == "select" or role.lower() in _CHOICE_ROLES:
+        return BrowserFieldKind.CHOICE
+    return BrowserFieldKind.NONE
+
+
+def _origin_or_none(url: str) -> str | None:
+    try:
+        return browser_origin(url)
+    except ValueError:
+        return None
+
+
+def _target_facts(url: str, *, page_url: str) -> BrowserTargetFacts:
+    """A navigation target reduced to facts; the raw URL never leaves the runtime."""
+
+    origin = _origin_or_none(url)
+    same_origin = origin is not None and origin == _origin_or_none(page_url)
+    path = urlsplit(url).path if url else ""
+    segments = [segment for segment in path.split("/") if segment]
+    first = segments[0] if segments else None
+    return BrowserTargetFacts(
+        same_origin=same_origin,
+        first_segment=(
+            first if first is not None and TASK_GRANT_PATH_SEGMENT.fullmatch(first) else None
+        ),
+        sensitive_path=path_is_sensitive(path),
+    )
+
+
+def _link_target(metadata: dict[str, Any], *, page_url: str) -> BrowserTargetFacts | None:
+    raw = metadata.get("linkHref")
+    resolved = metadata.get("link")
+    if not isinstance(raw, str) or not isinstance(resolved, str):
+        return None
+    raw = raw.strip()
+    if not raw or raw.startswith("#") or urlsplit(resolved).scheme.lower() == "javascript":
+        return None
+    return _target_facts(resolved, page_url=page_url)
+
+
+def _live_labels(metadata: dict[str, Any]) -> dict[BrowserLabelSource, str]:
+    labels = metadata.get("labels")
+    if not isinstance(labels, dict):
+        return {}
+    return {
+        source: str(labels.get(source.value) or "")
+        for source in BrowserLabelSource
+        if labels.get(source.value)
+    }
+
+
+def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> BrowserElementFacts:
+    """Derive one element's facts from its live attributes (ADR-0129 section 4.5)."""
+
+    visible_name = normalize_text(name)
+    labels = {
+        source: value[:MAXIMUM_FACT_LABEL_CHARACTERS]
+        for source, value in _live_labels(metadata).items()
+        if normalize_text(value) != visible_name
+    }
+    form = metadata.get("form")
+    return BrowserElementFacts(
+        field_kind=_field_kind(
+            tag=str(metadata.get("tag") or ""),
+            input_type=str(metadata.get("inputType") or ""),
+            autocomplete=str(metadata.get("autocomplete") or ""),
+            role=str(metadata.get("role") or ""),
+            editable=metadata.get("editable") is True,
+        ),
+        labels=labels,
+        link_target=_link_target(metadata, page_url=page_url),
+        form_target=(_target_facts(form, page_url=page_url) if isinstance(form, str) else None),
+        download=metadata.get("download") is True,
+        context_name=str(metadata.get("context") or "")[:MAXIMUM_CONTEXT_NAME_CHARACTERS],
+    )
 
 
 def _default_role(tag: str, input_type: str | None) -> str:
