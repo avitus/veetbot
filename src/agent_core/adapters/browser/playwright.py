@@ -710,6 +710,15 @@ class PythonPlaywrightRuntime:
         except PlaywrightError as exc:
             await _release_guards(guards)
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
+        except BaseException:
+            # Cancelled while Playwright waits for the element, or failed any
+            # other way: a guard left on the page would stop the next act's
+            # input. The release is shielded so a second cancellation cannot
+            # cut it short.
+            if guards:
+                with suppress(Exception, asyncio.CancelledError):
+                    await asyncio.shield(_release_guards(guards))
+            raise
         if await _release_guards(guards):
             # A click, key or text went to another element and was stopped
             # there; what the page's own listeners did with it is unknown.

@@ -506,6 +506,38 @@ async def test_an_act_that_ends_early_leaves_the_fence_refusal_behind() -> None:
     assert left == []
 
 
+# "Continue" sits under a transparent cover, so Playwright keeps waiting for
+# its click point to reach it; "Next" is uncovered.
+COVERED = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div style="position:relative;width:200px;height:40px">
+<button type="button" style="width:200px;height:40px"
+ onclick="window.clicks.push('continue')">Continue</button>
+<div style="position:absolute;inset:0"></div></div>
+<button type="button" onclick="window.clicks.push('next')">Next</button>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_an_act_cancelled_while_it_waits_leaves_no_guard_on_the_page() -> None:
+    """A granted click still waiting for its element is cancelled. Its click
+    guard goes with it, so the next act's click reaches the page."""
+
+    async with lesson_pages({"/lesson/1": COVERED}) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        granted = asyncio.create_task(_covered(runtime, _click_named(page, "Continue")))
+        await asyncio.sleep(1.5)
+        assert not granted.done()
+        granted.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await granted
+        page = await runtime.observe()
+        await runtime.act(_click_named(page, "Next"))
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert clicks == ["next"]
+    assert left == []
+
+
 PING = """<!doctype html><html><head><title>Lesson</title></head><body>
 <a href="/lesson/2" ping="/courses/remove-course">Next</a>
 </body></html>"""
