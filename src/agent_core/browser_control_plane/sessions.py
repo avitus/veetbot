@@ -12,9 +12,15 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Literal, Protocol
+from urllib.parse import urlsplit
 from uuid import UUID
 
+from agent_core.browser_control_plane.handoff import (
+    DeviceSessionHandoff,
+    confirmed_url_in_scope,
+    device_session_material,
+)
 from agent_core.browser_control_plane.models import (
     ProfileMaterialIdentity,
     ProfileMaterialMetadata,
@@ -41,6 +47,28 @@ from agent_core.domain.errors import ConflictError
 MAXIMUM_LEASE_SECONDS = MAXIMUM_BROWSER_LEASE_SECONDS
 MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
+# A device handoff's two verification loads end within this budget (ADR-0128).
+DEVICE_VERIFICATION_SECONDS = 30.0
+# Finished ceremonies kept for idempotent status reads, oldest dropped first.
+MAXIMUM_TERMINAL_CEREMONIES = 1_024
+_NO_SESSION_MATERIAL = b'{"format_version":1}'
+SurfaceOperation = Literal["frame", "events", "handoff"]
+
+
+class CeremonyCapabilityRejected(Exception):  # noqa: N818 - a refusal, not a fault
+    """The ceremony capability is missing, wrong, spent, expired or for another mode."""
+
+
+class DeviceHandoffInvalid(Exception):  # noqa: N818 - a refusal, not a fault
+    """The handoff is well formed but its confirmed page is outside the profile."""
+
+
+class DeviceSessionRejected(Exception):  # noqa: N818 - a refusal, not a fault
+    """Verification decided the handed-off session cannot be sealed (ADR-0128)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +162,7 @@ class HostedProfileSessionService:
         process_secret: bytes,
         ceremony_base_url: str,
         device_sign_in_enabled: bool = True,
+        verification_seconds: float = DEVICE_VERIFICATION_SECONDS,
     ) -> None:
         normalized_ceremony_origin = require_service_origin(
             ceremony_base_url,
@@ -147,6 +176,7 @@ class HostedProfileSessionService:
         self._process_secret = bytes(process_secret)
         self._ceremony_base_url = normalized_ceremony_origin
         self._device_sign_in_enabled = device_sign_in_enabled
+        self._verification_seconds = verification_seconds
         self._leases: dict[bytes, _LeaseState] = {}
         self._ceremonies: dict[UUID, _CeremonyState] = {}
         self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
@@ -474,19 +504,138 @@ class HostedProfileSessionService:
             await _close_ceremony_runtime(state)
             return await self._finish_ceremony_locked(state)
 
-    async def authenticate_surface(self, ceremony_id: UUID, capability: str) -> bool:
+    async def accept_device_session(
+        self,
+        ceremony_id: UUID,
+        capability: str,
+        handoff: DeviceSessionHandoff,
+    ) -> None:
+        """Verify one handed-off session and seal the verifying browser's state (ADR-0128).
+
+        The first well-formed handoff spends the capability. The service
+        loads the confirmed page twice, with the in-scope session and with
+        none, and seals only when the site tells the two apart. Every other
+        outcome ends the ceremony cancelled and writes nothing.
+        """
+        await self._expire()
+        async with self._lock:
+            state = self._ceremonies.get(ceremony_id)
+            if state is None or not self._accepts_handoff_locked(state, capability):
+                raise CeremonyCapabilityRejected
+            if not confirmed_url_in_scope(handoff, state.identity.allowed_origins):
+                raise DeviceHandoffInvalid
+            state.consumed = True
+        try:
+            await self._verify_and_seal(state, handoff)
+        finally:
+            async with self._lock:
+                # Any exit short of READY, cancellation included, ends the
+                # ceremony so it no longer blocks leases and begins.
+                if (
+                    self._ceremonies.get(state.id) is state
+                    and state.status not in _TERMINAL_AUTH_STATUSES
+                ):
+                    state.status = BrowserAuthenticationStatus.CANCELLED
+                    await self._finish_ceremony_locked(state)
+
+    async def _verify_and_seal(self, state: _CeremonyState, handoff: DeviceSessionHandoff) -> None:
+        metadata = await self._store.find_by_profile(state.profile_id)
+        if metadata is None or metadata.revoked:
+            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        try:
+            material = device_session_material(handoff, state.identity.allowed_origins, self._now())
+        except ValueError as exc:
+            raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True) from exc
+        if material is None:
+            raise DeviceSessionRejected("session_empty")
+        page = handoff.confirmed_page()
+        origins = state.identity.allowed_origins
+        signed_in = self._runtime_factory(state.tenant_id)
+        signed_out = self._runtime_factory(state.tenant_id)
+        try:
+            try:
+                async with asyncio.timeout(self._verification_seconds):
+                    with_session, without_session = await asyncio.gather(
+                        _page_evidence(signed_in, material, origins, page),
+                        _page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page),
+                    )
+                    _decide(with_session, without_session, confirmed_path=urlsplit(page).path)
+                    sealed = await signed_in.storage_state()
+            except DeviceSessionRejected:
+                raise
+            except Exception as exc:
+                # A provider error, a timeout, an oversized state or a browser
+                # crash: the check could not finish. The cause stays chained
+                # and is never rendered.
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable", retryable=True
+                ) from exc
+            async with self._lock:
+                if self._ceremonies.get(state.id) is not state:
+                    # A cancel, a revocation or an expiry won the race.
+                    current = await self._store.find_by_profile(state.profile_id)
+                    if current is None or current.revoked:
+                        raise BrowserProviderError(
+                            "tool.browser.profile_unavailable", retryable=False
+                        )
+                    raise CeremonyCapabilityRejected
+                current = await self._store.find_by_profile(state.profile_id)
+                if current is None or current.revoked:
+                    raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+                if current.identity() != state.identity:
+                    raise ConflictError("browser profile scope changed during verification")
+                await self._store.write(state.identity, sealed)
+                state.status = BrowserAuthenticationStatus.READY
+                await self._finish_ceremony_locked(state)
+        finally:
+            for runtime in (signed_in, signed_out):
+                with suppress(Exception):
+                    await runtime.close()
+
+    def _accepts_handoff_locked(self, state: _CeremonyState, capability: str) -> bool:
+        return (
+            state.mode is BrowserAuthenticationMode.DEVICE
+            and not state.consumed
+            and self._surface_live_locked(state, capability)
+        )
+
+    def _surface_live_locked(self, state: _CeremonyState, capability: str) -> bool:
+        """A non-terminal, unexpired ceremony whose capability matches, in constant time."""
+        return bool(
+            state.status not in _TERMINAL_AUTH_STATUSES
+            and state.expires_at > self._now()
+            and 32 <= len(capability) <= 128
+            and hmac.compare_digest(
+                state.capability_digest,
+                self._lookup_digest("ceremony:" + capability),
+            )
+        )
+
+    async def authenticate_surface(
+        self,
+        ceremony_id: UUID,
+        capability: str,
+        operation: SurfaceOperation = "frame",
+    ) -> bool:
+        """Whether ``capability`` authorizes ``operation`` on this ceremony now.
+
+        The headed surface's frame and events belong to remote ceremonies; the
+        handoff belongs to an unspent device ceremony. Expiry is checked here
+        too, whether or not a sweep has run.
+        """
         if not 32 <= len(capability) <= 128:
             return False
         await self._expire()
         async with self._lock:
             state = self._ceremonies.get(ceremony_id)
-            return bool(
-                state is not None
-                and state.status not in _TERMINAL_AUTH_STATUSES
-                and hmac.compare_digest(
-                    state.capability_digest,
-                    self._lookup_digest("ceremony:" + capability),
-                )
+            if state is None:
+                return False
+            if operation == "handoff":
+                return self._accepts_handoff_locked(state, capability)
+            return (
+                state.mode is BrowserAuthenticationMode.REMOTE
+                and state.runtime is not None
+                and self._surface_live_locked(state, capability)
             )
 
     async def authentication_frame(
@@ -567,7 +716,8 @@ class HostedProfileSessionService:
                     self._leases.pop(key)
                     expired_leases.append(lease_state)
             for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
-                if ceremony_state.expires_at <= now:
+                # A verifying handoff is ended by its own budget, never by time.
+                if ceremony_state.expires_at <= now and not ceremony_state.consumed:
                     ceremony_state.status = BrowserAuthenticationStatus.EXPIRED
                     await _close_ceremony_runtime(ceremony_state)
                     await self._finish_ceremony_locked(ceremony_state)
@@ -637,6 +787,9 @@ class HostedProfileSessionService:
             status=state.status,
         )
         self._terminal_ceremonies[state.id] = terminal
+        while len(self._terminal_ceremonies) > MAXIMUM_TERMINAL_CEREMONIES:
+            # Insertion order is finishing order: the oldest outcome goes first.
+            self._terminal_ceremonies.pop(next(iter(self._terminal_ceremonies)))
         return _terminal_ceremony_view(terminal)
 
     async def _surface_runtime_locked(
@@ -649,12 +802,8 @@ class HostedProfileSessionService:
         if (
             state is None
             or state.runtime is None
-            or state.status in _TERMINAL_AUTH_STATUSES
-            or not 32 <= len(capability) <= 128
-            or not hmac.compare_digest(
-                state.capability_digest,
-                self._lookup_digest("ceremony:" + capability),
-            )
+            or state.mode is not BrowserAuthenticationMode.REMOTE
+            or not self._surface_live_locked(state, capability)
         ):
             raise ConflictError("browser authentication capability is invalid")
         return state.runtime
@@ -676,6 +825,41 @@ class HostedProfileSessionService:
         ):
             raise ConflictError("browser profile session scope mismatch")
         return by_profile
+
+
+async def _page_evidence(
+    runtime: BrowserSessionRuntime,
+    material: bytes,
+    origins: tuple[str, ...],
+    url: str,
+) -> BrowserPageEvidence:
+    await runtime.start(material, origins, interactive=False)
+    return await runtime.load_page_evidence(url)
+
+
+def _normalized_path(path: str) -> str:
+    """Strip one trailing slash, except from the root; case-sensitive."""
+    path = path or "/"
+    return path[:-1] if len(path) > 1 and path.endswith("/") else path
+
+
+def _stays(evidence: BrowserPageEvidence, confirmed: str) -> bool:
+    path = _normalized_path(evidence.path)
+    return evidence.on_allowed_origin and (path == confirmed or path.startswith(confirmed + "/"))
+
+
+def _decide(
+    with_session: BrowserPageEvidence,
+    without_session: BrowserPageEvidence,
+    *,
+    confirmed_path: str,
+) -> None:
+    """Ready only when the site tells the session apart (ADR-0128 section 4.4)."""
+    confirmed = _normalized_path(confirmed_path)
+    if with_session.challenge_visible or not _stays(with_session, confirmed):
+        raise DeviceSessionRejected("session_signed_out")
+    if not without_session.challenge_visible and _stays(without_session, confirmed):
+        raise DeviceSessionRejected("session_unconfirmed")
 
 
 async def _close_ceremony_runtime(state: _CeremonyState) -> None:
