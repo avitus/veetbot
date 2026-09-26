@@ -167,9 +167,27 @@ async def test_covered_keys_still_reach_the_element_they_name() -> None:
         await _covered(runtime, _press(page, "Word", "ArrowLeft"))
         page = await runtime.observe()
         await _covered(runtime, _click_named(page, "Later"))
+        page = await runtime.observe()
+        for name, value in (("Answer", "hola"), ("Word", "adiós")):
+            await _covered(
+                runtime,
+                BrowserAction(
+                    kind=BrowserActionKind.TYPE,
+                    expected_revision=page.revision,
+                    ref=_ref(page, name),
+                    value=value,
+                ),
+            )
+            page = await runtime.observe()
         clicks = await _page_value(runtime, "window.clicks")
+        typed = await _page_value(
+            runtime,
+            "[document.querySelector('input').value,"
+            " document.getElementById('host').shadowRoot.querySelector('input').value]",
+        )
 
     assert clicks == ["next", "later"]
+    assert typed == ["hola", "adiós"]
     assert left == []
 
 
