@@ -1490,6 +1490,7 @@ public final class ChatViewModel: ObservableObject {
             guard var grant = activeTaskGrant, grant.id == grantID else { return }
             grant.actionsUsed = min(grant.maxActions, max(grant.actionsUsed, use ?? grant.actionsUsed + 1))
             activeTaskGrant = grant
+            syncTaskPermissions(sessionID: grant.sessionID, with: grant)
         case .created, .ended:
             await loadTaskGrant()
         }
@@ -1508,10 +1509,27 @@ public final class ChatViewModel: ObservableObject {
             )
             guard selectedSessionID == sessionID else { return }
             activeTaskGrant = page.items.first { $0.isActive && $0.sessionID == sessionID }
+            syncTaskPermissions(sessionID: sessionID, with: activeTaskGrant)
         } catch VeetbotAPIClientError.taskGrantsUnavailable {
-            if selectedSessionID == sessionID { activeTaskGrant = nil }
+            if selectedSessionID == sessionID {
+                activeTaskGrant = nil
+                syncTaskPermissions(sessionID: sessionID, with: nil)
+            }
         } catch {
             // Best effort: the next reconcile or stream event tries again.
+        }
+    }
+
+    /// Keeps Settings' list in step with what was just learned about one
+    /// conversation, which holds at most one active permission: a Settings
+    /// window left open on the Mac never re-reads it on appearing.
+    private func syncTaskPermissions(sessionID: UUID, with grant: BrowserTaskGrantView?) {
+        activeTaskGrants.removeAll { $0.sessionID == sessionID && $0.id != grant?.id }
+        guard let grant, grant.isActive else { return }
+        if let index = activeTaskGrants.firstIndex(where: { $0.id == grant.id }) {
+            activeTaskGrants[index] = grant
+        } else {
+            activeTaskGrants.insert(grant, at: 0)
         }
     }
 

@@ -299,6 +299,60 @@ import Testing
         #expect(server.routes.contains("POST veetbot.test /v1/browser-task-grants/\(Self.grantID.uuidString)/revoke"))
     }
 
+    /// The Mac's Settings window stays open and never re-runs onAppear, so
+    /// its list follows the open conversation's permission as it is created,
+    /// used and ended (0129-design §14 item 5).
+    @Test
+    func settingsFollowsTheOpenConversationsPermissionWhileItIsOpen() async throws {
+        let otherGrant = UUID()
+        let otherSession = UUID()
+        let sessionReads = Counter()
+        let resolved = try Self.contractApproval("resolved_for_task")
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/browser-task-grants":
+                    let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                    if query.contains(where: { $0.name == "session_id" }) {
+                        return (200, sessionReads.next() == 2 ? Self.page([Self.grant(used: 0)]) : Self.page([]))
+                    }
+                    let other = Self.grant(used: 5)
+                        .replacingOccurrences(of: Self.grantID.uuidString, with: otherGrant.uuidString)
+                        .replacingOccurrences(of: Self.sessionID.uuidString, with: otherSession.uuidString)
+                    return (200, Self.page([other]))
+                case "POST veetbot.test /v1/approvals/\(Self.approvalID.uuidString)/resolve":
+                    return (200, resolved)
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        await model.refreshTaskPermissions()
+        #expect(model.activeTaskGrants.map(\.id) == [otherGrant])
+        let offered = try JSONDecoder.server.decode(
+            ApprovalView.self, from: Data(try Self.contractApproval("offered").utf8)
+        )
+        let offer = try #require(offered.taskGrantOffer)
+
+        await model.resolveApproval(offered, decision: .approveForTask, taskGrant: TaskGrantEcho(offer: offer))
+
+        #expect(model.activeTaskGrant?.id == Self.grantID)
+        #expect(Set(model.activeTaskGrants.map(\.id)) == [Self.grantID, otherGrant])
+
+        await model.applyTaskGrantFrame(Self.authorized(ref: Self.grantID, use: 4))
+        #expect(model.activeTaskGrants.first { $0.id == Self.grantID }?.actionsUsed == 4)
+
+        await model.applyTaskGrantFrame(
+            SSEFrame(
+                id: 41, event: "browser.task_grant.ended",
+                data: ["grant_id": .string(Self.grantID.uuidString), "reason": .string("expired")]
+            )
+        )
+        #expect(model.activeTaskGrant == nil)
+        #expect(model.activeTaskGrants.map(\.id) == [otherGrant])
+    }
+
     @Test
     func aToolRowAllowedByATaskPermissionSaysSoAndWhatItDid() throws {
         let reducer = RunStateReducer()
